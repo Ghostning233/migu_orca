@@ -22,6 +22,7 @@ import {
   type TrackingItem,
   type TrackingStatusGroup,
 } from './trackingProjection'
+import TrackingInspector from './TrackingInspector.vue'
 
 type ListResult = NonNullable<
   operations['listTrackingItems']['responses']['200']['content']['application/json']['result']
@@ -173,12 +174,11 @@ watch(selectedTrackingId, (trackingId) => {
       </PanelSection>
 
       <aside class="tracking-inspector" aria-labelledby="tracking-inspector-heading">
-        <h2 id="tracking-inspector-heading">检查器</h2>
-        <section v-if="selectedItem" class="tracking-inspector-placeholder" aria-live="polite">
-          <p class="field-help">已选择追番记录</p><h3>{{ selectedItem.title || '未命名番剧' }}</h3>
-          <p>{{ selectedItem.status_label }}</p><p class="field-help">安全详情和操作将在后续迭代提供。</p>
-        </section>
-        <EmptyState v-else message="选择一条追番记录查看安全检查器。" />
+        <TrackingInspector v-if="selectedItem" :tracking-id="selectedItem.tracking_id" />
+        <template v-else>
+          <h2 id="tracking-inspector-heading">检查器</h2>
+          <EmptyState message="选择一条追番记录查看安全检查器。" />
+        </template>
       </aside>
     </section>
   </section>

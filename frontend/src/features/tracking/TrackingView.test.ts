@@ -21,9 +21,19 @@ function item(id: string, title: string, group: 'ACTIVE' | 'ATTENTION' = 'ACTIVE
   }
 }
 
+function detail() {
+  return {
+    ...item('tracking-1', '葬送的芙莉莲'), origin: 'single', batch_id: null,
+    created_at: '2026-09-12T00:00:00Z', last_synced_at: null, safe_info: null,
+    current_operation: null, revalidation_issues: [], external_mapping: null,
+    audit_events: [], warnings: [],
+  }
+}
+
 async function mountTracking(query: Record<string, string> = {}) {
   const router = createRouter({ history: createMemoryHistory('/app/'), routes: [
     { path: '/tracking', name: 'tracking', component: TrackingView },
+    { path: '/plans', name: 'plans', component: { template: '<div />' } },
   ] })
   await router.push({ path: '/tracking', query })
   await router.isReady()
@@ -48,13 +58,14 @@ describe('TrackingView formal overview (US-305)', () => {
   })
 
   it('selects a legal tracking id and keeps it as a single aria-current row', async () => {
-    apiGet.mockResolvedValue({ items: [item('tracking-1', '葬送的芙莉莲')], summary: {}, warnings: [] } as never)
+    apiGet.mockResolvedValueOnce({ items: [item('tracking-1', '葬送的芙莉莲')], summary: {}, warnings: [] } as never)
+    apiGet.mockResolvedValueOnce(detail() as never)
     const { wrapper, router } = await mountTracking({ tracking_id: 'tracking-1' })
     await nextTick()
     expect(router.currentRoute.value.fullPath).toBe('/tracking?tracking_id=tracking-1')
     expect(wrapper.find('[aria-current="true"]').attributes('data-tracking-id')).toBe('tracking-1')
     expect(document.activeElement).toBe(wrapper.find('[aria-current="true"]').element)
-    expect(wrapper.find('.tracking-inspector-placeholder').text()).toContain('葬送的芙莉莲')
+    expect(wrapper.find('.tracking-inspector-detail').text()).toContain('葬送的芙莉莲')
   })
 
   it('keeps a legal tracking query when the list request fails', async () => {

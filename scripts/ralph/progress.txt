@@ -54,3 +54,12 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - 修正 modify patch 内部约束：subscription、RSS 及非空 filter_rule 均使用 `allOf` 基础字段加 `anyOf` 至少一个字段，允许合法多字段修改；仅保留外层 target_scope 的 `oneOf`。
 - 补充 OpenAPI 结构/运行时契约测试，以及 generated TypeScript 多字段正向赋值和空 patch/filter_rule 负向断言。
 ---
+## [2026-09-13 10:00:00 CST] - US-306
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented: 新增 sticky `TrackingInspector`，只读取 generated `getTrackingItemDetail`，展示安全摘要、资源名称、外部状态、操作、复核问题、审计及固定更新集数占位；本地方案入口严格受 request_id 与 EXTERNAL_ONLY 门控。
+- Files changed: `frontend/src/features/tracking/TrackingInspector.vue`、对应 Vitest、`TrackingView.vue` 接线与测试、tracking Chromium route mock、Ralph 状态文件。
+- **Learnings for future iterations:**
+  - 详情请求用 AbortController 与请求代际双重保护；失败只影响检查器，不清除健康列表，敏感错误固定为中文文案。
+  - 外部 ID、Request ID、operation ID、raw Request/响应不渲染；仅展示 generated 白名单安全字段。
+  - 定向验证：TrackingInspector/TrackingView Vitest 7 passed、typecheck、单文件 lint、build 通过；真实 Chromium 定向选择/详情用例通过。
+---

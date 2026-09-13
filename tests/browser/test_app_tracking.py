@@ -49,6 +49,18 @@ def _mock_list(page: Page, *, failed: bool = False) -> None:
         if failed:
             route.fulfill(status=503, content_type="application/json", body=json.dumps({"ok": False}))
             return
+        if "/api/v1/tracking/items/tracking-a" in request.url:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"ok": True, "result": {
+                    **_item("tracking-a", "葬送的芙莉莲"),
+                    "origin": "single", "batch_id": None, "created_at": "2026-09-01T00:00:00+00:00",
+                    "updated_at": "2026-09-13T00:00:00+00:00", "last_synced_at": None,
+                    "safe_info": None, "current_operation": None, "revalidation_issues": [],
+                    "external_mapping": None, "audit_events": [], "warnings": [],
+                }}, ensure_ascii=False))
+            return
         route.fulfill(
             status=200,
             content_type="application/json",
@@ -66,6 +78,20 @@ def _mock_list(page: Page, *, failed: bool = False) -> None:
         )
 
     page.route("**/api/v1/tracking/items*", handler)
+    page.route(
+        "**/api/v1/tracking/items/tracking-a*",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"ok": True, "result": {
+                **_item("tracking-a", "葬送的芙莉莲"),
+                "origin": "single", "batch_id": None, "created_at": "2026-09-01T00:00:00+00:00",
+                "updated_at": "2026-09-13T00:00:00+00:00", "last_synced_at": None,
+                "safe_info": None, "current_operation": None, "revalidation_issues": [],
+                "external_mapping": None, "audit_events": [], "warnings": [],
+            }}, ensure_ascii=False),
+        ),
+    )
 
 
 class TestAppTrackingStage38:
@@ -82,7 +108,7 @@ class TestAppTrackingStage38:
         page.locator(".tracking-list-item").first.click()
         page.wait_for_url("**/app/tracking?tracking_id=tracking-a")
         expect(page.locator('[aria-current="true"]')).to_have_count(1)
-        expect(page.locator(".tracking-inspector-placeholder")).to_contain_text("葬送的芙莉莲")
+        expect(page.locator(".tracking-inspector-detail")).to_contain_text("葬送的芙莉莲")
 
         page.locator("#tracking-search").fill("不存在")
         expect(page.locator(".empty-state")).to_contain_text("没有符合当前搜索")
