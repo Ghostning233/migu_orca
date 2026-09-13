@@ -1,108 +1,23 @@
-# Ralph Agent Instructions
+# MiGuOrca Ralph 单轮指令
 
-You are an autonomous coding agent working on a software project.
+此文件供脚本加载；全仓库规范以根 [AGENTS.md](../../AGENTS.md) 为入口，
+流程细节见 [开发与审核流程](../../docs/development/workflow.md)。全程中文。
 
-## Your Task
+1. 先读根规范与改动目录的 AGENTS；检查分支、工作区、最近提交。
+2. 读本目录 `prd.json`、`progress.txt` 的 Codebase Patterns/最近记录及对应执行 PRD。
+   当前分支应匹配 branchName；不匹配或存在他人未提交改动时先确认，不自动提交它们或强行切换。
+3. 选 priority 最小、依赖满足的未完成 story；本轮只实现该条，不顺带下一 Stage。
+4. 按验收条件实现，保留安全/契约/可靠写边界；只查相关代码，不每轮读遍仓库和历史。
+5. 按根规范/本条 PRD 做定向检查；UI 加载项目 dev-browser skill，用真实 Chromium。
+   Stage 收尾才通常完整运行一次门禁；失败先跑最小失败用例，无变化不重复全量。
+6. 验收及实际验证满足后，只将本条 passes 改为 true；追加真实 progress：
+   时间/story、范围、文件、验证命令与结果、遗留风险和可复用结论。不要伪造线程链接。
+   新稳定规则归 AGENTS，细节归开发文档；不向各模型模板重复追加规则。
+7. 在本任务已授权的 Ralph 本地提交流程内，精确暂存本条代码、状态及 progress，
+   同次提交 `feat: [Story ID] - [Story Title]`；不 git add . 或吞入其他 Agent 修改。
+8. 本轮结束即交回脚本，不自行再启动循环或调度 Agent；批次上限由启动者明确。
+   未明确授权，不 push、建 PR、merge 或清理分支。阻塞/验证缺口如实报告，不标完成。
 
-1. Read the PRD at `prd.json` (in the same directory as this file)
-2. Read the progress log at `progress.txt` (check Codebase Patterns section first)
-3. Check you're on the correct branch from PRD `branchName`. If not, check it out or create from main.
-4. Pick the **highest priority** user story where `passes: false`
-5. Implement that single user story
-6. Run quality checks (e.g., typecheck, lint, test - use whatever your project requires)
-7. Update CODEX.md files if you discover reusable patterns (see below)
-8. If checks pass, commit ALL changes with message: `feat: [Story ID] - [Story Title]`
-9. Update the PRD to set `passes: true` for the completed story
-10. Append your progress to `progress.txt`
-
-## Progress Report Format
-
-APPEND to progress.txt (never replace, always append):
-
-```text
-## [Date/Time] - [Story ID]
-Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
-- What was implemented
-- Files changed
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
-  - Useful context (e.g., "the evaluation panel is in component X")
----
-```
-
-Include the thread URL so future iterations can use the `read_thread` tool to reference previous work if needed.
-
-The learnings section is critical - it helps future iterations avoid repeating mistakes and understand the codebase better.
-
-## Consolidate Patterns
-
-If you discover a **reusable pattern** that future iterations should know, add it to the `## Codebase Patterns` section at the TOP of progress.txt (create it if it doesn't exist). This section should consolidate the most important learnings:
-
-```text
-## Codebase Patterns
-- Example: Use `sql<number>` template for aggregations
-- Example: Always use `IF NOT EXISTS` for migrations
-- Example: Export types from actions.ts for UI components
-```
-
-Only add patterns that are **general and reusable**, not story-specific details.
-
-## Update CODEX.md Files
-
-Before committing, check if any edited files have learnings worth preserving in nearby CODEX.md files:
-
-1. **Identify directories with edited files** - Look at which directories you modified
-2. **Check for existing CODEX.md** - Look for CODEX.md in those directories or parent directories
-3. **Add valuable learnings** - If you discovered something future developers/agents should know:
-   - API patterns or conventions specific to that module
-   - Gotchas or non-obvious requirements
-   - Dependencies between files
-   - Testing approaches for that area
-   - Configuration or environment requirements
-
-**Examples of good CODEX.md additions:**
-- "When modifying X, also update Y to keep them in sync"
-- "This module uses pattern Z for all API calls"
-- "Tests require the dev server running on PORT 3000"
-- "Field names must match the template exactly"
-
-**Do NOT add:**
-- Story-specific implementation details
-- Temporary debugging notes
-- Information already in progress.txt
-
-Only update CODEX.md if you have **genuinely reusable knowledge** that would help future work in that directory.
-
-## Quality Requirements
-
-- ALL commits must pass your project's quality checks (typecheck, lint, test)
-- Do NOT commit broken code
-- Keep changes focused and minimal
-- Follow existing code patterns
-
-## Browser Testing (If Available)
-
-For any story that changes UI, verify it works in the browser if you have browser testing tools configured (e.g., via MCP):
-
-1. Navigate to the relevant page
-2. Verify the UI changes work as expected
-3. Take a screenshot if helpful for the progress log
-
-If no browser tools are available, note in your progress report that manual browser verification is needed.
-
-## Stop Condition
-
-After completing a user story, check if ALL stories have `passes: true`.
-
-If ALL stories are complete and passing, reply with:
+所有 stories 真正完成且验证满足时，最终输出的最后一行单独写：
 <promise>COMPLETE</promise>
-
-If there are still stories with `passes: false`, end your response normally (another iteration will pick up the next story).
-
-## Important
-
-- Work on ONE story per iteration
-- Commit frequently
-- Keep CI green
-- Read the Codebase Patterns section in progress.txt before starting
+否则正常结束，不在普通叙述或示例中输出该标记。完成标记不替代独立审核。

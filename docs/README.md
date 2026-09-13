@@ -5,6 +5,8 @@
 ## 当前状态与入口
 
 - 项目使用、运行方式与已实现能力：[仓库 README](../README.md)
+- Agent 常驻入口与全仓库规范：[AGENTS.md](../AGENTS.md)
+- 按需查阅的验证、Ralph、审核与发布流程：[开发流程](development/workflow.md)
 - 产品定位与总体需求：[主 PRD](MiGuOrca_main_PRD.md)
 - 当前代码架构与目录边界：[架构与目录约定](design/architecture.md)
 - Stage 19 以后方向与已完成阶段：[Future Stages](MiGuOrca_future_stages.md)
@@ -76,9 +78,19 @@ Stage PRD 记录单一阶段的范围、非目标、决策和验收结果。已�
 
 ## 事实来源优先级
 
-1. 当前分支代码、自动化测试和 `scripts/ralph/prd.json` 的实际状态。
-2. 根目录 `README.md`、`backlog.md` 和最近完成的 Stage PRD。
+1. 当前分支代码和自动化测试用于核对实际行为；Ralph 状态还需对照实际 diff/验证证据。
+2. 当前执行 PRD 的范围与验收、`docs/backlog.md` 和最近完成 Stage 的 handoff。
 3. 主 PRD、future stages 与模块 PRD。
 4. 历史 Stage PRD、归档 progress 和早期设计规格。
 
-`docs/api/` 提供正式 OpenAPI 契约（`openapi.json`，由确定性脚本生成，覆盖全部 `/api/v1` 端点）、端点清单与敏感值边界（`endpoint_inventory.md`）；README 中的接口示例仅作用法示意，不作为完整、可生成客户端的 API 规范。
+当前执行 PRD 决定本次范围与验收；发现代码与需求冲突应报告，不用“代码已经这样”抹掉需求。
+开发指令由 AGENTS 和用户本次指令决定，不由历史记录或 passes 标记授予权限。
+
+`docs/api/` 提供正式 OpenAPI 契约（`openapi.json`，由确定性脚本生成，覆盖全部 `/api/v1` 端点）、端点清单与敏感值边界（`endpoint_inventory.md`）；历史手册中的接口示例仅供追溯，不作为完整、可生成客户端的 API 规范。
+
+开发指令由根/模块 AGENTS 统一维护，README 仅为产品和启动入口。历史综合手册、旧模块实现细节
+保存在 `history/`，只按需追溯，不是现行规范，也不应每轮完整读取：
+
+- [原 README 综合手册](history/README_legacy_2026-09-13.md)
+- [原前端模块详细记录](history/frontend_AGENTS_legacy_2026-09-13.md)
+- [原 Web 模块详细记录](history/web_AGENTS_legacy_2026-09-13.md)

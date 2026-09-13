@@ -7,29 +7,35 @@ user-invocable: true
 # dev-browser：MiGuOrca 浏览器验证
 
 本项目的 Web UI 是 Vue 3 + TypeScript + Vite SPA（`frontend/`，由 Flask 在 `/app/` 同源托管；
-US-209 已删除旧 Flask/Jinja 页面与 `app.js`）。浏览器验证的标准路径是**项目的 Playwright 测试套件**
+旧 Flask/Jinja 页面与 `app.js` 已删除）。浏览器验证的标准路径是**项目的 Playwright 测试套件**
 （真实 Chromium 跑 Flask test server）；本地无 MCP 浏览器工具时不要尝试截图驱动，直接写/跑浏览器测试。
 
 ## 主验证路径：Playwright 套件
 
 ```bash
-uv run pytest tests/browser/ -q        # 全部浏览器测试
 uv run pytest tests/browser/test_xxx.py::TestYyy::test_zzz -q   # 单个测试
+uv run pytest tests/browser/ -q        # Stage 收尾的完整门禁，通常一次
 ```
 
 前置条件：
 
 - Chromium 可用（必要时先跑 `script/setup-browser-deps.sh`；`bin/chromium-wrapper.sh` 是包装脚本）
-- **仓库根 `.migu_orca/storage` 必须不存在**——陈旧 saved Request 会挂掉 `test_empty_list_state`、`test_no_default_storage_pollution`、`test_list_count_shows_zero` 等测试（目录被 gitignore，可直接删除）
-- SPA 测试需要 `frontend/dist` 已构建（`cd frontend && npm ci && npm run build`）；CI browser job 先构建再跑
+- 核对仓库根 `.migu_orca/storage`：陈旧运行数据会污染空状态/黄金路径；gitignore 不代表可以删除。
+  优先隔离测试根；确需移走时先核对内容，移动到唯一备份目录、报告位置，不覆盖旧备份/丢失用户数据。
+- SPA 测试需要最新 `frontend/dist`（依赖缺失时先 `npm ci`，然后 `npm run build`）；CI browser job 先构建再跑
+- 普通 UI story/修复跑受影响定向用例；无变化不重复全量，完整门禁按根 AGENTS/当前 PRD 收尾执行
 
 ## 写新浏览器测试的关键模式
 
 - 测试夹具在 `tests/browser/conftest.py`：`page`、`base_url`、`app`（Flask test server）等
-- **SPA 测试走 `/app/*` 路由**（`/app/workbench`、`/app/requests`、`/app/queue`、`/app/settings`）；
+- **SPA 测试走当前 `/app/*` 路由**（`/app/add`、`/app/plans`、`/app/tracking`、`/app/settings`）；
+  `/app/workbench`、`/app/requests`、`/app/queue` 仅验证安全兼容重定向；
   入口 `/index`、`/settings` 默认重定向到 SPA（旧页面已删，没有 legacy 回退）
 - **mock 外部依赖**：`page.route("**/api/v1/mikan/candidates", handler)` 拦截候选搜索等外部请求；handler 里对非 POST 请求要 `route.continue_()` 放行到真实 Flask 后端，只接管需要 mock 的 POST
-- **共享 envelope**：候选搜索 mock 返回 `{"ok": true, "result": {"query", "candidates"}}`；每个 candidate 只含公开元数据（bangumi_id、title、mikan_url、poster_url、source_query、aliases）
+- **共享 envelope**：mock 遵循真实 API DTO/serializer；候选搜索包含 status/parse_result/attempted_queries 等字段，
+  FOUND/EMPTY/FAILED 不能只看 HTTP 200。candidate 仅使用契约允许的公开元数据
+- **loading/超时验证**：用 held route 先保留请求，断言后 fulfill；不在同步 handler 中 sleep。
+  较窄 route 后注册，避免宽通配吞掉目标请求；改行为时同步检查同页面既有 Vitest/浏览器断言
 - **严格定位器**：Seeds 区有两个 `.seed-details`（完整种子/排除种子），必须用 `.complete-seed-details` / `.excluded-seed-details` / `.effective-seed-group` / `.subgroup-seed-group` 限定；`button:has-text('确认')` 会误匹配列表项按钮，意图是"动作按钮消失"时限定到 `#request-detail-container .detail-actions`
 - **折叠 `<details>`**：`inner_text()` 只含 summary；要断言内部种子标题/`无种子标题。`，先 `page.evaluate("el => el.open = true")` 展开
 - **敏感值回归**：参照 `tests/browser/test_app_*.py` 的敏感边界模式——把 token/cookie/endpoint/raw_html/raw_rss_xml/raw_response_body/magnet 注入 mock 响应，跑完流程后断言 URL、`localStorage`、`sessionStorage`、可见 body 文本、保存的 Request JSON、`history/` 文件全部干净
@@ -41,9 +47,10 @@ uv run pytest tests/browser/test_xxx.py::TestYyy::test_zzz -q   # 单个测试
 uv run flask --app wsgi:app run    # 默认 http://127.0.0.1:5000
 ```
 
-- `/` 与 `/index` 重定向到 `/app/workbench`；`/settings` 重定向到 `/app/settings`（旧页面已删）
-- 用 curl 检查关键页面 HTML 与 API：`curl -s http://127.0.0.1:5000/app/workbench`
-- 手动验收清单见 README「本地验收」；完成后补一条手动验证记录到 Ralph progress.txt（注明无法截图时用 Playwright 套件覆盖）
+- `/` 与 `/index` 重定向到 `/app/add`；`/settings` 重定向到 `/app/settings`（旧页面已删）
+- 用 curl 检查 HTML/API 可达性：`curl -s http://127.0.0.1:5000/app/add`；这不证明 Vue 交互正确
+- 手动清单取当前执行 PRD/目标页面交互规格，验证键盘/焦点、加载/空/错误、确认分流和敏感边界。
+  记录实际方法、结果和环境缺口；没有真实 Chromium 证据不能把手动说明或 curl 当作 UI 自动门禁通过
 
 ## 安全边界（验证时同样适用）
 

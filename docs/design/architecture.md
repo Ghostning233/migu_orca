@@ -37,9 +37,10 @@ CLI                     Vue SPA (frontend/, Flask 同源 /app/)
 | `rss_engine` | RSS 解析与种子筛选 |
 | `subscription_engine` | 字幕组选择与文件夹命名 |
 | `request_engine` | Request 契约、确认、取消、受限修改和摘要 |
+| `tracking_engine` | 统一追番记录/operation、外部映射、复核/提交/管理写与恢复规则 |
 | `ab_engine` | AutoBangumi 配置、认证 adapter、payload 与提交结果 |
 | `qbittorrent_engine` | qBittorrent 配置和显式只读连接测试 |
-| `storage_engine` | Request、history、AB result、queue、preference、correction、save-confirm idempotency 的本地 JSON 存储 |
+| `storage_engine` | Request、history、AB result、queue、偏好、幂等、tracking/operation/迁移的本地 JSON 存储 |
 | `shared` | 跨模块模型、错误、安全日志、标题季数与候选季数证据 |
 
 ## 4. 依赖规则
@@ -66,14 +67,14 @@ Web 业务操作统一通过 `/api/v1/*` JSON API 完成，页面是 Stage 27 �
   （US-209 起旧 Jinja 页面与 `web_entry_mode()` 回退开关已删除）。
 - Web API 适配层自 Stage 26 起按职责拆分（`apps/migu_orca_web/`）：
   - `schemas.py`：请求/查询 Pydantic 模型。
-  - `api_contract.py`：公开响应 DTO（`extra="forbid"`）。
+  - `api_contract.py`：公开响应 DTO；严格白名单 DTO 使用 `extra="forbid"`，部分兼容嵌套 DTO 允许安全扩展。
   - `serializers.py`：响应序列化与脱敏白名单。
   - `services.py`：用例编排与存储 seam，复用 engine/repository，不复制业务规则。
   - `contexts.py`：短期候选选择上下文。
-  - `routes_*.py`：按端点族（requests/mikan/batches/settings/connections）注册路由。
+  - `routes_*.py`：按端点族（requests/mikan/batches/tracking/settings/connections）注册路由。
   - `views.py`：入口重定向路由与 Blueprint 组装。
 - `docs/api/` 提供 OpenAPI 契约（`docs/api/openapi.json`，确定性生成），覆盖全部 `/api/v1`
-  端点；响应 DTO 在 `api_contract.py`（全部 `extra="forbid"`）。新增/删除端点必须同步
+  端点；响应 DTO 在 `api_contract.py`，serializer 先脱敏/白名单投影，不能以兼容 DTO 的宽松配置放出上游原始对象。新增/删除端点必须同步
   `docs/api/endpoint_inventory.md` §2、`openapi_gen.py` `_ENDPOINTS` 注册表、`docs/api/openapi.json`
   与 `tests/api_contract/`，否则契约测试失败。
 - 未保存草案由 `drafts.py:DraftStore`（进程内单例）权威持有：TTL 30 分钟、容量 128、
@@ -111,8 +112,17 @@ Web 业务操作统一通过 `/api/v1/*` JSON API 完成，页面是 Stage 27 �
 - Stage 31（B-C2，US-237～US-246，已完成并归档）在同一 request-scoped 边界内增加四类可靠管理写动作：
   operation v2、严格目标/patch 解析、3.1.18 action-specific adapter、写后回查和 VERIFY_EXTERNAL 恢复。
   管理 route 只接收 tracking ID、固定 scope 与严格白名单字段；operation 仅保存 SHA-256 摘要。番剧
-  destructive route 由 adapter 固定 `file=false`，RSS 只执行映射集合内的单项调用；正式管理页面和
-  Stage 32 B-D 兼容迁移、泄漏矩阵、回退和前端 handoff 已完成；正式追番管理页面仍属于后续前端阶段。
+  destructive route 由 adapter 固定 `file=false`，RSS 只执行映射集合内的单项调用。
+  Stage 32 B-D 完成兼容迁移、泄漏矩阵、回退和前端 handoff；正式追番管理页面在 Stage 38 交付。
+
+- 当前导航/页面落点由 `frontend/src/app/router/catalog.ts` 和 `index.ts` 统一定义：
+  `/app/add` → WorkbenchView，`/app/plans` → RequestsView，`/app/tracking` → TrackingView，
+  `/app/settings` → SettingsView。`/app/workbench|requests|queue` 只保留安全兼容重定向；
+  QueueView/queueWorkbench 留作回退，不进入默认构建，后端旧 batch 端点仍保留。
+- 当前前端审核使用共享候选、AnimeDraftEditor、useDraftSession 和旅程 composable；
+  tracking 页面统一拥有凭据/写意图/恢复，检查器只消费安全详情和页面会话。具体状态处理见代码/契约。
+- 普通前端 API 仍有短超时；MiKan 多步骤搜索/草案/批量读取使用单独有界预算和固定错误映射，
+  入口位于 `frontend/src/features/workbench/mikanFeedback.ts`，不是后端已变为异步 worker。
 
 因此前端工程化已先固化 API 契约和服务端安全边界，再渐进替换页面；Stage 26 已完成该固化
 （清单/DTO/OpenAPI/HTTP 状态/storage 根/draft/CI），Stage 27 完成迁移与旧前端删除，handoff
@@ -141,7 +151,8 @@ safe-info 新契约，handoff 见 `docs/MiGuOrca_stage28_draft_consistency_PRD.m
 
 ## 7. 测试与质量门禁
 
-测试包括纯规则单元测试、fixture 解析、API/入口测试和 Playwright 浏览器测试。统一命令为：
+测试包括纯规则单元测试、fixture 解析、API/入口测试和 Playwright 浏览器测试。
+下列为完整门禁命令，普通迭代应按 [开发流程](../development/workflow.md) 选择定向检查：
 
 ```bash
 uv run python -m compileall -q src tests   # 语法检查（只证明可编译）
