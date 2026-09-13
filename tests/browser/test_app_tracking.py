@@ -1166,7 +1166,10 @@ class TestAppTrackingRecovery:
         page.locator("#tracking-recover-succeeded").click()
         expect(page.locator(".confirm-dialog")).to_be_visible()
         expect(page.locator(".confirm-dialog-message")).to_contain_text("独立核对")
-        assert page.evaluate("document.activeElement.textContent") == "取消", "default focus must be cancel"
+        # Focus lands via requestAnimationFrame after the dialog is rendered, so
+        # this must be a polling assertion: a one-shot read can still see the
+        # trigger button on a slow machine.
+        expect(page.locator(".confirm-dialog-actions button").filter(has_text="取消")).to_be_focused()
         page.locator(".confirm-dialog-actions button").filter(has_text="取消").click()
         expect(page.locator(".confirm-dialog")).to_have_count(0)
         assert len(recover_calls) == 1, recover_calls
@@ -1673,10 +1676,10 @@ class TestAppTrackingExternalDelete:
         expect(page.locator(".confirm-dialog-message")).to_contain_text("不会删除任何媒体文件")
         expect(page.locator(".confirm-dialog-message")).to_contain_text("本地订阅方案")
         # The destructive confirmation is a danger dialog whose default focus is
-        # the cancel button, so Enter never deletes an external object.
+        # the cancel button, so Enter never deletes an external object. Poll:
+        # the focus trap activates on the frame after the dialog is rendered.
         assert page.locator(".confirm-dialog .danger-button").count() == 1, "not a danger dialog"
-        focused = page.evaluate("document.activeElement?.textContent?.trim()")
-        assert focused == "取消", focused
+        expect(page.locator(".confirm-dialog-actions button").filter(has_text="取消")).to_be_focused()
         assert not deletes, deletes
         page.keyboard.press("Enter")
         page.wait_for_selector(".confirm-dialog", state="detached")
@@ -1966,13 +1969,14 @@ class TestAppTrackingViewportJourney:
         page.wait_for_selector("#tracking-overview")
 
         page.keyboard.press("Tab")
-        assert page.evaluate("() => document.activeElement?.id || ''") == "skip-link"
+        expect(page.locator("#skip-link")).to_be_focused()
 
         # The filter controls are programmatically labelled (not placeholder-only).
         expect(page.locator("label[for='tracking-search']")).to_have_count(1)
         expect(page.locator("label[for='tracking-status-filter']")).to_have_count(1)
-        page.locator("#tracking-status-filter").focus()
-        assert page.evaluate("() => document.activeElement?.id || ''") == "tracking-status-filter"
+        status_filter = page.locator("#tracking-status-filter")
+        status_filter.focus()
+        expect(status_filter).to_be_focused()
 
         # A list row is a real button: focus it and select it from the keyboard.
         row = page.locator(".tracking-list-item").first
@@ -1980,9 +1984,9 @@ class TestAppTrackingViewportJourney:
         page.keyboard.press("Enter")
         page.wait_for_url("**/app/tracking?tracking_id=tracking-a")
         expect(page.locator('[aria-current="true"]')).to_have_count(1)
-        assert page.evaluate(
-            "() => document.activeElement?.getAttribute('data-tracking-id') || ''"
-        ) == "tracking-a"
+        expect(
+            page.locator(".tracking-list-item[data-tracking-id='tracking-a']")
+        ).to_be_focused()
 
     def test_aria_live_regions_cover_list_status_and_action_results(
         self, page: Page, live_server_url: str

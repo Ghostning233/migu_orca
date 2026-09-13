@@ -281,7 +281,7 @@ class TestCrossFeatureResponsive:
             control = page.locator(selector)
             expect(control).to_be_visible()
             control.focus()
-            assert page.evaluate("el => el === document.activeElement", control.element_handle())
+            expect(control).to_be_focused()
         _no_horizontal_overflow(page, viewport[0])
 
     def test_stage37_plans_200_percent_supports_modify_safe_info_and_reuse(
@@ -341,8 +341,7 @@ class TestKeyboardAndFocus:
         _goto(page, live_server_url, "/app/settings")
 
         page.keyboard.press("Tab")
-        active_id = page.evaluate("() => document.activeElement?.id || ''")
-        assert active_id == "skip-link", f"first tab stop was {active_id!r}"
+        expect(page.locator("#skip-link")).to_be_focused()
 
         # Focused skip links are visible (they are only visually hidden until
         # focused) and navigate to the main landmark.
@@ -350,10 +349,7 @@ class TestKeyboardAndFocus:
         expect(skip).to_be_visible()
         skip.press("Enter")
         expect(page.locator("main#app-main")).to_have_attribute("tabindex", "-1")
-        focused_main = page.evaluate(
-            "() => document.activeElement?.id === 'app-main'"
-        )
-        assert focused_main, "Enter on the skip link did not focus main#app-main"
+        expect(page.locator("main#app-main")).to_be_focused()
 
     def test_main_landmark_is_focus_target_on_every_route(
         self, page: Page, live_server_url: str
@@ -371,10 +367,12 @@ class TestKeyboardAndFocus:
         """The skip link and all four route links are in the keyboard path."""
         _goto(page, live_server_url, "/app/settings")
         page.keyboard.press("Tab")
-        assert page.locator("#skip-link").evaluate(
-            "el => el === document.activeElement"
-        )
+        expect(page.locator("#skip-link")).to_be_focused()
 
+        # This loop reads document.activeElement after each synchronous Tab key
+        # press (the browser updates focus as part of that key event), so a
+        # per-step read is deterministic here; only the focus moves that are
+        # scheduled after a click/navigation need polling assertions.
         focused_labels: list[str] = []
         for _ in range(12):
             page.keyboard.press("Tab")

@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import Page
+from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import is_browser_available
 
@@ -112,7 +112,10 @@ def test_app_spa_navigation_between_routes(page: Page, live_server_url: str) -> 
 
     page.get_by_role("link", name="追番方案", exact=True).click()
     page.wait_for_url("**/app/plans", timeout=5000)
-    assert page.locator("#app-main").evaluate("el => el === document.activeElement")
+    # Route changes move focus to the main landmark; poll instead of reading
+    # document.activeElement once, since the focus move is not synchronous with
+    # the URL change.
+    expect(page.locator("#app-main")).to_be_focused()
     assert page.get_by_role("link", name="追番方案", exact=True).get_attribute("aria-current") == "page"
     assert page.locator("#request-list-container").count() >= 1
     assert page.locator("#request-list-count").count() >= 1
@@ -144,9 +147,9 @@ def test_app_shell_skip_link_moves_keyboard_focus_to_main(
     page.goto(f"{live_server_url}/app/settings")
     page.wait_for_selector(".app-title")
     page.keyboard.press("Tab")
-    assert page.locator("#skip-link").evaluate("el => el === document.activeElement")
+    expect(page.locator("#skip-link")).to_be_focused()
     page.keyboard.press("Enter")
-    assert page.locator("#app-main").evaluate("el => el === document.activeElement")
+    expect(page.locator("#app-main")).to_be_focused()
 
 
 def test_legacy_spa_routes_replace_with_sanitized_public_query(
