@@ -139,3 +139,13 @@ Started: 2026-09-13
 - 审核结论：保存配置 probe 只接收 `connection_ref + configuration_revision`，在 immutable snapshot lease 内完成只读外调并在全路径释放；缓存只绑定当前 ref/revision 且不持久化，保存/替换/删除均失效；非 VERIFIED 结果不误报成功，公开结果不含配置、秘密或原始异常。US-321 更新为 `passes=true`，US-322/323 保持 `false`。
 - 独立验证：probe/settings repository/AB capability 与管理/连接、inventory/OpenAPI/DTO/lifecycle/views 组合 `329 passed`；`migu-orca-openapi --check`、受影响 Ruff、frontend `api:check` 与 `typecheck`、`git diff --check` 均通过；generated API 三文件 Vitest `10 passed`。
 - 验证记录：首次误用不存在的 `npm test` 脚本，仅在 typecheck 通过后导致该组合命令中止；随后按 `package.json` 使用 `npm run test:unit -- --run ...` 正确补跑通过。未运行全量 pytest/Vitest、浏览器或真实 AB；本故事无 UI 改动。
+
+## 2026-09-13 23:57 / US-322
+
+- 范围：新增 `SavedTrackingSubmitInput` 严格服务端 handoff（submit/retry 共用，`extra=forbid`、严格 confirm、规范 UUID、tracking/configuration revision 与 opaque key 校验）；新增 `run_saved_tracking_submit` / `run_saved_tracking_retry`，不改变现有 HTTP/generated 请求形状。
+- 实现：保存连接 service 以 `connection_ref + configuration_revision` 从专用 repository 原子取得 immutable snapshot 与 lease；lease 覆盖 PREPARED、IN_PROGRESS、外部调用和结果落盘全路径。终态重放只校验 operation 原绑定，即使配置删除也不重新调用或要求秘密；同 key 换 ref 与旧未绑定 operation 安全冲突。
+- 实现：统一 submit 状态机透传 connection_ref，operation v3 绑定原 ref；成功结果写入 external mapping v2 并绑定实际 ref；NEEDS_RECONFIRM、本地持久化失败与未知结果继续沿用原状态机，不伪造成功或盲目重试。
+- 文件：`src/apps/migu_orca_web/schemas.py`、`src/apps/migu_orca_web/tracking_submission_service.py`、`src/apps/migu_orca_web/tracking_saved_submission_service_test.py`、`scripts/ralph/prd.json`。
+- 验证：`uv run pytest src/apps/migu_orca_web/tracking_saved_submission_service_test.py -q --disable-warnings --maxfail=1`（4 passed）；`uv run pytest src/apps/migu_orca_web/tracking_submission_service_test.py src/apps/migu_orca_web/tracking_recovery_service_test.py src/storage_engine/controllers/operation_repository_test.py src/tracking_engine/models/operation_test.py src/tracking_engine/models/tracking_test.py -q --disable-warnings --maxfail=1`（150 passed）；受影响 Ruff、定向 compileall、`git diff --check`、`uv run migu-orca-openapi --check`、frontend `npm run api:check`、`npm run typecheck` 均通过。
+- 遗留风险：未运行全量后端/前端门禁、真实 Chromium 或真实 Auto Bangumi；现有 HTTP submit/retry 仍暂时接收旧 `ab_config`，按 PRD 留待 US-328 原子切换；同步/管理/恢复引用迁移仍待 US-323～US-325。
+- 可复用结论：终态 replay 不应为读取旧安全结果重新解析已删除的秘密；正常/预备请求必须在同一配置 lease 中完成状态机和 adapter 调用。连接 ref 是 operation/mapping 的唯一持久化归属证据，configuration revision 由 repository CAS 验证，不复制秘密。

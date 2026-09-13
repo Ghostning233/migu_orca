@@ -494,6 +494,68 @@ class SavedAutoBangumiProbePayload(BaseModel):
         return value
 
 
+class SavedTrackingSubmitInput(BaseModel):
+    """Strict server-side handoff for submit/retry using saved AB config.
+
+    This model is intentionally not an HTTP replacement for
+    :class:`TrackingSubmitPayload` yet.  US-328 switches the public request
+    shape; until then the new service seam consumes only the opaque saved
+    connection generation and the existing tracking submit fields.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tracking_id: StrictStr
+    expected_revision: StrictInt = Field(ge=1)
+    idempotency_key: StrictStr
+    confirm: StrictBool
+    connection_ref: UUID
+    configuration_revision: StrictInt = Field(ge=0)
+
+    @field_validator("tracking_id")
+    @classmethod
+    def _clean_tracking_id(cls, value: str) -> str:
+        tracking_id = value.strip()
+        if not tracking_id:
+            raise ValueError("tracking_id cannot be empty")
+        return tracking_id
+
+    @field_validator("idempotency_key")
+    @classmethod
+    def _clean_saved_submit_key(cls, value: str) -> str:
+        key = value.strip()
+        if not _IDEMPOTENCY_KEY_RE.fullmatch(key):
+            raise ValueError("idempotency_key 包含不合法字符")
+        return key
+
+    @field_validator("connection_ref", mode="before")
+    @classmethod
+    def _require_canonical_saved_submit_ref(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            raise ValueError("connection_ref 必须是规范 UUID")
+        try:
+            parsed = UUID(value)
+        except (ValueError, AttributeError, TypeError) as exc:
+            raise ValueError("connection_ref 必须是规范 UUID") from exc
+        if str(parsed) != value:
+            raise ValueError("connection_ref 必须是规范 UUID")
+        return value
+
+    @model_validator(mode="after")
+    def _require_confirmation(self) -> SavedTrackingSubmitInput:
+        if self.confirm is not True:
+            raise ValueError("confirm must be true")
+        return self
+
+
+# Retry deliberately has the same strict handoff shape.  Separate aliases keep
+# the two service entry points discoverable without introducing a second input
+# contract that could drift from submit.
+SavedTrackingRetryInput = SavedTrackingSubmitInput
+SavedTrackingSubmitPayload = SavedTrackingSubmitInput
+SavedTrackingRetryPayload = SavedTrackingRetryInput
+
+
 class AutoBangumiCapabilitiesConfigPayload(BaseModel):
     """Strict nested config for the capability endpoint only."""
 
