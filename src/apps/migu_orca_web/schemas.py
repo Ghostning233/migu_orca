@@ -969,3 +969,42 @@ class TrackingRefreshRssPayload(_TrackingManagementBasePayload):
         if value != "ASSOCIATED_RSS":
             raise ValueError("刷新操作只能作用于 ASSOCIATED_RSS")
         return value
+
+
+class SavedTrackingManagementInput(BaseModel):
+    """Strict handoff for management through one saved AB generation."""
+    model_config = ConfigDict(extra="forbid")
+    tracking_id: StrictStr
+    target_scope: StrictStr
+    operation: Literal["MODIFY", "SET_ENABLED", "DELETE_EXTERNAL", "REFRESH_RSS"]
+    expected_revision: StrictInt = Field(ge=1)
+    idempotency_key: StrictStr
+    confirm: StrictBool
+    connection_ref: UUID
+    configuration_revision: StrictInt = Field(ge=0)
+    patch: dict[str, Any] | None = None
+    enabled: StrictBool | None = None
+    storage_dir: str | None = None
+
+    @field_validator("connection_ref", mode="before")
+    @classmethod
+    def _canonical_management_ref(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            raise ValueError("connection_ref 必须是规范 UUID")
+        try:
+            parsed = UUID(value)
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ValueError("connection_ref 必须是规范 UUID") from exc
+        if str(parsed) != value:
+            raise ValueError("connection_ref 必须是规范 UUID")
+        return value
+
+    @model_validator(mode="after")
+    def _strict_management_input(self) -> SavedTrackingManagementInput:
+        if self.confirm is not True:
+            raise ValueError("confirm must be true")
+        if not self.tracking_id.strip() or not _IDEMPOTENCY_KEY_RE.fullmatch(self.idempotency_key.strip()):
+            raise ValueError("tracking_id 或 idempotency_key 无效")
+        if self.target_scope not in _MANAGEMENT_SCOPES:
+            raise ValueError("target_scope 无效")
+        return self

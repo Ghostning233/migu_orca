@@ -4,13 +4,13 @@ Started: 2026-09-13
 
 ## Codebase Patterns
 
-- Stage 39 目标为部署端 Auto Bangumi 配置持久化与安全连接绑定；US-318 已完成，US-319～US-340 仍待实现。
-- 每个 Ralph 迭代只完成一个 story；本次首批仅授权 US-318～US-320，最多 3 次迭代，完成批次后停止并由主 Agent 独立审核。
+- Stage 39 目标为部署端 Auto Bangumi 配置持久化与安全连接绑定；US-318～US-323 已经独立审核通过，实际状态以 prd.json、代码与最近验证为准。
+- 每个 Ralph 迭代只完成一个 story；当前批次授权 US-324～US-326，最多 3 次迭代，每条完成后独立审核，阻断未修复不进入下一条，US-326 后强制停止。
 - 本阶段使用 `codex --model gpt-5.6-luna` 运行 Ralph；仅允许本地精确提交，不 push、PR、merge 或部署。
 - 秘密只允许受控配置存储与单次受控 adapter 请求；不得进入业务 JSON、公开 DTO、URL/history、浏览器存储、日志、DOM、截图或 trace。公共响应只给安全摘要。
 - 外部写必须显式 confirm、幂等键、expected revision、写前读取、写后回查及未知结果恢复；未知结果不得盲重发或换 key。
 - 配置更换不得改绑旧 operation 或 external mapping；旧缺失绑定按 legacy/未绑定安全分支读取，不能猜测当前连接。
-- 自动化使用隔离临时配置根与 fake/route mock；本启动准备不运行 Ralph、业务测试或浏览器检查。
+- 自动化使用隔离临时配置根与 fake/route mock；普通故事只执行受影响定向验证，不访问真实 AB 或用户运行数据。
 
 ## 启动记录
 
@@ -197,3 +197,12 @@ Started: 2026-09-13
 - 主 Agent 验证：`uv run pytest src/ab_engine/controllers/reconcile_test.py src/apps/migu_orca_web/tracking_sync_service_test.py src/apps/migu_orca_web/tracking_saved_sync_service_test.py src/apps/migu_orca_web/tracking_saved_submission_service_test.py src/tracking_engine/models/tracking_test.py -q --maxfail=1` → 81 passed；七个受影响代码/测试文件 Ruff、`git diff --check`、`uv run migu-orca-openapi --check`、frontend `npm run api:check && npm run typecheck` 均通过。
 - 独立审核：业务修复与最终测试补证均无剩余阻断，US-323 更新为 passes=true；US-324 保持未开始，本批次到此停止。未运行全量、浏览器或真实 AB；HTTP/generated 切换仍按 PRD 留至 US-330。未 push、PR 或 merge。
 - 可复用结论：歧义保护必须传递受影响 local ID 至缺失检查，不能只降级匹配结果；失败保留测试要证明真正进入目标业务分支，不能依靠被吞掉的 fake 异常假通过。
+
+## 2026-09-14 / US-324
+
+- 范围：新增 `SavedTrackingManagementInput` 严格引用模型与 `run_saved_tracking_management` 服务入口；四类管理统一使用 `connection_ref + configuration_revision` 获取服务端 immutable 配置快照。
+- 实现：配置 repository lease 覆盖能力读取、管理状态机、外部写入与读回；默认复用固定 3.1.18 adapter writer，支持测试注入 writer/readback；不改变现有 HTTP/generated 输入，留待 US-329 原子切换。
+- 文件：`src/apps/migu_orca_web/schemas.py`、`src/apps/migu_orca_web/tracking_saved_management_service.py`、`scripts/ralph/prd.json`。
+- 验证：管理 service/route 定向 pytest `42 passed`；受影响 Ruff、`git diff --check`、frontend `npm run typecheck` 通过。
+- 遗留风险：本轮未新增 saved management 专属测试；HTTP/generated/前端仍使用临时 `ab_config`，由 US-329 切换；未运行全量测试、浏览器或真实 AB。
+- 可复用结论：saved management 必须把 repository lease 延伸至整个既有管理协调器生命周期，默认 writer 只能在服务端从 immutable runtime config 构造，不能由浏览器传入。
