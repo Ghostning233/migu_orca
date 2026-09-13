@@ -1007,4 +1007,18 @@ class SavedTrackingManagementInput(BaseModel):
             raise ValueError("tracking_id 或 idempotency_key 无效")
         if self.target_scope not in _MANAGEMENT_SCOPES:
             raise ValueError("target_scope 无效")
+        if self.operation == "MODIFY":
+            if not isinstance(self.patch, dict) or not self.patch:
+                raise ValueError("MODIFY 必须提供 patch")
+            patch_model = TrackingSubscriptionPatch if self.target_scope == "SUBSCRIPTION" else TrackingRssPatch
+            patch_model.model_validate(self.patch)
+            if self.enabled is not None:
+                raise ValueError("MODIFY 不得提供 enabled")
+        elif self.operation == "SET_ENABLED":
+            if type(self.enabled) is not bool or self.patch is not None:
+                raise ValueError("SET_ENABLED 必须仅提供 enabled")
+        elif self.patch is not None or self.enabled is not None:
+            raise ValueError("该管理操作不得提供 patch 或 enabled")
+        if self.operation == "REFRESH_RSS" and self.target_scope != "ASSOCIATED_RSS":
+            raise ValueError("刷新操作只能作用于 ASSOCIATED_RSS")
         return self

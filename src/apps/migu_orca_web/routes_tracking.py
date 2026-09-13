@@ -16,7 +16,7 @@ local storage is read — no external system is ever contacted.
 
 from ab_engine.controllers.ab_config import build_ab_config
 from ab_engine.controllers.ab_http_client import UrlopenAutoBangumiHttpTransport
-from ab_engine.controllers.ab_management_client import AutoBangumiManagementClient, create_legacy_31_management_client
+from ab_engine.controllers.ab_management_client import create_legacy_31_management_client
 from apps.migu_orca_web.blueprints import api_blueprint
 from apps.migu_orca_web.schemas import (
     TrackingDeleteExternalPayload,
@@ -31,7 +31,7 @@ from apps.migu_orca_web.schemas import (
     TrackingSyncPayload,
 )
 from apps.migu_orca_web.services import _storage_dir
-from apps.migu_orca_web.tracking_management_service import run_tracking_management
+from apps.migu_orca_web.tracking_management_service import management_writer, run_tracking_management
 from apps.migu_orca_web.tracking_read_service import (
     build_tracking_detail,
     list_tracking_items,
@@ -49,7 +49,6 @@ from extensions.flask_api.views import GetView, PostView
 from storage_engine.controllers.operation_repository import load_tracking_operation
 from storage_engine.controllers.storage_config import load_storage_config
 from storage_engine.controllers.tracking_repository import load_tracking_record
-from tracking_engine.controllers.management_target import ResolvedManagementTarget
 from tracking_engine.models.operation import TRACKING_OPERATION_STATE_SUCCEEDED
 
 
@@ -249,49 +248,7 @@ class TrackingItemRecoverView(PostView):
         )
 
 
-def _management_writer(client: AutoBangumiManagementClient, action: str):
-    """Build the fixed-route adapter closure for one request-scoped action."""
-    def write(target: ResolvedManagementTarget, payload: object) -> dict[str, object]:
-        calls: list[dict[str, object]] = []
-        if target.scope == "SUBSCRIPTION":
-            item = target.subscription
-            assert item is not None
-            if action == "MODIFY":
-                calls.append(client.update_subscription(item.external_id, payload))
-            elif action == "SET_ENABLED":
-                calls.append(client.set_subscription_enabled(item.external_id, payload["enabled"]))
-            elif action == "DELETE_EXTERNAL":
-                calls.append(client.delete_subscription(item.external_id))
-            else:
-                raise ValueError("invalid management action")
-        else:
-            rss_payloads = payload.get("items", []) if isinstance(payload, dict) else []
-            for index, item in enumerate(target.rss):
-                if action == "MODIFY":
-                    body = rss_payloads[index] if index < len(rss_payloads) else payload
-                    calls.append(client.update_rss(item.external_id, body, item.url))
-                elif action == "SET_ENABLED":
-                    calls.append(client.enable_rss([rss.external_id for rss in target.rss]) if payload["enabled"] else client.disable_rss(item.external_id))
-                    if payload["enabled"]:
-                        break
-                elif action == "DELETE_EXTERNAL":
-                    calls.append(client.delete_rss(item.external_id))
-                elif action == "REFRESH_RSS":
-                    calls.append(client.refresh_rss(item.external_id))
-        statuses = [
-            (200 if result.get("status") is True else 400 if result.get("status") is False else result.get("status_code"))
-            for result in calls if isinstance(result, dict)
-        ]
-        if statuses and all(isinstance(status, int) and 200 <= status < 300 for status in statuses):
-            return {"status_code": 200}
-        # A batch with both accepted and rejected RSS writes has an externally
-        # indeterminate aggregate outcome.  It must not inherit the first
-        # rejected status as a definite failure.
-        if (any(isinstance(status, int) and 200 <= status < 300 for status in statuses)
-                and any(not isinstance(status, int) or not 200 <= status < 300 for status in statuses)):
-            return {"transport_error": "unknown"}
-        return {"status_code": next((status for status in statuses if isinstance(status, int)), 502)}
-    return write
+_management_writer = management_writer
 
 
 def _management_result(config, *, tracking_id: str, action: str, result: dict[str, object]) -> dict[str, object]:

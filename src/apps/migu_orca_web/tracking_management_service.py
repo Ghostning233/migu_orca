@@ -10,6 +10,7 @@ import contextlib
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from typing import Any, Protocol
+from uuid import UUID
 
 from ab_engine.models.management import AutoBangumiCapabilities
 from shared.errors import Stage1Error
@@ -45,6 +46,7 @@ from tracking_engine.controllers.management_target import (
     build_management_binding,
     build_management_patch,
     resolve_management_target,
+    validate_management_mapping,
 )
 from tracking_engine.models.operation import (
     TRACKING_OPERATION_KIND_DELETE_EXTERNAL,
@@ -65,6 +67,10 @@ from tracking_engine.models.tracking import (
     TRACKING_AUDIT_MANAGEMENT_STARTED,
     TRACKING_AUDIT_MANAGEMENT_SUCCEEDED,
     TRACKING_AUDIT_MANAGEMENT_UNKNOWN,
+    TRACKING_AUDIT_RECOVERY_AUTO_SUCCEEDED,
+    TRACKING_AUDIT_RECOVERY_EXTERNAL_VERIFIED,
+    TRACKING_AUDIT_RECOVERY_MANUAL_SUCCEEDED,
+    TRACKING_AUDIT_SUBMIT_SUCCEEDED,
     TRACKING_STATUS_ACTIVE,
     TRACKING_STATUS_DISABLED,
     TRACKING_STATUS_EXTERNAL_DELETED,
@@ -84,6 +90,44 @@ class ManagementSnapshotClient(Protocol):
 
 ManagementWriter = Callable[[ResolvedManagementTarget, Mapping[str, Any] | None], Any]
 
+
+def management_writer(client: Any, action: str) -> ManagementWriter:
+    """Build the fixed-route adapter closure for one request-scoped action."""
+    def write(target: ResolvedManagementTarget, payload: object) -> dict[str, object]:
+        calls: list[dict[str, object]] = []
+        if target.scope == "SUBSCRIPTION":
+            item = target.subscription
+            assert item is not None
+            if action == "MODIFY":
+                calls.append(client.update_subscription(item.external_id, payload))
+            elif action == "SET_ENABLED":
+                calls.append(client.set_subscription_enabled(item.external_id, payload["enabled"]))
+            elif action == "DELETE_EXTERNAL":
+                calls.append(client.delete_subscription(item.external_id))
+            else:
+                raise ValueError("invalid management action")
+        else:
+            rss_payloads = payload.get("items", []) if isinstance(payload, dict) else []
+            for index, item in enumerate(target.rss):
+                if action == "MODIFY":
+                    body = rss_payloads[index] if index < len(rss_payloads) else payload
+                    calls.append(client.update_rss(item.external_id, body, item.url))
+                elif action == "SET_ENABLED":
+                    calls.append(client.enable_rss([rss.external_id for rss in target.rss]) if payload["enabled"] else client.disable_rss(item.external_id))
+                    if payload["enabled"]:
+                        break
+                elif action == "DELETE_EXTERNAL":
+                    calls.append(client.delete_rss(item.external_id))
+                elif action == "REFRESH_RSS":
+                    calls.append(client.refresh_rss(item.external_id))
+        statuses = [(200 if result.get("status") is True else 400 if result.get("status") is False else result.get("status_code")) for result in calls if isinstance(result, dict)]
+        if statuses and all(isinstance(status, int) and 200 <= status < 300 for status in statuses):
+            return {"status_code": 200}
+        if any(isinstance(status, int) and 200 <= status < 300 for status in statuses) and any(not isinstance(status, int) or not 200 <= status < 300 for status in statuses):
+            return {"transport_error": "unknown"}
+        return {"status_code": next((status for status in statuses if isinstance(status, int)), 502)}
+    return write
+
 def run_tracking_management(
     config: StorageConfig | None = None,
     *,
@@ -95,6 +139,7 @@ def run_tracking_management(
     target_scope: str,
     ab_config: Any = None,
     management_client: ManagementSnapshotClient | None = None,
+    connection_ref: str | None = None,
     capabilities: AutoBangumiCapabilities | None = None,
     patch: Mapping[str, Any] | None = None,
     enabled: bool | None = None,
@@ -110,6 +155,8 @@ def run_tracking_management(
     action-specific adapter closure in a later service layer.
     """
     del ab_config
+    if isinstance(connection_ref, UUID):
+        connection_ref = str(connection_ref)
     if confirm is not True:
         raise Stage1Error("tracking_management_confirmation_required", "请确认后再执行管理操作", "tracking_management")
     resolved_config = config or load_storage_config()
@@ -119,19 +166,24 @@ def run_tracking_management(
     if operation == TRACKING_OPERATION_KIND_REFRESH_RSS and target_scope != "ASSOCIATED_RSS":
         raise Stage1Error("tracking_management_patch_invalid", "刷新操作目标无效", "tracking_management")
     safe_patch = _safe_patch(operation, target_scope, patch, enabled)
-    binding = build_management_binding(action=operation, scope=target_scope, patch=safe_patch if operation == "MODIFY" else None, enabled=enabled if operation == "SET_ENABLED" else None)
+    binding = build_management_binding(action=operation, scope=target_scope, patch=safe_patch if operation == "MODIFY" else None, enabled=enabled if operation == "SET_ENABLED" else None, connection_ref=connection_ref)
     existing = _load_operation_if_present(resolved_config, idempotency_key)
     if existing is not None:
         same_binding = (existing.tracking_id, existing.operation, existing.target_scope,
-                        existing.request_fingerprint) == (
+                        existing.request_fingerprint, existing.connection_ref) == (
                             record.tracking_id, operation, target_scope,
-                            binding.action_fingerprint)
+                            binding.action_fingerprint, connection_ref)
         # Terminal replay remains bound to the original revision.  The caller
         # may safely replay with that stale-but-recorded revision; a different
         # revision is a different request and must conflict.
         if not same_binding or existing.expected_revision != expected_revision:
             raise Stage1Error("tracking_idempotency_conflict", "同一幂等键已绑定不同的管理操作", "tracking_management")
         if existing.state in TRACKING_OPERATION_TERMINAL_STATES:
+            # A later operation may have replaced the record pointer.  Never
+            # compensate an old terminal operation in that case: doing so
+            # would mutate historical bytes belonging to an unrelated op.
+            if record.current_operation_id != existing.operation_id:
+                raise Stage1Error("tracking_management_state_conflict", "已有管理操作已被后续操作取代", "tracking_management")
             if not _record_matches_management_terminal(record, existing):
                 # Do not claim success for an operation whose paired tracking
                 # result was lost in the operation-first crash window.
@@ -156,10 +208,12 @@ def run_tracking_management(
     if expected_revision != record.revision:
         raise Stage1Error("tracking_revision_conflict", "追番记录版本已变化，请刷新后重试", "tracking_management", {"expected_revision": expected_revision, "current_revision": record.revision})
     _guard_current_operation(resolved_config, record)
+    if connection_ref is not None:
+        validate_management_mapping(record, connection_ref)
     if management_client is None:
         raise Stage1Error("tracking_management_capability_unknown", "管理能力尚未验证", "tracking_management")
     caps, subscriptions, rss_items = management_client.read_snapshot()
-    effective_caps = capabilities or caps
+    effective_caps = caps if connection_ref is not None else (capabilities or caps)
     if not management_capability_allowed(effective_caps, operation, target_scope, enabled=enabled):
         raise Stage1Error("tracking_management_capability_unknown", "当前 Auto Bangumi 管理能力未验证", "tracking_management")
     target = resolve_management_target(
@@ -168,6 +222,7 @@ def run_tracking_management(
             operation in {TRACKING_OPERATION_KIND_SET_ENABLED, TRACKING_OPERATION_KIND_DELETE_EXTERNAL}
             and target_scope == "SUBSCRIPTION"
         ),
+        connection_ref=connection_ref,
     )
     # The operation binds the projection expected after the write, not merely
     # the sparse browser patch.  The fresh snapshot is still request-scoped.
@@ -193,6 +248,7 @@ def run_tracking_management(
         request_fingerprint=binding.action_fingerprint, target_scope=target_scope,
         previous_tracking_status=record.status,
         expected_external_fingerprint=binding.expected_external_fingerprint, now=now,
+        connection_ref=connection_ref,
     )
     if not created:
         if operation_record.state == TRACKING_OPERATION_STATE_IN_PROGRESS:
@@ -261,7 +317,7 @@ def run_tracking_management(
                 operation=in_progress, outcome=MANAGEMENT_OUTCOME_SUCCESS, target=target,
                 operation_id=in_progress.operation_id, reason="management_verified", now=now)
         try:
-            actual = readback(operation, target_scope, target) if readback is not None else _readback_target(management_client, record, target_scope, operation)
+            actual = readback(operation, target_scope, target) if readback is not None else _readback_target(management_client, record, target_scope, operation, connection_ref=connection_ref)
             readback_outcome = _classify_target_readback(operation, target_scope, target, actual, binding.expected_external_fingerprint)
         except Exception:
             readback_outcome = MANAGEMENT_OUTCOME_UNKNOWN
@@ -487,7 +543,7 @@ def _run_management_write(
     return {"transport_error": "partial_external_result"}
 
 
-def _readback_target(client: ManagementSnapshotClient | None, record: TrackingRecord, scope: str, operation: str) -> Any:
+def _readback_target(client: ManagementSnapshotClient | None, record: TrackingRecord, scope: str, operation: str, *, connection_ref: str | None = None) -> Any:
     if client is None:
         raise Stage1Error("tracking_management_readback_missing", "管理操作缺少外部回查", "tracking_management")
     _caps, subscriptions, rss_items = client.read_snapshot()
@@ -511,6 +567,7 @@ def _readback_target(client: ManagementSnapshotClient | None, record: TrackingRe
             operation in {TRACKING_OPERATION_KIND_SET_ENABLED, TRACKING_OPERATION_KIND_DELETE_EXTERNAL}
             and scope == "SUBSCRIPTION"
         ),
+        connection_ref=connection_ref,
     )
 
 
@@ -720,6 +777,26 @@ def _guard_current_operation(config: StorageConfig, record: TrackingRecord) -> N
         "RECOVERY_REQUIRED",
     }:
         raise Stage1Error("tracking_management_state_conflict", "已有管理操作正在执行，请先恢复", "tracking_management")
+    management_kinds = {
+        TRACKING_OPERATION_KIND_MODIFY,
+        TRACKING_OPERATION_KIND_SET_ENABLED,
+        TRACKING_OPERATION_KIND_DELETE_EXTERNAL,
+        TRACKING_OPERATION_KIND_REFRESH_RSS,
+    }
+    if operation.operation not in management_kinds:
+        if operation.operation == "SUBMIT" and operation.state == TRACKING_OPERATION_STATE_SUCCEEDED and any(
+                isinstance(event, Mapping)
+                and event.get("operation_id") == operation.operation_id
+                and event.get("action") in {
+                    TRACKING_AUDIT_SUBMIT_SUCCEEDED,
+                    TRACKING_AUDIT_RECOVERY_AUTO_SUCCEEDED,
+                    TRACKING_AUDIT_RECOVERY_MANUAL_SUCCEEDED,
+                    TRACKING_AUDIT_RECOVERY_EXTERNAL_VERIFIED,
+                }
+                for event in record.audit_events
+            ):
+                return
+        raise Stage1Error("tracking_management_state_conflict", "已有操作尚未完成，请先恢复", "tracking_management")
     if operation.state in TRACKING_OPERATION_TERMINAL_STATES and not _record_matches_management_terminal(record, operation):
         # A crash may land the operation result before its paired TrackingRecord
         # CAS.  Turn that orphaned terminal state into the normal recovery gate

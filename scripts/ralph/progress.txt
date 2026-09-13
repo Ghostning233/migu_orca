@@ -206,3 +206,13 @@ Started: 2026-09-13
 - 验证：管理 service/route 定向 pytest `42 passed`；受影响 Ruff、`git diff --check`、frontend `npm run typecheck` 通过。
 - 遗留风险：本轮未新增 saved management 专属测试；HTTP/generated/前端仍使用临时 `ab_config`，由 US-329 切换；未运行全量测试、浏览器或真实 AB。
 - 可复用结论：saved management 必须把 repository lease 延伸至整个既有管理协调器生命周期，默认 writer 只能在服务端从 immutable runtime config 构造，不能由浏览器传入。
+
+## 2026-09-14 / US-324 独立审核、定向修复与补证通过
+
+- 首轮 Ralph 仅交付 schema/wrapper，旧用例 42 passed 不构成验收；主 Agent 撤销完成标记。实证合法 UUID 二次解析异常，wrapper/core 未透传 ref、operation 未绑定且缺少新入口测试；未进入 US-325。
+- 修复：保存连接引用贯穿 mapping 写前校验、action fingerprint、operation v3、同次能力与写后回查；legacy 无 ref 指纹保留历史 JSON 摘要。固定 adapter writer 从 route 提取至 service，旧 route 仅复用引用，不保留重复规则。
+- 状态保护：成功 SUBMIT 及对应恢复成功审计允许后续管理，未决与未知操作继续锁住；终态重放无需现有秘密但复用统一协调器严格检查原绑定。旧 key 在记录已指向新 operation 时直接冲突，保留旧操作、新操作与记录字节，不错误补偿历史结果。
+- 补证：22 条 saved service 定向测试覆盖四动作、缺失/旧版/异 ref 映射零快照、能力降级、绑定冲突、未知不换键重发、删配置终态重放、read/write/readback 的六次 save/delete lease 拒绝、真实 Legacy31 adapter 单条 file=false 删除及三种结果保留本地方案、媒体、记录和旧审计，结束后配置保存成功证明 lease 释放。纯契约测试冻结 legacy 指纹并验证双 ref 隔离。
+- 主 Agent 验证：`uv run pytest src/apps/migu_orca_web/tracking_saved_management_service_test.py src/apps/migu_orca_web/tracking_management_service_test.py src/apps/migu_orca_web/tracking_management_routes_test.py src/apps/migu_orca_web/tracking_management_integration_test.py src/tracking_engine/controllers/management_target_test.py src/tracking_engine/controllers/management_operation_test.py -q --maxfail=1 --tb=short` → 90 passed；八个受影响代码/测试文件 Ruff、`git diff --check`、`uv run migu-orca-openapi --check`、frontend `npm run api:check && npm run typecheck` 通过。
+- 独立审核确认无剩余业务阻断，US-324 恢复 passes=true。未运行全量/浏览器/真实 AB，HTTP/generated 请求迁移仍留 US-329。当前批次尚余 US-325/326，各限一次 Ralph 迭代，逐故事审核；未 push/PR/merge。
+- 可复用结论：新增入口必须以真实新 service 与本地临时 repository 测试，不能以旧 core 测试替代；拒绝旧 key 时不能把已完成历史 operation 改成待恢复。终态读取复用权威协调器，不复制重放状态机。

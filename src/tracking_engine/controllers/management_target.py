@@ -188,7 +188,8 @@ def build_complete_rss_update(
 
 
 def build_management_binding(
-    *, action: str, scope: str, patch: Mapping[str, Any] | None = None, enabled: bool | None = None
+    *, action: str, scope: str, patch: Mapping[str, Any] | None = None,
+    enabled: bool | None = None, connection_ref: str | UUID | None = None,
 ) -> ManagementBinding:
     """Return deterministic action and expected-projection SHA-256 summaries."""
     if action not in {"MODIFY", "SET_ENABLED", "DELETE_EXTERNAL", "REFRESH_RSS"}:
@@ -207,14 +208,24 @@ def build_management_binding(
         projection = {"deleted": True}
     else:
         projection = {"scope": scope}
+    normalized_ref = _normalize_connection_ref(connection_ref) if connection_ref is not None else None
     action_digest = canonical_management_fingerprint(
-        action=action, target_scope=scope, expected_projection=projection
+        action=action, target_scope=scope, expected_projection=projection,
+        connection_ref=normalized_ref,
     )
     encoded = json.dumps(projection, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     return ManagementBinding(
         action_fingerprint=action_digest,
         expected_external_fingerprint=f"sha256:{hashlib.sha256(encoded).hexdigest()}",
     )
+
+
+def validate_management_mapping(record: TrackingRecord, connection_ref: str | UUID) -> None:
+    """Validate saved-connection ownership before any external snapshot IO."""
+    mapping = record.external_mapping
+    if not isinstance(mapping, Mapping):
+        raise _invalid("tracking_mapping_missing")
+    _require_current_mapping_connection(mapping, connection_ref)
 
 
 def _validate_patch_value(field: str, value: Any) -> Any:
@@ -261,6 +272,7 @@ __all__ = [
     "build_complete_subscription_update",
     "build_management_binding",
     "build_management_patch",
+    "validate_management_mapping",
     "_require_current_mapping_connection",
     "resolve_management_target",
 ]
