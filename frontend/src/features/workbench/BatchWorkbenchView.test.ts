@@ -195,6 +195,7 @@ describe('BatchWorkbenchView parse (US-205)', () => {
 
     expect(apiPost).toHaveBeenCalledWith('/api/v1/batches/parse', {
       body: { raw_input: '萌王S4\n路哥S4\n杖剑谭S2', storage_dir: null },
+      timeoutMs: 420000,
     })
     const cards = wrapper.findAll('.batch-draft-card')
     expect(cards).toHaveLength(3)
@@ -214,6 +215,21 @@ describe('BatchWorkbenchView parse (US-205)', () => {
 
     expect(wrapper.find('#batch-parse-progress').text()).toContain('1 / 1 部')
     expect(wrapper.find('.batch-draft-card').classes()).toContain('is-current')
+  })
+
+  it('maps a per-item MiKan timeout to fixed feedback without raw error text', async () => {
+    apiPost.mockResolvedValue(parseResult({
+      items: [batchItem({
+        status: 'FAILED',
+        error: { error_type: 'mikan_timeout', details: { category: 'mikan_search' }, error_message: 'raw upstream text' },
+      })],
+    }))
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王S4')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.batch-candidate-feedback').text()).toContain('MiKan 上游响应超时')
+    expect(wrapper.text()).not.toContain('raw upstream text')
   })
 
   it('filters visibility without clearing selection or the current detail', async () => {

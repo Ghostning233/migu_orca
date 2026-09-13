@@ -77,6 +77,12 @@ import { displayValue, type RequestSnapshot } from '@/features/requests/requestD
 import type { PreviewPatch } from '@/features/workbench/candidateSearch'
 import { currentStorageDir, storageQuery } from '@/features/requests/requestStorage'
 import { isPublicRouteIdentifier, routeLocation } from '@/app/router/catalog'
+import {
+  batchItemFailureMessage,
+  batchParseTimeoutMs,
+  MIKAN_DRAFT_GENERATION_TIMEOUT_MS,
+  mikanFailureMessage,
+} from './mikanFeedback'
 
 type CreateRequestResult = NonNullable<
   import('@/api/generated/api').operations['createRequest']['responses']['200']['content']['application/json']['result']
@@ -403,7 +409,10 @@ async function parseBatch(): Promise<void> {
   loadingMessage.value = `正在搜索 ${count} 个批量条目的 MiKan 候选（解析进度：0 / ${count} 部）`
   try {
     const payload = buildBatchParsePayload(rawInput.value, currentStorageDir())
-    const result = await api.post<BatchParseResult>('/api/v1/batches/parse', { body: payload })
+    const result = await api.post<BatchParseResult>('/api/v1/batches/parse', {
+      body: payload,
+      timeoutMs: batchParseTimeoutMs(count),
+    })
     parseResult.value = result
     journey.dispatch({ type: 'parse_succeeded', result })
     const parsedItems = result.items ?? []
@@ -429,8 +438,8 @@ async function parseBatch(): Promise<void> {
     parseResult.value = null
     items.value = []
     batchId.value = ''
-    parseError.value = '批量草案获取失败。请稍后重试。'
-    notification.error('批量草案获取失败', '批量草案获取失败。请稍后重试。')
+    parseError.value = mikanFailureMessage(error, '批量候选解析')
+    notification.error('批量草案获取失败', parseError.value)
   } finally {
     parseLoading.value = false
   }
@@ -473,6 +482,7 @@ async function generateDraftFromCandidate(candidate: BatchCandidate): Promise<vo
     })
     const result = await api.post<CreateRequestResult>('/api/v1/requests', {
       body: { ...payload, storage_dir: storageQuery().storage_dir ?? null },
+      timeoutMs: MIKAN_DRAFT_GENERATION_TIMEOUT_MS,
     })
     const request = result?.request as RequestSnapshot | undefined
     if (!request) {
@@ -491,7 +501,7 @@ async function generateDraftFromCandidate(candidate: BatchCandidate): Promise<vo
     notification.success('订阅草案已生成', '已根据所选 MiKan 合集生成当前批量条目的订阅草案。')
   } catch (error) {
     void error
-    notification.error('生成订阅草案失败', '从 MiKan 合集生成订阅草案失败。请重试。')
+    notification.error('生成订阅草案失败', mikanFailureMessage(error, '从 MiKan 合集生成订阅草案'))
   } finally {
     const next = new Set(draftCreateItemIds.value)
     next.delete(itemId)
@@ -1237,7 +1247,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                 未找到匹配的 MiKan 合集。
               </p>
               <p v-else-if="String(item.status ?? '') === 'FAILED'" class="batch-candidate-feedback">
-                搜索失败。可重新获取批量草案后重试。
+                {{ batchItemFailureMessage(item) }}
               </p>
               <p
                 v-if="!['CONFIRMED', 'SAVED_PENDING_CONFIRM'].includes(String(item.status ?? '')) && !itemConfirmability(item.item_id ?? '').confirmable"

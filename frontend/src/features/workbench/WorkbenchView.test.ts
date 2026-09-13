@@ -238,6 +238,7 @@ describe('WorkbenchView single search (US-204)', () => {
 
     expect(apiPost).toHaveBeenCalledWith('/api/v1/mikan/candidates', {
       body: { query: '芙莉莲' },
+      timeoutMs: 135000,
     })
     const cards = wrapper.findAll('.candidate-card')
     expect(cards).toHaveLength(1)
@@ -258,6 +259,20 @@ describe('WorkbenchView single search (US-204)', () => {
     // The explicit selection button is offered but nothing was generated.
     expect(wrapper.findAll('.candidate-select')).toHaveLength(1)
     expect(apiPost).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not mislabel a 200 FAILED candidate result as EMPTY', async () => {
+    apiPost.mockResolvedValue(candidateResult({
+      status: 'FAILED', candidates: [],
+      error: { error_type: 'mikan_timeout', details: { category: 'mikan_search' } },
+    }))
+    const { wrapper } = await mountWorkbench()
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#mikan-candidate-search-error').text()).toContain('MiKan 上游响应超时')
+    expect(wrapper.find('#mikan-candidate-search-result .empty-state').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('未找到候选合集')
   })
 
   it('renders the auditable title-parse summary with Chinese labels', async () => {
@@ -405,6 +420,7 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
         storage_dir: null,
         save_request: false,
       },
+      timeoutMs: 240000,
     })
     // The draft preview panel mounts with the display snapshot.
     expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(true)
@@ -753,7 +769,7 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     const { useNotificationStore } = await import('@/app/stores/notification')
     const notification = useNotificationStore()
     expect(notification.current?.title).toBe('生成失败')
-    expect(notification.current?.message).toBe('从 MiKan 合集生成订阅草案失败。请重试。')
+    expect(notification.current?.message).toBe('从 MiKan 合集生成订阅草案失败：MiKan 页面解析异常，请稍后重试。')
     expect(wrapper.findAll('.candidate-card')).toHaveLength(1)
     expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(false)
   })
@@ -810,8 +826,30 @@ describe('WorkbenchView direct fallback (US-204)', () => {
         storage_dir: null,
         save_request: false,
       },
+      timeoutMs: 240000,
     })
     expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(true)
     expect((wrapper.find('#mikan-fallback-bangumi').element as HTMLInputElement).value).toBe('')
+  })
+
+  it('prevents duplicate direct generation while the long request is pending', async () => {
+    let resolveRequest!: (value: unknown) => void
+    const pending = new Promise((resolve) => { resolveRequest = resolve })
+    apiPost.mockReturnValue(pending as never)
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-fallback-enabled').setValue(true)
+    await nextTick()
+    await wrapper.find('#mikan-fallback-bangumi').setValue('2353')
+    const submit = wrapper.find('#mikan-fallback-generate')
+    void submit.trigger('click')
+    await nextTick()
+    await submit.trigger('click')
+
+    expect(apiPost).toHaveBeenCalledTimes(1)
+    expect(submit.attributes('disabled')).toBeDefined()
+    resolveRequest({ draft_id: 'opaque', request: {} })
+    await flushPromises()
   })
 })

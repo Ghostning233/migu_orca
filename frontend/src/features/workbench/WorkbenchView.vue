@@ -50,6 +50,12 @@ import { displayValue } from '@/features/requests/requestDetail'
 import type { RequestSnapshot } from '@/features/requests/requestDetail'
 import { currentStorageDir, storageQuery } from '@/features/requests/requestStorage'
 import { consumeReuseHandoff, type ReuseSuggestion } from '@/features/requests/reuseHandoff'
+import {
+  candidateResultFailureMessage,
+  MIKAN_CANDIDATE_SEARCH_TIMEOUT_MS,
+  MIKAN_DRAFT_GENERATION_TIMEOUT_MS,
+  mikanFailureMessage,
+} from './mikanFeedback'
 
 type CreateRequestResult = NonNullable<
   operations['createRequest']['responses']['200']['content']['application/json']['result']
@@ -196,8 +202,15 @@ async function searchCandidates(): Promise<void> {
   try {
     const result = await api.post<CandidateSearchResult>('/api/v1/mikan/candidates', {
       body: { query: query.value.trim() },
+      timeoutMs: MIKAN_CANDIDATE_SEARCH_TIMEOUT_MS,
     })
     searchResult.value = result
+    const failedMessage = candidateResultFailureMessage(result)
+    if (failedMessage) {
+      searchError.value = failedMessage
+      notification.error('候选搜索失败', failedMessage)
+      return
+    }
     const count = result.candidates?.length ?? 0
     if (count) {
       notification.success('候选搜索完成', `找到 ${count} 个候选合集。`)
@@ -207,8 +220,8 @@ async function searchCandidates(): Promise<void> {
   } catch (error) {
     void error
     searchResult.value = null
-    searchError.value = '候选搜索失败。请稍后重试。'
-    notification.error('候选搜索失败', '候选搜索失败。请稍后重试。')
+    searchError.value = mikanFailureMessage(error, '候选搜索')
+    notification.error('候选搜索失败', searchError.value)
   } finally {
     searchLoading.value = false
     await nextTick()
@@ -227,6 +240,7 @@ async function generateFromCandidate(candidate: MikanCandidate): Promise<void> {
 }
 
 async function generateFromFallback(): Promise<void> {
+  if (fallbackLoading.value) return
   const validationError = validateFallbackValue(fallbackValue.value)
   if (validationError) {
     fallbackError.value = validationError
@@ -237,9 +251,14 @@ async function generateFromFallback(): Promise<void> {
     storageDir: currentStorageDir(),
     title: query.value.trim(),
   })
-  const generated = await generateDraft(payload)
-  if (generated) {
-    fallbackValue.value = ''
+  fallbackLoading.value = true
+  try {
+    const generated = await generateDraft(payload)
+    if (generated) {
+      fallbackValue.value = ''
+    }
+  } finally {
+    fallbackLoading.value = false
   }
 }
 
@@ -248,6 +267,7 @@ async function generateDraft(payload: Record<string, unknown>): Promise<boolean>
   try {
     const result = await api.post<CreateRequestResult>('/api/v1/requests', {
       body: { ...payload, storage_dir: storageQuery().storage_dir ?? null },
+      timeoutMs: MIKAN_DRAFT_GENERATION_TIMEOUT_MS,
     })
     if (result?.draft_id && result?.request) {
       draftId.value = result.draft_id
@@ -262,7 +282,8 @@ async function generateDraft(payload: Record<string, unknown>): Promise<boolean>
     return false
   } catch (error) {
     void error
-    notification.error('生成失败', '从 MiKan 合集生成订阅草案失败。请重试。')
+    const message = mikanFailureMessage(error, '从 MiKan 合集生成订阅草案')
+    notification.error('生成失败', message)
     return false
   } finally {
     draftLoading.value = false
@@ -366,7 +387,7 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
           type="text"
           autocomplete="off"
           placeholder="mikan.example/Home/Bangumi/2353 或 2353"
-          :disabled="fallbackLoading"
+          :disabled="fallbackLoading || draftLoading"
         />
         <p class="field-help" id="mikan-fallback-help">
           仅接受数字 ID 或同源 HTTP(S) /Home/Bangumi/&lt;id&gt; URL；生成成功后清空。
@@ -375,7 +396,7 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
           {{ fallbackError }}
         </p>
         <div class="notification-actions">
-          <BaseButton id="mikan-fallback-generate" type="submit" variant="secondary" :loading="fallbackLoading">
+          <BaseButton id="mikan-fallback-generate" type="submit" variant="secondary" :loading="fallbackLoading" :disabled="fallbackLoading || draftLoading">
             使用直连合集生成
           </BaseButton>
         </div>
@@ -393,9 +414,9 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
     >
       <LoadingState v-if="searchLoading" :message="`正在搜索「${query}」的 MiKan 候选...`" />
       <ErrorState
-        v-else-if="searchError && !searchResult"
+        v-else-if="searchError"
         title="候选搜索失败"
-        message="候选搜索失败。请稍后重试。"
+        :message="searchError"
         retry-label="重试"
         @retry="searchCandidates"
       />
