@@ -12,7 +12,7 @@
 | 0 | BL-002 | Playwright / 浏览器自动化测试 | 完成 |
 | 1 | BL-003 | Web UI 确认 / 取消 / 修改 Request 的操作入口 | 完成 |
 | 2 | BL-004 | Web UI 真实 MiKan / Auto Bangumi 配置入口 | 完成 |
-| 3 | BL-005 | qBittorrent 直连 | 完成 |
+| 3 | BL-005 | qBittorrent 直连 | 历史连接测试已交付；Stage 39 目标为退役，尚未删除 |
 | 4 | BL-006 | Web UI Settings 信息架构优化 | 完成 |
 | 5 | BL-007 | Web UI Request 可操作性与筛选可视化修复 | 完成 |
 | 6 | BL-008 | Web UI ACCEPTED 管理与筛选语义优化 | 完成 |
@@ -30,7 +30,7 @@
 | 18 | BL-023 | Web API 契约固化与服务端边界治理 | 已完成 (Stage 26, 2026-08-30) |
 | 19 | BL-024 | 前端工程化迁移与页面重构 | 已完成 (Stage 27, 2026-08-31) |
 | 20 | BL-025 | 前端体验重构的后端支撑与 Auto Bangumi 管理契约 | B-A～B-D 已完成（Stage 28～32，US-210～US-256） |
-| 21 | BL-026 | 桌面端前端体验分片重构 | F-A～F-F 已完成（Stage 33～38）；F-G 待评审 |
+| 21 | BL-026 | 桌面端前端体验分片重构 | F-A～F-F 已完成；Stage 39 扩展 F-G PRD 已编写，未启动 |
 | 22 | BL-014 | 部署/配置向导可行性验证 | 待办，远期，仅辅助配置 |
 
 以下事项已经落盘，但尚未进入开发优先级排序；触发条件满足或完成独立可行性评估后，再决定是否进入新的 Stage：
@@ -90,6 +90,10 @@
 - 配置保存策略已在 Stage 11 明确为 request-scoped：真实 MiKan 与 Auto Bangumi 配置只用于当前生成或提交，不写入 storage JSON、状态历史、浏览器 storage、URL、日志、截图或测试 trace。
 
 ### BL-005: qBittorrent 直连
+
+2026-09-13 产品决策：MiGuOrca 不直接了解或接管 qB 下载业务，独立连接测试不服务当前目标。
+[Stage 39](MiGuOrca_stage39_deployment_settings_PRD.md)计划删除 qB 配置、专属 API/engine/测试，
+当前尚未删除。以下为 Stage 12 的历史交付说明，不构成保留该实现或后续 qB 开发要求。
 
 - 状态：完成 (Stage 12, 2026-08-12)
 - 来源：Stage 8 Web UI 人工验收
@@ -536,7 +540,7 @@ Stage 32 执行范围见 `docs/MiGuOrca_stage32_contract_hardening_PRD.md`（US-
 
 ### BL-026: 桌面端前端体验分片重构
 
-- 状态：F-A～F-F 已完成为 Stage 33～38（US-257～US-317）；F-G 待评审
+- 状态：F-A～F-F 已完成为 Stage 33～38；Stage 39 扩展 F-G PRD 已编写，US-318～US-340 全部待实现
 - 来源：2026-09-07 前端体验重构 Gate 1～3
 - 优先级：21，P1
 - 候选 PRD：`docs/MiGuOrca_frontend_ux_implementation_PRD.md`
@@ -552,7 +556,9 @@ Stage 32 执行范围见 `docs/MiGuOrca_stage32_contract_hardening_PRD.md`（US-
 - Stage 37 执行分支：`ralph/stage37-plans-safe-info`；Ralph stories 为 US-294～US-302（已完成并归档）
 - Stage 38 执行 PRD：`docs/MiGuOrca_stage38_tracking_management_PRD.md`
 - Stage 38 执行分支：`ralph/stage38-tracking-management`；Ralph stories 为 US-303～US-317（已全部完成并归档）
-- F-G 待评审：Settings 简化、全局非敏感连接状态与跨页徽标、旧 Settings/Queue 入口最终收敛、完整用户文档与候选发布 Gate 5；进入 F-G 前先做独立评审
+- Stage 39 执行 PRD：[部署连接配置与设置发布收尾](MiGuOrca_stage39_deployment_settings_PRD.md)
+- 新确认范围：仅 AB 凭据部署持久化、设置统一管理连接且不使用全局凭据弹窗、删除 qB 与无用旧 Web
+  编排、MiKan 用户无配置搜索、跨页徽标/用户文档/Gate 5；后端前置工作包必须先独立验收，尚未启动
 
 候选范围：
 

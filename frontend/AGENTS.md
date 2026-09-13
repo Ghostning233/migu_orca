@@ -9,7 +9,8 @@
   Router history 和 Vite base 都是 `/app/`，RouterLink 不重复拼 `/app/` 前缀。
 - 四页面入口：`WorkbenchView`（add）、`RequestsView`（plans）、`TrackingView`（tracking）、
   `SettingsView`（settings）。旧路由仅重定向；`QueueView/queueWorkbench` 保留供回退，
-  不重新导入默认运行时，也不擅自删后端兼容端点。
+  不重新导入默认运行时。Stage 39 已明确目标为核对后删除旧队列/兼容编排，不保留无用 stub；
+  当前尚未删除，实施范围见 [Stage 39 PRD](../docs/MiGuOrca_stage39_deployment_settings_PRD.md)。
 - 共享审核复用 `CandidateCollectionList`、`AnimeDraftEditor`、`useDraftSession` 和旅程 composable。
   批量采用左卡右详情，不重新造候选浮层或另一套筛选/保存流程。
 - 设计基线见 `src/styles/` 和 `docs/design/frontend-ux-design-tokens-v1.md`；
@@ -28,12 +29,15 @@
 - 详情/全部信息复用安全摘要与真实 safe-info，不显示 raw snapshot、URL 或未知自由文本。
 - Tracking 外部写由页面统一持有临时凭据和意图；不把 `ab_config` 传给检查器或写持久 store。
   动作由 `available_actions + target_scopes + capability` 交集投影，未知动作/范围不发请求。
+  以上临时凭据是当前实现：Stage 39 改为设置页保存部署配置、业务请求只发 generated 连接引用，
+  浏览器不回读或持有已保存秘密；顶部状态入口进入设置，不新增全局凭据弹窗。
 - 写结果先用服务端 tracking 收敛，再只读回查；不要用改变 `:key` 重挂载来刷新详情，
   以免丢失结果面板。列表请求代际与写结果代际要分开，旧列表不能覆盖新写结果。
 - 结果未知时保留同一意图的原 key/revision/body，不能用回查后的新 revision 改写重放绑定；
   409 先回查并重新确认，结构化确定拒绝不当作未知，管理成功仅看 SUCCEEDED。
 - AUTO/人工恢复是本地操作；只有 VERIFY_EXTERNAL 恢复分支携带 AB 临时配置，且只读。
   本地复核不因未连接 AB 而禁用。外部删除单条、显式 danger 确认、无 file 请求字段。
+  Stage 39 的 VERIFY_EXTERNAL 仅携带绑定原 operation 的配置引用，由服务端解析，不能改绑。
 - 对话框复用 ConfirmDialog；焦点 trap 锚点在 Teleport 根，退出恢复焦点。
   CheckboxRow 的 id 只落到原生 input。状态需中文文本/aria-live，不仅用颜色表达。
 - 长请求加函数入口防重和正确 disabled 状态；不要仅依赖按钮防重或让跨入口响应互相覆盖。

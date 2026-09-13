@@ -4,6 +4,11 @@
 
 管理真正需要变化的系统运行配置，避免把代码常量过早建设成配置系统。
 
+2026-09-13 产品修订：[Stage 39](../MiGuOrca_stage39_deployment_settings_PRD.md)目标为仅 AB 的专用
+部署配置持久化，跨页/刷新/重启保留，秘密不进入业务文件或公开 DTO；MiKan 搜索由服务端封装，
+qB 独立连接测试退役。该阶段尚未实现，下文“当前边界”仍描述既有代码，旧凭据全面禁止持久化
+规则不适用于新增 AB 私有配置例外；不因此新增通用 system-config engine。
+
 ## 2. 当前边界
 
 当前不建立独立 system config engine。Stage 1 提供默认规则读取；Stage 3 增加显式 Auto Bangumi JSON 配置读取；Stage 5 增加显式 MiKan JSON 配置读取；Stage 12 增加 qBittorrent 显式连接测试配置边界。

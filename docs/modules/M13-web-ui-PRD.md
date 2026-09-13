@@ -1,5 +1,9 @@
 # M13 Web UI / 管理界面模块 PRD
 
+2026-09-13 新目标：[Stage 39](../MiGuOrca_stage39_deployment_settings_PRD.md)将设置改为保存/测试
+部署 AB 配置，不再业务提交或使用全局凭据弹窗；删除 qB 接入与旧队列执行，MiKan 用户无配置搜索。
+尚未实现，下文旧页面/临时凭据/qB 交付记录不构成保留旧代码要求，实施后按实际代码更新。
+
 ## 1. 模块目标
 
 M13 负责 Web UI 或管理界面能力，用于展示订阅方案、执行确认操作、管理配置和查看历史记录。Stage 7～26 已逐步完成 Flask Web UI、Request 操作、Settings、真实 MiKan 候选、可编辑预览、批量工作台、提交前队列、偏好展示、媒体缓存、AutoBangumi 兼容、标题季数解析展示和 Web API 契约固化。单个/批量入口通过分段控件管理，标题解析、真实候选和订阅草案状态明确分离；Stage 27 已在 OpenAPI/DTO 基线上把页面迁移到独立前端工程（Vue 3 + TypeScript + Vite，Flask 在 `/app/` 同源托管），并删除旧 Flask/Jinja 页面与 `app.js`；Stage 28 已接入草案 revision、可靠保存与保存确认，`draft_id`/revision/idempotency_key 只在页面内存流转。

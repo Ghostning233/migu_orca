@@ -30,11 +30,16 @@
 - TrackingRecord/TrackingOperation 的 CAS/持久化由 repository 处理，外部写前持久化意图，
   写后回查并落安全结果；未知结果进入恢复，不能误记成直接可重试失败。
 - 旧 submit/batch queue 复用统一 tracking submission/recovery，queue 只是兼容投影；
-  已落盘成功不被旧投影降级，默认前端退出旧队列不代表允许删兼容端点。
+  已落盘成功不被旧投影降级。这是既有契约要求，不代表旧路径已全部满足；Stage 39 已授权目标
+  为核对后退役旧 Web 写/队列端点，不修补并保留无用兼容路径；历史读取仍需可用。
 - revalidate/AUTO 恢复纯本地；VERIFY_EXTERNAL 才携带临时 AB 配置做能力校验的只读恢复。
   管理写仅在精确 3.1.18 password 能力开放，read-before-write/confirm/key/revision 必须保留。
 - 删除媒体参数在 adapter 固定 file=false，不能通过客户端输入覆盖；
   关联 RSS 操作只处理已映射单条集合，不扩大到全局对象。
+- Stage 39 新增 AB 专用部署配置 repository，与业务 storage/profile 隔离，唯一允许保存 AB
+  地址/账号/秘密；不从客户端选择配置根、不回显秘密、不把 snapshot 送入普通 repository。
+  目标接口使用配置引用、operation/映射归属、CAS/lease 与同源/受信 Host 校验；当前尚未实现，
+  具体边界见 [Stage 39 PRD](../../../docs/MiGuOrca_stage39_deployment_settings_PRD.md)。
 
 ## 展示与服务边界
 

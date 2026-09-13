@@ -46,15 +46,20 @@ HTTP/认证细节留在 adapter，持久化留在 repository，纯规则不混�
 
 - 真实 MiKan 合集必须由用户最终选择；AI/规则提示不等于真实季数证据。
   不绕过 Auto Bangumi 创建 qBittorrent 下载，不顺带实现下一 Stage 或移动端。
-- 凭据、Cookie、endpoint、原始响应、完整 RSS URL、magnet、本地绝对路径不进入
-  持久化、URL/history、日志、DOM 展示、截图或 trace；只在受控临时输入和单次请求中使用。
-  输入凭据的必要表单不是允许把它们复制到结果、属性或其他页面的理由。
+- Auto Bangumi 凭据的产品目标是保存在部署端专用私有配置，跨页、刷新和重启保留；
+  实现与唯一持久化例外见 [Stage 39 PRD](docs/MiGuOrca_stage39_deployment_settings_PRD.md)。
+  当前代码仍为临时输入模式，不把新目标当作已实现能力。秘密不进入业务 JSON、公开 DTO、
+  URL/history、浏览器存储、日志、其余 DOM/属性、截图或 trace；必要编辑表单不是复制许可。
+  Cookie、原始响应、完整 RSS URL、magnet、本地绝对路径仍不得公开或额外持久化。
+- 首期仅保存 AB 连接；MiKan 搜索配置由服务端封装，不要求用户配置。qB 独立连接测试及
+  已有正式替代的旧 Web 编排按 Stage 39 核对后退役；不接管 qB 下载，不删除历史运行数据。
 - 草案权威在服务端：前端只用 `draft_id + revision`，不回传完整 Request 当权威；
   保存复用预留 → 持久化 → 提交/释放。方案确认与外部提交是两次不同确认。
 - 追番状态以服务端 TrackingRecord/TrackingOperation 为准；动作取服务端允许值与 capability，
   未知值 fail closed。外部管理写只允许 password + 精确 Auto Bangumi 3.1.18 已验证能力。
 - 外部写保留 confirm、幂等键、expected revision、写前读取、写后回查与结果未知恢复。
   未知结果不等于确定失败；未决意图不得换键、换绑定或盲目重发。纯本地复核不要求 AB 凭据。
+  部署配置更换不能改绑旧 operation 或复用另一 AB 实例的外部映射；新绑定必须经后端验证。
 - 外部删除固定 `file=false`，保留本地方案、追番记录、审计、任务和已下载媒体。
   “已更新集数”仍是待开发占位，绝不从 RSS/种子数猜测。
 - Web `storage_dir` 只允许服务端根下的相对 profile；空值落服务端根，不能回退 CLI 默认。

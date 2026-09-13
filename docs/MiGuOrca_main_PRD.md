@@ -8,10 +8,15 @@
 | 文档名称 | MiGuOrca 主 PRD |
 | 文档类型 | 主 PRD |
 | 当前版本 | v0.38 |
-| 文档状态 | Stage 26～Stage 38 均已完成并归档；F-G 待评审 |
+| 文档状态 | Stage 26～Stage 38 均已完成；Stage 39 扩展 F-G 开发 PRD 已编写，未启动 |
 | 适用阶段 | 需求讨论、模块拆分、开发规划 |
 | 相关系统 | MiKanProject、Auto Bangumi、qBittorrent |
 | 简称约定 | Auto Bangumi 简称为 AB |
+
+2026-09-13 用户确认新的本地部署目标，执行范围见[Stage 39 PRD](MiGuOrca_stage39_deployment_settings_PRD.md)：
+仅 AB 凭据允许存入部署端专用私有配置，跨页/刷新/重启保留；qB 独立连接测试与无用旧 Web 编排退役，
+MiKan 搜索由服务端封装，用户无需配置搜索服务；顶部连接入口进入设置，不使用全局凭据弹窗。
+尚未实现，本文下方早期阶段/临时配置记录不是保留旧实现的要求；实际开发状态见[文档索引](README.md)。
 
 ### 1.1 命名约定
 

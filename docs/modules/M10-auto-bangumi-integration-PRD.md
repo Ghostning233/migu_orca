@@ -1,5 +1,9 @@
 # M10 Auto Bangumi 集成模块 PRD
 
+2026-09-13 新目标：[Stage 39](../MiGuOrca_stage39_deployment_settings_PRD.md)采用部署端 AB 私有配置，
+Web 外部动作只携带配置引用并验证原 operation/映射绑定；旧 Web 提交编排退役，仍有效的 CLI/adapter
+保留。该阶段尚未实现，下文临时凭据与旧兼容交付记录需与新目标区分，不代表保留无用路径要求。
+
 ## 1. 模块目标
 
 M10 负责后续阶段的 Auto Bangumi 集成能力。用户接受 Request 后，系统通过本模块调用 AB 创建订阅；如果调用失败，则生成可人工处理的降级 JSON 配置。

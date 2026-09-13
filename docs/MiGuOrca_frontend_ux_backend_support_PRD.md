@@ -15,6 +15,11 @@
 本 PRD 只定义前端体验重构必须补齐的服务端能力。它不重新设计页面，也不要求一次性放入一个
 超大 Stage。正式排期时应按本文的候选实施包拆分，每个包分别生成 Ralph stories、提交和验收。
 
+2026-09-13 新目标：[Stage 39](MiGuOrca_stage39_deployment_settings_PRD.md)补齐独立部署 AB 配置、
+连接引用与 operation/映射归属，并退役无用旧 Web/qB 接口。下文 B-A～B-D 是已交付基线；
+其中 DB-03 的 request-scoped 凭据输入与旧端点保留不再约束新阶段目标。
+当前代码/生成契约尚未迁移，不能把新 PRD 当作现有能力或提前修改 API 事实清单。
+
 ## 2. 背景
 
 Stage 26 已建立 Flask `/api/v1`、严格响应 DTO、确定性 OpenAPI、服务端权威 draft 和默认
