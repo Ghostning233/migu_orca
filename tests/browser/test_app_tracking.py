@@ -870,6 +870,22 @@ class TestAppTrackingStage38:
         assert len(modifies) == 1, modifies
         assert state["detail_reads"] >= 2, state
 
+        # A *different* request while the result is still unresolved is refused
+        # with zero requests — and the page states the fixed next step instead of
+        # leaving the user with a dead button. The unresolved result panel keeps
+        # its own copy.
+        page.locator("#tracking-modify-rss-name-enabled").check()
+        page.locator("#tracking-modify-rss-name").fill("第二次不同修改")
+        page.locator("#tracking-modify-rss-submit").click()
+        expect(page.locator("#tracking-intent-blocked-notice")).to_be_visible()
+        expect(page.locator("#tracking-intent-blocked-notice")).to_have_attribute("role", "status")
+        expect(page.locator("#tracking-intent-blocked-notice")).to_contain_text(
+            "上一次外部操作的结果仍未确认"
+        )
+        expect(page.locator("#tracking-modify-result")).to_contain_text("外部修改结果未知")
+        expect(page.locator("body")).not_to_contain_text("network_error")
+        assert len(modifies) == 1, modifies
+
         # The user re-selects the identical field set; the page recognises the
         # locked intent and replays the very same key and revision binding.
         page.locator("#tracking-modify-rss-name-enabled").check()
@@ -877,6 +893,8 @@ class TestAppTrackingStage38:
         page.locator("#tracking-modify-rss-submit").click()
         page.locator(".confirm-dialog-actions button").filter(has_text="确认修改 RSS").click()
         page.wait_for_selector("#tracking-modify-result:has-text('已应用本次修改')")
+        # Replaying the same intent ends the refusal, so the notice disappears.
+        expect(page.locator("#tracking-intent-blocked-notice")).to_have_count(0)
         assert len(modifies) == 2, modifies
         assert modifies[1]["idempotency_key"] == modifies[0]["idempotency_key"], modifies
         assert modifies[1]["expected_revision"] == modifies[0]["expected_revision"], modifies

@@ -559,6 +559,31 @@ export function createManagementInFlightSession(
   return createManagementSession(trackingId, action, targetScope, 'IN_FLIGHT')
 }
 
+/**
+ * Fixed copy for a management request the page itself refuses to build.
+ *
+ * ``createTrackingManagementBody`` returns ``null`` when an intent cannot be
+ * turned into a safe request.  That is a definite page-side refusal — nothing
+ * was sent — so it must converge on a decided state instead of leaving the
+ * panel on ``IN_FLIGHT`` ("正在提交外部修改，请稍候…") forever.
+ */
+export const MANAGEMENT_UNBUILDABLE_MESSAGE =
+  '本次管理请求缺少可安全发送的必要信息，未向 Auto Bangumi 发送任何请求；已重新读取最新详情，请重新确认后再试。'
+
+/**
+ * A management intent the page could not turn into a request: no external call
+ * was made, so it releases the page-level intent exactly like ``REJECTED``.
+ */
+export function createManagementUnbuildableSession(
+  trackingId: string,
+  action: SendableManagementActionCode,
+  targetScope: TrackingManagementScope,
+): TrackingManagementSession {
+  return createManagementSession(
+    trackingId, action, targetScope, 'REJECTED', false, MANAGEMENT_UNBUILDABLE_MESSAGE,
+  )
+}
+
 // -- confirmation copy -------------------------------------------------------
 
 export interface TrackingManagementConfirmation {

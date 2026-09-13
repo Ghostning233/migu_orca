@@ -63,6 +63,7 @@ import {
   createManagementConflictSession,
   createManagementInFlightSession,
   createManagementRejectedSession,
+  createManagementUnbuildableSession,
   createTrackingManagementActionIntent,
   createTrackingManagementBody,
   isSendableManagementActionCode,
@@ -168,6 +169,60 @@ const selectedItem = computed(() => items.value.find(
 const selectedHidden = computed(() => Boolean(
   selectedItem.value && !filteredItems.value.some((item) => item.tracking_id === selectedTrackingId.value),
 ))
+/**
+ * Feedback for a locked (unresolved) external intent (Stage 38 review fix).
+ *
+ * One page-level intent at a time is a safety invariant: while an external
+ * result is still unconfirmed, minting a new key for a *different* request
+ * could duplicate or double-apply the external change, so the page refuses it
+ * and sends zero requests.  A refusal the user cannot see is a dead end, so the
+ * fixed next step below is stated instead of returning silently.  It is
+ * deliberately separate from the write/recovery/management result panels (it
+ * never replaces their copy or state) and scoped to the record the user acted
+ * on, so it can never leak onto another item.
+ */
+const INTENT_BLOCKED_MESSAGE =
+  '上一次外部操作的结果仍未确认，在确认或恢复之前不能发起不同的外部操作；请先使用只读回查或恢复得出结论，或点击“清除连接”后重新连接再试。'
+
+const blockedIntentNotice = ref<{ trackingId: string; message: string } | null>(null)
+
+/** The record whose still-unresolved intent refuses this request, or ''. */
+function otherItemIntentOwner(trackingId: string): string {
+  const write = writeSession.value
+  if (write && write.trackingId !== trackingId && writeSessionKeepsIntent(write.state)) return write.trackingId
+  const recovery = recoverySession.value
+  if (recovery && recovery.trackingId !== trackingId && recoverySessionKeepsLock(recovery.state)) {
+    return recovery.trackingId
+  }
+  const management = managementSession.value
+  if (management && management.trackingId !== trackingId && managementSessionKeepsIntent(management)) {
+    return management.trackingId
+  }
+  return ''
+}
+
+/** True while any record still owns the page's single unresolved intent. */
+function hasPendingIntentLock(): boolean {
+  const write = writeSession.value
+  if (write && writeSessionKeepsIntent(write.state)) return true
+  const recovery = recoverySession.value
+  if (recovery && recoverySessionKeepsLock(recovery.state)) return true
+  const management = managementSession.value
+  return Boolean(management && managementSessionKeepsIntent(management))
+}
+
+/** State the fixed reason a locked intent refused a different request. */
+function blockIntent(trackingId: string): void {
+  blockedIntentNotice.value = { trackingId, message: INTENT_BLOCKED_MESSAGE }
+}
+
+/** The notice shown on the selected record; empty while nothing is blocked. */
+const selectedIntentNotice = computed(() => {
+  const notice = blockedIntentNotice.value
+  if (notice && notice.trackingId === selectedTrackingId.value) return notice.message
+  return otherItemIntentOwner(selectedTrackingId.value) ? INTENT_BLOCKED_MESSAGE : ''
+})
+
 /**
  * External writes and recoveries are single-flight (Stage 38 invariant).  The
  * lock covers the external action only: selecting, searching, refreshing and
@@ -374,6 +429,7 @@ function resetWrite(): void {
   writePending.value = false
   writeLoading.value = false
   writeSession.value = null
+  blockedIntentNotice.value = null
 }
 
 function resetRecovery(): void {
@@ -383,6 +439,7 @@ function resetRecovery(): void {
   recoveryPending.value = false
   recoveryLoading.value = false
   recoverySession.value = null
+  blockedIntentNotice.value = null
 }
 
 function resetManagement(): void {
@@ -393,6 +450,7 @@ function resetManagement(): void {
   managementPending.value = false
   managementLoading.value = false
   managementSession.value = null
+  blockedIntentNotice.value = null
 }
 
 /**
@@ -427,8 +485,12 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
   // No page credential session means no external write at all.
   if (!config || !capabilities) return
   const trackingId = payload.item.tracking_id
-  const unresolved = writeSession.value
-  if (unresolved && unresolved.trackingId !== trackingId && writeSessionKeepsIntent(unresolved.state)) return
+  // Any *other* record still holding the page's single unresolved intent refuses
+  // this request — with a stated next step instead of a silent no-op.
+  if (otherItemIntentOwner(trackingId)) {
+    blockIntent(trackingId)
+    return
+  }
   const requested = payload.action.code
   // Only the submit-family actions this page can actually send are accepted;
   // every other server action waits for its own story.
@@ -436,11 +498,17 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
   // A locked intent still owns the single opaque key for this item. Replaying it
   // under a different action would send something the user did not ask for, and
   // minting a new key while the external result is unresolved could create a
-  // second subscription — so a mismatching action does nothing at all.
+  // second subscription — so a mismatching action does nothing but explain why.
   const locked = writeIntent && writeSession.value?.trackingId === trackingId ? writeIntent : null
-  if (locked && locked.action !== requested) return
+  if (locked && locked.action !== requested) {
+    blockIntent(trackingId)
+    return
+  }
   const action: TrackingWriteActionCode = requested
 
+  // The user is now replaying the one locked request (or starting a fresh one
+  // once nothing is pending): the refusal notice has served its purpose.
+  blockedIntentNotice.value = null
   writePending.value = true
   let confirmed = false
   try {
@@ -547,10 +615,15 @@ async function runTrackingRecovery(
   const requested = payload.action
   if (!isRecoveryActionCode(requested)) return
   const trackingId = payload.item.tracking_id
-  const unresolvedWrite = writeSession.value
-  if (unresolvedWrite && unresolvedWrite.trackingId !== trackingId && writeSessionKeepsIntent(unresolvedWrite.state)) return
-  const openRecovery = recoverySession.value
-  if (openRecovery && openRecovery.trackingId !== trackingId && recoverySessionKeepsLock(openRecovery.state)) return
+  // Another record's unresolved write or recovery keeps the page's single
+  // intent, so this recovery is refused before it can race it (D38-09.4) — and
+  // the reason is stated rather than swallowed.
+  if (otherItemIntentOwner(trackingId)) {
+    blockIntent(trackingId)
+    return
+  }
+  // This record's own next step is legitimate: drop the earlier refusal notice.
+  blockedIntentNotice.value = null
   const confirmation = recoveryConfirmation(requested)
   if (confirmation) {
     recoveryPending.value = true
@@ -650,12 +723,12 @@ async function runTrackingManagement(payload: {
   const targetScope = payload.targetScope
   if (!isTrackingManagementScope(targetScope)) return
   const trackingId = payload.item.tracking_id
-  const unresolvedWrite = writeSession.value
-  if (unresolvedWrite && unresolvedWrite.trackingId !== trackingId && writeSessionKeepsIntent(unresolvedWrite.state)) return
-  const openRecovery = recoverySession.value
-  if (openRecovery && openRecovery.trackingId !== trackingId && recoverySessionKeepsLock(openRecovery.state)) return
-  const openManagement = managementSession.value
-  if (openManagement && openManagement.trackingId !== trackingId && managementSessionKeepsIntent(openManagement)) return
+  // Any other record still holding the page's single unresolved intent refuses
+  // this management request — with a stated reason, not a silent no-op.
+  if (otherItemIntentOwner(trackingId)) {
+    blockIntent(trackingId)
+    return
+  }
 
   // The page re-validates the emitted request against the current server
   // projection: the action and scope must still be offered for this revision,
@@ -670,11 +743,17 @@ async function runTrackingManagement(payload: {
   // confirmed with. Replaying it for a different scope, patch or direction
   // would send something the user did not ask for, and minting a new key while
   // the external result is unresolved could apply the change twice — so a
-  // mismatching request does nothing at all.
+  // mismatching request is not sent, and the fixed next step is shown.
   const locked = managementIntent && managementSession.value?.trackingId === trackingId ? managementIntent : null
-  if (locked && !sameManagementRequest(locked, projectedIntent)) return
+  if (locked && !sameManagementRequest(locked, projectedIntent)) {
+    blockIntent(trackingId)
+    return
+  }
   const intent = locked ?? projectedIntent
 
+  // The user is replaying the one locked request (or starting a fresh one):
+  // the refusal notice has served its purpose.
+  blockedIntentNotice.value = null
   managementPending.value = true
   let confirmed = false
   try {
@@ -688,6 +767,17 @@ async function runTrackingManagement(payload: {
   if (!confirmed || !sessionConfig.value || !sessionCapabilities.value) return
 
   managementIntent = intent
+  // A body the page cannot build safely (no server address, missing scope
+  // patch, no known enable direction) is refused here, before any in-flight
+  // session exists: it sends zero requests and converges on a definite failure
+  // instead of leaving the panel stuck on "正在提交外部修改，请稍候…".
+  const body = createTrackingManagementBody(intent, sessionConfig.value, storageQuery().storage_dir)
+  if (!body) {
+    managementIntent = null
+    managementSession.value = createManagementUnbuildableSession(trackingId, action, targetScope)
+    await recheckAfterAction(trackingId, true)
+    return
+  }
   const sequence = ++managementSequence
   const controller = new AbortController()
   managementController?.abort()
@@ -695,10 +785,6 @@ async function runTrackingManagement(payload: {
   managementLoading.value = true
   managementSession.value = createManagementInFlightSession(trackingId, action, targetScope)
   try {
-    // A body the page cannot build safely (no server address, missing scope
-    // patch, no known enable direction) is not sent at all.
-    const body = createTrackingManagementBody(intent, sessionConfig.value, storageQuery().storage_dir)
-    if (!body) return
     const result = await api.post<TrackingManagementResult>(MANAGEMENT_ACTION_ENDPOINTS[intent.action], {
       path: { tracking_id: trackingId }, body, signal: controller.signal,
     })
@@ -760,6 +846,12 @@ watch(() => route.query.tracking_id, () => {
 watch(selectedTrackingId, (trackingId) => {
   if (trackingId) void focusSelection()
 }, { flush: 'post' })
+// A refusal notice only explains a still-pending intent: once every write,
+// recovery and management lock is released (a definite result, a 409, a 4xx
+// refusal, a manual recovery verdict or a cleared connection) it must disappear.
+watch([writeSession, recoverySession, managementSession], () => {
+  if (blockedIntentNotice.value && !hasPendingIntentLock()) blockedIntentNotice.value = null
+})
 onBeforeUnmount(() => {
   cancelSync()
   resetWrite()
@@ -833,6 +925,7 @@ onBeforeUnmount(() => {
           :recovery-session="recoverySession"
           :management-session="managementSession"
           :write-busy="inspectorIntentBusy"
+          :intent-notice="selectedIntentNotice"
           @tracking-updated="applyReturnedTracking"
           @write-requested="runTrackingWrite"
           @recovery-requested="runTrackingRecovery"

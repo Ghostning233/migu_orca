@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
-import type { CapabilityResult, TrackingItem } from './trackingProjection'
+import { managementSessionKeepsIntent, type CapabilityResult, type TrackingItem } from './trackingProjection'
 import {
   buildRssPatch,
   buildSubscriptionPatch,
   createManagementConflictSession,
   createManagementInFlightSession,
   createManagementRejectedSession,
+  createManagementUnbuildableSession,
   createTrackingManagementActionIntent,
   createTrackingManagementBody,
   createTrackingManagementIntent,
@@ -309,6 +310,22 @@ describe('tracking modify result (US-313)', () => {
     const inFlight = createManagementInFlightSession('tracking-1', 'MODIFY', 'SUBSCRIPTION')
     expect(inFlight.state).toBe('IN_FLIGHT')
     expect(inFlight.message).toContain('正在提交外部修改')
+  })
+
+  it('converges an unbuildable request on a definite failure instead of in-flight', () => {
+    // ``createTrackingManagementBody`` refuses a session without a server
+    // address; the page must never keep such a request in IN_FLIGHT.
+    const intent = createTrackingManagementIntent(
+      item(), 'MODIFY', 'SUBSCRIPTION', { title: 'x' }, capabilities(),
+    )!
+    expect(createTrackingManagementBody(intent, { ...abConfig, base_url: undefined })).toBeNull()
+
+    const session = createManagementUnbuildableSession('tracking-1', 'MODIFY', 'SUBSCRIPTION')
+    expect(session.state).not.toBe('IN_FLIGHT')
+    expect(managementSessionKeepsIntent(session)).toBe(false)
+    expect(session.message).toContain('未向 Auto Bangumi 发送任何请求')
+    expect(session.message).not.toContain('IN_FLIGHT')
+    expect(session.message).not.toContain('base_url')
   })
 
   it('binds each scope to its own impact confirmation without any external id', () => {

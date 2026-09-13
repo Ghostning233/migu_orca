@@ -1593,6 +1593,16 @@ describe('TrackingView external modify (US-313)', () => {
     await wrapper.find('#tracking-modify-rss-submit').trigger('submit')
     await flushPromises()
     expect(modifiedBodies()).toHaveLength(1)
+    // The refusal is no longer silent: a fixed Chinese next step explains it,
+    // without overwriting the unresolved result panel.
+    const notice = wrapper.find('#tracking-intent-blocked-notice')
+    expect(notice.exists()).toBe(true)
+    expect(notice.attributes('role')).toBe('status')
+    expect(notice.text()).toContain('上一次外部操作的结果仍未确认')
+    expect(notice.text()).toContain('只读回查')
+    expect(notice.text()).toContain('清除连接')
+    expect(notice.text()).not.toContain('network_error')
+    expect(wrapper.find('#tracking-modify-result').text()).toContain('外部修改结果未知')
 
     // The very same intent replays with the same key and revision binding: the
     // user re-selects the identical field set, so the page recognises the same
@@ -1607,6 +1617,8 @@ describe('TrackingView external modify (US-313)', () => {
     expect(bodies[1]?.expected_revision).toBe(bodies[0]?.expected_revision)
     expect(bodies[1]?.patch).toEqual(bodies[0]?.patch)
     expect(wrapper.find('#tracking-modify-result').text()).toContain('已应用本次修改')
+    // Replaying the same intent ends the refusal, so the notice disappears.
+    expect(wrapper.find('#tracking-intent-blocked-notice').exists()).toBe(false)
   })
 
   it('releases the intent on a conflict and requires a fresh confirmation', async () => {
@@ -1965,5 +1977,106 @@ describe('TrackingView external enable and RSS refresh (US-314)', () => {
     await flushPromises()
     expect(actionEndpoints()).toEqual([])
     expect(wrapper.find('#tracking-management-result').exists()).toBe(false)
+  })
+})
+
+// -- Stage 38 review fix: a locked intent must never refuse silently ---------
+
+describe('TrackingView locked-intent feedback', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  it('explains the fixed next step when a locked submit intent refuses a different action', async () => {
+    let currentDetail: unknown = submitDetail()
+    serveApi(() => currentDetail)
+    apiPost.mockResolvedValueOnce(capabilities() as never).mockRejectedValueOnce(unknownError as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+    const confirmSpy = answerConfirm(wrapper, true)
+    // The record's next detail read will offer a different server action, but the
+    // click below still requests SUBMIT against the already-loaded detail.
+    currentDetail = retryDetail()
+    await wrapper.find('#tracking-submit').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#tracking-submit-result').text()).toContain('提交结果未知')
+    expect(submittedBodies()).toHaveLength(1)
+
+    // A different action is a different request: zero requests, one fixed notice,
+    // and the unresolved result panel keeps its own copy and state.
+    confirmSpy.mockClear()
+    await wrapper.find('#tracking-retry').trigger('click')
+    await flushPromises()
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(submittedBodies()).toHaveLength(1)
+    expect(retriedBodies()).toHaveLength(0)
+    const notice = wrapper.find('#tracking-intent-blocked-notice')
+    expect(notice.exists()).toBe(true)
+    expect(notice.attributes('role')).toBe('status')
+    expect(notice.text()).toContain('上一次外部操作的结果仍未确认')
+    expect(notice.text()).not.toContain('network_error')
+    expect(wrapper.find('#tracking-submit-result').text()).toContain('提交结果未知')
+
+    // Clearing the page connection drops the intent, so the notice goes with it.
+    await wrapper.find('.tracking-clear-connection').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#tracking-intent-blocked-notice').exists()).toBe(false)
+  })
+
+  it('explains a cross-record unresolved lock instead of leaving a dead button', async () => {
+    const secondDetail = {
+      ...modifyDetail({ available_actions: [submitAction, modifyAction] }),
+      tracking_id: 'tracking-2', request_id: 'request-tracking-2', title: '咒术回战',
+    }
+    let currentDetail: unknown = submitDetail()
+    apiGet.mockImplementation((url: string) => Promise.resolve(
+      (url === '/api/v1/tracking/items'
+        ? { items: [item('tracking-1', '葬送的芙莉莲'), item('tracking-2', '咒术回战')], summary: {}, warnings: [] }
+        : currentDetail) as never,
+    ))
+    apiPost.mockResolvedValueOnce(capabilities() as never).mockRejectedValueOnce(unknownError as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-submit').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#tracking-submit-result').text()).toContain('提交结果未知')
+    expect(submittedBodies()).toHaveLength(1)
+
+    // Selecting another record shows the reason its external actions are locked.
+    currentDetail = secondDetail
+    await wrapper.findAll('.tracking-list-item')[1]?.trigger('click')
+    await flushPromises()
+    const notice = wrapper.find('#tracking-intent-blocked-notice')
+    expect(notice.exists()).toBe(true)
+    expect(notice.attributes('role')).toBe('status')
+    expect(notice.text()).toContain('上一次外部操作的结果仍未确认')
+    expect(wrapper.find('#tracking-submit').attributes('disabled')).toBeDefined()
+
+    // Attempting submit or management on the second record sends zero requests
+    // and opens no confirmation dialog.
+    await wrapper.find('#tracking-submit').trigger('click')
+    await wrapper.find('#tracking-modify-title-enabled').setValue(true)
+    await wrapper.find('#tracking-modify-title').setValue('不该发送')
+    await wrapper.find('#tracking-modify-subscription-submit').trigger('submit')
+    await flushPromises()
+    expect(submittedBodies()).toHaveLength(1)
+    expect(modifiedBodies()).toHaveLength(0)
+    expect(document.querySelector('.confirm-dialog')).toBeNull()
+
+    // The notice belongs to the acted-on record only: the lock owner is never
+    // shown another record's refusal.
+    currentDetail = submitDetail()
+    await wrapper.findAll('.tracking-list-item')[0]?.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#tracking-intent-blocked-notice').exists()).toBe(false)
+
+    // Resolving the lock at its owner clears it for every record.
+    apiPost.mockResolvedValueOnce(submitPayload({ tracking: { ...item('tracking-1', '葬送的芙莉莲'), revision: 9 } }) as never)
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-submit').trigger('click')
+    await flushPromises()
+    currentDetail = secondDetail
+    await wrapper.findAll('.tracking-list-item')[1]?.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#tracking-intent-blocked-notice').exists()).toBe(false)
   })
 })

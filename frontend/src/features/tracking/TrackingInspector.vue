@@ -59,6 +59,11 @@ const props = defineProps<{
   managementSession?: TrackingManagementSession | null
   /** The single page intent is spent elsewhere (another item's write/recovery). */
   writeBusy?: boolean
+  /**
+   * Fixed page-level reason a locked intent refused a different request. It is
+   * shown on the selected record only and never replaces a result panel.
+   */
+  intentNotice?: string | null
 }>()
 const emit = defineEmits<{
   (e: 'tracking-updated', tracking: TrackingItem): void
@@ -438,6 +443,13 @@ defineExpose({ reload: () => fetchDetail(true) })
         </dl>
       </section>
 
+      <p
+        v-if="intentNotice"
+        id="tracking-intent-blocked-notice"
+        class="tracking-intent-notice"
+        role="status"
+      >{{ intentNotice }}</p>
+
       <section v-if="detail.external_mapping" class="tracking-inspector-section" aria-labelledby="tracking-external-heading">
         <h4 id="tracking-external-heading">外部安全摘要</h4>
         <dl>
@@ -646,6 +658,7 @@ defineExpose({ reload: () => fetchDetail(true) })
 .tracking-inspector-section ul, .tracking-resource-names { display: grid; gap: .3rem; margin: 0; padding-left: 1.2rem; }
 .tracking-plan-link { font-weight: 600; }
 .tracking-inspector-loading { min-height: 8rem; }
+.tracking-intent-notice { padding: var(--space-3); border: 1px solid var(--color-border-subtle); border-left: 0.3rem solid var(--color-accent-emphasis); border-radius: var(--radius-sm); background: var(--color-surface-raised); font-weight: 600; }
 .tracking-revalidate { gap: .65rem; }
 .tracking-revalidate-result { display: grid; gap: .4rem; padding: var(--space-3); border: 1px solid var(--color-border-subtle); border-left: 0.3rem solid var(--color-text-muted); border-radius: var(--radius-sm); background: var(--color-surface-raised); }
 .tracking-revalidate-result.is-ready { border-left-color: var(--color-feedback-success-border); }
