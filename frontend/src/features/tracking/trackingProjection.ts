@@ -1,10 +1,14 @@
 /**
- * API-free tracking page projection and intent helpers (US-304, US-309, US-310).
+ * API-free tracking page projection and intent helpers (US-304, US-309, US-310,
+ * US-311).
  *
  * This module only consumes generated OpenAPI operation types. It never
  * performs transport, reconstructs server state, or stores an intent/key.
  */
+import type { paths } from '@/api/generated/api'
 import type { operations } from '@/api/generated/api'
+
+type ApiPath = Extract<keyof paths, string>
 
 export type TrackingListResult = NonNullable<
   operations['listTrackingItems']['responses']['200']['content']['application/json']['result']
@@ -31,6 +35,19 @@ export type TrackingSubmitBody = NonNullable<
 export type TrackingSubmitResult = NonNullable<
   operations['submitTrackingItem']['responses']['200']['content']['application/json']['result']
 >
+export type TrackingRetryBody = NonNullable<
+  operations['retryTrackingItem']['requestBody']['content']['application/json']
+>
+export type TrackingRetryResult = NonNullable<
+  operations['retryTrackingItem']['responses']['200']['content']['application/json']['result']
+>
+/**
+ * ``submit`` and ``retry`` are the two submit-family external writes (US-226):
+ * the retry endpoint accepts exactly the same revision/key/confirm/credential
+ * body and answers with the same persisted-outcome result.
+ */
+export type TrackingWriteBody = TrackingSubmitBody | TrackingRetryBody
+export type TrackingWriteResult = TrackingSubmitResult | TrackingRetryResult
 
 export const TRACKING_STATUS_GROUPS = [
   'PENDING', 'PROCESSING', 'ACTIVE', 'ATTENTION', 'INACTIVE',
@@ -330,13 +347,51 @@ export function projectRevalidateIssues(issues: unknown): TrackingRevalidateIssu
 }
 
 /**
- * Explicit external submission (US-310).
+ * Submit-family external writes (US-310, US-311).
  *
- * ``SUBMIT`` is the only write that reaches Auto Bangumi in this story, so the
- * page-level write session below describes one item-scoped external write:
+ * The generated path template and the impact confirmation are bound to the
+ * server-computed action code, so the page can never send one action's request
+ * with another action's copy. Both need a live page credential session, the
+ * latest revision and an explicit confirmation.
+ */
+export const WRITE_ACTION_ENDPOINTS = {
+  SUBMIT: '/api/v1/tracking/items/{tracking_id}/submit',
+  RETRY: '/api/v1/tracking/items/{tracking_id}/retry',
+} as const satisfies Record<string, ApiPath>
+
+export type TrackingWriteActionCode = keyof typeof WRITE_ACTION_ENDPOINTS
+
+export interface TrackingWriteConfirmation {
+  title: string
+  message: string
+  confirmLabel: string
+}
+
+export const WRITE_ACTION_CONFIRMATIONS: Record<TrackingWriteActionCode, TrackingWriteConfirmation> = {
+  SUBMIT: {
+    title: '提交 Auto Bangumi 订阅',
+    message: '将在 Auto Bangumi 创建该追番的外部订阅，并可能触发下载。提交只使用本页面已探测的连接，是否继续？',
+    confirmLabel: '确认提交',
+  },
+  RETRY: {
+    title: '重试 Auto Bangumi 提交',
+    message: '该追番上次提交明确失败。重试会使用本页面已探测的连接重新创建外部订阅，并可能触发下载，是否继续？',
+    confirmLabel: '确认重试',
+  },
+}
+
+/** True only for the submit-family actions this page knows how to send. */
+export function isWriteActionCode(value: TrackingActionCode): value is TrackingWriteActionCode {
+  return value === 'SUBMIT' || value === 'RETRY'
+}
+
+/**
+ * Explicit external submission and retry (US-310, US-311).
+ *
+ * The page-level write session below describes one item-scoped external write:
  * ``state`` is either the persisted business outcome the server returned, the
  * in-flight marker, or one of the two client-side states that mean "the server
- * never gave us a definite answer" (a 409 conflict, or an unreadable result).
+ * never gave us a definite answer" (a conflict, or an unreadable result).
  * Fixed Chinese copy only — the raw server enum never reaches the DOM.
  */
 export const SUBMIT_OUTCOMES = [
@@ -356,6 +411,35 @@ export interface TrackingWriteSession {
   readonly issues: TrackingRevalidateIssueView[]
 }
 
+/**
+ * Every 409 the submit-family endpoints document (US-225/US-226) means the
+ * request was refused *before* the external boundary: Auto Bangumi was never
+ * called with it. The record summary in the error body is not authoritative, so
+ * the page converges by re-reading the server tracking and asks the user to
+ * confirm again — never by resending. Each documented type gets its own fixed
+ * Chinese next step; an unrecognized one falls back to the generic copy.
+ */
+export const WRITE_CONFLICT_TYPES = [
+  'tracking_revision_conflict', 'tracking_idempotency_conflict',
+  'tracking_state_conflict', 'tracking_operation_in_progress',
+] as const
+
+export type TrackingWriteConflictType = (typeof WRITE_CONFLICT_TYPES)[number]
+
+export const WRITE_CONFLICT_FALLBACK_MESSAGE =
+  '追番记录已变化或当前状态不允许提交，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认后再提交。'
+
+const WRITE_CONFLICT_MESSAGES: Record<TrackingWriteConflictType, string> = {
+  tracking_revision_conflict:
+    '追番记录已变化，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认后再提交。',
+  tracking_idempotency_conflict:
+    '本次提交标识已失效，未提交到 Auto Bangumi；正在刷新最新详情，请重新确认后再提交。',
+  tracking_state_conflict:
+    '当前追番状态不允许本次提交，未提交到 Auto Bangumi；正在刷新最新详情，请按最新状态重新确认。',
+  tracking_operation_in_progress:
+    '存在尚未完成的提交操作，本次未提交到 Auto Bangumi；正在刷新最新详情，请先完成恢复后再提交。',
+}
+
 const WRITE_MESSAGES: Record<TrackingWriteState, string> = {
   IN_FLIGHT: '正在提交到 Auto Bangumi，请稍候…',
   ACTIVE: '提交成功：已在 Auto Bangumi 创建外部订阅。',
@@ -363,7 +447,7 @@ const WRITE_MESSAGES: Record<TrackingWriteState, string> = {
   NEEDS_RECONFIRM: '本地方案已变化，本次尚未创建外部订阅；请返回修改方案后重新确认。',
   VERIFYING_EXTERNAL: '外部提交结果未知，正在只读回查；请勿重复提交。',
   RECOVERY_REQUIRED: '本地结果未完成落盘，需要恢复；请勿重复提交。',
-  CONFLICT: '追番记录已变化或当前状态不允许提交，正在刷新最新详情；请重新确认后再提交。',
+  CONFLICT: WRITE_CONFLICT_FALLBACK_MESSAGE,
   UNKNOWN: '提交结果未知，正在只读回查；未确认生效前不会再次提交。',
 }
 
@@ -386,14 +470,35 @@ export function createWriteSession(
   return { trackingId, action, state, message: WRITE_MESSAGES[state], issues }
 }
 
+/** Fixed next step for one documented conflict; unknown types fail closed. */
+export function writeConflictMessage(errorType: unknown): string {
+  return typeof errorType === 'string' && (WRITE_CONFLICT_TYPES as readonly string[]).includes(errorType)
+    ? WRITE_CONFLICT_MESSAGES[errorType as TrackingWriteConflictType]
+    : WRITE_CONFLICT_FALLBACK_MESSAGE
+}
+
 /**
- * Project one HTTP 200 submit result. An outcome we do not recognize is treated
- * exactly like an unreadable transport result: read back, never resubmit blind.
+ * A 409 refuses the request before the external boundary, so this session is
+ * released immediately (`writeSessionKeepsIntent('CONFLICT') === false`) and the
+ * page re-reads the server tracking before asking for a new confirmation.
  */
-export function projectSubmitOutcome(
+export function createWriteConflictSession(
   trackingId: string,
   action: TrackingActionCode,
-  result: TrackingSubmitResult,
+  errorType: unknown,
+): TrackingWriteSession {
+  return { trackingId, action, state: 'CONFLICT', message: writeConflictMessage(errorType), issues: [] }
+}
+
+/**
+ * Project one HTTP 200 submit-family result. An outcome we do not recognize is
+ * treated exactly like an unreadable transport result: read back, never
+ * resubmit blind.
+ */
+export function projectWriteOutcome(
+  trackingId: string,
+  action: TrackingActionCode,
+  result: TrackingWriteResult,
 ): TrackingWriteSession {
   const outcome: TrackingWriteState = isSubmitOutcome(result.outcome) ? result.outcome : 'UNKNOWN'
   return createWriteSession(trackingId, action, outcome, projectRevalidateIssues(result.issues))

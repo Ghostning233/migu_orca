@@ -19,21 +19,26 @@ import {
   capabilityStateLabel,
   capabilityVersionLabel,
   createTrackingActionIntent,
+  createWriteConflictSession,
   createWriteSession,
   filterTrackingItems,
+  isWriteActionCode,
   probeStatusLabel,
   projectCapabilitySummary,
-  projectSubmitOutcome,
   projectTrackingOverview,
+  projectWriteOutcome,
   sortTrackingItems,
   TRACKING_STATUS_GROUPS,
+  WRITE_ACTION_CONFIRMATIONS,
+  WRITE_ACTION_ENDPOINTS,
   writeSessionKeepsIntent,
   type TrackingAction,
   type TrackingActionIntent,
   type TrackingItem,
   type TrackingStatusGroup,
-  type TrackingSubmitBody,
-  type TrackingSubmitResult,
+  type TrackingWriteActionCode,
+  type TrackingWriteBody,
+  type TrackingWriteResult,
   type TrackingWriteSession,
 } from './trackingProjection'
 import TrackingInspector from './TrackingInspector.vue'
@@ -314,7 +319,14 @@ async function recheckAfterWrite(trackingId: string, refreshList = false): Promi
   await inspector.value?.reload()
 }
 
-async function submitTrackingItem(payload: { action: TrackingAction; item: TrackingItem }): Promise<void> {
+/**
+ * Run one explicit submit-family external write (US-310, US-311).
+ *
+ * ``SUBMIT`` and ``RETRY`` share this single path: the endpoint, the impact
+ * confirmation and the result projection are all bound to the server-computed
+ * action code, so a retry can never be sent with submit copy (or the reverse).
+ */
+async function runTrackingWrite(payload: { action: TrackingAction; item: TrackingItem }): Promise<void> {
   // A confirmation is already open, or an external write is already running:
   // one external write at a time, and no second dialog can displace the first.
   if (writePending.value || writeLoading.value) return
@@ -325,15 +337,23 @@ async function submitTrackingItem(payload: { action: TrackingAction; item: Track
   const trackingId = payload.item.tracking_id
   const unresolved = writeSession.value
   if (unresolved && unresolved.trackingId !== trackingId && writeSessionKeepsIntent(unresolved.state)) return
+  const requested = payload.action.code
+  // Only the submit-family actions this page can actually send are accepted;
+  // every other server action waits for its own story.
+  if (!isWriteActionCode(requested)) return
+  // A locked intent still owns the single opaque key for this item. Replaying it
+  // under a different action would send something the user did not ask for, and
+  // minting a new key while the external result is unresolved could create a
+  // second subscription — so a mismatching action does nothing at all.
+  const locked = writeIntent && writeSession.value?.trackingId === trackingId ? writeIntent : null
+  if (locked && locked.action !== requested) return
+  const action: TrackingWriteActionCode = requested
 
   writePending.value = true
   let confirmed = false
   try {
     confirmed = (await confirmDialog.value?.confirm({
-      title: '提交 Auto Bangumi 订阅',
-      message: '将在 Auto Bangumi 创建该追番的外部订阅，并可能触发下载。提交只使用本页面已探测的连接，是否继续？',
-      confirmLabel: '确认提交',
-      cancelLabel: '取消',
+      ...WRITE_ACTION_CONFIRMATIONS[action], cancelLabel: '取消',
     })) ?? false
   } finally {
     writePending.value = false
@@ -342,10 +362,10 @@ async function submitTrackingItem(payload: { action: TrackingAction; item: Track
   if (!confirmed || !sessionConfig.value || !sessionCapabilities.value) return
 
   // One opaque key per confirmation.  Only an indeterminate earlier result keeps
-  // its locked intent, so a transport retry reuses the very same key instead of
-  // risking a second external subscription.
-  const reused = writeIntent && writeSession.value?.trackingId === trackingId ? writeIntent : null
-  const intent = reused ?? createTrackingActionIntent(payload.item, payload.action, undefined, sessionCapabilities.value)
+  // its locked intent, so a transport retry reuses the very same key (and the
+  // very same revision binding) instead of risking a second external
+  // subscription; a definite failure always mints a fresh one.
+  const intent = locked ?? createTrackingActionIntent(payload.item, payload.action, undefined, sessionCapabilities.value)
   if (!intent) return
   writeIntent = intent
   const sequence = ++writeSequence
@@ -353,23 +373,23 @@ async function submitTrackingItem(payload: { action: TrackingAction; item: Track
   writeController?.abort()
   writeController = controller
   writeLoading.value = true
-  writeSession.value = createWriteSession(trackingId, intent.action, 'IN_FLIGHT')
+  writeSession.value = createWriteSession(trackingId, action, 'IN_FLIGHT')
   try {
     const storageDir = storageQuery().storage_dir
-    const body: TrackingSubmitBody = {
+    const body: TrackingWriteBody = {
       expected_revision: intent.expectedRevision,
       idempotency_key: intent.idempotencyKey,
       confirm: true,
       ab_config: config,
       ...(storageDir ? { storage_dir: storageDir } : {}),
     }
-    const result = await api.post<TrackingSubmitResult>('/api/v1/tracking/items/{tracking_id}/submit', {
+    const result = await api.post<TrackingWriteResult>(WRITE_ACTION_ENDPOINTS[action], {
       path: { tracking_id: trackingId }, body, signal: controller.signal,
     })
     if (sequence !== writeSequence) return
     // The returned tracking converges the list row without a second list read.
     applyReturnedTracking(result.tracking)
-    const session = projectSubmitOutcome(trackingId, intent.action, result)
+    const session = projectWriteOutcome(trackingId, action, result)
     writeSession.value = session
     if (!writeSessionKeepsIntent(session.state)) writeIntent = null
     await recheckAfterWrite(trackingId)
@@ -378,11 +398,13 @@ async function submitTrackingItem(payload: { action: TrackingAction; item: Track
     const apiError = toApiError(error)
     if (apiError.cancelled && !apiError.httpError) return
     if (apiError.status === 409) {
-      // Revision/state/idempotency conflict: the locked intent is spent, the
-      // returned summary is an error body, so re-read both and require a new
-      // explicit confirmation — nothing is ever resent on the user's behalf.
+      // Every documented 409 (revision / idempotency / state / in-flight) is
+      // raised before the external boundary, so nothing was submitted. The
+      // locked intent is spent, the error body carries no authoritative
+      // tracking, so re-read both and require a new explicit confirmation —
+      // nothing is ever resent on the user's behalf.
       writeIntent = null
-      writeSession.value = createWriteSession(trackingId, intent.action, 'CONFLICT')
+      writeSession.value = createWriteConflictSession(trackingId, action, apiError.type)
       await recheckAfterWrite(trackingId, true)
       return
     }
@@ -390,7 +412,7 @@ async function submitTrackingItem(payload: { action: TrackingAction; item: Track
     // outcome: the external result is unknown. Keeping the locked intent can
     // never duplicate a subscription, so this path fails closed and only reads
     // back; it never mints a new key and never resends by itself.
-    writeSession.value = createWriteSession(trackingId, intent.action, 'UNKNOWN')
+    writeSession.value = createWriteSession(trackingId, action, 'UNKNOWN')
     await recheckAfterWrite(trackingId, true)
   } finally {
     if (sequence === writeSequence) {
@@ -482,7 +504,7 @@ onBeforeUnmount(() => {
           :write-session="writeSession"
           :write-busy="inspectorWriteBusy"
           @tracking-updated="applyReturnedTracking"
-          @submit-requested="submitTrackingItem"
+          @write-requested="runTrackingWrite"
         />
         <template v-else>
           <h2 id="tracking-inspector-heading">检查器</h2>

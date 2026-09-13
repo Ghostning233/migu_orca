@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api/client'
 import TrackingInspector from './TrackingInspector.vue'
-import type { CapabilityResult } from './trackingProjection'
+import type { CapabilityResult, TrackingWriteSession } from './trackingProjection'
 
 vi.mock('@/api/client', () => ({
   api: { get: vi.fn(), post: vi.fn() },
@@ -62,12 +62,15 @@ function revalidateResult(overrides: Record<string, unknown> = {}) {
   }
 }
 
-async function mountInspector(trackingId = 'tracking-1') {
-  const router = createRouter({ history: createMemoryHistory('/app/'), routes: [
+function inspectorRouter() {
+  return createRouter({ history: createMemoryHistory('/app/'), routes: [
     { path: '/tracking', component: TrackingInspector }, { path: '/plans', component: { template: '<div />' } },
   ] })
+}
+
+async function mountInspector(trackingId = 'tracking-1', props: Record<string, unknown> = {}) {
   const wrapper = mount(TrackingInspector, {
-    props: { trackingId }, global: { plugins: [router] },
+    props: { trackingId, ...props }, global: { plugins: [inspectorRouter()] },
   })
   await flushPromises()
   return wrapper
@@ -267,11 +270,11 @@ function capabilities(overrides: Partial<CapabilityResult> = {}): CapabilityResu
   }
 }
 
-function writeSession(overrides: Record<string, unknown> = {}) {
+function writeSession(overrides: Record<string, unknown> = {}): TrackingWriteSession {
   return {
     trackingId: 'tracking-1', action: 'SUBMIT', state: 'ACTIVE',
     message: '提交成功：已在 Auto Bangumi 创建外部订阅。', issues: [], ...overrides,
-  }
+  } as TrackingWriteSession
 }
 
 /** Mount the inspector with a live page credential session offering SUBMIT. */
@@ -316,7 +319,7 @@ describe('TrackingInspector explicit submission (US-310)', () => {
     await flushPromises()
     // The inspector never performs the external write itself.
     expect(apiPost).not.toHaveBeenCalled()
-    const payload = wrapper.emitted('submit-requested')?.at(-1)?.[0] as {
+    const payload = wrapper.emitted('write-requested')?.at(-1)?.[0] as {
       action: { code: string }; item: { revision: number; tracking_id: string }
     }
     expect(payload.action.code).toBe('SUBMIT')
@@ -332,7 +335,7 @@ describe('TrackingInspector explicit submission (US-310)', () => {
     await wrapper.find('#tracking-submit').trigger('click')
     await wrapper.find('#tracking-revalidate').trigger('click')
     await flushPromises()
-    expect(wrapper.emitted('submit-requested')).toBeUndefined()
+    expect(wrapper.emitted('write-requested')).toBeUndefined()
     expect(apiPost).not.toHaveBeenCalled()
   })
 
@@ -361,5 +364,84 @@ describe('TrackingInspector explicit submission (US-310)', () => {
     expect(wrapper.text()).toContain('写后详情')
     expect(wrapper.find('.tracking-inspector-loading').exists()).toBe(false)
     expect(document.activeElement).not.toBe(wrapper.find('#tracking-inspector-heading').element)
+  })
+})
+
+const retryAction = {
+  code: 'RETRY', label: '重试提交', style: 'SECONDARY',
+  requires_confirmation: true, target_scopes: [],
+}
+
+const LIVE_SESSION = { credentialReady: true, capabilities: capabilities() }
+
+describe('TrackingInspector explicit retry (US-311)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  it('offers RETRY only for the server action with a proven submit capability', async () => {
+    apiGet.mockResolvedValue(detail({ available_actions: [revalidateAction, retryAction] }) as never)
+    const wrapper = await mountInspector()
+    expect(wrapper.find('#tracking-retry').exists()).toBe(false)
+    expect(wrapper.text()).toContain('需要先在页面连接 Auto Bangumi')
+  })
+
+  it('hides RETRY and downgrades to read-only when the capability is unsupported', async () => {
+    apiGet.mockResolvedValue(detail({ available_actions: [retryAction] }) as never)
+    const wrapper = await mountInspector('tracking-1', {
+      ...LIVE_SESSION, capabilities: capabilities({ subscription_submit: 'UNSUPPORTED' }),
+    })
+    expect(wrapper.find('#tracking-retry').exists()).toBe(false)
+    expect(wrapper.text()).toContain('未确认提交能力，已降级为只读')
+  })
+
+  it('emits the retry action with the latest revision and never writes itself', async () => {
+    apiGet.mockResolvedValue(detail({
+      revision: 7, available_actions: [revalidateAction, retryAction],
+    }) as never)
+    const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
+    // SUBMIT is not offered on this record, so the section shows retry only.
+    expect(wrapper.find('#tracking-submit').exists()).toBe(false)
+    expect(wrapper.text()).toContain('上次提交明确失败')
+    await wrapper.find('#tracking-retry').trigger('click')
+    await flushPromises()
+    // The inspector never performs the external write itself.
+    expect(apiPost).not.toHaveBeenCalled()
+    const payload = wrapper.emitted('write-requested')?.at(-1)?.[0] as {
+      action: { code: string }; item: { revision: number; tracking_id: string }
+    }
+    expect(payload.action.code).toBe('RETRY')
+    expect(payload.item.revision).toBe(7)
+    expect(payload.item.tracking_id).toBe('tracking-1')
+  })
+
+  it('locks retry while a write is in flight and renders the page result', async () => {
+    apiGet.mockResolvedValue(detail({ available_actions: [revalidateAction, retryAction] }) as never)
+    const wrapper = await mountInspector('tracking-1', {
+      ...LIVE_SESSION,
+      writeSession: writeSession({
+        action: 'RETRY', state: 'SUBMIT_FAILED',
+        message: '提交明确失败，尚未创建外部订阅；可在确认后显式重试。',
+      }),
+    })
+    expect(wrapper.find('#tracking-retry').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('#tracking-revalidate').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('#tracking-submit-result').text()).toContain('提交明确失败')
+
+    await wrapper.setProps({ writeSession: writeSession({ action: 'RETRY', state: 'IN_FLIGHT' }) })
+    await flushPromises()
+    expect(wrapper.find('#tracking-retry').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('#tracking-retry').attributes('aria-busy')).toBe('true')
+    expect(wrapper.find('#tracking-revalidate').attributes('disabled')).toBeDefined()
+    await wrapper.find('#tracking-retry').trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('write-requested')).toBeUndefined()
+  })
+
+  it('never projects RETRY for an unknown action code', async () => {
+    apiGet.mockResolvedValue(detail({
+      available_actions: [{ ...retryAction, code: 'RETRY_AGAIN' }],
+    }) as never)
+    const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
+    expect(wrapper.find('#tracking-retry').exists()).toBe(false)
+    expect(wrapper.text()).toContain('当前状态不可提交或重试外部订阅')
   })
 })

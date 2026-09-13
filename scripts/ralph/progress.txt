@@ -13,6 +13,7 @@ Started: Sun Sep 13 08:40:00 CST 2026
 - 页面初始只读本地 tracking；probe、sync、submit、retry、verify 和管理动作仅由用户显式发起。revalidate 是纯本地动作，不带 AB 凭据。
 - 凭据只存在 TrackingView 当前实例和单次 POST body；刷新、离页、取消、切模、清除和卸载后销毁，不进入 URL、storage、日志、通知、DOM、截图或 trace。
 - 外部写全部使用最新 revision、confirm、单意图 opaque idempotency key、单飞、服务端返回收敛和结果未知只读回查；不得盲重试或用新 key 掩盖未知结果。
+- 幂等重放绑定是 **idempotency_key + expected_revision**（服务端 `_guard_replay_binding` 先于 `_guard_expected_revision`）：transport 重试必须整份复用锁定 intent（含 revision），只复用 key 会被判同键不同绑定 409。submit 家族的全部 409 都发生在外部边界之前，即「未提交到 Auto Bangumi」；按 `error_type` 给固定中文，并固定「重读列表+重读详情 → 要求重新确认」，绝不静默重发。
 - 外部写的请求/确认/key/结果面板固定在 `TrackingView`（凭据所在实例），**不要**把 `ab_config` 当 prop 传给 inspector；inspector 只按 `credentialReady + capabilities + available_actions` 投影按钮并 emit intent（携带最新 detail revision），写后回查用 inspector `defineExpose` 的 `reload()`，绝不用 `detailRevision`/`:key` 重挂载（会丢写结果面板）。
 - DELETE_EXTERNAL 始终逐条操作且请求无 `file` 字段，必须明确并实际保留本地 Request、tracking、审计、任务和已下载媒体。
 - “已更新集数”固定为待开发；不得根据资源数、RSS、下载或文件名猜测。自动化只用 fake/route mock，不连接真实 MiKan、Auto Bangumi 或 qBittorrent。
@@ -131,4 +132,18 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - 单飞语义与「只锁当前条目的冲突动作」并存：请求中禁用外部写动作（含其他条目的 SUBMIT），但选择/筛选/刷新/detail 读取/其他条目的本地复核全部保持可用。
   - Playwright route 后注册优先：`/submit` 必须注册在 `**/api/v1/tracking/items/tracking-a*` **之后**，否则被详情通配吃掉。
 - 定向验证：tracking 四个 Vitest 文件 64 passed、`npm run typecheck`、`npm run lint`、`npm run api:check`、`npm run build`、`uv run ruff check tests/browser/test_app_tracking.py`、`uv run pytest tests/browser/test_app_tracking.py -q`（7 passed，真实 Chromium）、`git diff --check` 全部通过。
+---
+
+## [2026-09-13 10:45:00 CST] - US-311
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented: 在既有 submit 家族写路径上接入 RETRY：`TrackingInspector` 只按 `credentialReady + capabilities + available_actions` 投影 SUBMIT **或** RETRY（两者在服务端互斥，同一时刻只渲染其一），emit 统一改为 `write-requested { action, item }`（仍携带最新 detail revision）；`TrackingView.runTrackingWrite` 由 action code 派生端点（`WRITE_ACTION_ENDPOINTS`）与影响确认文案（`WRITE_ACTION_CONFIRMATIONS`），RETRY 请求固定带最新 `expected_revision`、`confirm=true`、单意图 opaque key 与单次 body 凭据。
+- 幂等语义：明确失败（`SUBMIT_FAILED`/`ACTIVE`/`NEEDS_RECONFIRM`）释放 intent，每次用户确认新 key；transport/结果不明（`UNKNOWN`/`VERIFYING_EXTERNAL`/`RECOVERY_REQUIRED`）保留锁定 intent，显式重试复用**同 key 同 expected_revision**（服务端按 key+revision 判定重放）；锁定期间若点到另一个 action 直接零请求（既不换 key 也不按新动作重放）。
+- 冲突分流：submit 家族全部 409（revision/idempotency/state/operation_in_progress）都在外部边界之前抛出，`createWriteConflictSession` 按 `error_type` 渲染固定中文「未提交到 Auto Bangumi」下一步（未知类型回退通用文案），并固定「静默重读列表 + 重读详情 → 要求重新确认」，绝不静默重发。
+- Files changed: `frontend/src/features/tracking/trackingProjection.ts`、`TrackingView.vue`、`TrackingInspector.vue` 及三个 Vitest；`tests/browser/test_app_tracking.py`（+3 例真实 Chromium）；`frontend/AGENTS.md`；Ralph 状态文件。
+- **Learnings for future iterations:**
+  - 重放绑定是 **key + expected_revision**：`_guard_replay_binding` 会在 `_guard_expected_revision` **之前**执行，换 revision 复用同 key 会被判 `tracking_idempotency_conflict`。因此「transport 重试」必须整份复用锁定 intent（含 revision），不能只复用 key。
+  - submit 家族端点/文案必须由 action code 绑定成表，不能散落在分支里；否则很容易出现「重试按钮发 submit 请求」或「重试用提交文案」这类不可见漂移。
+  - 9 个 `available_actions` code 里只有 `SUBMIT`/`RETRY` 由本页发送；`isWriteActionCode()` 之外的动作（MODIFY/SET_ENABLED/REFRESH_RSS/DELETE_EXTERNAL/RECOVER_*）即使被 emit 也必须零请求，等各自 story 再接线。
+  - Playwright `route.abort()` 可稳定造出「transport 结果不明」：页面必须只回查、复用同 key 重放，浏览器用例可直接断言两次请求的 `idempotency_key` 与 `expected_revision` 完全相等。
+- 定向验证：tracking 四个 Vitest 文件 81 passed、`npm run test:unit -- --run`（44 files / 486 tests）、`npm run typecheck`、`npm run lint`、`npm run api:check`、`npm run build`、`uv run ruff check tests/browser/test_app_tracking.py`、`uv run pytest tests/browser/test_app_tracking.py -q`（10 passed，真实 Chromium）、`git diff --check` 全部通过。
 ---

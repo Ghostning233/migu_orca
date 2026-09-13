@@ -4,17 +4,24 @@ import {
   capabilityStateLabel,
   capabilityVersionLabel,
   createTrackingActionIntent,
+  createWriteConflictSession,
+  createWriteSession,
   executableTrackingActions,
   filterTrackingItems,
+  isWriteActionCode,
   probeStatusLabel,
   projectCapabilitySummary,
-  createWriteSession,
   projectRevalidateIssues,
-  projectSubmitOutcome,
   projectTrackingOverview,
+  projectWriteOutcome,
   reuseTrackingActionIntent,
   sortTrackingItems,
   SUBMIT_OUTCOMES,
+  WRITE_ACTION_CONFIRMATIONS,
+  WRITE_ACTION_ENDPOINTS,
+  WRITE_CONFLICT_FALLBACK_MESSAGE,
+  WRITE_CONFLICT_TYPES,
+  writeConflictMessage,
   writeSessionKeepsIntent,
   writeSessionMessage,
   type CapabilityResult,
@@ -190,7 +197,7 @@ describe('tracking write session projection (US-310)', () => {
 
   it('maps every generated submit outcome to fixed Chinese copy', () => {
     for (const outcome of SUBMIT_OUTCOMES) {
-      const session = projectSubmitOutcome('tracking-1', 'SUBMIT', submitResult({ outcome }))
+      const session = projectWriteOutcome('tracking-1', 'SUBMIT', submitResult({ outcome }))
       expect(session.state).toBe(outcome)
       expect(session.message).toBe(writeSessionMessage(outcome))
       expect(session.trackingId).toBe('tracking-1')
@@ -203,14 +210,14 @@ describe('tracking write session projection (US-310)', () => {
   })
 
   it('fails closed to an unknown result when the outcome is not a documented one', () => {
-    const session = projectSubmitOutcome('tracking-1', 'SUBMIT', submitResult({ outcome: 'SOMETHING_NEW' }))
+    const session = projectWriteOutcome('tracking-1', 'SUBMIT', submitResult({ outcome: 'SOMETHING_NEW' }))
     expect(session.state).toBe('UNKNOWN')
     expect(session.message).toBe(writeSessionMessage('UNKNOWN'))
     expect(session.message).not.toContain('SOMETHING_NEW')
   })
 
   it('projects only documented §11.5 issues and never echoes unknown server text', () => {
-    const session = projectSubmitOutcome('tracking-1', 'SUBMIT', submitResult({
+    const session = projectWriteOutcome('tracking-1', 'SUBMIT', submitResult({
       outcome: 'NEEDS_RECONFIRM',
       issues: [
         { code: 'REQUEST_CHANGED', field: null, message: '本地方案已变化', recovery_action: 'SUBMIT' },
@@ -241,5 +248,80 @@ describe('tracking write session projection (US-310)', () => {
       message: writeSessionMessage('IN_FLIGHT'), issues: [],
     })
     expect(Object.keys(session)).not.toContain('idempotencyKey')
+  })
+})
+
+describe('tracking retry projection (US-311)', () => {
+  function retryResult(overrides: Record<string, unknown> = {}) {
+    return {
+      tracking_id: 'tracking-1', outcome: 'ACTIVE', checked_revision: 4, next_revision: 5,
+      checked_at: '2026-09-13T04:00:00Z', operation_id: 'operation-2', issues: [],
+      tracking: item({ revision: 5 }), ...overrides,
+    } as never
+  }
+
+  it('binds each submit-family action to its own generated endpoint and copy', () => {
+    expect(WRITE_ACTION_ENDPOINTS.SUBMIT).toBe('/api/v1/tracking/items/{tracking_id}/submit')
+    expect(WRITE_ACTION_ENDPOINTS.RETRY).toBe('/api/v1/tracking/items/{tracking_id}/retry')
+    // The two confirmations must not be interchangeable: a retry never reuses
+    // the first-submission wording (or the reverse).
+    expect(WRITE_ACTION_CONFIRMATIONS.RETRY.message).not.toBe(WRITE_ACTION_CONFIRMATIONS.SUBMIT.message)
+    expect(WRITE_ACTION_CONFIRMATIONS.RETRY.confirmLabel).toBe('确认重试')
+    expect(WRITE_ACTION_CONFIRMATIONS.SUBMIT.confirmLabel).toBe('确认提交')
+    for (const confirmation of Object.values(WRITE_ACTION_CONFIRMATIONS)) {
+      expect(confirmation.message).toContain('外部订阅')
+      expect(confirmation.message).toContain('是否继续')
+      expect(confirmation.confirmLabel.startsWith('确认')).toBe(true)
+    }
+  })
+
+  it('accepts only the submit-family action codes this page can send', () => {
+    expect(isWriteActionCode('SUBMIT')).toBe(true)
+    expect(isWriteActionCode('RETRY')).toBe(true)
+    expect(isWriteActionCode('REVALIDATE')).toBe(false)
+    expect(isWriteActionCode('MODIFY')).toBe(false)
+    expect(isWriteActionCode('SET_ENABLED')).toBe(false)
+    expect(isWriteActionCode('REFRESH_RSS')).toBe(false)
+    expect(isWriteActionCode('DELETE_EXTERNAL')).toBe(false)
+    expect(isWriteActionCode('RECOVER_AUTO')).toBe(false)
+  })
+
+  it('maps every generated retry outcome exactly like a submit outcome', () => {
+    for (const outcome of SUBMIT_OUTCOMES) {
+      const session = projectWriteOutcome('tracking-1', 'RETRY', retryResult({ outcome }))
+      expect(session.state).toBe(outcome)
+      expect(session.action).toBe('RETRY')
+      expect(session.message).toBe(writeSessionMessage(outcome))
+      expect(session.message).not.toContain(outcome)
+    }
+    const unknown = projectWriteOutcome('tracking-1', 'RETRY', retryResult({ outcome: 'SOMETHING_NEW' }))
+    expect(unknown.state).toBe('UNKNOWN')
+    expect(unknown.message).toBe(writeSessionMessage('UNKNOWN'))
+  })
+
+  it('gives every documented conflict its own fixed next step and fails closed', () => {
+    const messages = WRITE_CONFLICT_TYPES.map((errorType) => writeConflictMessage(errorType))
+    for (const message of messages) {
+      // Every conflict states that nothing reached Auto Bangumi, so a user
+      // cannot mistake a refused request for a duplicate subscription.
+      expect(message).toContain('未提交到 Auto Bangumi')
+      for (const errorType of WRITE_CONFLICT_TYPES) expect(message).not.toContain(errorType)
+    }
+    expect(new Set(messages).size).toBe(WRITE_CONFLICT_TYPES.length)
+
+    expect(writeConflictMessage('brand_new_conflict')).toBe(WRITE_CONFLICT_FALLBACK_MESSAGE)
+    expect(writeConflictMessage(null)).toBe(WRITE_CONFLICT_FALLBACK_MESSAGE)
+    expect(writeConflictMessage(undefined)).toBe(WRITE_CONFLICT_FALLBACK_MESSAGE)
+    // The generic state copy is the fallback, so an unnamed 409 never renders blank.
+    expect(writeSessionMessage('CONFLICT')).toBe(WRITE_CONFLICT_FALLBACK_MESSAGE)
+  })
+
+  it('releases the key on every conflict so the next confirmation is explicit', () => {
+    for (const errorType of [...WRITE_CONFLICT_TYPES, 'brand_new_conflict']) {
+      const session = createWriteConflictSession('tracking-1', 'RETRY', errorType)
+      expect(session).toMatchObject({ trackingId: 'tracking-1', action: 'RETRY', state: 'CONFLICT', issues: [] })
+      expect(session.message).toBe(writeConflictMessage(errorType))
+      expect(writeSessionKeepsIntent(session.state)).toBe(false)
+    }
   })
 })

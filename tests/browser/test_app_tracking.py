@@ -462,3 +462,267 @@ class TestAppTrackingStage38:
         expect(page.locator("body")).not_to_contain_text("secret-user")
         expect(page.locator("body")).not_to_contain_text(key)
         assert state["detail_reads"] >= 2, state
+
+    def test_explicit_retry_requires_session_and_confirmation_and_keeps_the_key_in_memory(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        _require_dist()
+        _mock_list(page)
+        retries: list[dict[str, Any]] = []
+        state = {"revision": 3, "detail_reads": 0}
+
+        def probe(route: Any, request: Any) -> None:
+            assert request.method == "POST"
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "result": {
+                "probe_status": "VERIFIED", "version": "3.1.18", "adapter": "legacy_3_1",
+                "subscription_list": "SUPPORTED", "subscription_detail": "SUPPORTED", "subscription_submit": "SUPPORTED",
+                "subscription_modify": "SUPPORTED", "subscription_enable": "SUPPORTED", "subscription_disable": "SUPPORTED",
+                "subscription_delete": "SUPPORTED", "rss_list": "SUPPORTED", "rss_modify": "SUPPORTED", "rss_enable": "SUPPORTED",
+                "rss_disable": "SUPPORTED", "rss_delete": "SUPPORTED", "rss_refresh": "SUPPORTED", "external_verify": "SUPPORTED",
+                "checked_at": None, "safe_message": "已完成安全探测",
+            }}, ensure_ascii=False))
+
+        def detail(route: Any, request: Any) -> None:
+            state["detail_reads"] += 1
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "result": {
+                **_item("tracking-a", "葬送的芙莉莲", "ATTENTION"),
+                "status": "SUBMIT_FAILED", "status_label": "提交失败", "revision": state["revision"],
+                "available_actions": [
+                    {"code": "REVALIDATE", "label": "重新复核", "style": "SECONDARY",
+                     "requires_confirmation": False, "target_scopes": []},
+                    {"code": "RETRY", "label": "重试提交", "style": "SECONDARY",
+                     "requires_confirmation": True, "target_scopes": []},
+                ],
+                "origin": "single", "batch_id": None, "created_at": "2026-09-01T00:00:00+00:00",
+                "updated_at": "2026-09-13T00:00:00+00:00", "last_synced_at": None,
+                "safe_info": None, "current_operation": None, "revalidation_issues": [],
+                "external_mapping": None, "audit_events": [], "warnings": [],
+            }}, ensure_ascii=False))
+
+        def retry(route: Any, request: Any) -> None:
+            assert request.method == "POST"
+            retries.append(json.loads(request.post_data or "{}"))
+            state["revision"] = 4
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "result": {
+                "tracking_id": "tracking-a", "outcome": "ACTIVE", "checked_revision": 3, "next_revision": 4,
+                "checked_at": "2026-09-13T04:00:00+00:00", "operation_id": "operation-2", "issues": [],
+                "tracking": {
+                    **_item("tracking-a", "葬送的芙莉莲"), "status_label": "重试成功", "revision": 4,
+                },
+            }}, ensure_ascii=False))
+
+        page.route("**/api/v1/autobangumi/capabilities", probe)
+        # Registered after the broader tracking routes: later routes win.
+        page.route("**/api/v1/tracking/items/tracking-a/retry", retry)
+        page.route("**/api/v1/tracking/items/tracking-a", detail)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-overview")
+        # The retry action is server-computed and capability-gated: no session, no button.
+        expect(page.locator("#tracking-retry")).to_have_count(0)
+        expect(page.locator("#tracking-submit")).to_have_count(0)
+
+        page.locator("#tracking-connect").click()
+        page.locator("#tracking-ab-base-url").fill("https://private.invalid")
+        page.locator("#tracking-ab-username").fill("secret-user")
+        page.locator("#tracking-ab-password").fill("secret-password")
+        page.locator("#tracking-ab-probe").click()
+        page.wait_for_selector("#tracking-retry")
+        # Connecting never retries on the user's behalf.
+        assert not retries, retries
+
+        page.locator("#tracking-retry").click()
+        expect(page.locator(".confirm-dialog")).to_be_visible()
+        expect(page.locator(".confirm-dialog-message")).to_contain_text("重新创建外部订阅")
+        assert not retries, retries
+        page.locator(".confirm-dialog-actions button").filter(has_text="取消").click()
+        # Cancelling the impact confirmation sends zero requests.
+        assert not retries, retries
+
+        page.locator("#tracking-retry").click()
+        page.locator(".confirm-dialog-actions button").filter(has_text="确认重试").click()
+        page.wait_for_selector("#tracking-submit-result")
+
+        expect(page.locator("#tracking-submit-result")).to_contain_text("提交成功")
+        expect(page.locator("#tracking-submit-result")).not_to_contain_text("ACTIVE")
+        assert len(retries) == 1, retries
+        body = retries[0]
+        assert body["confirm"] is True, body
+        assert body["expected_revision"] == 3, body
+        assert body["ab_config"]["password"] == "secret-password", body
+        key = body["idempotency_key"]
+        assert isinstance(key, str) and len(key) >= 8, body
+        # The key lives in page memory only, and the returned tracking converges
+        # the list row without a reload of the page.
+        expect(page.locator(".tracking-list-item").first).to_contain_text("重试成功")
+        expect(page).to_have_url(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        expect(page.locator("body")).not_to_contain_text("secret-password")
+        expect(page.locator("body")).not_to_contain_text("secret-user")
+        expect(page.locator("body")).not_to_contain_text(key)
+
+    def test_retry_transport_unknown_locks_the_key_and_only_reads_back(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        _require_dist()
+        _mock_list(page)
+        retries: list[dict[str, Any]] = []
+        state = {"detail_reads": 0}
+
+        def probe(route: Any, request: Any) -> None:
+            assert request.method == "POST"
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "result": {
+                "probe_status": "VERIFIED", "version": "3.1.18", "adapter": "legacy_3_1",
+                "subscription_list": "SUPPORTED", "subscription_detail": "SUPPORTED", "subscription_submit": "SUPPORTED",
+                "subscription_modify": "SUPPORTED", "subscription_enable": "SUPPORTED", "subscription_disable": "SUPPORTED",
+                "subscription_delete": "SUPPORTED", "rss_list": "SUPPORTED", "rss_modify": "SUPPORTED", "rss_enable": "SUPPORTED",
+                "rss_disable": "SUPPORTED", "rss_delete": "SUPPORTED", "rss_refresh": "SUPPORTED", "external_verify": "SUPPORTED",
+                "checked_at": None, "safe_message": "已完成安全探测",
+            }}, ensure_ascii=False))
+
+        def detail(route: Any, request: Any) -> None:
+            state["detail_reads"] += 1
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "result": {
+                **_item("tracking-a", "葬送的芙莉莲", "ATTENTION"),
+                "status": "SUBMIT_FAILED", "status_label": "提交失败", "revision": 3,
+                "available_actions": [{
+                    "code": "RETRY", "label": "重试提交", "style": "SECONDARY",
+                    "requires_confirmation": True, "target_scopes": [],
+                }],
+                "origin": "single", "batch_id": None, "created_at": "2026-09-01T00:00:00+00:00",
+                "updated_at": "2026-09-13T00:00:00+00:00", "last_synced_at": None,
+                "safe_info": None, "current_operation": None, "revalidation_issues": [],
+                "external_mapping": None, "audit_events": [], "warnings": [],
+            }}, ensure_ascii=False))
+
+        def retry(route: Any, request: Any) -> None:
+            assert request.method == "POST"
+            retries.append(json.loads(request.post_data or "{}"))
+            if len(retries) == 1:
+                # The request never got a readable answer: the external result is
+                # unknown, so the page may only read back.
+                route.abort()
+                return
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "result": {
+                "tracking_id": "tracking-a", "outcome": "ACTIVE", "checked_revision": 3, "next_revision": 4,
+                "checked_at": "2026-09-13T04:05:00+00:00", "operation_id": "operation-2", "issues": [],
+                "tracking": {
+                    **_item("tracking-a", "葬送的芙莉莲"), "status_label": "重试成功", "revision": 4,
+                },
+            }}, ensure_ascii=False))
+
+        page.route("**/api/v1/autobangumi/capabilities", probe)
+        page.route("**/api/v1/tracking/items/tracking-a/retry", retry)
+        page.route("**/api/v1/tracking/items/tracking-a", detail)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-overview")
+        page.locator("#tracking-connect").click()
+        page.locator("#tracking-ab-base-url").fill("https://private.invalid")
+        page.locator("#tracking-ab-username").fill("user")
+        page.locator("#tracking-ab-password").fill("secret-password")
+        page.locator("#tracking-ab-probe").click()
+        page.wait_for_selector("#tracking-retry")
+
+        page.locator("#tracking-retry").click()
+        page.locator(".confirm-dialog-actions button").filter(has_text="确认重试").click()
+        page.wait_for_selector("#tracking-submit-result")
+        # Exactly one retry reached the server, and it says nothing was confirmed.
+        expect(page.locator("#tracking-submit-result")).to_contain_text("提交结果未知")
+        expect(page.locator("#tracking-submit-result")).to_contain_text("只读回查")
+        expect(page.locator("body")).not_to_contain_text("network_error")
+        assert len(retries) == 1, retries
+        assert state["detail_reads"] >= 2, state
+
+        # The explicit retry replays the very same key and revision binding.
+        page.locator("#tracking-retry").click()
+        page.locator(".confirm-dialog-actions button").filter(has_text="确认重试").click()
+        page.wait_for_selector("#tracking-submit-result:has-text('提交成功')")
+        assert len(retries) == 2, retries
+        assert retries[1]["idempotency_key"] == retries[0]["idempotency_key"], retries
+        assert retries[1]["expected_revision"] == retries[0]["expected_revision"], retries
+        expect(page.locator(".tracking-list-item").first).to_contain_text("重试成功")
+
+    def test_retry_conflict_converges_on_server_tracking_and_needs_a_new_key(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        _require_dist()
+        _mock_list(page)
+        retries: list[dict[str, Any]] = []
+        state = {"revision": 3, "detail_reads": 0}
+
+        def probe(route: Any, request: Any) -> None:
+            assert request.method == "POST"
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "result": {
+                "probe_status": "VERIFIED", "version": "3.1.18", "adapter": "legacy_3_1",
+                "subscription_list": "SUPPORTED", "subscription_detail": "SUPPORTED", "subscription_submit": "SUPPORTED",
+                "subscription_modify": "SUPPORTED", "subscription_enable": "SUPPORTED", "subscription_disable": "SUPPORTED",
+                "subscription_delete": "SUPPORTED", "rss_list": "SUPPORTED", "rss_modify": "SUPPORTED", "rss_enable": "SUPPORTED",
+                "rss_disable": "SUPPORTED", "rss_delete": "SUPPORTED", "rss_refresh": "SUPPORTED", "external_verify": "SUPPORTED",
+                "checked_at": None, "safe_message": "已完成安全探测",
+            }}, ensure_ascii=False))
+
+        def detail(route: Any, request: Any) -> None:
+            state["detail_reads"] += 1
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "result": {
+                **_item("tracking-a", "葬送的芙莉莲", "ATTENTION"),
+                "status": "SUBMIT_FAILED", "status_label": "提交失败", "revision": state["revision"],
+                "available_actions": [{
+                    "code": "RETRY", "label": "重试提交", "style": "SECONDARY",
+                    "requires_confirmation": True, "target_scopes": [],
+                }],
+                "origin": "single", "batch_id": None, "created_at": "2026-09-01T00:00:00+00:00",
+                "updated_at": "2026-09-13T00:00:00+00:00", "last_synced_at": None,
+                "safe_info": None, "current_operation": None, "revalidation_issues": [],
+                "external_mapping": None, "audit_events": [], "warnings": [],
+            }}, ensure_ascii=False))
+
+        def retry(route: Any, request: Any) -> None:
+            assert request.method == "POST"
+            body = json.loads(request.post_data or "{}")
+            retries.append(body)
+            if len(retries) == 1:
+                # The record moved on while the retry was in flight.
+                state["revision"] = 9
+                route.fulfill(status=409, content_type="application/json", body=json.dumps({
+                    "ok": False, "error_type": "tracking_state_conflict",
+                    "error_message": "只有明确提交失败的记录可以重试", "error_data": None,
+                }, ensure_ascii=False))
+                return
+            assert body["expected_revision"] == 9, body
+            assert body["idempotency_key"] != retries[0]["idempotency_key"], retries
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "result": {
+                "tracking_id": "tracking-a", "outcome": "ACTIVE", "checked_revision": 9, "next_revision": 10,
+                "checked_at": "2026-09-13T04:10:00+00:00", "operation_id": "operation-2", "issues": [],
+                "tracking": {
+                    **_item("tracking-a", "葬送的芙莉莲"), "status_label": "重试成功", "revision": 10,
+                },
+            }}, ensure_ascii=False))
+
+        page.route("**/api/v1/autobangumi/capabilities", probe)
+        page.route("**/api/v1/tracking/items/tracking-a/retry", retry)
+        page.route("**/api/v1/tracking/items/tracking-a", detail)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-overview")
+        page.locator("#tracking-connect").click()
+        page.locator("#tracking-ab-base-url").fill("https://private.invalid")
+        page.locator("#tracking-ab-username").fill("user")
+        page.locator("#tracking-ab-password").fill("secret-password")
+        page.locator("#tracking-ab-probe").click()
+        page.wait_for_selector("#tracking-retry")
+        detail_reads_before = state["detail_reads"]
+
+        page.locator("#tracking-retry").click()
+        page.locator(".confirm-dialog-actions button").filter(has_text="确认重试").click()
+        page.wait_for_selector("#tracking-submit-result")
+
+        result = page.locator("#tracking-submit-result")
+        expect(result).to_contain_text("未提交到 Auto Bangumi")
+        expect(result).to_contain_text("请按最新状态重新确认")
+        expect(page.locator("body")).not_to_contain_text("tracking_state_conflict")
+        # Nothing was silently resent; the conflict re-read the server tracking.
+        assert len(retries) == 1, retries
+        assert state["detail_reads"] > detail_reads_before, state
+
+        page.locator("#tracking-retry").click()
+        page.locator(".confirm-dialog-actions button").filter(has_text="确认重试").click()
+        page.wait_for_selector("#tracking-submit-result:has-text('提交成功')")
+        assert len(retries) == 2, retries
+        expect(page.locator(".tracking-list-item").first).to_contain_text("重试成功")

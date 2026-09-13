@@ -708,3 +708,231 @@ describe('TrackingView explicit submission (US-310)', () => {
     expect(wrapper.find('#tracking-submit-result').exists()).toBe(false)
   })
 })
+
+const retryAction = {
+  code: 'RETRY', label: '重试提交', style: 'SECONDARY',
+  requires_confirmation: true, target_scopes: [],
+}
+
+/** A definitely-failed record: the only status the retry endpoint accepts. */
+function retryDetail(overrides: Record<string, unknown> = {}) {
+  return {
+    ...detail(), status: 'SUBMIT_FAILED', status_label: '提交失败',
+    available_actions: [revalidateAction, retryAction], ...overrides,
+  }
+}
+
+function retryPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    tracking_id: 'tracking-1', outcome: 'ACTIVE', checked_revision: 1, next_revision: 2,
+    checked_at: '2026-09-13T04:00:00Z', operation_id: 'operation-2', issues: [],
+    tracking: { ...item('tracking-1', '葬送的芙莉莲'), revision: 2 }, ...overrides,
+  }
+}
+
+function retriedBodies(): Record<string, unknown>[] {
+  return apiPost.mock.calls
+    .filter((call) => call[0] === '/api/v1/tracking/items/{tracking_id}/retry')
+    .map((call) => call[1]?.body as Record<string, unknown>)
+}
+
+/** Count the reads the conflict path must perform: silent list + detail reload. */
+function reads(): { list: number; detail: number } {
+  return {
+    list: apiGet.mock.calls.filter((call) => call[0] === '/api/v1/tracking/items').length,
+    detail: apiGet.mock.calls.filter((call) => call[0] === '/api/v1/tracking/items/{tracking_id}').length,
+  }
+}
+
+describe('TrackingView explicit retry (US-311)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  it('never retries without a live session and an explicit impact confirmation', async () => {
+    serveApi(() => retryDetail())
+    apiPost.mockResolvedValueOnce(capabilities() as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    // RETRY is server-computed and capability-gated: no session, no button.
+    expect(wrapper.find('#tracking-retry').exists()).toBe(false)
+    expect(wrapper.find('#tracking-submit').exists()).toBe(false)
+
+    await connect(wrapper)
+    // Connecting must never retry on the user's behalf.
+    expect(retriedBodies()).toHaveLength(0)
+    const confirmSpy = answerConfirm(wrapper, false)
+    await wrapper.find('#tracking-retry').trigger('click')
+    await flushPromises()
+    expect(confirmSpy).toHaveBeenCalledTimes(1)
+    expect(String(confirmSpy.mock.calls[0]?.[0]?.title)).toContain('重试')
+    expect(String(confirmSpy.mock.calls[0]?.[0]?.message)).toContain('重新创建外部订阅')
+    expect(retriedBodies()).toHaveLength(0)
+    expect(wrapper.find('#tracking-submit-result').exists()).toBe(false)
+  })
+
+  it('sends the generated retry request with the latest revision and one opaque key', async () => {
+    serveApi(() => retryDetail({ revision: 6 }))
+    apiPost.mockResolvedValueOnce(capabilities() as never).mockResolvedValueOnce(retryPayload() as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-retry').trigger('click')
+    await flushPromises()
+
+    expect(apiPost).toHaveBeenLastCalledWith('/api/v1/tracking/items/{tracking_id}/retry', {
+      path: { tracking_id: 'tracking-1' },
+      body: {
+        expected_revision: 6, idempotency_key: expect.stringMatching(/^[A-Za-z0-9-]{8,128}$/),
+        confirm: true,
+        ab_config: {
+          auth_mode: 'password', base_url: 'https://ab.invalid', username: 'user',
+          password: 'pass', fallback_enabled: false,
+        },
+      },
+      signal: expect.any(AbortSignal),
+    })
+    // The retry endpoint is never reached through the submit action.
+    expect(submittedBodies()).toHaveLength(0)
+    expect(wrapper.find('#tracking-submit-result').text()).toContain('提交成功')
+    const key = retriedBodies()[0]?.idempotency_key as string
+    expect(window.location.href).not.toContain(key)
+    expect(document.body.textContent).not.toContain(key)
+    expect(JSON.stringify(window.localStorage)).not.toContain(key)
+  })
+
+  it('converges the list from the returned tracking and re-reads the detail', async () => {
+    serveApi(() => retryDetail())
+    apiPost.mockResolvedValueOnce(capabilities() as never).mockResolvedValueOnce(retryPayload({
+      tracking: { ...item('tracking-1', '葬送的芙莉莲'), status_label: '重试成功', revision: 2 },
+    }) as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+    const before = reads()
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-retry').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.tracking-list-item').text()).toContain('重试成功')
+    expect(reads().detail).toBe(before.detail + 1)
+  })
+
+  it('mints a new key for every confirmation after a definite failure', async () => {
+    serveApi(() => retryDetail())
+    apiPost.mockResolvedValueOnce(capabilities() as never)
+      .mockResolvedValueOnce(retryPayload({ outcome: 'SUBMIT_FAILED' }) as never)
+      .mockResolvedValueOnce(retryPayload() as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-retry').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#tracking-submit-result').text()).toContain('提交明确失败')
+
+    await wrapper.find('#tracking-retry').trigger('click')
+    await flushPromises()
+    const bodies = retriedBodies()
+    expect(bodies).toHaveLength(2)
+    expect(bodies[1]?.idempotency_key).not.toBe(bodies[0]?.idempotency_key)
+  })
+
+  it('reuses the very same key and revision when the retry result stays unknown', async () => {
+    serveApi(() => retryDetail({ revision: 6 }))
+    apiPost.mockResolvedValueOnce(capabilities() as never)
+      .mockRejectedValueOnce(unknownError as never)
+      .mockResolvedValueOnce(retryPayload() as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-retry').trigger('click')
+    await flushPromises()
+
+    // No blind resend: exactly one retry reached the server and it says so.
+    expect(retriedBodies()).toHaveLength(1)
+    const result = wrapper.find('#tracking-submit-result')
+    expect(result.text()).toContain('提交结果未知')
+    expect(result.text()).toContain('只读回查')
+    expect(wrapper.text()).not.toContain('network_error')
+
+    await wrapper.find('#tracking-retry').trigger('click')
+    await flushPromises()
+    const bodies = retriedBodies()
+    expect(bodies).toHaveLength(2)
+    expect(bodies[1]?.idempotency_key).toBe(bodies[0]?.idempotency_key)
+    // The replayed request keeps the original revision binding too, otherwise
+    // the server would reject the very same key as a different binding.
+    expect(bodies[1]?.expected_revision).toBe(bodies[0]?.expected_revision)
+    expect(wrapper.find('#tracking-submit-result').text()).toContain('提交成功')
+  })
+
+  it('converges every documented conflict on the server tracking with a fresh key', async () => {
+    const cases: Array<[string, string]> = [
+      ['tracking_revision_conflict', '追番记录已变化'],
+      ['tracking_idempotency_conflict', '提交标识已失效'],
+      ['tracking_state_conflict', '状态不允许本次提交'],
+      ['tracking_operation_in_progress', '尚未完成的提交操作'],
+      ['brand_new_conflict', '请重新确认后再提交'],
+    ]
+    for (const [errorType, copy] of cases) {
+      apiGet.mockReset()
+      apiPost.mockReset()
+      let revision = 4
+      serveApi(() => retryDetail({ revision }))
+      apiPost.mockResolvedValueOnce(capabilities() as never)
+        // The record moves on while the retry is in flight.
+        .mockImplementationOnce((async () => { revision = 9; throw {
+          type: errorType, message: '请刷新后重试', status: 409, cancelled: false, httpError: true,
+        } }) as never)
+        .mockResolvedValueOnce(retryPayload() as never)
+      const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+      await connect(wrapper)
+      const before = reads()
+      answerConfirm(wrapper, true)
+      await wrapper.find('#tracking-retry').trigger('click')
+      await flushPromises()
+
+      const result = wrapper.find('#tracking-submit-result')
+      expect(result.text()).toContain(copy)
+      expect(result.text()).toContain('未提交到 Auto Bangumi')
+      expect(wrapper.text()).not.toContain(errorType)
+      // The conflict body carries no authoritative tracking: both the list and
+      // the detail are re-read before the user is asked again.
+      expect(reads().list).toBe(before.list + 1)
+      expect(reads().detail).toBe(before.detail + 1)
+
+      await wrapper.find('#tracking-retry').trigger('click')
+      await flushPromises()
+      const bodies = retriedBodies()
+      expect(bodies).toHaveLength(2)
+      expect(bodies[1]?.expected_revision).toBe(9)
+      expect(bodies[1]?.idempotency_key).not.toBe(bodies[0]?.idempotency_key)
+      wrapper.unmount()
+    }
+  })
+
+  it('never mints a new key through another action while the result is unresolved', async () => {
+    let actions: unknown[] = [submitAction]
+    const listValue = () => ({ items: [item('tracking-1', '葬送的芙莉莲')], summary: {}, warnings: [] })
+    apiGet.mockImplementation((url: string) => Promise.resolve(
+      (url === '/api/v1/tracking/items' ? listValue() : submitDetail({ available_actions: actions })) as never,
+    ))
+    apiPost.mockResolvedValueOnce(capabilities() as never)
+      // The record is refreshed to RETRY while the SUBMIT result is unreadable.
+      .mockImplementationOnce((async () => { actions = [revalidateAction, retryAction]; throw unknownError }) as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-submit').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#tracking-submit-result').text()).toContain('提交结果未知')
+    expect(wrapper.find('#tracking-retry').exists()).toBe(true)
+
+    // The locked SUBMIT intent still owns the one key: replaying it under the
+    // RETRY action would send something the user did not ask for, and a new key
+    // could create a second subscription. Nothing at all is sent.
+    const confirmSpy = answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-retry').trigger('click')
+    await flushPromises()
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(retriedBodies()).toHaveLength(0)
+    expect(submittedBodies()).toHaveLength(1)
+    expect(wrapper.find('#tracking-submit-result').text()).toContain('提交结果未知')
+  })
+})

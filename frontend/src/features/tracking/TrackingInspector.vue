@@ -41,7 +41,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   (e: 'tracking-updated', tracking: TrackingItem): void
-  (e: 'submit-requested', payload: { action: TrackingAction; item: TrackingItem }): void
+  (e: 'write-requested', payload: { action: TrackingAction; item: TrackingItem }): void
 }>()
 const detail = ref<TrackingDetail | null>(null)
 const loading = ref(false)
@@ -68,33 +68,38 @@ const revalidateAction = computed(() => (
   detail.value ? executableTrackingActions(detail.value, null).find((action) => action.code === 'REVALIDATE') ?? null : null
 ))
 
-// -- explicit external submission (US-310) -----------------------------------
+// -- explicit external submission and retry (US-310, US-311) -----------------
 // The page owns the credential and the request; this component only offers the
-// server-computed SUBMIT action when the page session proves the capability,
-// and renders the fixed page-level write result.  No key, credential or request
-// state ever lives here.
+// server-computed write action when the page session proves the capability, and
+// renders the fixed page-level write result.  No key, credential or request
+// state ever lives here.  SUBMIT and RETRY are mutually exclusive on the server
+// (different source statuses), so at most one of them is ever projected.
 const writeInFlight = computed(() => (
   props.writeSession?.trackingId === props.trackingId && props.writeSession.state === 'IN_FLIGHT'
 ))
 const thisWrite = computed(() => (
   props.writeSession && props.writeSession.trackingId === props.trackingId ? props.writeSession : null
 ))
-const submitAction = computed(() => (
+/** The server-computed write actions, intersected with the proven capability. */
+const writeActions = computed(() => (
   detail.value && props.credentialReady === true
-    ? executableTrackingActions(detail.value, props.capabilities).find((action) => action.code === 'SUBMIT') ?? null
-    : null
+    ? executableTrackingActions(detail.value, props.capabilities)
+    : []
 ))
-const submitHint = computed(() => {
-  if (props.credentialReady !== true) return '需要先在页面连接 Auto Bangumi，才能提交外部订阅。'
-  const offered = (detail.value?.available_actions ?? []).some((action) => action.code === 'SUBMIT')
-  return offered ? '当前连接未确认提交能力，已降级为只读。' : '当前状态不可提交外部订阅。'
+const submitAction = computed(() => writeActions.value.find((action) => action.code === 'SUBMIT') ?? null)
+const retryAction = computed(() => writeActions.value.find((action) => action.code === 'RETRY') ?? null)
+const writeHint = computed(() => {
+  if (props.credentialReady !== true) return '需要先在页面连接 Auto Bangumi，才能提交或重试外部订阅。'
+  const offered = (detail.value?.available_actions ?? []).some(
+    (action) => action.code === 'SUBMIT' || action.code === 'RETRY',
+  )
+  return offered ? '当前连接未确认提交能力，已降级为只读。' : '当前状态不可提交或重试外部订阅。'
 })
 
-function requestSubmit(): void {
-  const action = submitAction.value
+function requestWrite(action: TrackingAction | null): void {
   if (!action || !detail.value || writeInFlight.value || props.writeBusy) return
   // The page confirms, builds the intent (fresh revision + opaque key) and sends.
-  emit('submit-requested', { action, item: detail.value })
+  emit('write-requested', { action, item: detail.value })
 }
 
 function resetRevalidate(): void {
@@ -306,15 +311,25 @@ defineExpose({ reload: () => fetchDetail(true) })
 
       <section class="tracking-inspector-section tracking-submit" aria-labelledby="tracking-submit-heading">
         <h4 id="tracking-submit-heading">提交到 Auto Bangumi</h4>
-        <p class="field-help">提交会使用本页面已探测的连接，在 Auto Bangumi 创建外部订阅并可能触发下载；每次提交都需要单独确认。</p>
-        <BaseButton
-          v-if="submitAction"
-          id="tracking-submit"
-          :loading="writeInFlight"
-          :disabled="writeInFlight || writeBusy"
-          @click="requestSubmit"
-        >{{ submitAction.label }}</BaseButton>
-        <p v-else class="field-help">{{ submitHint }}</p>
+        <template v-if="submitAction">
+          <p class="field-help">提交会使用本页面已探测的连接，在 Auto Bangumi 创建外部订阅并可能触发下载；每次提交都需要单独确认。</p>
+          <BaseButton
+            id="tracking-submit"
+            :loading="writeInFlight"
+            :disabled="writeInFlight || writeBusy"
+            @click="requestWrite(submitAction)"
+          >{{ submitAction.label }}</BaseButton>
+        </template>
+        <template v-else-if="retryAction">
+          <p class="field-help">该记录上次提交明确失败。重试会使用本页面已探测的连接，重新在 Auto Bangumi 创建外部订阅并可能触发下载；每次重试都需要单独确认。</p>
+          <BaseButton
+            id="tracking-retry"
+            :loading="writeInFlight"
+            :disabled="writeInFlight || writeBusy"
+            @click="requestWrite(retryAction)"
+          >{{ retryAction.label }}</BaseButton>
+        </template>
+        <p v-else class="field-help">{{ writeHint }}</p>
         <div
           v-if="thisWrite"
           id="tracking-submit-result"
