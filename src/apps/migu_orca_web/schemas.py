@@ -584,6 +584,32 @@ class TrackingSyncPayload(BaseModel):
     confirm: Literal[True]
 
 
+class SavedTrackingSyncInput(BaseModel):
+    """Strict handoff for syncing through a server-owned AB connection."""
+    model_config = ConfigDict(extra="forbid")
+    connection_ref: str
+    configuration_revision: StrictInt = Field(ge=0)
+    confirm: StrictBool
+    storage_dir: str | None = None
+
+    @field_validator("connection_ref")
+    @classmethod
+    def _canonical_ref(cls, value: str) -> str:
+        try:
+            parsed = UUID(value)
+        except (ValueError, AttributeError, TypeError) as exc:
+            raise ValueError("connection_ref 必须是规范 UUID") from exc
+        if str(parsed) != value:
+            raise ValueError("connection_ref 必须是规范 UUID")
+        return value
+
+    @model_validator(mode="after")
+    def _confirmed(self) -> SavedTrackingSyncInput:
+        if self.confirm is not True:
+            raise ValueError("confirm must be true")
+        return self
+
+
 class QbittorrentConfigPayload(BaseModel):
     endpoint: str
     username: str

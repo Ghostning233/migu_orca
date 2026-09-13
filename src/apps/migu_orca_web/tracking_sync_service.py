@@ -69,6 +69,7 @@ def run_tracking_sync(
     config: StorageConfig | None = None,
     management_client: AutoBangumiManagementClient | None = None,
     now: str | None = None,
+    connection_ref=None,
 ) -> TrackingSyncResult:
     """Read AB once and converge local records, returning only safe counts.
 
@@ -131,7 +132,7 @@ def run_tracking_sync(
             warnings.append(decision.warning)
         if decision.tracking_id is None:
             record, created, failed = _ensure_external(
-                resolved_config, decision, externals, checked_at
+                resolved_config, decision, externals, checked_at, connection_ref
             )
             counts = replace(
                 counts,
@@ -146,7 +147,7 @@ def run_tracking_sync(
         if local is None:
             counts = replace(counts, checked=counts.checked + 1, failed=counts.failed + 1)
             continue
-        updated, failed = _apply_decision(resolved_config, local, decision, checked_at)
+        updated, failed = _apply_decision(resolved_config, local, decision, checked_at, connection_ref)
         counts = replace(
             counts,
             checked=counts.checked + 1,
@@ -175,7 +176,7 @@ def run_tracking_sync(
             continue
         if SYNC_WARNING_EXTERNAL_DELETED not in warnings:
             warnings.append(SYNC_WARNING_EXTERNAL_DELETED)
-        updated, failed = _apply_missing(resolved_config, local, missing, checked_at)
+        updated, failed = _apply_missing(resolved_config, local, missing, checked_at, connection_ref)
         counts = replace(
             counts, updated=counts.updated + int(updated and not failed),
             unchanged=counts.unchanged + int(not updated and not failed),
@@ -187,9 +188,9 @@ def run_tracking_sync(
     return TrackingSyncResult(status, checked_at, capabilities, counts, tuple(warnings))
 
 
-def _apply_decision(config, record: TrackingRecord, decision, timestamp: str) -> tuple[bool, bool]:
+def _apply_decision(config, record: TrackingRecord, decision, timestamp: str, connection_ref=None) -> tuple[bool, bool]:
     desired_status = decision.status
-    mapping = decision.safe_mapping()
+    mapping = decision.safe_mapping(connection_ref=connection_ref)
     current_mapping = record.external_mapping or {}
     mapping_changed = _mapping_without_verified_at(current_mapping) != _mapping_without_verified_at(mapping)
     status_changed = desired_status != record.status
@@ -222,12 +223,12 @@ def _apply_decision(config, record: TrackingRecord, decision, timestamp: str) ->
         return False, True
 
 
-def _apply_missing(config, record, decision, timestamp):
+def _apply_missing(config, record, decision, timestamp, connection_ref=None):
     previous_mapping = record.external_mapping or {}
     missing_count = int(previous_mapping.get("missing_sync_count", 0))
     if record.status != decision.status:
         missing_count += 1
-    mapping = {**previous_mapping, **decision.safe_mapping(), "missing_sync_count": missing_count}
+    mapping = {**previous_mapping, **decision.safe_mapping(connection_ref=connection_ref), "missing_sync_count": missing_count}
     status_changed = decision.status != record.status
     mapping_changed = _mapping_without_verified_at(previous_mapping) != _mapping_without_verified_at(mapping)
     if not mapping_changed and not status_changed:
@@ -248,20 +249,21 @@ def _apply_missing(config, record, decision, timestamp):
         return False, True
 
 
-def _ensure_external(config, decision, externals, timestamp):
+def _ensure_external(config, decision, externals, timestamp, connection_ref=None):
     external = next(item for item in externals if item.external_id == decision.external_id)
     record = create_external_tracking_record(
         adapter="legacy_3_1", object_kind="subscription", external_id=external.external_id,
         title=external.title, season=external.season, subtitle_group=external.subtitle_group,
         subscription_id=decision.subscription_id, rss_ids=decision.rss_ids,
         match_reason=decision.match_reason, external_deleted=decision.external_deleted,
+        connection_ref=connection_ref,
         enabled=not decision.external_deleted, last_verified_at=timestamp, now=timestamp,
     )
     try:
         existing, created = ensure_tracking_record(config, record)
         if created:
             return existing, True, False
-        updated, failed = _apply_decision(config, existing, decision, timestamp)
+        updated, failed = _apply_decision(config, existing, decision, timestamp, connection_ref)
         return existing, False, failed
     except Stage1Error:
         return record, False, True

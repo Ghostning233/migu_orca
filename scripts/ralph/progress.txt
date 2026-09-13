@@ -149,3 +149,12 @@ Started: 2026-09-13
 - 验证：`uv run pytest src/apps/migu_orca_web/tracking_saved_submission_service_test.py -q --disable-warnings --maxfail=1`（4 passed）；`uv run pytest src/apps/migu_orca_web/tracking_submission_service_test.py src/apps/migu_orca_web/tracking_recovery_service_test.py src/storage_engine/controllers/operation_repository_test.py src/tracking_engine/models/operation_test.py src/tracking_engine/models/tracking_test.py -q --disable-warnings --maxfail=1`（150 passed）；受影响 Ruff、定向 compileall、`git diff --check`、`uv run migu-orca-openapi --check`、frontend `npm run api:check`、`npm run typecheck` 均通过。
 - 遗留风险：未运行全量后端/前端门禁、真实 Chromium 或真实 Auto Bangumi；现有 HTTP submit/retry 仍暂时接收旧 `ab_config`，按 PRD 留待 US-328 原子切换；同步/管理/恢复引用迁移仍待 US-323～US-325。
 - 可复用结论：终态 replay 不应为读取旧安全结果重新解析已删除的秘密；正常/预备请求必须在同一配置 lease 中完成状态机和 adapter 调用。连接 ref 是 operation/mapping 的唯一持久化归属证据，configuration revision 由 repository CAS 验证，不复制秘密。
+
+## 2026-09-14 / US-323
+
+- 范围：新增 `SavedTrackingSyncInput` 与 `run_saved_tracking_sync`，严格接收 canonical `connection_ref`、configuration revision 和 confirm；通过专用配置 repository lease 获取 immutable runtime snapshot，执行只读同步。
+- 实现：同步核心支持传递本次连接引用，所有新建、更新及缺失映射均生成绑定实际 ref 的 mapping v2；旧临时凭据 HTTP 入口保持不变，待 US-330 原子切换。
+- 文件：`src/apps/migu_orca_web/schemas.py`、`src/apps/migu_orca_web/tracking_sync_service.py`、`src/apps/migu_orca_web/tracking_saved_sync_service.py` 及对应测试、`scripts/ralph/prd.json`。
+- 验证：`uv run pytest src/apps/migu_orca_web/tracking_saved_sync_service_test.py src/apps/migu_orca_web/tracking_sync_service_test.py -q --disable-warnings --maxfail=1`（5 passed）；受影响 Ruff 与 `git diff --check` 通过。
+- 遗留风险：尚未切换 sync HTTP/generated/前端调用者；双实例归属歧义、旧未绑定映射的只读核验及完整 API drift/Chromium 门禁留待后续 story/阶段验收。
+- 可复用结论：保存连接业务 service 必须在同一 repository lease 内创建 adapter 并运行整个外部只读同步；mapping 的连接归属只能来自本次 immutable snapshot，不能由外部 ID、标题或旧状态推断。
