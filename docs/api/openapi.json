@@ -8638,6 +8638,17 @@
                                     "requires_confirmation": {
                                       "title": "Requires Confirmation",
                                       "type": "boolean"
+                                    },
+                                    "target_scopes": {
+                                      "items": {
+                                        "enum": [
+                                          "SUBSCRIPTION",
+                                          "ASSOCIATED_RSS"
+                                        ],
+                                        "type": "string"
+                                      },
+                                      "title": "Target Scopes",
+                                      "type": "array"
                                     }
                                   },
                                   "required": [
@@ -8786,7 +8797,8 @@
                             "code": "示例",
                             "label": "示例",
                             "style": "示例",
-                            "requires_confirmation": true
+                            "requires_confirmation": true,
+                            "target_scopes": []
                           }
                         ],
                         "valid_resource_count": 0,
@@ -9405,6 +9417,17 @@
                                     "requires_confirmation": {
                                       "title": "Requires Confirmation",
                                       "type": "boolean"
+                                    },
+                                    "target_scopes": {
+                                      "items": {
+                                        "enum": [
+                                          "SUBSCRIPTION",
+                                          "ASSOCIATED_RSS"
+                                        ],
+                                        "type": "string"
+                                      },
+                                      "title": "Target Scopes",
+                                      "type": "array"
                                     }
                                   },
                                   "required": [
@@ -9540,7 +9563,8 @@
                             "code": "示例",
                             "label": "示例",
                             "style": "示例",
-                            "requires_confirmation": true
+                            "requires_confirmation": true,
+                            "target_scopes": []
                           }
                         ],
                         "valid_resource_count": 0,
@@ -21046,6 +21070,17 @@
                               "requires_confirmation": {
                                 "title": "Requires Confirmation",
                                 "type": "boolean"
+                              },
+                              "target_scopes": {
+                                "items": {
+                                  "enum": [
+                                    "SUBSCRIPTION",
+                                    "ASSOCIATED_RSS"
+                                  ],
+                                  "type": "string"
+                                },
+                                "title": "Target Scopes",
+                                "type": "array"
                               }
                             },
                             "required": [
@@ -21987,7 +22022,8 @@
                         "code": "示例",
                         "label": "示例",
                         "style": "示例",
-                        "requires_confirmation": true
+                        "requires_confirmation": true,
+                        "target_scopes": []
                       }
                     ],
                     "valid_resource_count": 0,
@@ -22426,6 +22462,17 @@
                                   "requires_confirmation": {
                                     "title": "Requires Confirmation",
                                     "type": "boolean"
+                                  },
+                                  "target_scopes": {
+                                    "items": {
+                                      "enum": [
+                                        "SUBSCRIPTION",
+                                        "ASSOCIATED_RSS"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "title": "Target Scopes",
+                                    "type": "array"
                                   }
                                 },
                                 "required": [
@@ -22630,7 +22677,8 @@
                           "code": "示例",
                           "label": "示例",
                           "style": "示例",
-                          "requires_confirmation": true
+                          "requires_confirmation": true,
+                          "target_scopes": []
                         }
                       ],
                       "valid_resource_count": 0,
@@ -23118,6 +23166,17 @@
                                   "requires_confirmation": {
                                     "title": "Requires Confirmation",
                                     "type": "boolean"
+                                  },
+                                  "target_scopes": {
+                                    "items": {
+                                      "enum": [
+                                        "SUBSCRIPTION",
+                                        "ASSOCIATED_RSS"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "title": "Target Scopes",
+                                    "type": "array"
                                   }
                                 },
                                 "required": [
@@ -23322,7 +23381,8 @@
                           "code": "示例",
                           "label": "示例",
                           "style": "示例",
-                          "requires_confirmation": true
+                          "requires_confirmation": true,
+                          "target_scopes": []
                         }
                       ],
                       "valid_resource_count": 0,
@@ -23521,90 +23581,251 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "target_scope",
-                  "expected_revision",
-                  "idempotency_key",
-                  "confirm",
-                  "ab_config",
-                  "patch"
-                ],
-                "properties": {
-                  "target_scope": {
-                    "type": "string",
-                    "enum": [
-                      "SUBSCRIPTION",
-                      "ASSOCIATED_RSS"
-                    ]
-                  },
-                  "expected_revision": {
-                    "type": "integer",
-                    "minimum": 1
-                  },
-                  "idempotency_key": {
-                    "type": "string",
-                    "x-request-scoped": true
-                  },
-                  "confirm": {
-                    "const": true
-                  },
-                  "ab_config": {
+                "oneOf": [
+                  {
                     "type": "object",
                     "additionalProperties": false,
-                    "x-request-scoped": true,
+                    "required": [
+                      "target_scope",
+                      "expected_revision",
+                      "idempotency_key",
+                      "confirm",
+                      "ab_config",
+                      "patch"
+                    ],
                     "properties": {
-                      "auth_mode": {
+                      "target_scope": {
+                        "const": "SUBSCRIPTION"
+                      },
+                      "expected_revision": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "idempotency_key": {
                         "type": "string",
-                        "enum": [
-                          "password",
-                          "api_token"
+                        "x-request-scoped": true
+                      },
+                      "confirm": {
+                        "const": true
+                      },
+                      "ab_config": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "x-request-scoped": true,
+                        "properties": {
+                          "auth_mode": {
+                            "type": "string",
+                            "enum": [
+                              "password",
+                              "api_token"
+                            ]
+                          },
+                          "base_url": {
+                            "type": "string",
+                            "x-request-scoped": true
+                          },
+                          "username": {
+                            "type": "string",
+                            "x-request-scoped": true
+                          },
+                          "password": {
+                            "type": "string",
+                            "x-request-scoped": true
+                          },
+                          "token": {
+                            "type": "string",
+                            "x-request-scoped": true
+                          },
+                          "fallback_enabled": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "auth_mode",
+                          "fallback_enabled"
                         ]
                       },
-                      "base_url": {
-                        "type": "string",
-                        "x-request-scoped": true
+                      "storage_dir": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
                       },
-                      "username": {
-                        "type": "string",
-                        "x-request-scoped": true
-                      },
-                      "password": {
-                        "type": "string",
-                        "x-request-scoped": true
-                      },
-                      "token": {
-                        "type": "string",
-                        "x-request-scoped": true
-                      },
-                      "fallback_enabled": {
-                        "type": "boolean"
+                      "patch": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "title": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "season": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ],
+                            "minimum": 0,
+                            "maximum": 100
+                          },
+                          "subtitle_group": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "filter_rule": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                              "must_contain": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "must_not_contain": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "use_regex": {
+                                "type": [
+                                  "boolean",
+                                  "null"
+                                ]
+                              },
+                              "case_sensitive": {
+                                "type": [
+                                  "boolean",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "minProperties": 1
+                          },
+                          "offset": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ],
+                            "minimum": 0
+                          },
+                          "expected_folder_name": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "minProperties": 1
                       }
-                    },
-                    "required": [
-                      "auth_mode",
-                      "fallback_enabled"
-                    ]
+                    }
                   },
-                  "storage_dir": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "patch": {
+                  {
                     "type": "object",
-                    "additionalProperties": false
+                    "additionalProperties": false,
+                    "required": [
+                      "target_scope",
+                      "expected_revision",
+                      "idempotency_key",
+                      "confirm",
+                      "ab_config",
+                      "patch"
+                    ],
+                    "properties": {
+                      "target_scope": {
+                        "const": "ASSOCIATED_RSS"
+                      },
+                      "expected_revision": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "idempotency_key": {
+                        "type": "string",
+                        "x-request-scoped": true
+                      },
+                      "confirm": {
+                        "const": true
+                      },
+                      "ab_config": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "x-request-scoped": true,
+                        "properties": {
+                          "auth_mode": {
+                            "type": "string",
+                            "enum": [
+                              "password",
+                              "api_token"
+                            ]
+                          },
+                          "base_url": {
+                            "type": "string",
+                            "x-request-scoped": true
+                          },
+                          "username": {
+                            "type": "string",
+                            "x-request-scoped": true
+                          },
+                          "password": {
+                            "type": "string",
+                            "x-request-scoped": true
+                          },
+                          "token": {
+                            "type": "string",
+                            "x-request-scoped": true
+                          },
+                          "fallback_enabled": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "auth_mode",
+                          "fallback_enabled"
+                        ]
+                      },
+                      "storage_dir": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "patch": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "name": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "aggregate": {
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "parser": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "minProperties": 1
+                      }
+                    }
                   }
-                }
+                ]
               },
-              "example": {
-                "target_scope": "示例",
-                "expected_revision": 1,
-                "confirm": true,
-                "patch": {}
-              }
+              "example": {}
             }
           },
           "description": "修改外部追番方案"
@@ -23826,6 +24047,17 @@
                                   "requires_confirmation": {
                                     "title": "Requires Confirmation",
                                     "type": "boolean"
+                                  },
+                                  "target_scopes": {
+                                    "items": {
+                                      "enum": [
+                                        "SUBSCRIPTION",
+                                        "ASSOCIATED_RSS"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "title": "Target Scopes",
+                                    "type": "array"
                                   }
                                 },
                                 "required": [
@@ -23936,7 +24168,8 @@
                           "code": "示例",
                           "label": "示例",
                           "style": "示例",
-                          "requires_confirmation": true
+                          "requires_confirmation": true,
+                          "target_scopes": []
                         }
                       ],
                       "valid_resource_count": 0,
@@ -24466,6 +24699,17 @@
                                   "requires_confirmation": {
                                     "title": "Requires Confirmation",
                                     "type": "boolean"
+                                  },
+                                  "target_scopes": {
+                                    "items": {
+                                      "enum": [
+                                        "SUBSCRIPTION",
+                                        "ASSOCIATED_RSS"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "title": "Target Scopes",
+                                    "type": "array"
                                   }
                                 },
                                 "required": [
@@ -24670,7 +24914,8 @@
                           "code": "示例",
                           "label": "示例",
                           "style": "示例",
-                          "requires_confirmation": true
+                          "requires_confirmation": true,
+                          "target_scopes": []
                         }
                       ],
                       "valid_resource_count": 0,
@@ -25212,6 +25457,17 @@
                                   "requires_confirmation": {
                                     "title": "Requires Confirmation",
                                     "type": "boolean"
+                                  },
+                                  "target_scopes": {
+                                    "items": {
+                                      "enum": [
+                                        "SUBSCRIPTION",
+                                        "ASSOCIATED_RSS"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "title": "Target Scopes",
+                                    "type": "array"
                                   }
                                 },
                                 "required": [
@@ -25327,7 +25583,8 @@
                           "code": "示例",
                           "label": "示例",
                           "style": "示例",
-                          "requires_confirmation": true
+                          "requires_confirmation": true,
+                          "target_scopes": []
                         }
                       ],
                       "valid_resource_count": 0,
@@ -25908,6 +26165,17 @@
                                   "requires_confirmation": {
                                     "title": "Requires Confirmation",
                                     "type": "boolean"
+                                  },
+                                  "target_scopes": {
+                                    "items": {
+                                      "enum": [
+                                        "SUBSCRIPTION",
+                                        "ASSOCIATED_RSS"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "title": "Target Scopes",
+                                    "type": "array"
                                   }
                                 },
                                 "required": [
@@ -26024,7 +26292,8 @@
                           "code": "示例",
                           "label": "示例",
                           "style": "示例",
-                          "requires_confirmation": true
+                          "requires_confirmation": true,
+                          "target_scopes": []
                         }
                       ],
                       "valid_resource_count": 0,
@@ -26499,6 +26768,17 @@
                                   "requires_confirmation": {
                                     "title": "Requires Confirmation",
                                     "type": "boolean"
+                                  },
+                                  "target_scopes": {
+                                    "items": {
+                                      "enum": [
+                                        "SUBSCRIPTION",
+                                        "ASSOCIATED_RSS"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "title": "Target Scopes",
+                                    "type": "array"
                                   }
                                 },
                                 "required": [
@@ -26703,7 +26983,8 @@
                           "code": "示例",
                           "label": "示例",
                           "style": "示例",
-                          "requires_confirmation": true
+                          "requires_confirmation": true,
+                          "target_scopes": []
                         }
                       ],
                       "valid_resource_count": 0,
@@ -27251,6 +27532,17 @@
                                   "requires_confirmation": {
                                     "title": "Requires Confirmation",
                                     "type": "boolean"
+                                  },
+                                  "target_scopes": {
+                                    "items": {
+                                      "enum": [
+                                        "SUBSCRIPTION",
+                                        "ASSOCIATED_RSS"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "title": "Target Scopes",
+                                    "type": "array"
                                   }
                                 },
                                 "required": [
@@ -27366,7 +27658,8 @@
                           "code": "示例",
                           "label": "示例",
                           "style": "示例",
-                          "requires_confirmation": true
+                          "requires_confirmation": true,
+                          "target_scopes": []
                         }
                       ],
                       "valid_resource_count": 0,

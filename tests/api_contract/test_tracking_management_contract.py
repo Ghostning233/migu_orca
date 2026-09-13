@@ -60,3 +60,48 @@ def test_public_action_and_management_status_are_enumerated() -> None:
                                     needs_manual=False, safe_message="x",
                                     tracking={"tracking_id": "trk", "status": "ACTIVE",
                                               "status_label": "正在追番", "status_group": "ACTIVE", "revision": 1})
+
+
+def test_modify_patch_is_strictly_discriminated_by_scope() -> None:
+    base = {
+        "expected_revision": 1, "idempotency_key": "key-1", "confirm": True,
+        "ab_config": {"auth_mode": "password", "base_url": "https://ab.invalid",
+                      "username": "u", "password": "p", "fallback_enabled": False},
+    }
+    subscription = TrackingModifyPayload.model_validate({
+        **base, "tracking_id": "trk_1", "target_scope": "SUBSCRIPTION",
+        "patch": {"season": 2, "filter_rule": {"must_contain": "1080p"}},
+    })
+    assert subscription.patch.model_dump(exclude_unset=True) == {
+        "season": 2, "filter_rule": {"must_contain": "1080p"}
+    }
+    rss = TrackingModifyPayload.model_validate({
+        **base, "tracking_id": "trk_1", "target_scope": "ASSOCIATED_RSS",
+        "patch": {"aggregate": True},
+    })
+    assert rss.patch.model_dump(exclude_unset=True) == {"aggregate": True}
+    with pytest.raises(ValidationError):
+        TrackingModifyPayload.model_validate({
+            **base, "tracking_id": "trk_1", "target_scope": "SUBSCRIPTION",
+            "patch": {"name": "rss"},
+        })
+    with pytest.raises(ValidationError):
+        TrackingModifyPayload.model_validate({
+            **base, "tracking_id": "trk_1", "target_scope": "ASSOCIATED_RSS",
+            "patch": {"title": "show"},
+        })
+    with pytest.raises(ValidationError):
+        TrackingModifyPayload.model_validate({
+            **base, "tracking_id": "trk_1", "target_scope": "SUBSCRIPTION",
+            "patch": {"title": "show", "rss_url": "https://ab.invalid/rss"},
+        })
+
+
+def test_management_action_scopes_are_server_computed_without_mapping_values() -> None:
+    from apps.migu_orca_web.tracking_serializers import tracking_available_actions
+
+    actions = tracking_available_actions(
+        "ACTIVE", {"subscription_id": "opaque-sub", "rss_ids": ["opaque-rss"]}
+    )
+    assert all(item["target_scopes"] == ["SUBSCRIPTION", "ASSOCIATED_RSS"] for item in actions)
+    assert all("opaque" not in str(item) for item in actions)

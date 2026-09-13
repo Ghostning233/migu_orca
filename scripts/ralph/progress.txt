@@ -15,3 +15,13 @@ Started: Sun Sep 13 08:40:00 CST 2026
 - 外部写全部使用最新 revision、confirm、单意图 opaque idempotency key、单飞、服务端返回收敛和结果未知只读回查；不得盲重试或用新 key 掩盖未知结果。
 - DELETE_EXTERNAL 始终逐条操作且请求无 `file` 字段，必须明确并实际保留本地 Request、tracking、审计、任务和已下载媒体。
 - “已更新集数”固定为待开发；不得根据资源数、RSS、下载或文件名猜测。自动化只用 fake/route mock，不连接真实 MiKan、Auto Bangumi 或 qBittorrent。
+
+## [2026-09-13 09:10:00 CST] - US-303
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented: 补齐 modifyTrackingItem 的 scope-discriminated 严格 patch 联合，并为 server-computed 管理动作增加仅含公开 scope 的 target_scopes。
+- Files changed: Python schemas/serializer/DTO、OpenAPI/generated TypeScript、endpoint inventory/handoff 与契约测试。
+- **Learnings for future iterations:**
+  - generated 请求体必须由 OpenAPI oneOf 保持 scope 与 patch 字段绑定；前端只从 operations 派生类型。
+  - target_scopes 只能由本地映射是否存在计算，绝不把映射值带入公开动作对象。
+  - 定向验证：tracking contract tests、OpenAPI drift check、frontend api:check、typecheck 均通过。
+---

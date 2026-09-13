@@ -311,11 +311,65 @@ def _management_endpoint(operation_id: str, summary: str, *, extra: dict[str, An
         "success": TrackingManagementResultDTO,
         "errors": _MANAGEMENT_ERRORS,
     }
+
+
+def _modify_request_body() -> dict[str, Any]:
+    """Strict scope-discriminated request union for external modify."""
+    common = {key: value for key, value in _MANAGEMENT_COMMON.items() if key != "tracking_id"}
+    subscription_patch = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "title": {"type": ["string", "null"]},
+            "season": {"type": ["integer", "null"], "minimum": 0, "maximum": 100},
+            "subtitle_group": {"type": ["string", "null"]},
+            "filter_rule": {
+                "type": ["object", "null"],
+                "additionalProperties": False,
+                "properties": {
+                    "must_contain": {"type": ["string", "null"]},
+                    "must_not_contain": {"type": ["string", "null"]},
+                    "use_regex": {"type": ["boolean", "null"]},
+                    "case_sensitive": {"type": ["boolean", "null"]},
+                },
+                "minProperties": 1,
+            },
+            "offset": {"type": ["integer", "null"], "minimum": 0},
+            "expected_folder_name": {"type": ["string", "null"]},
+        },
+        "minProperties": 1,
+    }
+    rss_patch = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "name": {"type": ["string", "null"]},
+            "aggregate": {"type": ["boolean", "null"]},
+            "parser": {"type": ["string", "null"]},
+        },
+        "minProperties": 1,
+    }
+
+    def branch(scope: str, patch: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["target_scope", "expected_revision", "idempotency_key", "confirm", "ab_config", "patch"],
+            "properties": {
+                **common,
+                "target_scope": {"const": scope},
+                "patch": patch,
+            },
+        }
+
+    return {
+        "oneOf": [branch("SUBSCRIPTION", subscription_patch), branch("ASSOCIATED_RSS", rss_patch)],
+    }
 _ENDPOINTS: dict[str, dict[str, Any]] = {
-    "POST /api/v1/tracking/items/<path:tracking_id>/modify": _management_endpoint(
-        "modifyTrackingItem", "修改外部追番方案",
-        extra={"patch": {"type": "object", "additionalProperties": False}}, required_extra=["patch"]
-    ),
+    "POST /api/v1/tracking/items/<path:tracking_id>/modify": {
+        **_management_endpoint("modifyTrackingItem", "修改外部追番方案", required_extra=["patch"]),
+        "requestBody": _modify_request_body(),
+    },
     "POST /api/v1/tracking/items/<path:tracking_id>/set-enabled": _management_endpoint(
         "setTrackingItemEnabled", "启用或停用外部追番方案",
         extra={"enabled": {"type": "boolean"}}, required_extra=["enabled"]

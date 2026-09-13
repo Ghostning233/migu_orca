@@ -339,7 +339,9 @@ class TrackingItemModifyView(PostView):
     def save(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, TrackingModifyPayload)
         payload = self.request_validator_model
-        return _run_management_route(payload, "MODIFY", patch=payload.patch)
+        return _run_management_route(
+            payload, "MODIFY", patch=payload.patch.model_dump(exclude_unset=True)
+        )
 
 
 @class_route(api_blueprint, "/api/v1/tracking/items/<path:tracking_id>/set-enabled", methods=["POST"])

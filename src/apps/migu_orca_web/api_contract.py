@@ -862,6 +862,7 @@ class TrackingAvailableActionDTO(_StrictBase):
     label: str
     style: Literal["PRIMARY", "SECONDARY", "DANGER"]
     requires_confirmation: bool
+    target_scopes: list[Literal["SUBSCRIPTION", "ASSOCIATED_RSS"]] = Field(default_factory=list)
 
 
 class TrackingAuditEventDTO(_StrictBase):

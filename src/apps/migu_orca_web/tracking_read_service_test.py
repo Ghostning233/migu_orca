@@ -101,7 +101,8 @@ def test_available_actions_expose_stage31_management_actions() -> None:
 
 def test_available_action_objects_are_strict_shape() -> None:
     for action in tracking_available_actions(TRACKING_STATUS_SUBMIT_FAILED):
-        assert set(action) == {"code", "label", "style", "requires_confirmation"}
+        assert set(action) == {"code", "label", "style", "requires_confirmation", "target_scopes"}
+        assert action["target_scopes"] == []
         assert action["style"] in {"PRIMARY", "SECONDARY", "DANGER"}
         assert isinstance(action["requires_confirmation"], bool)
 

@@ -33,7 +33,7 @@ F-F 是 handoff 的消费边界，不表示本阶段已经交付管理页面。S
 | 提交 | `submitTrackingItem` | 必须为 `true` | `expected_revision` + `idempotency_key` | 重新验证后写外部；明确失败用 retry，未知结果只能 recover |
 | 重试 | `retryTrackingItem` | 必须为 `true` | `expected_revision` + 新操作的 `idempotency_key` | 仅明确失败允许；不得绕过 recovery |
 | 恢复 | `recoverTrackingItem` | 人工标记时为 `true` | `expected_revision` | `AUTO` 纯本地；`VERIFY_EXTERNAL` 只读核验；`MARK_SUCCEEDED`/`MARK_FAILED` 是人工结论，不盲目重建 |
-| 修改 | `modifyTrackingItem` | 必须为 `true` | `target_scope` + `expected_revision` + `idempotency_key` | `SUBSCRIPTION`/`ASSOCIATED_RSS`；服务端 read-before-write + capability |
+| 修改 | `modifyTrackingItem` | 必须为 `true` | `target_scope` + `expected_revision` + `idempotency_key` | `SUBSCRIPTION` 时 patch 仅允许 `title`/`season`/`subtitle_group`/`filter_rule`/`offset`/`expected_folder_name`；`ASSOCIATED_RSS` 时仅允许 `name`/`aggregate`/`parser`；服务端 read-before-write + capability |
 | 启停 | `setTrackingItemEnabled` | 必须为 `true` | 同上 | 同上；外部删除/停用固定 `file=false` |
 | 刷新 RSS | `refreshTrackingRss` | 必须为 `true` | `target_scope=ASSOCIATED_RSS` + revision + 幂等 | 仅关联 RSS capability |
 | 外部删除 | `deleteExternalTrackingItem` | 必须为 `true` | scope + revision + 幂等 | 保留本地 Request、tracking、审计和媒体；固定 `file=false` |
@@ -58,9 +58,10 @@ F-F 是 handoff 的消费边界，不表示本阶段已经交付管理页面。S
 
 ## F-F 启动条件与 Stage 38 补口
 
-Stage 32 已合入，F-A～F-E 也已完成，因此 F-F 已规划为 Stage 38。实时复核发现 generated
-`modifyTrackingItem.patch` 仍为 `Record<string, never>`，且 `available_actions` 尚无可安全判定的目标 scope；
-US-303 只补齐严格 patch 联合与 server-computed `target_scopes`，不新增管理动作、状态、endpoint 或外部语义。
+Stage 32 已合入，F-A～F-E 也已完成，因此 F-F 已规划为 Stage 38。US-303 已补齐 generated
+`modifyTrackingItem` 的 scope-discriminated 严格 patch 联合与 `available_actions[].target_scopes`：patch
+至少包含一个字段并拒绝跨 scope/未知字段，target scopes 只表达当前本地映射的公开 scope（不包含外部
+ID/URL/RSS）；本次补口不新增管理动作、状态、endpoint 或外部语义。
 补口通过 API drift check 与 typecheck 后再实现正式页面；Stage 33 的 QueueView 兼容挂载仍不等于管理页面完成。
 
 ## 集数占位
