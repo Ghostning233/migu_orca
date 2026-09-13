@@ -90,3 +90,15 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - 能力展示统一走 generated 白名单投影 + 固定中文 label；原始枚举（VERIFIED/SUPPORTED/UNKNOWN）不得进 DOM，version 只接受纯版本 token，否则显示「未确认」。
 - 定向验证：`npm run typecheck`、`npm run lint`、`npm run test:unit -- --run`（44 files / 438 tests）、`npm run build`、`uv run pytest tests/browser/test_app_tracking.py -q`（4 passed，真实 Chromium）、`git diff --check` 全部通过。
 ---
+## [2026-09-13 10:14:07 CST] - Stage 38 追番能力端点生命周期契约漂移修复（子 Agent B / 定向修复）
+- 修复阻断项：提交 `8543e42` 只改了 `docs/api/endpoint_inventory.md` 中 `/api/v1/autobangumi/capabilities` 的 `relation` 文案（补入 D38-02.4 的「`subscription_submit` 仅由已验证的 3.1.18 password/legacy probe 支持」），但未同步 registry，导致 `test_inventory_projects_lifecycle_registry` 红灯（`1 failed, 1638 passed`）。
+- Fix：把同一句真实语义补进 `src/apps/migu_orca_web/endpoint_lifecycle.py` 对应 `_entry(...)` 的 `relation`（与 markdown 单元格逐字一致，含反引号），使 markdown inventory 与 registry 重新一致；未新增/删除端点，未改路由、状态机或业务语义。
+- 因 `openapi_gen` 会把整个 `x-lifecycle`（含 `relation`）投影进 OpenAPI，registry 变更后 `docs/api/openapi.json` 必然过期，故按官方命令 `uv run python -m apps.migu_orca_web.openapi_gen` 重新生成；diff 仅 1 行 `x-lifecycle.relation` 描述字符串，无 path/schema/status 契约变化；`frontend/src/api/generated/api.ts` 不内嵌 `relation`，未受影响、未改动。
+- 在 `tests/api_contract/test_endpoint_lifecycle.py` 新增守护 `test_capabilities_relation_records_subscription_submit_probe_scope`：显式断言该 relation 同时包含 `subscription_submit` 与 `3.1.18`，避免未来把该约束从两侧一起静默删除；未削弱任何现有断言。
+- Files changed: `src/apps/migu_orca_web/endpoint_lifecycle.py`、`docs/api/openapi.json`（重生成）、`tests/api_contract/test_endpoint_lifecycle.py`、`scripts/ralph/progress.txt`。
+- **Learnings for future iterations:**
+  - `ENDPOINT_LIFECYCLE` 的 `relation` 不只是 registry 内部文案：`openapi_gen` 会把 `lifecycle/relation/authority` 整体写入每个 operation 的 `x-lifecycle`，因此改 `relation` 必须同步重生成 `docs/api/openapi.json`，否则 `test_openapi_generation.py` 与 `migu-orca-openapi --check` 会红。
+  - 改 markdown inventory 的任一单元格前先确认它是否由 registry 投影而来；「只改文档」会立刻打破 `test_inventory_projects_lifecycle_registry` 的逐字相等断言。三处（registry / inventory / openapi.json）必须一起动。
+  - 仅比对单行不足以发现漂移，`test_inventory_projects_lifecycle_registry` 的全量 dict 相等才是权威守护；本次全量比对确认「Omitting 38 identical items」，仅该行曾被改坏。
+- 定向验证：`uv run pytest tests/api_contract/test_endpoint_lifecycle.py -q`（5 passed）、`uv run pytest -q -m "not browser"`（1640 passed，0 failed）、`uv run ruff check src tests`（All checks passed）、`uv run migu-orca-openapi --check`（OpenAPI up to date，exit 0）、`git diff --check`（exit 0）。
+---

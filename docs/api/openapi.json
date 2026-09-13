@@ -324,7 +324,7 @@
         },
         "x-lifecycle": {
           "lifecycle": "PRIMARY",
-          "relation": "只读能力探测；管理写入时重新探测",
+          "relation": "只读能力探测；管理写入时重新探测；`subscription_submit` 仅由已验证的 3.1.18 password/legacy probe 支持",
           "authority": "Capability probe"
         },
         "requestBody": {
