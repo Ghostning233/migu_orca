@@ -2,6 +2,10 @@
 
 Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修改 Web API 代码时遵循以下约定。
 
+Stage 38 US-303 只允许为既有 F-F 管理契约补齐严格 modify patch 联合与
+server-computed `target_scopes`，并同步 DTO/serializer/OpenAPI/generated client/契约测试；不得新增
+endpoint、状态、持久化 schema、外部动作或业务语义，响应不得暴露外部 ID、URL、RSS 或原始映射。
+
 ## 模块职责（拆分后的布局）
 
 - `blueprints.py`：定义 `api_blueprint` / `web_blueprint`（唯一 Blueprint 归属地，避免循环导入）。

@@ -3,23 +3,16 @@
 MiGuOrca 的 Vue 3 + TypeScript(strict) + Vite 前端工程。依赖与命令全部走 npm（`npm ci`），
 与后端 `uv` 分离；**不得**混用多个 lockfile（`package-lock.json` 是唯一来源）。
 
-## Stage 37 当前执行边界
+## Stage 38 当前执行边界
 
-- 当前执行 PRD 是 `docs/MiGuOrca_stage37_plans_safe_info_PRD.md`，分支固定为
-  `ralph/stage37-plans-safe-info`，stories 为 US-294～US-302。
-- Stage 37 只实现 F-E：本地追番方案列表—详情、真实 SafeInfo、共享 saved Request 修改、复制再用
-  与精确 tracking 链接；不得顺带实现 F-F 正式追番管理或 F-G 设置/发布收尾。
-- US-294 只为现有 `RequestSummaryDTO` 追加可空 `season`/`updated_at`、把候选字幕组收紧为无 URL 的
-  严格公开摘要并同步 OpenAPI/generated；不新增端点、不改状态机/持久化 schema。其余 stories
-  不得继续扩展后端契约。
-- `getRequestSafeInfo` 是“全部信息”唯一数据源；`listTrackingItems` 仅作本地只读投影并按公开
-  `request_id` 唯一精确关联。不得推导 ID、读取 available actions 或调用任何同步/外部写动作。
-- `AnimeDraftEditor` 保持受控展示层；saved Request transport 由详情宿主调用 generated
-  `modifyRequest`，不得塞入 `useDraftSession` 或套用 draft revision/preview-modify 语义。
-- “复制再用”只使用一次性内存白名单 handoff；刷新失效，用户仍须明确搜索并选择真实 MiKan
-  合集、生成新草案。不得复制 Request/draft/RSS/capability 或自动保存、确认、外部提交。
-- 每次 Ralph 最多运行 3 个 stories；完成 US-296、US-299、US-302 后必须停下独立审核。普通 story
-  只跑定向检查，完整前端、后端非浏览器与 Chromium 门禁只在 US-302 运行。
+- 当前执行 PRD 是 `docs/MiGuOrca_stage38_tracking_management_PRD.md`，分支固定为
+  `ralph/stage38-tracking-management`，stories 为 US-303～US-317。
+- Stage 38 只实现 F-F 正式追番管理；F-G Settings 简化、全局连接状态、跨页收敛和发布 Gate 5 不进入本阶段。
+- US-303 仅补齐严格 generated modify patch 联合与 server-computed `target_scopes`；不得新增 endpoint、状态、持久化 schema、外部动作或业务语义。其余 stories 不得继续扩展后端契约。
+- 列表/详情只消费 generated tracking DTO；动作只取 `available_actions + target_scopes + 当前 capability` 交集。未知值 fail closed，不手写 DTO 或猜 scope。
+- 凭据只存在 TrackingView 实例与单次 POST body；外部动作必须显式触发并复用 revision、confirm、单意图 idempotency、回查和结果未知保护。
+- 删除只允许当前单条外部对象且请求无 `file` 字段；必须保留本地 Request、tracking、审计、任务与媒体。“已更新集数”仍固定待开发。
+- 每次 Ralph 最多运行 3 个 stories；完成 US-305、US-308、US-311、US-314、US-317 后必须停下独立审核。完整门禁只在 US-317 运行。
 
 ## 工程结构与约定
 

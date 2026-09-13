@@ -19,7 +19,7 @@
 | F-C 单番确认 | 明确确认后保存并进入待提交 | `confirmRequestSave` | `operations['confirmRequestSave']`；结果中的 `handoff.tracking_id` 是后续入口 |
 | F-D 批量确认 | 逐条确认，允许部分成功 | `saveConfirmBatchItems` | `operations['saveConfirmBatchItems']`；按输入顺序消费 `results[]` |
 | F-E 追番方案 | 列表、详情、安全信息、复核 | `listTrackingItems`、`getTrackingItemDetail`、`getRequestSafeInfo`、`revalidateTrackingItem` | 对应 `operations[...]` 的 query/path/body 与 `result` |
-| F-F 正式追番管理 | 同步、提交/重试/恢复、修改、启停、刷新、外部删除 | `syncTrackingItems`、`submitTrackingItem`、`retryTrackingItem`、`recoverTrackingItem`、`modifyTrackingItem`、`setTrackingItemEnabled`、`refreshTrackingRss`、`deleteExternalTrackingItem` | 对应 `operations[...]`；必须等待 Stage 32 合入后重新执行 generated-client drift check |
+| F-F 正式追番管理 | 同步、提交/重试/恢复、修改、启停、刷新、外部删除 | `syncTrackingItems`、`submitTrackingItem`、`retryTrackingItem`、`recoverTrackingItem`、`modifyTrackingItem`、`setTrackingItemEnabled`、`refreshTrackingRss`、`deleteExternalTrackingItem` | 对应 `operations[...]`；Stage 38 US-303 先补严格 modify patch 与安全 target scopes |
 
 F-F 是 handoff 的消费边界，不表示本阶段已经交付管理页面。Stage 33 的 `QueueView` 兼容挂载只代表旧队列可访问，不等于正式追番管理完成。
 
@@ -56,9 +56,12 @@ F-F 是 handoff 的消费边界，不表示本阶段已经交付管理页面。S
 - F-E 使用 tracking list/detail 和 safe-info；`safe_info` 是白名单展示数据，不能推断外部原始响应或本地路径。
 - 所有 tracking 投影以 `TrackingRecord` 为唯一外部提交权威；旧 queue/AB 结果仅为兼容投影或迁移证据。
 
-## F-F 等待条件
+## F-F 启动条件与 Stage 38 补口
 
-F-F 必须等待 Stage 32 合入后，以最终 `openapi.json` 重新生成并通过 `npm run api:check`、typecheck、lint、unit 和 build，再开始正式页面实现。Stage 33 的 QueueView 兼容挂载不改变上述等待条件，也不授权新增管理动作。
+Stage 32 已合入，F-A～F-E 也已完成，因此 F-F 已规划为 Stage 38。实时复核发现 generated
+`modifyTrackingItem.patch` 仍为 `Record<string, never>`，且 `available_actions` 尚无可安全判定的目标 scope；
+US-303 只补齐严格 patch 联合与 server-computed `target_scopes`，不新增管理动作、状态、endpoint 或外部语义。
+补口通过 API drift check 与 typecheck 后再实现正式页面；Stage 33 的 QueueView 兼容挂载仍不等于管理页面完成。
 
 ## 集数占位
 
