@@ -1,8 +1,10 @@
+from dataclasses import replace
 from pathlib import Path
 
 from ab_engine.models.management import AutoBangumiCapabilities, ExternalSubscription
 from apps.migu_orca_web.tracking_sync_service import run_tracking_sync
 from shared.errors import Stage1Error
+from storage_engine.controllers.operation_repository import bind_tracking_operation
 from storage_engine.controllers.storage_config import load_storage_config
 from storage_engine.controllers.tracking_repository import (
     ensure_tracking_record,
@@ -48,6 +50,26 @@ def test_external_sync_is_idempotent(tmp_path: Path) -> None:
     assert len(record.audit_events) == 1
 
 
+def test_legacy_sync_does_not_use_request_rss_as_match_evidence(tmp_path: Path) -> None:
+    config = load_storage_config(tmp_path)
+    from storage_engine.controllers.request_repository import save_request_snapshot
+    save_request_snapshot(config, {
+        "request_id": "legacy-rss", "confirmable_config": {"selected_rss_url": "other-rss"},
+    })
+    local_record = create_tracking_record(
+        request_id="legacy-rss", status=TRACKING_STATUS_ACTIVE,
+        plan_summary={"title": "Show", "season": 1, "subtitle_group": "Group"},
+    )
+    ensure_tracking_record(config, local_record)
+    result = run_tracking_sync(
+        config=config,
+        management_client=FakeManagementClient([ExternalSubscription(
+            "sub-1", "Show", 1, "Group", rss_urls=("expected-rss",),
+        )]),
+    )
+    assert result.summary.updated == 1
+
+
 def test_unique_local_match_updates_once_and_merges_old_orphan(tmp_path: Path) -> None:
     config = load_storage_config(tmp_path)
     orphan = run_tracking_sync(
@@ -81,3 +103,96 @@ def test_external_read_failure_does_not_mark_locals_deleted(tmp_path: Path) -> N
     assert result.sync_status == "FAILED"
     assert result.summary.checked == 0
     assert "EXTERNAL_CAPABILITY_FAILED" in result.warnings
+
+
+def test_saved_sync_partial_capability_does_not_write(tmp_path: Path) -> None:
+    config = load_storage_config(tmp_path)
+    partial = AutoBangumiCapabilities(
+        probe_status="PARTIAL", version="3.1.18", adapter="legacy_3_1",
+        subscription_list="SUPPORTED", subscription_detail="UNKNOWN",
+        rss_list="UNKNOWN", external_verify="UNKNOWN",
+    )
+    client = FakeManagementClient([ExternalSubscription("sub-1", "Show", 1, "Group")])
+    client.read_snapshot = lambda: (partial, client.subscriptions, [])
+    result = run_tracking_sync(
+        config=config, management_client=client,
+        connection_ref="11111111-1111-4111-8111-111111111111",
+    )
+    assert result.sync_status == "FAILED"
+    assert result.summary.checked == 0
+    assert list_tracking_records(config).records == []
+
+
+def test_saved_sync_preserves_record_with_unresolved_operation(tmp_path: Path) -> None:
+    config = load_storage_config(tmp_path)
+    ref = "11111111-1111-4111-8111-111111111111"
+    record = create_tracking_record(
+        request_id="pending-request", status=TRACKING_STATUS_ACTIVE,
+        plan_summary={"title": "Show", "season": 1, "subtitle_group": "Group"},
+    )
+    record, _ = ensure_tracking_record(config, record)
+    operation, _ = bind_tracking_operation(
+        config, tracking_id=record.tracking_id, operation="SUBMIT",
+        idempotency_key="pending-sync-key", expected_revision=record.revision,
+        request_fingerprint="fingerprint", connection_ref=ref,
+    )
+    from storage_engine.controllers.tracking_repository import compare_and_swap_tracking_record
+    compare_and_swap_tracking_record(
+        config, record.tracking_id, record.revision,
+        record.__class__(**{**record.__dict__, "revision": 2, "current_operation_id": operation.operation_id}),
+    )
+    before = list_tracking_records(config).records[0]
+    result = run_tracking_sync(
+        config=config,
+        management_client=FakeManagementClient([ExternalSubscription("sub-1", "Show", 1, "Group")]),
+        connection_ref=ref,
+    )
+    after = list_tracking_records(config).records[0]
+    assert result.summary.created == 1
+    assert after.status == before.status
+    assert after.external_mapping == before.external_mapping
+    assert after.current_operation_id == operation.operation_id
+
+
+def test_saved_sync_duplicate_external_id_never_persists_conflict_record(tmp_path: Path) -> None:
+    config = load_storage_config(tmp_path)
+    existing = replace(create_tracking_record(
+        request_id="req-1", status=TRACKING_STATUS_ACTIVE,
+        plan_summary={"title": "Show", "season": 1, "subtitle_group": "Group"},
+    ), external_mapping={"subscription_id": "sub-1", "connection_ref": "11111111-1111-4111-8111-111111111111"})
+    ensure_tracking_record(config, existing)
+    duplicate = ExternalSubscription("sub-1", "Show", 1, "Group")
+    result = run_tracking_sync(
+        config=config, connection_ref="11111111-1111-4111-8111-111111111111",
+        management_client=FakeManagementClient([duplicate, duplicate]),
+    )
+    records = list_tracking_records(config).records
+    assert "EXTERNAL_MATCH_CONFLICT" in result.warnings
+    assert len(records) == 1
+    assert records[0].tracking_id == existing.tracking_id
+
+
+def test_saved_sync_unproven_match_only_protects_affected_local(tmp_path: Path) -> None:
+    config = load_storage_config(tmp_path)
+    ref = "11111111-1111-4111-8111-111111111111"
+    affected = replace(create_tracking_record(
+        request_id="req-affected", status=TRACKING_STATUS_ACTIVE,
+        plan_summary={"title": "Show", "season": 1, "subtitle_group": "Group"},
+    ), external_mapping={})
+    healthy = replace(create_tracking_record(
+        request_id="req-healthy", status=TRACKING_STATUS_ACTIVE,
+        plan_summary={"title": "Other", "season": 1, "subtitle_group": "Group"},
+    ), external_mapping={"subscription_id": "sub-missing", "connection_ref": ref})
+    ensure_tracking_record(config, affected)
+    ensure_tracking_record(config, healthy)
+    result = run_tracking_sync(
+        config=config, connection_ref=ref,
+        management_client=FakeManagementClient([
+            ExternalSubscription("sub-a-1", "Show", 1, "Group"),
+            ExternalSubscription("sub-a-2", "Show", 1, "Group"),
+        ]),
+    )
+    records = {record.tracking_id: record for record in list_tracking_records(config).records}
+    assert "EXTERNAL_MATCH_UNPROVEN" in result.warnings
+    assert records[affected.tracking_id].status == TRACKING_STATUS_ACTIVE
+    assert records[healthy.tracking_id].status == "EXTERNAL_DELETED"

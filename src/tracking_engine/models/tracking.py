@@ -330,14 +330,19 @@ def tracking_id_for_request(request_id: str) -> str:
     return f"trk_{digest[:32]}"
 
 
-def tracking_id_for_external(adapter: str, object_kind: str, external_id: str) -> str:
+def tracking_id_for_external(
+    adapter: str, object_kind: str, external_id: str, connection_ref: str | UUID | None = None
+) -> str:
     """Return the stable opaque id for one external object (D30-09)."""
     adapter = _require_opaque_token(adapter, "adapter")
     object_kind = _require_opaque_token(object_kind, "object_kind")
     external_id = _require_opaque_token(external_id, "external_id")
-    digest = hashlib.sha256(
-        f"migu-orca/tracking/external/v1\x00{adapter}\x00{object_kind}\x00{external_id}".encode()
-    ).hexdigest()
+    clean_ref = _optional_connection_ref(connection_ref)
+    if clean_ref is None:
+        seed = f"migu-orca/tracking/external/v1\x00{adapter}\x00{object_kind}\x00{external_id}"
+    else:
+        seed = f"migu-orca/tracking/external/v2\x00connection\x00{clean_ref}\x00{adapter}\x00{object_kind}\x00{external_id}"
+    digest = hashlib.sha256(seed.encode()).hexdigest()
     return f"trk_{digest[:32]}"
 
 
@@ -525,7 +530,7 @@ def create_external_tracking_record(
     timestamp = now or utc_now()
     status = TRACKING_STATUS_EXTERNAL_DELETED if external_deleted else TRACKING_STATUS_EXTERNAL_ONLY
     record = TrackingRecord(
-        tracking_id=tracking_id_for_external(adapter, object_kind, external_id),
+        tracking_id=tracking_id_for_external(adapter, object_kind, external_id, clean_connection_ref),
         request_id=None,
         origin=TRACKING_ORIGIN_EXTERNAL_SYNC,
         status=status,

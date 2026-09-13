@@ -14,17 +14,27 @@ from ab_engine.controllers.ab_management_client import (
     Legacy31ManagementClient,
 )
 from ab_engine.controllers.reconcile import (
+    RECONCILE_WARNING_CONFLICT,
+    RECONCILE_WARNING_UNPROVEN,
     LocalTrackingEvidence,
     classify_missing_mapping,
     reconcile_subscriptions,
 )
 from ab_engine.models.management import AutoBangumiCapabilities
 from shared.errors import Stage1Error
+from storage_engine.controllers.operation_repository import load_tracking_operation
+from storage_engine.controllers.request_repository import load_request_snapshot
 from storage_engine.controllers.storage_config import StorageConfig, load_storage_config
 from storage_engine.controllers.tracking_repository import (
     compare_and_swap_tracking_record,
     ensure_tracking_record,
     list_tracking_records,
+)
+from tracking_engine.models.operation import (
+    TRACKING_OPERATION_STATE_IN_PROGRESS,
+    TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN,
+    TRACKING_OPERATION_STATE_PREPARED,
+    TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
 )
 from tracking_engine.models.tracking import (
     TRACKING_AUDIT_PLAN_CHANGE_DETECTED,
@@ -102,7 +112,9 @@ def run_tracking_sync(
             TrackingSyncSummary(), (SYNC_WARNING_CAPABILITY_FAILED,)
         )
 
-    if capabilities.subscription_list != "SUPPORTED":
+    if capabilities.subscription_list != "SUPPORTED" or (
+        connection_ref is not None and capabilities.probe_status != "VERIFIED"
+    ):
         return TrackingSyncResult(
             "FAILED", checked_at, capabilities, TrackingSyncSummary(),
             (SYNC_WARNING_CAPABILITY_FAILED,)
@@ -117,12 +129,22 @@ def run_tracking_sync(
             origin=record.origin,
             plan_summary=record.plan_summary,
             external_mapping=record.external_mapping,
+            rss_urls=(_request_rss_urls(resolved_config, record) if connection_ref is not None else ()),
         )
         for record in local_result.records
     )
-    decisions = reconcile_subscriptions(externals, evidence)
+    decisions = reconcile_subscriptions(externals, evidence, connection_ref=connection_ref)
+    protected_ids = {
+        record.tracking_id for record in local_result.records
+        if connection_ref is not None and _has_pending_operation(resolved_config, record)
+    }
+    for decision in decisions:
+        protected_ids.update(decision.protected_tracking_ids)
+    if protected_ids:
+        warnings: list[str] = [RECONCILE_WARNING_UNPROVEN]
+    else:
+        warnings = []
     counts = TrackingSyncSummary(unreadable=local_result.unreadable_count)
-    warnings: list[str] = []
     if local_result.unreadable_count:
         warnings.append(SYNC_WARNING_UNREADABLE)
 
@@ -131,6 +153,16 @@ def run_tracking_sync(
         if decision.warning and decision.warning not in warnings:
             warnings.append(decision.warning)
         if decision.tracking_id is None:
+            if decision.warning == RECONCILE_WARNING_CONFLICT or decision.protected_tracking_ids:
+                counts = replace(counts, checked=counts.checked + 1, unchanged=counts.unchanged + 1)
+                continue
+            if connection_ref is not None:
+                existing_external = locals_by_id.get(
+                    _external_tracking_id(decision.external_id, connection_ref)
+                )
+                if existing_external is not None and existing_external.tracking_id in protected_ids:
+                    counts = replace(counts, checked=counts.checked + 1, unchanged=counts.unchanged + 1)
+                    continue
             record, created, failed = _ensure_external(
                 resolved_config, decision, externals, checked_at, connection_ref
             )
@@ -147,6 +179,9 @@ def run_tracking_sync(
         if local is None:
             counts = replace(counts, checked=counts.checked + 1, failed=counts.failed + 1)
             continue
+        if local.tracking_id in protected_ids:
+            counts = replace(counts, checked=counts.checked + 1, unchanged=counts.unchanged + 1)
+            continue
         updated, failed = _apply_decision(resolved_config, local, decision, checked_at, connection_ref)
         counts = replace(
             counts,
@@ -155,9 +190,11 @@ def run_tracking_sync(
             unchanged=counts.unchanged + int(not updated and not failed),
             failed=counts.failed + int(failed),
         )
-        orphan_id = _external_tracking_id(decision.external_id)
+        orphan_id = _external_tracking_id(decision.external_id, connection_ref)
         orphan = locals_by_id.get(orphan_id)
-        if orphan is not None and orphan.tracking_id != local.tracking_id and local.request_id is not None:
+        if (orphan is not None and orphan.tracking_id != local.tracking_id
+                and local.request_id is not None and _same_ref(orphan, connection_ref)
+                and orphan.tracking_id not in protected_ids):
             merged, merge_failed = _merge_orphan(resolved_config, orphan, local.tracking_id, checked_at)
             counts = replace(
                 counts, updated=counts.updated + int(merged and not merge_failed),
@@ -171,7 +208,9 @@ def run_tracking_sync(
     for local in local_result.records:
         if local.tracking_id in {d.tracking_id for d in decisions if d.tracking_id}:
             continue
-        missing = classify_missing_mapping(local, complete_subscription_list=True)
+        if local.tracking_id in protected_ids:
+            continue
+        missing = classify_missing_mapping(local, complete_subscription_list=True, connection_ref=connection_ref)
         if missing is None or _mapping_subscription_id(local) in observed_ids:
             continue
         if SYNC_WARNING_EXTERNAL_DELETED not in warnings:
@@ -310,10 +349,41 @@ def _mapping_subscription_id(record):
     return value if isinstance(value, str) else None
 
 
-def _external_tracking_id(external_id: str) -> str:
+def _external_tracking_id(external_id: str, connection_ref=None) -> str:
     from tracking_engine.models.tracking import tracking_id_for_external
 
-    return tracking_id_for_external("legacy_3_1", "subscription", external_id)
+    return tracking_id_for_external("legacy_3_1", "subscription", external_id, connection_ref)
+
+
+def _same_ref(record: TrackingRecord, connection_ref) -> bool:
+    return connection_ref is None or (record.external_mapping or {}).get("connection_ref") == str(connection_ref)
+
+
+def _has_pending_operation(config: StorageConfig, record: TrackingRecord) -> bool:
+    if record.status in {"UNKNOWN", "VERIFYING_EXTERNAL", "RECOVERY_REQUIRED"}:
+        return True
+    if not record.current_operation_id:
+        return False
+    try:
+        operation = load_tracking_operation(config, record.current_operation_id)
+    except Stage1Error:
+        return True
+    return operation.state in {
+        TRACKING_OPERATION_STATE_PREPARED, TRACKING_OPERATION_STATE_IN_PROGRESS,
+        TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN, TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
+    }
+
+
+def _request_rss_urls(config: StorageConfig, record: TrackingRecord) -> tuple[str, ...]:
+    if not record.request_id:
+        return ()
+    try:
+        request = load_request_snapshot(config, record.request_id)
+    except Stage1Error:
+        return ()
+    confirmable = request.get("confirmable_config")
+    selected_url = confirmable.get("selected_rss_url") if isinstance(confirmable, dict) else None
+    return (selected_url,) if isinstance(selected_url, str) and selected_url else ()
 
 
 def _failed_capabilities(client) -> AutoBangumiCapabilities:

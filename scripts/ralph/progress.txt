@@ -188,3 +188,12 @@ Started: 2026-09-13
 - 仅补充 saved submission service 测试：repository 重建后重放不增加外调；外调成功但持久化失败保留 RECOVERY_REQUIRED 且后续配置保存成功证明 lease 释放；NEEDS_RECONFIRM 无外调；unknown 换新 key 拒绝；未绑定 operation 不能被 saved ref 认领。
 - 主 Agent 独立运行 `uv run pytest src/apps/migu_orca_web/tracking_saved_submission_service_test.py src/apps/migu_orca_web/tracking_submission_service_test.py src/apps/migu_orca_web/tracking_recovery_service_test.py src/storage_engine/controllers/operation_repository_test.py -q --maxfail=1` → `80 passed`；Ruff、OpenAPI check、frontend api:check/typecheck 通过。
 - US-322 更新为 passes=true；US-323 保持 false，已有未提交同步修复保留，不纳入 US-322 精确提交。未运行全量、浏览器或真实上游。
+
+## 2026-09-14 / US-323 定向修复、补证与独立审核通过
+
+- 修复：saved 同步仅允许同 ref 的精确 ID 命中；其他匹配必须具备完整标题、正整数季度、字幕组及原 Request selected RSS 严格证据。重复 external ID 拒绝写入；多对象命中与候选歧义局部保护，不阻断无关同 ref 缺失记录收敛。legacy 路径不读取新 RSS 证据，保持旧行为。
+- 归属与恢复：external-only ID 按 canonical connection_ref 隔离，旧 ref 缺失不判删除；未知状态及未决、缺失或损坏 operation 均保留 tracking、mapping 与恢复锁。仅 VERIFIED 且列表 SUPPORTED 的保存连接快照允许同步写入。
+- 补证：真实 saved service 覆盖旧 ref/revision 在 client 构造前拒绝、双实例同 ID 与旧记录字节保留、歧义匹配、配置 lease 期间 save/delete 拒绝及成功/异常/能力降级后释放、未知状态与四类真实 operation 状态、损坏 operation、安全输出。主 Agent 复现歧义回归红灯后修复转绿；修正原 PARTIAL 测试误走客户端异常分支的假证据。
+- 主 Agent 验证：`uv run pytest src/ab_engine/controllers/reconcile_test.py src/apps/migu_orca_web/tracking_sync_service_test.py src/apps/migu_orca_web/tracking_saved_sync_service_test.py src/apps/migu_orca_web/tracking_saved_submission_service_test.py src/tracking_engine/models/tracking_test.py -q --maxfail=1` → 81 passed；七个受影响代码/测试文件 Ruff、`git diff --check`、`uv run migu-orca-openapi --check`、frontend `npm run api:check && npm run typecheck` 均通过。
+- 独立审核：业务修复与最终测试补证均无剩余阻断，US-323 更新为 passes=true；US-324 保持未开始，本批次到此停止。未运行全量、浏览器或真实 AB；HTTP/generated 切换仍按 PRD 留至 US-330。未 push、PR 或 merge。
+- 可复用结论：歧义保护必须传递受影响 local ID 至缺失检查，不能只降级匹配结果；失败保留测试要证明真正进入目标业务分支，不能依靠被吞掉的 fake 异常假通过。

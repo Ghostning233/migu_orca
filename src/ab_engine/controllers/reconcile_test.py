@@ -102,3 +102,46 @@ def test_deleted_and_in_progress_status_mapping() -> None:
     )
     assert protected is not None
     assert protected.status == "REVALIDATING"
+
+
+def test_saved_sync_excludes_other_connection_id_and_requires_rss_proof() -> None:
+    ref = "11111111-1111-4111-8111-111111111111"
+    other = local(rss_urls=("https://ab.invalid/other",), external_mapping={"subscription_id": "sub-1", "connection_ref": "22222222-2222-4222-8222-222222222222"})
+    assert reconcile_subscription(external(), [other], connection_ref=ref).tracking_id is None
+    no_rss = local(rss_urls=(), external_mapping={"subscription_id": "sub-1"})
+    assert reconcile_subscription(external(), [no_rss], connection_ref=ref).tracking_id is None
+
+
+def test_saved_sync_cross_connection_requires_unique_rss_evidence() -> None:
+    ref = "11111111-1111-4111-8111-111111111111"
+    candidate = local(external_mapping={"subscription_id": "sub-old", "connection_ref": "22222222-2222-4222-8222-222222222222"})
+    result = reconcile_subscription(external(), [candidate], connection_ref=ref)
+    assert result.tracking_id == "trk-local"
+    ambiguous = reconcile_subscription(external(), [candidate, local(tracking_id="other", external_mapping={"connection_ref": "33333333-3333-4333-8333-333333333333"})], connection_ref=ref)
+    assert ambiguous.tracking_id is None
+
+
+def test_saved_sync_same_connection_changed_mapping_requires_selected_rss() -> None:
+    ref = "11111111-1111-4111-8111-111111111111"
+    candidate = local(external_mapping={"subscription_id": "sub-old", "connection_ref": ref}, rss_urls=())
+    result = reconcile_subscription(external(), [candidate], connection_ref=ref)
+    assert result.tracking_id is None
+    candidate_with_rss = local(
+        external_mapping={"subscription_id": "sub-old", "connection_ref": ref},
+    )
+    proven = reconcile_subscription(external(), [candidate_with_rss], connection_ref=ref)
+    assert proven.tracking_id == "trk-local"
+
+
+def test_saved_sync_same_connection_unbound_mapping_requires_selected_rss() -> None:
+    ref = "11111111-1111-4111-8111-111111111111"
+    candidate = local(external_mapping={"connection_ref": ref}, rss_urls=())
+    result = reconcile_subscription(external(), [candidate], connection_ref=ref)
+    assert result.tracking_id is None
+
+
+def test_saved_sync_does_not_match_legacy_mapping_without_request_rss() -> None:
+    ref = "11111111-1111-4111-8111-111111111111"
+    legacy = local(external_mapping={"subscription_id": "sub-1"}, rss_urls=())
+    result = reconcile_subscription(external(), [legacy], connection_ref=ref)
+    assert result.tracking_id is None

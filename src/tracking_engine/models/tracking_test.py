@@ -93,6 +93,19 @@ def test_external_tracking_id_uses_frozen_versioned_namespace() -> None:
     assert first == "trk_" + __import__("hashlib").sha256(
         b"migu-orca/tracking/external/v1\x00legacy_3_1\x00subscription\x00sub-123"
     ).hexdigest()[:32]
+
+
+def test_saved_external_tracking_ids_are_connection_isolated() -> None:
+    first = tracking_id_for_external(
+        "legacy_3_1", "subscription", "sub-123",
+        "11111111-1111-4111-8111-111111111111",
+    )
+    second = tracking_id_for_external(
+        "legacy_3_1", "subscription", "sub-123",
+        "22222222-2222-4222-8222-222222222222",
+    )
+    legacy = tracking_id_for_external("legacy_3_1", "subscription", "sub-123")
+    assert len({first, second, legacy}) == 3
     assert "sub-123" not in first
     with pytest.raises(ValueError):
         tracking_id_for_external("legacy_3_1", "subscription", "https://bad")
