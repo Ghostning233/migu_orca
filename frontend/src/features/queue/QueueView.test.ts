@@ -200,7 +200,7 @@ describe('QueueView submit (US-206)', () => {
   })
 
   async function fillAbForm(wrapper: VueWrapper) {
-    await wrapper.find('#batch-queue-ab-endpoint').setValue('https://ab.example/api')
+    await wrapper.find('#batch-queue-ab-endpoint').setValue('192.168.1.20:7890')
     await wrapper.find('#batch-queue-ab-username').setValue('browser-user')
     await wrapper.find('#batch-queue-ab-password').setValue('browser-secret-password')
     await wrapper.find('#batch-queue-ab-confirm').setValue(true)
@@ -217,7 +217,7 @@ describe('QueueView submit (US-206)', () => {
       '请填写服务地址。',
     )
 
-    await wrapper.find('#batch-queue-ab-endpoint').setValue('https://ab.example/api')
+    await wrapper.find('#batch-queue-ab-endpoint').setValue('https://ab.example')
     await wrapper.find('#batch-queue-submit-button').trigger('submit')
     await nextTick()
     expect(apiPost).not.toHaveBeenCalled()
@@ -230,7 +230,7 @@ describe('QueueView submit (US-206)', () => {
     const { wrapper } = await mountQueue()
     await flushPromises()
 
-    await wrapper.find('#batch-queue-ab-endpoint').setValue('https://ab.example/api')
+    await wrapper.find('#batch-queue-ab-endpoint').setValue('https://ab.example')
     await wrapper.find('#batch-queue-ab-username').setValue('u')
     await wrapper.find('#batch-queue-ab-password').setValue('p')
     await wrapper.find('#batch-queue-submit-button').trigger('submit')
@@ -263,7 +263,7 @@ describe('QueueView submit (US-206)', () => {
       confirm: true,
       ab_config: {
         auth_mode: 'password',
-        base_url: 'https://ab.example/api',
+        base_url: 'http://192.168.1.20:7890',
         username: 'browser-user',
         password: 'browser-secret-password',
         fallback_enabled: false,
@@ -295,7 +295,7 @@ describe('QueueView submit (US-206)', () => {
     )
     // Legacy parity: HTTP-level failure preserves inputs for retry.
     expect(wrapper.find<HTMLInputElement>('#batch-queue-ab-endpoint').element.value).toBe(
-      'https://ab.example/api',
+      '192.168.1.20:7890',
     )
     expect(wrapper.find<HTMLInputElement>('#batch-queue-ab-password').element.value).toBe(
       'browser-secret-password',
@@ -310,7 +310,7 @@ describe('QueueView submit (US-206)', () => {
     const { wrapper } = await mountQueue()
     await flushPromises()
 
-    await wrapper.find('#batch-queue-ab-endpoint').setValue('https://ab.example/api')
+    await wrapper.find('#batch-queue-ab-endpoint').setValue('https://ab.example')
     await wrapper.find('#batch-queue-ab-username').setValue('u')
     await wrapper.find('#batch-queue-ab-password').setValue('p')
     await wrapper.find('#batch-queue-ab-auth-mode').setValue('api_token')
@@ -362,7 +362,7 @@ describe('QueueView retry & recover (US-206)', () => {
     const { wrapper } = await mountQueue()
     await flushPromises()
 
-    await wrapper.find('#batch-queue-ab-endpoint').setValue('https://ab.example/api')
+    await wrapper.find('#batch-queue-ab-endpoint').setValue('https://ab.example')
     await wrapper.find('#batch-queue-ab-username').setValue('u')
     await wrapper.find('#batch-queue-ab-password').setValue('p')
     await wrapper.find('#batch-queue-ab-confirm').setValue(true)
@@ -375,7 +375,7 @@ describe('QueueView retry & recover (US-206)', () => {
     expect(body).toMatchObject({
       request_id: 'req-fail',
       confirm: true,
-      ab_config: { auth_mode: 'password', base_url: 'https://ab.example/api' },
+      ab_config: { auth_mode: 'password', base_url: 'https://ab.example' },
     })
     // Retry button disappears once the item becomes SUCCEEDED.
     expect(wrapper.find('.batch-queue-item-retry').exists()).toBe(false)
@@ -475,7 +475,7 @@ describe('QueueView retry & recover (US-206)', () => {
     const { wrapper } = await mountQueue()
     await flushPromises()
 
-    await wrapper.find('#batch-queue-ab-endpoint').setValue('https://private-ab.example/api')
+    await wrapper.find('#batch-queue-ab-endpoint').setValue('https://private-ab.example')
     await wrapper.find('#batch-queue-ab-username').setValue('secret-user')
     await wrapper.find('#batch-queue-ab-password').setValue('secret-password')
     await wrapper.find('#batch-queue-ab-confirm').setValue(true)

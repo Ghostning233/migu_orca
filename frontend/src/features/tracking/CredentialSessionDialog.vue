@@ -14,6 +14,10 @@ import {
   probeStatusLabel,
   projectCapabilitySummary,
 } from './trackingProjection'
+import {
+  AUTO_BANGUMI_SERVICE_ROOT_HELP,
+  validateAutoBangumiServiceRoot,
+} from '@/features/autobangumi/serviceRoot'
 
 type CapabilityResult = NonNullable<
   operations['probeAutoBangumiCapabilities']['responses']['200']['content']['application/json']['result']
@@ -79,8 +83,9 @@ function invalidateProbe(): void {
 }
 
 function buildConfig(): ProbeBody['ab_config'] | null {
-  if (!fields.get('baseUrl').trim()) {
-    probeError.value = '请填写 Auto Bangumi 服务地址。'
+  const serviceRoot = validateAutoBangumiServiceRoot(fields.get('baseUrl'))
+  if (!serviceRoot.value) {
+    probeError.value = serviceRoot.message ?? '请填写合法的 Auto Bangumi 服务根地址。'
     return null
   }
   if (authMode.value === 'password' && (!fields.get('username').trim() || !fields.get('password'))) {
@@ -93,7 +98,7 @@ function buildConfig(): ProbeBody['ab_config'] | null {
   }
   const config: ProbeBody['ab_config'] = {
     auth_mode: authMode.value,
-    base_url: fields.get('baseUrl'),
+    base_url: serviceRoot.value,
     fallback_enabled: fallbackEnabled.value,
   }
   if (authMode.value === 'password') {
@@ -164,7 +169,8 @@ defineExpose({ clearSession })
           { value: 'password', label: '用户名密码' }, { value: 'api_token', label: 'API Token' },
         ]" />
         <label for="tracking-ab-base-url">服务地址</label>
-        <BaseInput id="tracking-ab-base-url" v-model="baseUrl" type="url" autocomplete="off" />
+        <BaseInput id="tracking-ab-base-url" v-model="baseUrl" type="text" inputmode="url" autocomplete="off" />
+        <p class="field-help">{{ AUTO_BANGUMI_SERVICE_ROOT_HELP }}</p>
         <template v-if="authMode === 'password'">
           <label for="tracking-ab-username">用户名</label>
           <BaseInput id="tracking-ab-username" v-model="username" autocomplete="off" />

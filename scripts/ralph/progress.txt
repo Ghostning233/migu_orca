@@ -312,3 +312,14 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - 补充 submit/management 不同配置与清除后重连零写请求回归，以及 submit 未知结果经 MARK_FAILED 后用最新 revision、新 key 重试；保留 ConfirmDialog、UNKNOWN 分类和严格 Ralph guard。
 - 最小验证：TrackingView/trackingProjection Vitest 通过；typecheck/lint 通过；根目录误生成 node_modules 仅含 `.vite`，已移出仓库；归档按原文同步。
 ---
+
+## [2026-09-13 17:05:00 CST] - Stage 38 后紧急缺陷修复：Auto Bangumi 局域网地址规范化
+- 根因：后端 `_service_root` 安全地要求显式 HTTP(S) scheme；用户输入的裸 `IP:端口` 被前端原样放入 request-scoped `ab_config.base_url`，因此在后端校验前被拒绝。
+- 修复：新增共享纯前端服务根地址 helper，严格校验 HTTP(S) origin、根路径、凭据/查询/片段/非法端口及歧义字符；Tracking、Settings、Queue 统一发送规范化后的 `base_url`，输入控件改为保留 URL 提示但允许裸主机输入。
+- 定向验证：相关 Vitest 76 passed；typecheck、lint、build、Ruff 通过；真实 Chromium 裸局域网地址探测 route-mock 1 passed。未访问真实外部服务，未运行全量前后端 pytest。
+
+## [2026-09-13 17:15:00 CST] - Stage 38 局域网地址规范化审核修复
+- 修正 serviceRoot 的 scheme 判定：`host:port`（包括 `localhost`、普通主机名和 `autobangumi`）补齐 `http://`，显式 scheme 仅允许 HTTP(S)，并拒绝常见非 HTTP scheme 伪装。
+- 在 URL 解析前按原始输入校验 authority 后只能无路径或单个 `/`，拒绝点段、编码点段、重复斜杠、反斜杠及其他歧义路径；补充三个入口与独立 endpoint/password canary 的回归覆盖，检查 DOM、URL、history、localStorage、sessionStorage 和 console。
+- 定向验证：相关 Vitest 91 passed；typecheck、lint、build、Ruff 通过；真实 Chromium canary route-mock 1 passed；未访问真实外部服务。
+---

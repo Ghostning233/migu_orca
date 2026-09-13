@@ -24,7 +24,7 @@ describe('CredentialSessionDialog (US-307)', () => {
   it('defaults to password and probes only the generated capability endpoint', async () => {
     apiPost.mockResolvedValue(capabilities() as never)
     const wrapper = mount(CredentialSessionDialog, { props: { open: true }, global: { stubs: { Teleport: true } } })
-    await wrapper.find('#tracking-ab-base-url').setValue('https://ab.invalid')
+    await wrapper.find('#tracking-ab-base-url').setValue('192.168.1.20:7890')
     await wrapper.find('#tracking-ab-username').setValue('user')
     await wrapper.find('#tracking-ab-password').setValue('secret')
     await wrapper.find('#tracking-ab-probe').trigger('click')
@@ -32,7 +32,7 @@ describe('CredentialSessionDialog (US-307)', () => {
     expect(apiPost).toHaveBeenCalledTimes(1)
     expect(apiPost).toHaveBeenCalledWith('/api/v1/autobangumi/capabilities', {
       body: { ab_config: {
-        auth_mode: 'password', base_url: 'https://ab.invalid', username: 'user', password: 'secret', fallback_enabled: false,
+        auth_mode: 'password', base_url: 'http://192.168.1.20:7890', username: 'user', password: 'secret', fallback_enabled: false,
       } }, signal: expect.any(AbortSignal),
     })
     expect(wrapper.text()).toContain('3.1.18')
@@ -40,7 +40,7 @@ describe('CredentialSessionDialog (US-307)', () => {
     expect(wrapper.find('.credential-capability-list').text()).toContain('新增订阅')
     expect(wrapper.text()).not.toContain('VERIFIED')
     expect(wrapper.text()).not.toContain('SUPPORTED')
-    expect(wrapper.text()).not.toContain('https://ab.invalid')
+    expect(wrapper.text()).not.toContain('192.168.1.20:7890')
   })
 
   it('validates missing credentials without issuing a request and clears on cancel', async () => {
