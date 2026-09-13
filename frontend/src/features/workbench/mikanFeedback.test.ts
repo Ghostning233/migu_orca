@@ -18,22 +18,39 @@ describe('mikanFeedback', () => {
     expect(batchParseTimeoutMs(3)).toBe(420000)
     expect(batchParseTimeoutMs(12)).toBe(1500000)
     expect(batchParseTimeoutMs(MIKAN_BATCH_MAX_ITEMS + 10)).toBe(MIKAN_BATCH_PARSE_MAX_TIMEOUT_MS)
+    expect(batchParseTimeoutMs(Number.NaN)).toBe(180000)
+    expect(batchParseTimeoutMs(Number.POSITIVE_INFINITY)).toBe(180000)
   })
 
   it.each([
     ['request_timeout', '等待超时'],
+    ['request_cancelled', '候选搜索已取消'],
     ['mikan_timeout', 'MiKan 上游响应超时'],
     ['mikan_connection_failed', '网络或连接不可用'],
     ['mikan_http_failed', 'MiKan 服务暂时异常'],
     ['upstream_unavailable', 'MiKan 服务暂时异常'],
-    ['mikan_parse_failed', 'MiKan 页面解析异常'],
-    ['rss_parse_failed', 'MiKan 页面解析异常'],
+    ['server_error', '应用内部处理异常'],
+    ['storage_error', '应用内部处理异常'],
+    ['storage_json_error', '应用内部处理异常'],
+    ['mikan_parse_failed', 'MiKan 页面格式异常'],
+    ['rss_parse_failed', 'RSS 资源读取或解析失败'],
     ['unexpected', '候选搜索失败，请稍后重试'],
   ])('maps %s to fixed feedback', (type, expected) => {
     const message = mikanFailureMessage({ type, message: 'https://secret.example/raw?password=canary' }, '候选搜索')
     expect(message).toContain(expected)
     expect(message).not.toContain('secret.example')
     expect(message).not.toContain('canary')
+  })
+
+  it('reads nested server categories without exposing raw details', () => {
+    expect(mikanFailureMessage({
+      type: 'unexpected', details: { details: { category: 'title_parse' } },
+      message: 'raw https://secret.example/canary',
+    }, '候选搜索')).toContain('标题解析未完成')
+    expect(mikanFailureMessage({
+      type: 'unexpected', details: { details: { category: 'rss_parse' } },
+      message: 'raw https://secret.example/canary',
+    }, '候选搜索')).toContain('RSS 资源读取或解析失败')
   })
 
   it('maps a generated 200 FAILED result and leaves EMPTY/FOUND alone', () => {

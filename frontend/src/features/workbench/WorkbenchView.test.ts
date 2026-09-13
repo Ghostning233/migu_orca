@@ -769,7 +769,7 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     const { useNotificationStore } = await import('@/app/stores/notification')
     const notification = useNotificationStore()
     expect(notification.current?.title).toBe('生成失败')
-    expect(notification.current?.message).toBe('从 MiKan 合集生成订阅草案失败：MiKan 页面解析异常，请稍后重试。')
+    expect(notification.current?.message).toBe('从 MiKan 合集生成订阅草案失败：MiKan 页面格式异常，请稍后重试。')
     expect(wrapper.findAll('.candidate-card')).toHaveLength(1)
     expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(false)
   })
@@ -850,6 +850,26 @@ describe('WorkbenchView direct fallback (US-204)', () => {
     expect(apiPost).toHaveBeenCalledTimes(1)
     expect(submit.attributes('disabled')).toBeDefined()
     resolveRequest({ draft_id: 'opaque', request: {} })
+    await flushPromises()
+  })
+
+  it('shares the direct-generation busy lock with candidate search', async () => {
+    let resolveRequest!: (value: CreateResult) => void
+    const pending = new Promise<CreateResult>((resolve) => { resolveRequest = resolve })
+    apiPost.mockImplementation(() => pending)
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-fallback-enabled').setValue(true)
+    await nextTick()
+    await wrapper.find('#mikan-fallback-bangumi').setValue('2353')
+    void wrapper.find('#mikan-fallback-generate').trigger('click')
+    await nextTick()
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+
+    expect(apiPost).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('#mikan-candidate-search-submit').attributes('disabled')).toBeDefined()
+    resolveRequest(createDraftResult())
     await flushPromises()
   })
 })

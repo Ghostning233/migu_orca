@@ -387,6 +387,7 @@ function syncBatchIdToUrl(batchIdValue: string): void {
 }
 
 async function parseBatch(): Promise<void> {
+  if (parseLoading.value) return
   if (saveOperation.value || savingItemIds.value.size > 0 || saveInFlight.value || draftCreateItemIds.value.size > 0) {
     notification.error('批量审核处理中', '批量保存结果待核验，请先完成当前操作。')
     return
@@ -406,7 +407,7 @@ async function parseBatch(): Promise<void> {
   journey.dispatch({ type: 'parse_started' })
   const count = batchItemCount(rawInput.value)
   parseCount.value = count
-  loadingMessage.value = `正在搜索 ${count} 个批量条目的 MiKan 候选（解析进度：0 / ${count} 部）`
+  loadingMessage.value = `正在逐项搜索 ${count} 个批量条目的 MiKan 候选；系统会逐项处理，较大的批量可能需要数分钟，请耐心等待。`
   try {
     const payload = buildBatchParsePayload(rawInput.value, currentStorageDir())
     const result = await api.post<BatchParseResult>('/api/v1/batches/parse', {

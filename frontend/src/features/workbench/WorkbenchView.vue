@@ -89,6 +89,10 @@ const draftRequest = ref<RequestSnapshot | null>(null)
 const draftId = ref('')
 const draftRevision = ref(1)
 const draftLoading = ref(false)
+// A single page-level busy lock covers search, direct fallback generation and
+// candidate draft generation.  The individual flags remain for accurate UI
+// labels, while this lock prevents two long MiKan plans from racing.
+const singleBusy = ref(false)
 const reuseSuggestion = ref<ReuseSuggestion | null>(null)
 const reuseSource = ref<{ title: string; mikanBangumiId: string } | null>(null)
 // Track per-candidate season confirmation in memory (never persisted).
@@ -115,7 +119,7 @@ watch(query, (value) => {
 })
 
 async function changeMode(nextMode: AnimeMode): Promise<void> {
-  if (nextMode === mode.value || searchLoading.value || draftLoading.value) return
+  if (nextMode === mode.value || singleBusy.value) return
   const currentInput = mode.value === 'single' ? singleInput.value : batchInput.value
   if (currentInput) selections.value[mode.value] = currentInput.selection()
   mode.value = nextMode
@@ -186,7 +190,7 @@ function attemptedQueryTexts(): string[] {
 }
 
 async function searchCandidates(): Promise<void> {
-  if (searchLoading.value) return
+  if (singleBusy.value) return
   const validationError = validateCandidateQuery(query.value)
   if (validationError) {
     searchError.value = validationError
@@ -198,6 +202,7 @@ async function searchCandidates(): Promise<void> {
   searchResult.value = null
   seasonConfirmations.value = {}
   lastSearchQuery.value = query.value.trim()
+  singleBusy.value = true
   searchLoading.value = true
   try {
     const result = await api.post<CandidateSearchResult>('/api/v1/mikan/candidates', {
@@ -224,6 +229,7 @@ async function searchCandidates(): Promise<void> {
     notification.error('候选搜索失败', searchError.value)
   } finally {
     searchLoading.value = false
+    singleBusy.value = false
     await nextTick()
     if (searchResult.value?.candidates?.length) {
       document.querySelector<HTMLElement>('#mikan-candidate-search-result .candidate-select')?.focus()
@@ -240,7 +246,7 @@ async function generateFromCandidate(candidate: MikanCandidate): Promise<void> {
 }
 
 async function generateFromFallback(): Promise<void> {
-  if (fallbackLoading.value) return
+  if (singleBusy.value || fallbackLoading.value) return
   const validationError = validateFallbackValue(fallbackValue.value)
   if (validationError) {
     fallbackError.value = validationError
@@ -263,6 +269,8 @@ async function generateFromFallback(): Promise<void> {
 }
 
 async function generateDraft(payload: Record<string, unknown>): Promise<boolean> {
+  if (singleBusy.value) return false
+  singleBusy.value = true
   draftLoading.value = true
   try {
     const result = await api.post<CreateRequestResult>('/api/v1/requests', {
@@ -287,6 +295,7 @@ async function generateDraft(payload: Record<string, unknown>): Promise<boolean>
     return false
   } finally {
     draftLoading.value = false
+    singleBusy.value = false
   }
 }
 
@@ -338,7 +347,7 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 
   <PanelSection title="创建订阅方案" class="workbench-panel">
     <!-- ── single search ──────────────────────────────────────────── -->
-    <AnimeModeSwitch :model-value="mode" :disabled="searchLoading || draftLoading" @update:model-value="changeMode" />
+    <AnimeModeSwitch :model-value="mode" :disabled="singleBusy" @update:model-value="changeMode" />
 
     <form v-if="mode === 'single' && !hasResults" id="mikan-candidate-search-form" class="workbench-search-form" @submit.prevent="searchCandidates">
       <p class="step-label">步骤 1 · 输入番剧</p>
@@ -348,7 +357,7 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
         id="mikan-candidate-query"
         v-model="query"
         mode="single"
-        :disabled="searchLoading"
+        :disabled="singleBusy"
       />
       <p class="field-help" id="mikan-candidate-help">
         输入番剧标题，从真实 MiKan 搜索候选合集。候选不会自动选择，需手动点击「选择此合集」生成订阅草案。
@@ -360,7 +369,7 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
         {{ searchError }}
       </p>
       <div class="notification-actions">
-        <BaseButton id="mikan-candidate-search-submit" type="submit" variant="primary" :loading="searchLoading" :disabled="searchLoading || !query.trim()">
+        <BaseButton id="mikan-candidate-search-submit" type="submit" variant="primary" :loading="searchLoading" :disabled="singleBusy || !query.trim()">
           搜索候选
         </BaseButton>
       </div>
@@ -387,7 +396,7 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
           type="text"
           autocomplete="off"
           placeholder="mikan.example/Home/Bangumi/2353 或 2353"
-          :disabled="fallbackLoading || draftLoading"
+          :disabled="singleBusy"
         />
         <p class="field-help" id="mikan-fallback-help">
           仅接受数字 ID 或同源 HTTP(S) /Home/Bangumi/&lt;id&gt; URL；生成成功后清空。
@@ -396,7 +405,7 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
           {{ fallbackError }}
         </p>
         <div class="notification-actions">
-          <BaseButton id="mikan-fallback-generate" type="submit" variant="secondary" :loading="fallbackLoading" :disabled="fallbackLoading || draftLoading">
+          <BaseButton id="mikan-fallback-generate" type="submit" variant="secondary" :loading="fallbackLoading" :disabled="singleBusy">
             使用直连合集生成
           </BaseButton>
         </div>
