@@ -306,3 +306,9 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - ConfirmDialog 使用 Vue `nextTick` 及代际守卫激活焦点陷阱，卸载时解除 inert/keydown 并收敛 pending promise；Ralph 完成判断改为末条非空 token + 非空 userStories 且 passes 严格全 true。归档同步本记录。
 - 定向 Vitest 144 passed；typecheck、lint、build 通过；受影响 Chromium 3 passed；Ralph guard 三种输入均符合预期；未改后端/OpenAPI，未生成产物。
 ---
+
+## [2026-09-13 16:15:00 CST] - Stage 38 合并后审计修复（二）
+- TrackingView 为未决 write/management intent 绑定页面内存中的 AB 配置快照；相同配置可继续使用原快照重试，清除连接或探测到不同账号/端点后销毁快照并转为不可重放 tombstone，点击时给出固定恢复提示且不打开确认框、不发写请求。恢复明确终态才释放源锁。
+- 补充 submit/management 不同配置与清除后重连零写请求回归，以及 submit 未知结果经 MARK_FAILED 后用最新 revision、新 key 重试；保留 ConfirmDialog、UNKNOWN 分类和严格 Ralph guard。
+- 最小验证：TrackingView/trackingProjection Vitest 通过；typecheck/lint 通过；根目录误生成 node_modules 仅含 `.vite`，已移出仓库；归档按原文同步。
+---

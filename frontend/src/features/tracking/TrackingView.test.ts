@@ -96,11 +96,14 @@ function syncPayload(overrides: Record<string, unknown> = {}) {
   }
 }
 
-async function connect(wrapper: TrackingWrapper): Promise<void> {
+async function connect(
+  wrapper: TrackingWrapper,
+  credentials: { username?: string; password?: string } = {},
+): Promise<void> {
   await wrapper.find('#tracking-connect').trigger('click')
   await wrapper.find('#tracking-ab-base-url').setValue('https://ab.invalid')
-  await wrapper.find('#tracking-ab-username').setValue('user')
-  await wrapper.find('#tracking-ab-password').setValue('pass')
+  await wrapper.find('#tracking-ab-username').setValue(credentials.username ?? 'user')
+  await wrapper.find('#tracking-ab-password').setValue(credentials.password ?? 'pass')
   await wrapper.find('#tracking-ab-probe').trigger('click')
   await flushPromises()
 }
@@ -842,6 +845,37 @@ describe('TrackingView explicit submission (US-310)', () => {
     expect(wrapper.find('#tracking-submit').exists()).toBe(false)
     expect(wrapper.find('#tracking-submit-result').text()).toContain('提交结果未知')
   })
+
+  it('does not replay an unknown submit after a different connection is probed', async () => {
+    serveApi(() => submitDetail())
+    apiPost.mockResolvedValueOnce(capabilities() as never)
+      .mockRejectedValueOnce(unknownError as never)
+      .mockResolvedValueOnce(capabilities() as never)
+      .mockResolvedValueOnce(capabilities() as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-submit').trigger('click')
+    await flushPromises()
+    expect(submittedBodies()).toHaveLength(1)
+
+    await connect(wrapper, { username: 'other-user', password: 'other-password' })
+    const before = apiPost.mock.calls.length
+    await wrapper.find('#tracking-submit').trigger('click')
+    await flushPromises()
+    expect(apiPost.mock.calls.length).toBe(before)
+    expect(wrapper.find('.tracking-intent-notice').text()).toContain('连接已被清除或更换')
+    expect(wrapper.find('.confirm-dialog').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('other-password')
+
+    await wrapper.find('.tracking-clear-connection').trigger('click')
+    await connect(wrapper, { username: 'third-user', password: 'third-password' })
+    const afterClear = apiPost.mock.calls.length
+    await wrapper.find('#tracking-submit').trigger('click')
+    await flushPromises()
+    expect(apiPost.mock.calls.length).toBe(afterClear)
+    expect(wrapper.find('.tracking-intent-notice').text()).toContain('连接已被清除或更换')
+  })
 })
 
 const retryAction = {
@@ -1126,6 +1160,73 @@ function clickDialogButton(label: string): void {
 
 describe('TrackingView unknown-result recovery (US-312)', () => {
   beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  it('releases the original submit lock only after a terminal recovery verdict', async () => {
+    let currentDetail: unknown = submitDetail({ revision: 1 })
+    serveApi(() => currentDetail)
+    apiPost.mockResolvedValueOnce(capabilities() as never)
+      .mockRejectedValueOnce(unknownError as never)
+      .mockResolvedValueOnce(recoveryPayload({
+        action: 'MARK_FAILED', outcome: 'SUBMIT_FAILED',
+        tracking: recoverySummary({ status: 'SUBMIT_FAILED', status_label: '提交失败', revision: 3,
+          available_actions: [revalidateAction, retryAction] }),
+      }) as never)
+      .mockResolvedValueOnce(retryPayload({ checked_revision: 3, next_revision: 4 }) as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-submit').trigger('click')
+    currentDetail = recoveryDetail({ revision: 2 })
+    await flushPromises()
+    expect(wrapper.find('.tracking-recovery').exists()).toBe(true)
+
+    currentDetail = retryDetail({ revision: 3 })
+    await wrapper.find('#tracking-recover-failed').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#tracking-retry').exists()).toBe(true)
+    await wrapper.find('#tracking-retry').trigger('click')
+    await flushPromises()
+
+    const submits = submittedBodies()
+    const retries = retriedBodies()
+    expect(submits).toHaveLength(1)
+    expect(retries).toHaveLength(1)
+    expect(retries[0]?.expected_revision).toBe(3)
+    expect(retries[0]?.idempotency_key).not.toBe(submits[0]?.idempotency_key)
+  })
+
+  it('releases an unknown management lock after recovery reaches a terminal state', async () => {
+    let currentDetail: unknown = modifyDetail({ revision: 1 })
+    serveApi(() => currentDetail)
+    apiPost.mockResolvedValueOnce(capabilities() as never)
+      .mockRejectedValueOnce(unknownError as never)
+      .mockResolvedValueOnce(recoveryPayload({
+        action: 'MARK_FAILED', outcome: 'SUBMIT_FAILED',
+        tracking: recoverySummary({ status: 'SUBMIT_FAILED', status_label: '提交失败', revision: 3 }),
+      }) as never)
+      .mockResolvedValueOnce(modifyPayload() as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+    await wrapper.find('#tracking-modify-title-enabled').setValue(true)
+    await wrapper.find('#tracking-modify-title').setValue('第一次修改')
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-modify-subscription-submit').trigger('submit')
+    currentDetail = recoveryDetail({ revision: 2 })
+    await flushPromises()
+    expect(wrapper.find('.tracking-recovery').exists()).toBe(true)
+
+    currentDetail = modifyDetail({ revision: 3 })
+    await wrapper.find('#tracking-recover-failed').trigger('click')
+    await flushPromises()
+    await wrapper.find('#tracking-modify-title-enabled').setValue(true)
+    await wrapper.find('#tracking-modify-title').setValue('恢复后修改')
+    await wrapper.find('#tracking-modify-subscription-submit').trigger('submit')
+    await flushPromises()
+
+    expect(modifiedBodies()).toHaveLength(2)
+    expect(modifiedBodies()[1]?.idempotency_key).not.toBe(modifiedBodies()[0]?.idempotency_key)
+    expect(modifiedBodies()[1]?.expected_revision).toBe(3)
+  })
 
   it('recovers locally with no credential, no confirmation and no external write', async () => {
     serveApi(() => recoveryDetail({ revision: 4 }))
@@ -1694,6 +1795,43 @@ describe('TrackingView external modify (US-313)', () => {
     const bodies = modifiedBodies()
     expect(bodies).toHaveLength(2)
     expect(bodies[1]?.idempotency_key).not.toBe(bodies[0]?.idempotency_key)
+  })
+
+  it('does not replay an unknown management intent after a different connection is probed', async () => {
+    serveApi(() => modifyDetail())
+    apiPost.mockResolvedValueOnce(capabilities() as never)
+      .mockRejectedValueOnce(unknownError as never)
+      .mockResolvedValueOnce(capabilities() as never)
+      .mockResolvedValueOnce(capabilities() as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+    await wrapper.find('#tracking-modify-title-enabled').setValue(true)
+    await wrapper.find('#tracking-modify-title').setValue('第一次修改')
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-modify-subscription-submit').trigger('submit')
+    await flushPromises()
+    expect(modifiedBodies()).toHaveLength(1)
+
+    await connect(wrapper, { username: 'other-user', password: 'other-password' })
+    await wrapper.find('#tracking-modify-title-enabled').setValue(true)
+    await wrapper.find('#tracking-modify-title').setValue('重连后不应修改')
+    const before = apiPost.mock.calls.length
+    await wrapper.find('#tracking-modify-subscription-submit').trigger('submit')
+    await flushPromises()
+    expect(apiPost.mock.calls.length).toBe(before)
+    expect(wrapper.find('.tracking-intent-notice').text()).toContain('连接已被清除或更换')
+    expect(wrapper.find('.confirm-dialog').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('other-password')
+
+    await wrapper.find('.tracking-clear-connection').trigger('click')
+    await connect(wrapper, { username: 'third-user', password: 'third-password' })
+    await wrapper.find('#tracking-modify-title-enabled').setValue(true)
+    await wrapper.find('#tracking-modify-title').setValue('清除后不应修改')
+    const afterClear = apiPost.mock.calls.length
+    await wrapper.find('#tracking-modify-subscription-submit').trigger('submit')
+    await flushPromises()
+    expect(apiPost.mock.calls.length).toBe(afterClear)
+    expect(wrapper.find('#tracking-intent-blocked-notice').text()).toContain('连接已被清除或更换')
   })
 
   it('clears the page modify state when the connection is cleared', async () => {
