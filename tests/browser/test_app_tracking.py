@@ -121,3 +121,40 @@ class TestAppTrackingStage38:
         expect(page).to_have_url(f"{live_server_url}/app/tracking")
         expect(page.locator(".error-state")).to_contain_text("暂时无法读取本地追番列表")
         expect(page.locator("body")).not_to_contain_text("private.invalid")
+
+    def test_credential_session_probe_is_explicit_and_clearable(self, page: Page, live_server_url: str) -> None:
+        _require_dist()
+        _mock_list(page)
+
+        def probe(route: Any, request: Any) -> None:
+            assert request.method == "POST"
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"ok": True, "result": {
+                    "probe_status": "VERIFIED", "version": "3.1.18", "adapter": "legacy_3_1",
+                    "subscription_list": "SUPPORTED", "subscription_detail": "SUPPORTED",
+                    "subscription_submit": "SUPPORTED", "subscription_modify": "SUPPORTED",
+                    "subscription_enable": "SUPPORTED", "subscription_disable": "SUPPORTED",
+                    "subscription_delete": "SUPPORTED", "rss_list": "SUPPORTED", "rss_modify": "SUPPORTED",
+                    "rss_enable": "SUPPORTED", "rss_disable": "SUPPORTED", "rss_delete": "SUPPORTED",
+                    "rss_refresh": "SUPPORTED", "external_verify": "SUPPORTED", "checked_at": None,
+                    "safe_message": "已完成安全探测",
+                }}, ensure_ascii=False),
+            )
+
+        page.route("**/api/v1/autobangumi/capabilities", probe)
+        page.goto(f"{live_server_url}/app/tracking")
+        page.wait_for_selector("#tracking-overview")
+        page.locator("#tracking-connect").click()
+        page.locator("#tracking-ab-base-url").fill("https://private.invalid")
+        page.locator("#tracking-ab-username").fill("secret-user")
+        page.locator("#tracking-ab-password").fill("secret-password")
+        page.locator("#tracking-ab-probe").click()
+        expect(page.locator(".tracking-connection-status")).to_contain_text("VERIFIED")
+        expect(page).to_have_url(f"{live_server_url}/app/tracking")
+        expect(page.locator("body")).not_to_contain_text("https://private.invalid")
+        page.locator(".tracking-clear-connection").click()
+        page.locator("#tracking-connect").click()
+        expect(page.locator("#tracking-ab-password")).to_have_value("")
+        expect(page.locator("body")).not_to_contain_text("secret-password")

@@ -23,9 +23,16 @@ import {
   type TrackingStatusGroup,
 } from './trackingProjection'
 import TrackingInspector from './TrackingInspector.vue'
+import CredentialSessionDialog from './CredentialSessionDialog.vue'
 
 type ListResult = NonNullable<
   operations['listTrackingItems']['responses']['200']['content']['application/json']['result']
+>
+type ProbeBody = NonNullable<
+  operations['probeAutoBangumiCapabilities']['requestBody']['content']['application/json']
+>
+type CapabilityResult = NonNullable<
+  operations['probeAutoBangumiCapabilities']['responses']['200']['content']['application/json']['result']
 >
 
 const route = useRoute()
@@ -37,6 +44,10 @@ const searchTerm = ref('')
 const statusFilter = ref<TrackingStatusGroup | ''>('')
 const selectedTrackingId = ref('')
 const listContainer = ref<HTMLElement | null>(null)
+const credentialDialogOpen = ref(false)
+const credentialDialog = ref<InstanceType<typeof CredentialSessionDialog> | null>(null)
+const sessionConfig = ref<ProbeBody['ab_config'] | null>(null)
+const sessionCapabilities = ref<CapabilityResult | null>(null)
 let loadSequence = 0
 
 const statusLabels: Record<TrackingStatusGroup, string> = {
@@ -111,6 +122,18 @@ function clearFilters(): void {
   statusFilter.value = ''
 }
 
+function onConnected(value: { config: ProbeBody['ab_config']; capabilities: CapabilityResult }): void {
+  sessionConfig.value = value.config
+  sessionCapabilities.value = value.capabilities
+  credentialDialogOpen.value = false
+}
+
+function clearConnection(): void {
+  credentialDialog.value?.clearSession()
+  sessionConfig.value = null
+  sessionCapabilities.value = null
+}
+
 onMounted(() => {
   void loadList().then(() => {
     if (selectedTrackingId.value) void focusSelection()
@@ -129,6 +152,7 @@ watch(selectedTrackingId, (trackingId) => {
   <section id="tracking-overview" class="tracking-overview" aria-labelledby="tracking-heading">
     <PanelSection title="追番管理" class="tracking-header">
       <template #actions>
+        <BaseButton id="tracking-connect" variant="secondary" @click="credentialDialogOpen = true">连接 Auto Bangumi</BaseButton>
         <BaseButton id="tracking-refresh" variant="secondary" :loading="loading" @click="loadList">刷新列表</BaseButton>
       </template>
       <p id="tracking-heading" class="tracking-lede">查看本地追番状态。选择单条记录后，右侧将显示检查器入口。</p>
@@ -181,6 +205,11 @@ watch(selectedTrackingId, (trackingId) => {
         </template>
       </aside>
     </section>
+    <p v-if="sessionCapabilities" class="tracking-connection-status" role="status">
+      当前页面已连接 Auto Bangumi（{{ sessionCapabilities.probe_status }}），仅在用户明确操作时使用。
+      <button type="button" class="tracking-clear-connection" @click="clearConnection">清除连接</button>
+    </p>
+    <CredentialSessionDialog ref="credentialDialog" v-model:open="credentialDialogOpen" @connected="onConnected" />
   </section>
 </template>
 
@@ -212,6 +241,8 @@ watch(selectedTrackingId, (trackingId) => {
 .tracking-inspector { position: sticky; top: var(--space-4); display: grid; gap: var(--space-3); min-height: 15rem; padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); }
 .tracking-inspector-placeholder { display: grid; gap: .5rem; padding: var(--space-4); border: 1px dashed var(--color-border); border-radius: var(--radius-md); }
 .tracking-inspector-placeholder h3, .tracking-inspector-placeholder p { margin: 0; }
+.tracking-connection-status { margin: 0; color: var(--color-text-muted); }
+.tracking-clear-connection { margin-left: .5rem; color: var(--color-primary); text-decoration: underline; }
 @media (max-width: 1280px) { .tracking-workspace { grid-template-columns: minmax(0, 1.35fr) minmax(16rem, 1fr); } }
 @media (max-width: 800px) {
   .tracking-status-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }

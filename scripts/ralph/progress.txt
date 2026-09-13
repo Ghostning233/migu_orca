@@ -61,5 +61,12 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - **Learnings for future iterations:**
   - 详情请求用 AbortController 与请求代际双重保护；失败只影响检查器，不清除健康列表，敏感错误固定为中文文案。
   - 外部 ID、Request ID、operation ID、raw Request/响应不渲染；仅展示 generated 白名单安全字段。
-  - 定向验证：TrackingInspector/TrackingView Vitest 7 passed、typecheck、单文件 lint、build 通过；真实 Chromium 定向选择/详情用例通过。
+- 定向验证：TrackingInspector/TrackingView Vitest 7 passed、typecheck、单文件 lint、build 通过；真实 Chromium 定向选择/详情用例通过。
 ---
+
+## [2026-09-13 10:15:00 CST] - US-307
+- What was implemented: 新增页面级 CredentialSessionDialog，复用 useSensitiveFields，默认 password、API Token 能力降级，只调用 generated capabilities 探测；连接成功仅建立当前页面会话，清除/取消/切换认证模式/卸载均销毁敏感输入。
+- Files changed: `CredentialSessionDialog.vue`/定向 Vitest、`TrackingView.vue` 页面接线、tracking Chromium route-mock 测试、Ralph 状态文件。
+- **Learnings for future iterations:**
+  - 成功探测后关闭对话框，只在页面状态提示 VERIFIED；服务地址、账号、凭据不进入 DOM 展示，失败仅显示固定中文并保留可修正输入。
+  - 定向验证：CredentialSessionDialog/TrackingInspector/TrackingView Vitest 10 passed、typecheck、build、单文件 lint 通过；真实 Chromium 凭据探测与清除用例通过。
