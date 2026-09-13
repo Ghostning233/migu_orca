@@ -54,6 +54,44 @@ describe('versioned frontend contract handoff (US-255)', () => {
     expectTypeOf<JsonResult<'probeAutoBangumiCapabilities'>['probe_status']>().toEqualTypeOf<
       'VERIFIED' | 'PARTIAL' | 'FAILED'
     >()
+    expectTypeOf<JsonResult<'probeAutoBangumiCapabilities'>['subscription_submit']>().toEqualTypeOf<
+      'SUPPORTED' | 'UNSUPPORTED' | 'UNKNOWN'
+    >()
+    // The generated union must reject a write with no allowed patch field.
+    const emptyModify: JsonBody<'modifyTrackingItem'> = {
+      target_scope: 'SUBSCRIPTION', expected_revision: 1,
+      idempotency_key: 'intent-test', confirm: true,
+      ab_config: { auth_mode: 'password', fallback_enabled: false },
+      // @ts-expect-error an empty patch is not a valid modify request
+      patch: {},
+    }
+    void emptyModify
+    const emptyFilterModify: JsonBody<'modifyTrackingItem'> = {
+      target_scope: 'SUBSCRIPTION', expected_revision: 1,
+      idempotency_key: 'intent-test', confirm: true,
+      ab_config: { auth_mode: 'password', fallback_enabled: false },
+      // @ts-expect-error a non-null filter_rule also needs at least one field
+      patch: { filter_rule: {} },
+    }
+    void emptyFilterModify
+    const emptyRssModify: JsonBody<'modifyTrackingItem'> = {
+      target_scope: 'ASSOCIATED_RSS', expected_revision: 1,
+      idempotency_key: 'intent-test', confirm: true,
+      ab_config: { auth_mode: 'password', fallback_enabled: false },
+      // @ts-expect-error an empty RSS patch is not a valid modify request
+      patch: {},
+    }
+    void emptyRssModify
+    const multiFieldModify: JsonBody<'modifyTrackingItem'> = {
+      target_scope: 'SUBSCRIPTION', expected_revision: 1,
+      idempotency_key: 'intent-test', confirm: true,
+      ab_config: { auth_mode: 'password', fallback_enabled: false },
+      patch: {
+        title: '更新标题', season: 2,
+        filter_rule: { must_contain: '1080p', use_regex: false },
+      },
+    }
+    void multiFieldModify
     expectTypeOf<TrackingAction['requires_confirmation']>().toEqualTypeOf<boolean>()
     expectTypeOf<TrackingResult['updated_episode']>().toEqualTypeOf<null>()
     expectTypeOf<components['schemas']['ApiErrorEnvelope']>().toMatchTypeOf<{

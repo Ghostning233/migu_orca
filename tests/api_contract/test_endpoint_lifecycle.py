@@ -74,6 +74,13 @@ def test_openapi_projects_lifecycle_registry() -> None:
     assert projected == expected
 
 
+def test_capabilities_relation_records_subscription_submit_probe_scope() -> None:
+    """D38-02.4: subscription_submit 只由已验证的 3.1.18 password/legacy probe 支持。"""
+    relation = ENDPOINT_LIFECYCLE[("POST", "/api/v1/autobangumi/capabilities")]["relation"]
+    assert "subscription_submit" in relation
+    assert "3.1.18" in relation
+
+
 def test_legacy_routes_are_explicit_compatibility_and_tracking_is_authority() -> None:
     legacy = {
         ("POST", "/api/v1/requests/preview-save"),

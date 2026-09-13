@@ -43,7 +43,9 @@ _STYLE_SECONDARY = "SECONDARY"
 _STYLE_DANGER = "DANGER"
 
 
-def tracking_available_actions(status: str) -> list[dict[str, Any]]:
+def tracking_available_actions(
+    status: str, mapping: dict[str, Any] | None = None
+) -> list[dict[str, Any]]:
     """Return the currently-executable action objects for ``status``.
 
     Only actions the unified submit/retry/recover endpoints can actually
@@ -78,18 +80,36 @@ def tracking_available_actions(status: str) -> list[dict[str, Any]]:
             _action("MARK_FAILED", "标记为失败", _STYLE_DANGER, requires_confirmation=True)
         )
     elif management_actions_for_status(status):
+        scopes = _available_target_scopes(mapping)
+        # The mapping contains two independent target kinds.  Never advertise
+        # an RSS refresh against a subscription merely because that
+        # subscription also has an RSS mapping.
+        scopes_by_action = {
+            "MODIFY": {"SUBSCRIPTION", "ASSOCIATED_RSS"},
+            "SET_ENABLED": {"SUBSCRIPTION", "ASSOCIATED_RSS"},
+            "DELETE_EXTERNAL": {"SUBSCRIPTION", "ASSOCIATED_RSS"},
+            "REFRESH_RSS": {"ASSOCIATED_RSS"},
+        }
         if "MODIFY" in management_actions_for_status(status):
-            actions.append(_action("MODIFY", "修改外部订阅", _STYLE_SECONDARY, requires_confirmation=True))
+            target_scopes = [scope for scope in scopes if scope in scopes_by_action["MODIFY"]]
+            if target_scopes:
+                actions.append(_action("MODIFY", "修改外部订阅", _STYLE_SECONDARY, requires_confirmation=True, target_scopes=target_scopes))
         if "SET_ENABLED" in management_actions_for_status(status):
-            actions.append(_action(
-                "SET_ENABLED", "启用外部订阅" if status == TRACKING_STATUS_DISABLED else "停用外部订阅",
-                _STYLE_PRIMARY if status == TRACKING_STATUS_DISABLED else _STYLE_SECONDARY,
-                requires_confirmation=True,
-            ))
+            target_scopes = [scope for scope in scopes if scope in scopes_by_action["SET_ENABLED"]]
+            if target_scopes:
+                actions.append(_action(
+                    "SET_ENABLED", "启用外部订阅" if status == TRACKING_STATUS_DISABLED else "停用外部订阅",
+                    _STYLE_PRIMARY if status == TRACKING_STATUS_DISABLED else _STYLE_SECONDARY,
+                    requires_confirmation=True, target_scopes=target_scopes,
+                ))
         if "REFRESH_RSS" in management_actions_for_status(status):
-            actions.append(_action("REFRESH_RSS", "刷新关联 RSS", _STYLE_SECONDARY, requires_confirmation=True))
+            target_scopes = [scope for scope in scopes if scope in scopes_by_action["REFRESH_RSS"]]
+            if target_scopes:
+                actions.append(_action("REFRESH_RSS", "刷新关联 RSS", _STYLE_SECONDARY, requires_confirmation=True, target_scopes=target_scopes))
         if "DELETE_EXTERNAL" in management_actions_for_status(status):
-            actions.append(_action("DELETE_EXTERNAL", "删除外部订阅", _STYLE_DANGER, requires_confirmation=True))
+            target_scopes = [scope for scope in scopes if scope in scopes_by_action["DELETE_EXTERNAL"]]
+            if target_scopes:
+                actions.append(_action("DELETE_EXTERNAL", "删除外部订阅", _STYLE_DANGER, requires_confirmation=True, target_scopes=target_scopes))
     # REVALIDATING / SUBMITTING / EXTERNAL_DELETED / EXTERNAL_ONLY have no
     # currently-executable state-changing action.
     return actions
@@ -121,7 +141,7 @@ def tracking_summary_fields(
         "status": record.status,
         "status_label": TRACKING_STATUS_LABELS.get(record.status, record.status),
         "status_group": tracking_status_group(record.status),
-        "available_actions": tracking_available_actions(record.status),
+        "available_actions": tracking_available_actions(record.status, record.external_mapping),
         "valid_resource_count": _non_negative_count(valid_resource_count),
         "updated_episode": None,
         "updated_episode_status": "NOT_IMPLEMENTED",
@@ -206,13 +226,37 @@ def serialize_tracking_audit_events(
     return serialized
 
 
-def _action(code: str, label: str, style: str, *, requires_confirmation: bool) -> dict[str, Any]:
+def _action(
+    code: str,
+    label: str,
+    style: str,
+    *,
+    requires_confirmation: bool,
+    target_scopes: list[str] | None = None,
+) -> dict[str, Any]:
     return {
         "code": code,
         "label": label,
         "style": style,
         "requires_confirmation": requires_confirmation,
+        "target_scopes": target_scopes or [],
     }
+
+
+def _available_target_scopes(mapping: dict[str, Any] | None) -> list[str]:
+    """Return only mapped public scopes, never the opaque mapping values."""
+    if not isinstance(mapping, dict):
+        return []
+    scopes: list[str] = []
+    subscription_id = mapping.get("subscription_id")
+    if isinstance(subscription_id, str) and subscription_id.strip():
+        scopes.append("SUBSCRIPTION")
+    rss_ids = mapping.get("rss_ids")
+    if isinstance(rss_ids, (list, tuple)) and rss_ids and all(
+        isinstance(item, str) and bool(item.strip()) for item in rss_ids
+    ):
+        scopes.append("ASSOCIATED_RSS")
+    return scopes
 
 
 def _safe_poster_path(value: Any) -> str | None:

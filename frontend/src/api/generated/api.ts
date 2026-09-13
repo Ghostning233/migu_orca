@@ -765,6 +765,7 @@ export interface operations {
                      *         "adapter": "示例",
                      *         "subscription_list": "示例",
                      *         "subscription_detail": "示例",
+                     *         "subscription_submit": "示例",
                      *         "subscription_modify": "示例",
                      *         "subscription_enable": "示例",
                      *         "subscription_disable": "示例",
@@ -805,6 +806,11 @@ export interface operations {
                              * @enum {string}
                              */
                             subscription_detail: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Subscription Submit
+                             * @enum {string}
+                             */
+                            subscription_submit: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
                             /**
                              * Subscription Modify
                              * @enum {string}
@@ -5086,7 +5092,8 @@ export interface operations {
                      *                 "code": "示例",
                      *                 "label": "示例",
                      *                 "style": "示例",
-                     *                 "requires_confirmation": true
+                     *                 "requires_confirmation": true,
+                     *                 "target_scopes": []
                      *               }
                      *             ],
                      *             "valid_resource_count": 0,
@@ -5174,6 +5181,8 @@ export interface operations {
                                     style: "PRIMARY" | "SECONDARY" | "DANGER";
                                     /** Requires Confirmation */
                                     requires_confirmation: boolean;
+                                    /** Target Scopes */
+                                    target_scopes?: ("SUBSCRIPTION" | "ASSOCIATED_RSS")[];
                                 }[];
                                 /**
                                  * Valid Resource Count
@@ -5352,6 +5361,7 @@ export interface operations {
                      *           "adapter": "示例",
                      *           "subscription_list": "示例",
                      *           "subscription_detail": "示例",
+                     *           "subscription_submit": "示例",
                      *           "subscription_modify": "示例",
                      *           "subscription_enable": "示例",
                      *           "subscription_disable": "示例",
@@ -5392,7 +5402,8 @@ export interface operations {
                      *                 "code": "示例",
                      *                 "label": "示例",
                      *                 "style": "示例",
-                     *                 "requires_confirmation": true
+                     *                 "requires_confirmation": true,
+                     *                 "target_scopes": []
                      *               }
                      *             ],
                      *             "valid_resource_count": 0,
@@ -5439,6 +5450,11 @@ export interface operations {
                                  * @enum {string}
                                  */
                                 subscription_detail: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Submit
+                                 * @enum {string}
+                                 */
+                                subscription_submit: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
                                 /**
                                  * Subscription Modify
                                  * @enum {string}
@@ -5575,6 +5591,8 @@ export interface operations {
                                     style: "PRIMARY" | "SECONDARY" | "DANGER";
                                     /** Requires Confirmation */
                                     requires_confirmation: boolean;
+                                    /** Target Scopes */
+                                    target_scopes?: ("SUBSCRIPTION" | "ASSOCIATED_RSS")[];
                                 }[];
                                 /**
                                  * Valid Resource Count
@@ -11351,7 +11369,8 @@ export interface operations {
                      *             "code": "示例",
                      *             "label": "示例",
                      *             "style": "示例",
-                     *             "requires_confirmation": true
+                     *             "requires_confirmation": true,
+                     *             "target_scopes": []
                      *           }
                      *         ],
                      *         "valid_resource_count": 0,
@@ -11462,6 +11481,8 @@ export interface operations {
                                 style: "PRIMARY" | "SECONDARY" | "DANGER";
                                 /** Requires Confirmation */
                                 requires_confirmation: boolean;
+                                /** Target Scopes */
+                                target_scopes?: ("SUBSCRIPTION" | "ASSOCIATED_RSS")[];
                             }[];
                             /**
                              * Valid Resource Count
@@ -12037,7 +12058,8 @@ export interface operations {
                      *               "code": "示例",
                      *               "label": "示例",
                      *               "style": "示例",
-                     *               "requires_confirmation": true
+                     *               "requires_confirmation": true,
+                     *               "target_scopes": []
                      *             }
                      *           ],
                      *           "valid_resource_count": 0,
@@ -12142,6 +12164,8 @@ export interface operations {
                                     style: "PRIMARY" | "SECONDARY" | "DANGER";
                                     /** Requires Confirmation */
                                     requires_confirmation: boolean;
+                                    /** Target Scopes */
+                                    target_scopes?: ("SUBSCRIPTION" | "ASSOCIATED_RSS")[];
                                 }[];
                                 /**
                                  * Valid Resource Count
@@ -12334,17 +12358,10 @@ export interface operations {
         /** @description 修改外部追番方案 */
         requestBody: {
             content: {
-                /**
-                 * @example {
-                 *       "target_scope": "示例",
-                 *       "expected_revision": 1,
-                 *       "confirm": true,
-                 *       "patch": {}
-                 *     }
-                 */
+                /** @example {} */
                 "application/json": {
-                    /** @enum {string} */
-                    target_scope: "SUBSCRIPTION" | "ASSOCIATED_RSS";
+                    /** @constant */
+                    target_scope: "SUBSCRIPTION";
                     expected_revision: number;
                     idempotency_key: string;
                     /** @constant */
@@ -12359,7 +12376,265 @@ export interface operations {
                         fallback_enabled: boolean;
                     };
                     storage_dir?: string | null;
-                    patch: Record<string, never>;
+                    patch: {
+                        title?: string | null;
+                        season?: number | null;
+                        subtitle_group?: string | null;
+                        filter_rule?: null | ({
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } & ({
+                            must_contain: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive: boolean | null;
+                        }));
+                        offset?: number | null;
+                        expected_folder_name?: string | null;
+                    } & ({
+                        title: string | null;
+                        season?: number | null;
+                        subtitle_group?: string | null;
+                        filter_rule?: null | ({
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } & ({
+                            must_contain: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive: boolean | null;
+                        }));
+                        offset?: number | null;
+                        expected_folder_name?: string | null;
+                    } | {
+                        title?: string | null;
+                        season: number | null;
+                        subtitle_group?: string | null;
+                        filter_rule?: null | ({
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } & ({
+                            must_contain: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive: boolean | null;
+                        }));
+                        offset?: number | null;
+                        expected_folder_name?: string | null;
+                    } | {
+                        title?: string | null;
+                        season?: number | null;
+                        subtitle_group: string | null;
+                        filter_rule?: null | ({
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } & ({
+                            must_contain: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive: boolean | null;
+                        }));
+                        offset?: number | null;
+                        expected_folder_name?: string | null;
+                    } | {
+                        title?: string | null;
+                        season?: number | null;
+                        subtitle_group?: string | null;
+                        filter_rule: null | ({
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } & ({
+                            must_contain: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive: boolean | null;
+                        }));
+                        offset?: number | null;
+                        expected_folder_name?: string | null;
+                    } | {
+                        title?: string | null;
+                        season?: number | null;
+                        subtitle_group?: string | null;
+                        filter_rule?: null | ({
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } & ({
+                            must_contain: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive: boolean | null;
+                        }));
+                        offset: number | null;
+                        expected_folder_name?: string | null;
+                    } | {
+                        title?: string | null;
+                        season?: number | null;
+                        subtitle_group?: string | null;
+                        filter_rule?: null | ({
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } & ({
+                            must_contain: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive: boolean | null;
+                        }));
+                        offset?: number | null;
+                        expected_folder_name: string | null;
+                    });
+                } | {
+                    /** @constant */
+                    target_scope: "ASSOCIATED_RSS";
+                    expected_revision: number;
+                    idempotency_key: string;
+                    /** @constant */
+                    confirm: true;
+                    ab_config: {
+                        /** @enum {string} */
+                        auth_mode: "password" | "api_token";
+                        base_url?: string;
+                        username?: string;
+                        password?: string;
+                        token?: string;
+                        fallback_enabled: boolean;
+                    };
+                    storage_dir?: string | null;
+                    patch: {
+                        name?: string | null;
+                        aggregate?: boolean | null;
+                        parser?: string | null;
+                    } & ({
+                        name: string | null;
+                        aggregate?: boolean | null;
+                        parser?: string | null;
+                    } | {
+                        name?: string | null;
+                        aggregate: boolean | null;
+                        parser?: string | null;
+                    } | {
+                        name?: string | null;
+                        aggregate?: boolean | null;
+                        parser: string | null;
+                    });
                 };
             };
         };
@@ -12394,7 +12669,8 @@ export interface operations {
                      *               "code": "示例",
                      *               "label": "示例",
                      *               "style": "示例",
-                     *               "requires_confirmation": true
+                     *               "requires_confirmation": true,
+                     *               "target_scopes": []
                      *             }
                      *           ],
                      *           "valid_resource_count": 0,
@@ -12499,6 +12775,8 @@ export interface operations {
                                     style: "PRIMARY" | "SECONDARY" | "DANGER";
                                     /** Requires Confirmation */
                                     requires_confirmation: boolean;
+                                    /** Target Scopes */
+                                    target_scopes?: ("SUBSCRIPTION" | "ASSOCIATED_RSS")[];
                                 }[];
                                 /**
                                  * Valid Resource Count
@@ -12755,7 +13033,8 @@ export interface operations {
                      *               "code": "示例",
                      *               "label": "示例",
                      *               "style": "示例",
-                     *               "requires_confirmation": true
+                     *               "requires_confirmation": true,
+                     *               "target_scopes": []
                      *             }
                      *           ],
                      *           "valid_resource_count": 0,
@@ -12880,6 +13159,8 @@ export interface operations {
                                     style: "PRIMARY" | "SECONDARY" | "DANGER";
                                     /** Requires Confirmation */
                                     requires_confirmation: boolean;
+                                    /** Target Scopes */
+                                    target_scopes?: ("SUBSCRIPTION" | "ASSOCIATED_RSS")[];
                                 }[];
                                 /**
                                  * Valid Resource Count
@@ -13130,7 +13411,8 @@ export interface operations {
                      *               "code": "示例",
                      *               "label": "示例",
                      *               "style": "示例",
-                     *               "requires_confirmation": true
+                     *               "requires_confirmation": true,
+                     *               "target_scopes": []
                      *             }
                      *           ],
                      *           "valid_resource_count": 0,
@@ -13235,6 +13517,8 @@ export interface operations {
                                     style: "PRIMARY" | "SECONDARY" | "DANGER";
                                     /** Requires Confirmation */
                                     requires_confirmation: boolean;
+                                    /** Target Scopes */
+                                    target_scopes?: ("SUBSCRIPTION" | "ASSOCIATED_RSS")[];
                                 }[];
                                 /**
                                  * Valid Resource Count
@@ -13496,7 +13780,8 @@ export interface operations {
                      *               "code": "示例",
                      *               "label": "示例",
                      *               "style": "示例",
-                     *               "requires_confirmation": true
+                     *               "requires_confirmation": true,
+                     *               "target_scopes": []
                      *             }
                      *           ],
                      *           "valid_resource_count": 0,
@@ -13629,6 +13914,8 @@ export interface operations {
                                     style: "PRIMARY" | "SECONDARY" | "DANGER";
                                     /** Requires Confirmation */
                                     requires_confirmation: boolean;
+                                    /** Target Scopes */
+                                    target_scopes?: ("SUBSCRIPTION" | "ASSOCIATED_RSS")[];
                                 }[];
                                 /**
                                  * Valid Resource Count
@@ -13872,7 +14159,8 @@ export interface operations {
                      *               "code": "示例",
                      *               "label": "示例",
                      *               "style": "示例",
-                     *               "requires_confirmation": true
+                     *               "requires_confirmation": true,
+                     *               "target_scopes": []
                      *             }
                      *           ],
                      *           "valid_resource_count": 0,
@@ -14003,6 +14291,8 @@ export interface operations {
                                     style: "PRIMARY" | "SECONDARY" | "DANGER";
                                     /** Requires Confirmation */
                                     requires_confirmation: boolean;
+                                    /** Target Scopes */
+                                    target_scopes?: ("SUBSCRIPTION" | "ASSOCIATED_RSS")[];
                                 }[];
                                 /**
                                  * Valid Resource Count
@@ -14255,7 +14545,8 @@ export interface operations {
                      *               "code": "示例",
                      *               "label": "示例",
                      *               "style": "示例",
-                     *               "requires_confirmation": true
+                     *               "requires_confirmation": true,
+                     *               "target_scopes": []
                      *             }
                      *           ],
                      *           "valid_resource_count": 0,
@@ -14360,6 +14651,8 @@ export interface operations {
                                     style: "PRIMARY" | "SECONDARY" | "DANGER";
                                     /** Requires Confirmation */
                                     requires_confirmation: boolean;
+                                    /** Target Scopes */
+                                    target_scopes?: ("SUBSCRIPTION" | "ASSOCIATED_RSS")[];
                                 }[];
                                 /**
                                  * Valid Resource Count
@@ -14621,7 +14914,8 @@ export interface operations {
                      *               "code": "示例",
                      *               "label": "示例",
                      *               "style": "示例",
-                     *               "requires_confirmation": true
+                     *               "requires_confirmation": true,
+                     *               "target_scopes": []
                      *             }
                      *           ],
                      *           "valid_resource_count": 0,
@@ -14754,6 +15048,8 @@ export interface operations {
                                     style: "PRIMARY" | "SECONDARY" | "DANGER";
                                     /** Requires Confirmation */
                                     requires_confirmation: boolean;
+                                    /** Target Scopes */
+                                    target_scopes?: ("SUBSCRIPTION" | "ASSOCIATED_RSS")[];
                                 }[];
                                 /**
                                  * Valid Resource Count

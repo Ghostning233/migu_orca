@@ -2,7 +2,7 @@
 
 版本：`v1`（Stage 32 B-D）
 来源：`docs/api/openapi.json` → `frontend/src/api/generated/api.ts`
-范围：F-B～F-F 的页面边界；本文不实现正式页面。
+范围：F-B～F-F 的页面边界；F-B～F-F 均已交付（Stage 34～38），本文只描述消费规则，不重复实现细节。
 
 ## 使用规则
 
@@ -19,13 +19,14 @@
 | F-C 单番确认 | 明确确认后保存并进入待提交 | `confirmRequestSave` | `operations['confirmRequestSave']`；结果中的 `handoff.tracking_id` 是后续入口 |
 | F-D 批量确认 | 逐条确认，允许部分成功 | `saveConfirmBatchItems` | `operations['saveConfirmBatchItems']`；按输入顺序消费 `results[]` |
 | F-E 追番方案 | 列表、详情、安全信息、复核 | `listTrackingItems`、`getTrackingItemDetail`、`getRequestSafeInfo`、`revalidateTrackingItem` | 对应 `operations[...]` 的 query/path/body 与 `result` |
-| F-F 正式追番管理 | 同步、提交/重试/恢复、修改、启停、刷新、外部删除 | `syncTrackingItems`、`submitTrackingItem`、`retryTrackingItem`、`recoverTrackingItem`、`modifyTrackingItem`、`setTrackingItemEnabled`、`refreshTrackingRss`、`deleteExternalTrackingItem` | 对应 `operations[...]`；必须等待 Stage 32 合入后重新执行 generated-client drift check |
+| F-F 正式追番管理 | 同步、提交/重试/恢复、修改、启停、刷新、外部删除 | `syncTrackingItems`、`submitTrackingItem`、`retryTrackingItem`、`recoverTrackingItem`、`modifyTrackingItem`、`setTrackingItemEnabled`、`refreshTrackingRss`、`deleteExternalTrackingItem` | 对应 `operations[...]`；Stage 38 US-303 先补严格 modify patch 与安全 target scopes |
 
-F-F 是 handoff 的消费边界，不表示本阶段已经交付管理页面。Stage 33 的 `QueueView` 兼容挂载只代表旧队列可访问，不等于正式追番管理完成。
+F-F 是 handoff 的消费边界：Stage 38 已按本表交付正式追番管理页，见本文末节。Stage 33 的 `QueueView`
+兼容挂载曾只代表旧队列可访问，现已退出默认运行时。
 
 ## 状态与动作
 
-列表/详情是本地 `TrackingRecord` 的安全投影，`available_actions` 只表达本地已知可执行性，不是外部授权。页面应使用 generated `code`、`style` 和 `requires_confirmation`，并在每次 POST 中让服务端重新探测 request-scoped capability。
+列表/详情是本地 `TrackingRecord` 的安全投影，`available_actions` 只表达本地已知可执行性，不是外部授权。页面应使用 generated `code`、`style` 和 `requires_confirmation`，并在每次 POST 中让服务端重新探测 request-scoped capability。提交/重试还必须检查 generated capability 的 `subscription_submit=SUPPORTED`，且 probe_status 为 VERIFIED；API Token、未知或失败探测保持不可执行。
 
 | 动作 | operationId | 需要 `confirm` | revision / 幂等 | 外部能力与恢复 |
 | --- | --- | --- | --- | --- |
@@ -33,7 +34,7 @@ F-F 是 handoff 的消费边界，不表示本阶段已经交付管理页面。S
 | 提交 | `submitTrackingItem` | 必须为 `true` | `expected_revision` + `idempotency_key` | 重新验证后写外部；明确失败用 retry，未知结果只能 recover |
 | 重试 | `retryTrackingItem` | 必须为 `true` | `expected_revision` + 新操作的 `idempotency_key` | 仅明确失败允许；不得绕过 recovery |
 | 恢复 | `recoverTrackingItem` | 人工标记时为 `true` | `expected_revision` | `AUTO` 纯本地；`VERIFY_EXTERNAL` 只读核验；`MARK_SUCCEEDED`/`MARK_FAILED` 是人工结论，不盲目重建 |
-| 修改 | `modifyTrackingItem` | 必须为 `true` | `target_scope` + `expected_revision` + `idempotency_key` | `SUBSCRIPTION`/`ASSOCIATED_RSS`；服务端 read-before-write + capability |
+| 修改 | `modifyTrackingItem` | 必须为 `true` | `target_scope` + `expected_revision` + `idempotency_key` | `SUBSCRIPTION` 时 patch 仅允许 `title`/`season`/`subtitle_group`/`filter_rule`/`offset`/`expected_folder_name`；`ASSOCIATED_RSS` 时仅允许 `name`/`aggregate`/`parser`；服务端 read-before-write + capability |
 | 启停 | `setTrackingItemEnabled` | 必须为 `true` | 同上 | 同上；外部删除/停用固定 `file=false` |
 | 刷新 RSS | `refreshTrackingRss` | 必须为 `true` | `target_scope=ASSOCIATED_RSS` + revision + 幂等 | 仅关联 RSS capability |
 | 外部删除 | `deleteExternalTrackingItem` | 必须为 `true` | scope + revision + 幂等 | 保留本地 Request、tracking、审计和媒体；固定 `file=false` |
@@ -56,9 +57,18 @@ F-F 是 handoff 的消费边界，不表示本阶段已经交付管理页面。S
 - F-E 使用 tracking list/detail 和 safe-info；`safe_info` 是白名单展示数据，不能推断外部原始响应或本地路径。
 - 所有 tracking 投影以 `TrackingRecord` 为唯一外部提交权威；旧 queue/AB 结果仅为兼容投影或迁移证据。
 
-## F-F 等待条件
+## F-F 交付状态与 Stage 38 补口
 
-F-F 必须等待 Stage 32 合入后，以最终 `openapi.json` 重新生成并通过 `npm run api:check`、typecheck、lint、unit 和 build，再开始正式页面实现。Stage 33 的 QueueView 兼容挂载不改变上述等待条件，也不授权新增管理动作。
+Stage 38（US-303～US-317）已完成 F-F 并归档。US-303 补齐了 generated `modifyTrackingItem` 的
+scope-discriminated 严格 patch 联合与 `available_actions[].target_scopes`：patch 至少包含一个字段并拒绝
+跨 scope/未知字段，target scopes 只表达当前本地映射的公开 scope（不包含外部 ID/URL/RSS）；本次补口
+没有新增管理动作、状态、endpoint 或外部语义。
+
+正式页面 `/app/tracking` 已消费上表全部 F-F operation：`TrackingView` 持有页面级临时凭据会话与所有
+外部写生命周期，`TrackingInspector` 只渲染安全详情并按 `available_actions`/`target_scopes`/本次
+capability 投影动作。`QueueView` 已退出默认运行时（组件按 Stage 38 §10.2 保留供回退），旧
+`batch_id` 深链只做一次性兼容定位，**所有** `/api/v1/batches/*` 兼容端点保持可用；旧入口的最终收敛
+连同全局连接状态一起交给 F-G，见 `docs/MiGuOrca_stage38_tracking_management_PRD.md` §11～§12。
 
 ## 集数占位
 

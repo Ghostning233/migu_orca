@@ -699,6 +699,58 @@ _SUBSCRIPTION_MANAGEMENT_FIELDS = frozenset(
 _RSS_MANAGEMENT_FIELDS = frozenset({"name", "aggregate", "parser"})
 
 
+class TrackingFilterRulePatch(BaseModel):
+    """Strict public subset of the subscription filter rule patch."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    must_contain: str | None = None
+    must_not_contain: str | None = None
+    use_regex: bool | None = None
+    case_sensitive: bool | None = None
+
+    @model_validator(mode="after")
+    def _require_field(self) -> TrackingFilterRulePatch:
+        if not self.model_fields_set:
+            raise ValueError("filter_rule 不能为空")
+        return self
+
+
+class TrackingSubscriptionPatch(BaseModel):
+    """Fields that may be changed on the mapped external subscription."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = None
+    season: StrictInt | None = Field(default=None, ge=0, le=100)
+    subtitle_group: str | None = None
+    filter_rule: TrackingFilterRulePatch | None = None
+    offset: StrictInt | None = Field(default=None, ge=0)
+    expected_folder_name: str | None = None
+
+    @model_validator(mode="after")
+    def _require_field(self) -> TrackingSubscriptionPatch:
+        if not self.model_fields_set:
+            raise ValueError("patch 不能为空")
+        return self
+
+
+class TrackingRssPatch(BaseModel):
+    """Fields that may be changed on the mapped associated RSS target."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = None
+    aggregate: bool | None = None
+    parser: str | None = None
+
+    @model_validator(mode="after")
+    def _require_field(self) -> TrackingRssPatch:
+        if not self.model_fields_set:
+            raise ValueError("patch 不能为空")
+        return self
+
+
 class _TrackingManagementBasePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -736,23 +788,13 @@ class _TrackingManagementBasePayload(BaseModel):
 
 
 class TrackingModifyPayload(_TrackingManagementBasePayload):
-    patch: dict[str, Any]
-
-    @field_validator("patch")
-    @classmethod
-    def _validate_management_patch(cls, value: dict[str, Any]) -> dict[str, Any]:
-        if not value:
-            raise ValueError("patch 不能为空")
-        unknown = set(value) - (_SUBSCRIPTION_MANAGEMENT_FIELDS | _RSS_MANAGEMENT_FIELDS)
-        if unknown:
-            raise ValueError("patch 包含不支持的字段")
-        return value
+    patch: TrackingSubscriptionPatch | TrackingRssPatch
 
     @model_validator(mode="after")
     def _validate_scope_fields(self) -> TrackingModifyPayload:
-        allowed = (_SUBSCRIPTION_MANAGEMENT_FIELDS if self.target_scope == "SUBSCRIPTION"
-                   else _RSS_MANAGEMENT_FIELDS)
-        if set(self.patch) - allowed:
+        if self.target_scope == "SUBSCRIPTION" and not isinstance(self.patch, TrackingSubscriptionPatch):
+            raise ValueError("patch 字段与 target_scope 不匹配")
+        if self.target_scope == "ASSOCIATED_RSS" and not isinstance(self.patch, TrackingRssPatch):
             raise ValueError("patch 字段与 target_scope 不匹配")
         return self
 

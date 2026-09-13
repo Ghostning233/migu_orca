@@ -13,7 +13,9 @@ export type AppRouteKey = 'add' | 'plans' | 'tracking' | 'settings'
 export type PublicQueryKey = 'batch_id' | 'request_id' | 'tracking_id'
 
 export interface RouteParityBaseline {
-  readonly view: 'WorkbenchView' | 'RequestsView' | 'QueueView' | 'SettingsView'
+  // US-316: the retired queue view is deliberately absent — `/app/tracking` is
+  // the formal tracking screen and `/app/queue` survives only as a redirect.
+  readonly view: 'WorkbenchView' | 'RequestsView' | 'TrackingView' | 'SettingsView'
   readonly vitest: readonly string[]
   readonly chromium: readonly string[]
 }
@@ -64,12 +66,16 @@ export const routeCatalog = {
     key: 'tracking',
     path: '/app/tracking',
     routerPath: '/tracking',
-    queryKey: 'batch_id',
-    alternateQueryKey: 'tracking_id',
+    queryKey: 'tracking_id',
+    alternateQueryKey: 'batch_id',
     parity: {
-      view: 'QueueView',
-      vitest: ['src/features/queue/QueueView.test.ts', 'src/features/queue/queueWorkbench.test.ts'],
-      chromium: ['tests/browser/test_app_queue.py'],
+      view: 'TrackingView',
+      vitest: [
+        'src/features/tracking/TrackingView.test.ts',
+        'src/features/tracking/trackingProjection.test.ts',
+        'src/features/tracking/trackingCompat.test.ts',
+      ],
+      chromium: ['tests/browser/test_app_tracking.py'],
     },
   },
   settings: {

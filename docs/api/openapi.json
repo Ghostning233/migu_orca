@@ -83,6 +83,15 @@
                           "title": "Subscription Detail",
                           "type": "string"
                         },
+                        "subscription_submit": {
+                          "enum": [
+                            "SUPPORTED",
+                            "UNSUPPORTED",
+                            "UNKNOWN"
+                          ],
+                          "title": "Subscription Submit",
+                          "type": "string"
+                        },
                         "subscription_modify": {
                           "enum": [
                             "SUPPORTED",
@@ -211,6 +220,7 @@
                         "adapter",
                         "subscription_list",
                         "subscription_detail",
+                        "subscription_submit",
                         "subscription_modify",
                         "subscription_enable",
                         "subscription_disable",
@@ -238,6 +248,7 @@
                     "adapter": "示例",
                     "subscription_list": "示例",
                     "subscription_detail": "示例",
+                    "subscription_submit": "示例",
                     "subscription_modify": "示例",
                     "subscription_enable": "示例",
                     "subscription_disable": "示例",
@@ -313,7 +324,7 @@
         },
         "x-lifecycle": {
           "lifecycle": "PRIMARY",
-          "relation": "只读能力探测；管理写入时重新探测",
+          "relation": "只读能力探测；管理写入时重新探测；`subscription_submit` 仅由已验证的 3.1.18 password/legacy probe 支持",
           "authority": "Capability probe"
         },
         "requestBody": {
@@ -8638,6 +8649,17 @@
                                     "requires_confirmation": {
                                       "title": "Requires Confirmation",
                                       "type": "boolean"
+                                    },
+                                    "target_scopes": {
+                                      "items": {
+                                        "enum": [
+                                          "SUBSCRIPTION",
+                                          "ASSOCIATED_RSS"
+                                        ],
+                                        "type": "string"
+                                      },
+                                      "title": "Target Scopes",
+                                      "type": "array"
                                     }
                                   },
                                   "required": [
@@ -8786,7 +8808,8 @@
                             "code": "示例",
                             "label": "示例",
                             "style": "示例",
-                            "requires_confirmation": true
+                            "requires_confirmation": true,
+                            "target_scopes": []
                           }
                         ],
                         "valid_resource_count": 0,
@@ -9070,6 +9093,15 @@
                               "title": "Subscription Detail",
                               "type": "string"
                             },
+                            "subscription_submit": {
+                              "enum": [
+                                "SUPPORTED",
+                                "UNSUPPORTED",
+                                "UNKNOWN"
+                              ],
+                              "title": "Subscription Submit",
+                              "type": "string"
+                            },
                             "subscription_modify": {
                               "enum": [
                                 "SUPPORTED",
@@ -9198,6 +9230,7 @@
                             "adapter",
                             "subscription_list",
                             "subscription_detail",
+                            "subscription_submit",
                             "subscription_modify",
                             "subscription_enable",
                             "subscription_disable",
@@ -9405,6 +9438,17 @@
                                     "requires_confirmation": {
                                       "title": "Requires Confirmation",
                                       "type": "boolean"
+                                    },
+                                    "target_scopes": {
+                                      "items": {
+                                        "enum": [
+                                          "SUBSCRIPTION",
+                                          "ASSOCIATED_RSS"
+                                        ],
+                                        "type": "string"
+                                      },
+                                      "title": "Target Scopes",
+                                      "type": "array"
                                     }
                                   },
                                   "required": [
@@ -9500,6 +9544,7 @@
                       "adapter": "示例",
                       "subscription_list": "示例",
                       "subscription_detail": "示例",
+                      "subscription_submit": "示例",
                       "subscription_modify": "示例",
                       "subscription_enable": "示例",
                       "subscription_disable": "示例",
@@ -9540,7 +9585,8 @@
                             "code": "示例",
                             "label": "示例",
                             "style": "示例",
-                            "requires_confirmation": true
+                            "requires_confirmation": true,
+                            "target_scopes": []
                           }
                         ],
                         "valid_resource_count": 0,
@@ -21046,6 +21092,17 @@
                               "requires_confirmation": {
                                 "title": "Requires Confirmation",
                                 "type": "boolean"
+                              },
+                              "target_scopes": {
+                                "items": {
+                                  "enum": [
+                                    "SUBSCRIPTION",
+                                    "ASSOCIATED_RSS"
+                                  ],
+                                  "type": "string"
+                                },
+                                "title": "Target Scopes",
+                                "type": "array"
                               }
                             },
                             "required": [
@@ -21987,7 +22044,8 @@
                         "code": "示例",
                         "label": "示例",
                         "style": "示例",
-                        "requires_confirmation": true
+                        "requires_confirmation": true,
+                        "target_scopes": []
                       }
                     ],
                     "valid_resource_count": 0,
@@ -22426,6 +22484,17 @@
                                   "requires_confirmation": {
                                     "title": "Requires Confirmation",
                                     "type": "boolean"
+                                  },
+                                  "target_scopes": {
+                                    "items": {
+                                      "enum": [
+                                        "SUBSCRIPTION",
+                                        "ASSOCIATED_RSS"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "title": "Target Scopes",
+                                    "type": "array"
                                   }
                                 },
                                 "required": [
@@ -22630,7 +22699,8 @@
                           "code": "示例",
                           "label": "示例",
                           "style": "示例",
-                          "requires_confirmation": true
+                          "requires_confirmation": true,
+                          "target_scopes": []
                         }
                       ],
                       "valid_resource_count": 0,
@@ -23118,6 +23188,17 @@
                                   "requires_confirmation": {
                                     "title": "Requires Confirmation",
                                     "type": "boolean"
+                                  },
+                                  "target_scopes": {
+                                    "items": {
+                                      "enum": [
+                                        "SUBSCRIPTION",
+                                        "ASSOCIATED_RSS"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "title": "Target Scopes",
+                                    "type": "array"
                                   }
                                 },
                                 "required": [
@@ -23322,7 +23403,8 @@
                           "code": "示例",
                           "label": "示例",
                           "style": "示例",
-                          "requires_confirmation": true
+                          "requires_confirmation": true,
+                          "target_scopes": []
                         }
                       ],
                       "valid_resource_count": 0,
@@ -23521,90 +23603,1803 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "target_scope",
-                  "expected_revision",
-                  "idempotency_key",
-                  "confirm",
-                  "ab_config",
-                  "patch"
-                ],
-                "properties": {
-                  "target_scope": {
-                    "type": "string",
-                    "enum": [
-                      "SUBSCRIPTION",
-                      "ASSOCIATED_RSS"
-                    ]
-                  },
-                  "expected_revision": {
-                    "type": "integer",
-                    "minimum": 1
-                  },
-                  "idempotency_key": {
-                    "type": "string",
-                    "x-request-scoped": true
-                  },
-                  "confirm": {
-                    "const": true
-                  },
-                  "ab_config": {
+                "oneOf": [
+                  {
                     "type": "object",
                     "additionalProperties": false,
-                    "x-request-scoped": true,
+                    "required": [
+                      "target_scope",
+                      "expected_revision",
+                      "idempotency_key",
+                      "confirm",
+                      "ab_config",
+                      "patch"
+                    ],
                     "properties": {
-                      "auth_mode": {
+                      "target_scope": {
+                        "const": "SUBSCRIPTION"
+                      },
+                      "expected_revision": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "idempotency_key": {
                         "type": "string",
-                        "enum": [
-                          "password",
-                          "api_token"
+                        "x-request-scoped": true
+                      },
+                      "confirm": {
+                        "const": true
+                      },
+                      "ab_config": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "x-request-scoped": true,
+                        "properties": {
+                          "auth_mode": {
+                            "type": "string",
+                            "enum": [
+                              "password",
+                              "api_token"
+                            ]
+                          },
+                          "base_url": {
+                            "type": "string",
+                            "x-request-scoped": true
+                          },
+                          "username": {
+                            "type": "string",
+                            "x-request-scoped": true
+                          },
+                          "password": {
+                            "type": "string",
+                            "x-request-scoped": true
+                          },
+                          "token": {
+                            "type": "string",
+                            "x-request-scoped": true
+                          },
+                          "fallback_enabled": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "auth_mode",
+                          "fallback_enabled"
                         ]
                       },
-                      "base_url": {
-                        "type": "string",
-                        "x-request-scoped": true
+                      "storage_dir": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
                       },
-                      "username": {
-                        "type": "string",
-                        "x-request-scoped": true
-                      },
-                      "password": {
-                        "type": "string",
-                        "x-request-scoped": true
-                      },
-                      "token": {
-                        "type": "string",
-                        "x-request-scoped": true
-                      },
-                      "fallback_enabled": {
-                        "type": "boolean"
+                      "patch": {
+                        "allOf": [
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "title": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "season": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ],
+                                "minimum": 0,
+                                "maximum": 100
+                              },
+                              "subtitle_group": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "filter_rule": {
+                                "anyOf": [
+                                  {
+                                    "type": "null"
+                                  },
+                                  {
+                                    "allOf": [
+                                      {
+                                        "type": "object",
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "must_contain": {
+                                            "type": [
+                                              "string",
+                                              "null"
+                                            ]
+                                          },
+                                          "must_not_contain": {
+                                            "type": [
+                                              "string",
+                                              "null"
+                                            ]
+                                          },
+                                          "use_regex": {
+                                            "type": [
+                                              "boolean",
+                                              "null"
+                                            ]
+                                          },
+                                          "case_sensitive": {
+                                            "type": [
+                                              "boolean",
+                                              "null"
+                                            ]
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "anyOf": [
+                                          {
+                                            "type": "object",
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "must_contain": {
+                                                "type": [
+                                                  "string",
+                                                  "null"
+                                                ]
+                                              },
+                                              "must_not_contain": {
+                                                "type": [
+                                                  "string",
+                                                  "null"
+                                                ]
+                                              },
+                                              "use_regex": {
+                                                "type": [
+                                                  "boolean",
+                                                  "null"
+                                                ]
+                                              },
+                                              "case_sensitive": {
+                                                "type": [
+                                                  "boolean",
+                                                  "null"
+                                                ]
+                                              }
+                                            },
+                                            "required": [
+                                              "must_contain"
+                                            ]
+                                          },
+                                          {
+                                            "type": "object",
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "must_contain": {
+                                                "type": [
+                                                  "string",
+                                                  "null"
+                                                ]
+                                              },
+                                              "must_not_contain": {
+                                                "type": [
+                                                  "string",
+                                                  "null"
+                                                ]
+                                              },
+                                              "use_regex": {
+                                                "type": [
+                                                  "boolean",
+                                                  "null"
+                                                ]
+                                              },
+                                              "case_sensitive": {
+                                                "type": [
+                                                  "boolean",
+                                                  "null"
+                                                ]
+                                              }
+                                            },
+                                            "required": [
+                                              "must_not_contain"
+                                            ]
+                                          },
+                                          {
+                                            "type": "object",
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "must_contain": {
+                                                "type": [
+                                                  "string",
+                                                  "null"
+                                                ]
+                                              },
+                                              "must_not_contain": {
+                                                "type": [
+                                                  "string",
+                                                  "null"
+                                                ]
+                                              },
+                                              "use_regex": {
+                                                "type": [
+                                                  "boolean",
+                                                  "null"
+                                                ]
+                                              },
+                                              "case_sensitive": {
+                                                "type": [
+                                                  "boolean",
+                                                  "null"
+                                                ]
+                                              }
+                                            },
+                                            "required": [
+                                              "use_regex"
+                                            ]
+                                          },
+                                          {
+                                            "type": "object",
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "must_contain": {
+                                                "type": [
+                                                  "string",
+                                                  "null"
+                                                ]
+                                              },
+                                              "must_not_contain": {
+                                                "type": [
+                                                  "string",
+                                                  "null"
+                                                ]
+                                              },
+                                              "use_regex": {
+                                                "type": [
+                                                  "boolean",
+                                                  "null"
+                                                ]
+                                              },
+                                              "case_sensitive": {
+                                                "type": [
+                                                  "boolean",
+                                                  "null"
+                                                ]
+                                              }
+                                            },
+                                            "required": [
+                                              "case_sensitive"
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              "offset": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ],
+                                "minimum": 0
+                              },
+                              "expected_folder_name": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            }
+                          },
+                          {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "title": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "season": {
+                                    "type": [
+                                      "integer",
+                                      "null"
+                                    ],
+                                    "minimum": 0,
+                                    "maximum": 100
+                                  },
+                                  "subtitle_group": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "filter_rule": {
+                                    "anyOf": [
+                                      {
+                                        "type": "null"
+                                      },
+                                      {
+                                        "allOf": [
+                                          {
+                                            "type": "object",
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "must_contain": {
+                                                "type": [
+                                                  "string",
+                                                  "null"
+                                                ]
+                                              },
+                                              "must_not_contain": {
+                                                "type": [
+                                                  "string",
+                                                  "null"
+                                                ]
+                                              },
+                                              "use_regex": {
+                                                "type": [
+                                                  "boolean",
+                                                  "null"
+                                                ]
+                                              },
+                                              "case_sensitive": {
+                                                "type": [
+                                                  "boolean",
+                                                  "null"
+                                                ]
+                                              }
+                                            }
+                                          },
+                                          {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "must_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "must_not_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "use_regex": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "case_sensitive": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "must_contain"
+                                                ]
+                                              },
+                                              {
+                                                "type": "object",
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "must_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "must_not_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "use_regex": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "case_sensitive": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "must_not_contain"
+                                                ]
+                                              },
+                                              {
+                                                "type": "object",
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "must_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "must_not_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "use_regex": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "case_sensitive": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "use_regex"
+                                                ]
+                                              },
+                                              {
+                                                "type": "object",
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "must_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "must_not_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "use_regex": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "case_sensitive": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "case_sensitive"
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  "offset": {
+                                    "type": [
+                                      "integer",
+                                      "null"
+                                    ],
+                                    "minimum": 0
+                                  },
+                                  "expected_folder_name": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "title"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "title": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "season": {
+                                    "type": [
+                                      "integer",
+                                      "null"
+                                    ],
+                                    "minimum": 0,
+                                    "maximum": 100
+                                  },
+                                  "subtitle_group": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "filter_rule": {
+                                    "anyOf": [
+                                      {
+                                        "type": "null"
+                                      },
+                                      {
+                                        "allOf": [
+                                          {
+                                            "type": "object",
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "must_contain": {
+                                                "type": [
+                                                  "string",
+                                                  "null"
+                                                ]
+                                              },
+                                              "must_not_contain": {
+                                                "type": [
+                                                  "string",
+                                                  "null"
+                                                ]
+                                              },
+                                              "use_regex": {
+                                                "type": [
+                                                  "boolean",
+                                                  "null"
+                                                ]
+                                              },
+                                              "case_sensitive": {
+                                                "type": [
+                                                  "boolean",
+                                                  "null"
+                                                ]
+                                              }
+                                            }
+                                          },
+                                          {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "must_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "must_not_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "use_regex": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "case_sensitive": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "must_contain"
+                                                ]
+                                              },
+                                              {
+                                                "type": "object",
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "must_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "must_not_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "use_regex": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "case_sensitive": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "must_not_contain"
+                                                ]
+                                              },
+                                              {
+                                                "type": "object",
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "must_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "must_not_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "use_regex": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "case_sensitive": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "use_regex"
+                                                ]
+                                              },
+                                              {
+                                                "type": "object",
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "must_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "must_not_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "use_regex": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "case_sensitive": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "case_sensitive"
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  "offset": {
+                                    "type": [
+                                      "integer",
+                                      "null"
+                                    ],
+                                    "minimum": 0
+                                  },
+                                  "expected_folder_name": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "season"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "title": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "season": {
+                                    "type": [
+                                      "integer",
+                                      "null"
+                                    ],
+                                    "minimum": 0,
+                                    "maximum": 100
+                                  },
+                                  "subtitle_group": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "filter_rule": {
+                                    "anyOf": [
+                                      {
+                                        "type": "null"
+                                      },
+                                      {
+                                        "allOf": [
+                                          {
+                                            "type": "object",
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "must_contain": {
+                                                "type": [
+                                                  "string",
+                                                  "null"
+                                                ]
+                                              },
+                                              "must_not_contain": {
+                                                "type": [
+                                                  "string",
+                                                  "null"
+                                                ]
+                                              },
+                                              "use_regex": {
+                                                "type": [
+                                                  "boolean",
+                                                  "null"
+                                                ]
+                                              },
+                                              "case_sensitive": {
+                                                "type": [
+                                                  "boolean",
+                                                  "null"
+                                                ]
+                                              }
+                                            }
+                                          },
+                                          {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "must_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "must_not_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "use_regex": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "case_sensitive": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "must_contain"
+                                                ]
+                                              },
+                                              {
+                                                "type": "object",
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "must_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "must_not_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "use_regex": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "case_sensitive": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "must_not_contain"
+                                                ]
+                                              },
+                                              {
+                                                "type": "object",
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "must_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "must_not_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "use_regex": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "case_sensitive": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "use_regex"
+                                                ]
+                                              },
+                                              {
+                                                "type": "object",
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "must_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "must_not_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "use_regex": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "case_sensitive": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "case_sensitive"
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  "offset": {
+                                    "type": [
+                                      "integer",
+                                      "null"
+                                    ],
+                                    "minimum": 0
+                                  },
+                                  "expected_folder_name": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "subtitle_group"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "title": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "season": {
+                                    "type": [
+                                      "integer",
+                                      "null"
+                                    ],
+                                    "minimum": 0,
+                                    "maximum": 100
+                                  },
+                                  "subtitle_group": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "filter_rule": {
+                                    "anyOf": [
+                                      {
+                                        "type": "null"
+                                      },
+                                      {
+                                        "allOf": [
+                                          {
+                                            "type": "object",
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "must_contain": {
+                                                "type": [
+                                                  "string",
+                                                  "null"
+                                                ]
+                                              },
+                                              "must_not_contain": {
+                                                "type": [
+                                                  "string",
+                                                  "null"
+                                                ]
+                                              },
+                                              "use_regex": {
+                                                "type": [
+                                                  "boolean",
+                                                  "null"
+                                                ]
+                                              },
+                                              "case_sensitive": {
+                                                "type": [
+                                                  "boolean",
+                                                  "null"
+                                                ]
+                                              }
+                                            }
+                                          },
+                                          {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "must_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "must_not_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "use_regex": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "case_sensitive": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "must_contain"
+                                                ]
+                                              },
+                                              {
+                                                "type": "object",
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "must_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "must_not_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "use_regex": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "case_sensitive": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "must_not_contain"
+                                                ]
+                                              },
+                                              {
+                                                "type": "object",
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "must_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "must_not_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "use_regex": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "case_sensitive": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "use_regex"
+                                                ]
+                                              },
+                                              {
+                                                "type": "object",
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "must_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "must_not_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "use_regex": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "case_sensitive": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "case_sensitive"
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  "offset": {
+                                    "type": [
+                                      "integer",
+                                      "null"
+                                    ],
+                                    "minimum": 0
+                                  },
+                                  "expected_folder_name": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "filter_rule"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "title": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "season": {
+                                    "type": [
+                                      "integer",
+                                      "null"
+                                    ],
+                                    "minimum": 0,
+                                    "maximum": 100
+                                  },
+                                  "subtitle_group": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "filter_rule": {
+                                    "anyOf": [
+                                      {
+                                        "type": "null"
+                                      },
+                                      {
+                                        "allOf": [
+                                          {
+                                            "type": "object",
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "must_contain": {
+                                                "type": [
+                                                  "string",
+                                                  "null"
+                                                ]
+                                              },
+                                              "must_not_contain": {
+                                                "type": [
+                                                  "string",
+                                                  "null"
+                                                ]
+                                              },
+                                              "use_regex": {
+                                                "type": [
+                                                  "boolean",
+                                                  "null"
+                                                ]
+                                              },
+                                              "case_sensitive": {
+                                                "type": [
+                                                  "boolean",
+                                                  "null"
+                                                ]
+                                              }
+                                            }
+                                          },
+                                          {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "must_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "must_not_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "use_regex": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "case_sensitive": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "must_contain"
+                                                ]
+                                              },
+                                              {
+                                                "type": "object",
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "must_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "must_not_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "use_regex": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "case_sensitive": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "must_not_contain"
+                                                ]
+                                              },
+                                              {
+                                                "type": "object",
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "must_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "must_not_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "use_regex": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "case_sensitive": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "use_regex"
+                                                ]
+                                              },
+                                              {
+                                                "type": "object",
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "must_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "must_not_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "use_regex": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "case_sensitive": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "case_sensitive"
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  "offset": {
+                                    "type": [
+                                      "integer",
+                                      "null"
+                                    ],
+                                    "minimum": 0
+                                  },
+                                  "expected_folder_name": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "offset"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "title": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "season": {
+                                    "type": [
+                                      "integer",
+                                      "null"
+                                    ],
+                                    "minimum": 0,
+                                    "maximum": 100
+                                  },
+                                  "subtitle_group": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "filter_rule": {
+                                    "anyOf": [
+                                      {
+                                        "type": "null"
+                                      },
+                                      {
+                                        "allOf": [
+                                          {
+                                            "type": "object",
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "must_contain": {
+                                                "type": [
+                                                  "string",
+                                                  "null"
+                                                ]
+                                              },
+                                              "must_not_contain": {
+                                                "type": [
+                                                  "string",
+                                                  "null"
+                                                ]
+                                              },
+                                              "use_regex": {
+                                                "type": [
+                                                  "boolean",
+                                                  "null"
+                                                ]
+                                              },
+                                              "case_sensitive": {
+                                                "type": [
+                                                  "boolean",
+                                                  "null"
+                                                ]
+                                              }
+                                            }
+                                          },
+                                          {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "must_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "must_not_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "use_regex": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "case_sensitive": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "must_contain"
+                                                ]
+                                              },
+                                              {
+                                                "type": "object",
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "must_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "must_not_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "use_regex": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "case_sensitive": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "must_not_contain"
+                                                ]
+                                              },
+                                              {
+                                                "type": "object",
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "must_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "must_not_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "use_regex": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "case_sensitive": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "use_regex"
+                                                ]
+                                              },
+                                              {
+                                                "type": "object",
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "must_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "must_not_contain": {
+                                                    "type": [
+                                                      "string",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "use_regex": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  },
+                                                  "case_sensitive": {
+                                                    "type": [
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "case_sensitive"
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  "offset": {
+                                    "type": [
+                                      "integer",
+                                      "null"
+                                    ],
+                                    "minimum": 0
+                                  },
+                                  "expected_folder_name": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "expected_folder_name"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
                       }
-                    },
-                    "required": [
-                      "auth_mode",
-                      "fallback_enabled"
-                    ]
+                    }
                   },
-                  "storage_dir": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "patch": {
+                  {
                     "type": "object",
-                    "additionalProperties": false
+                    "additionalProperties": false,
+                    "required": [
+                      "target_scope",
+                      "expected_revision",
+                      "idempotency_key",
+                      "confirm",
+                      "ab_config",
+                      "patch"
+                    ],
+                    "properties": {
+                      "target_scope": {
+                        "const": "ASSOCIATED_RSS"
+                      },
+                      "expected_revision": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "idempotency_key": {
+                        "type": "string",
+                        "x-request-scoped": true
+                      },
+                      "confirm": {
+                        "const": true
+                      },
+                      "ab_config": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "x-request-scoped": true,
+                        "properties": {
+                          "auth_mode": {
+                            "type": "string",
+                            "enum": [
+                              "password",
+                              "api_token"
+                            ]
+                          },
+                          "base_url": {
+                            "type": "string",
+                            "x-request-scoped": true
+                          },
+                          "username": {
+                            "type": "string",
+                            "x-request-scoped": true
+                          },
+                          "password": {
+                            "type": "string",
+                            "x-request-scoped": true
+                          },
+                          "token": {
+                            "type": "string",
+                            "x-request-scoped": true
+                          },
+                          "fallback_enabled": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "auth_mode",
+                          "fallback_enabled"
+                        ]
+                      },
+                      "storage_dir": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "patch": {
+                        "allOf": [
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "name": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "aggregate": {
+                                "type": [
+                                  "boolean",
+                                  "null"
+                                ]
+                              },
+                              "parser": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            }
+                          },
+                          {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "name": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "aggregate": {
+                                    "type": [
+                                      "boolean",
+                                      "null"
+                                    ]
+                                  },
+                                  "parser": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "name"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "name": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "aggregate": {
+                                    "type": [
+                                      "boolean",
+                                      "null"
+                                    ]
+                                  },
+                                  "parser": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "aggregate"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "name": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "aggregate": {
+                                    "type": [
+                                      "boolean",
+                                      "null"
+                                    ]
+                                  },
+                                  "parser": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "parser"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    }
                   }
-                }
+                ]
               },
-              "example": {
-                "target_scope": "示例",
-                "expected_revision": 1,
-                "confirm": true,
-                "patch": {}
-              }
+              "example": {}
             }
           },
           "description": "修改外部追番方案"
@@ -23826,6 +25621,17 @@
                                   "requires_confirmation": {
                                     "title": "Requires Confirmation",
                                     "type": "boolean"
+                                  },
+                                  "target_scopes": {
+                                    "items": {
+                                      "enum": [
+                                        "SUBSCRIPTION",
+                                        "ASSOCIATED_RSS"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "title": "Target Scopes",
+                                    "type": "array"
                                   }
                                 },
                                 "required": [
@@ -23936,7 +25742,8 @@
                           "code": "示例",
                           "label": "示例",
                           "style": "示例",
-                          "requires_confirmation": true
+                          "requires_confirmation": true,
+                          "target_scopes": []
                         }
                       ],
                       "valid_resource_count": 0,
@@ -24466,6 +26273,17 @@
                                   "requires_confirmation": {
                                     "title": "Requires Confirmation",
                                     "type": "boolean"
+                                  },
+                                  "target_scopes": {
+                                    "items": {
+                                      "enum": [
+                                        "SUBSCRIPTION",
+                                        "ASSOCIATED_RSS"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "title": "Target Scopes",
+                                    "type": "array"
                                   }
                                 },
                                 "required": [
@@ -24670,7 +26488,8 @@
                           "code": "示例",
                           "label": "示例",
                           "style": "示例",
-                          "requires_confirmation": true
+                          "requires_confirmation": true,
+                          "target_scopes": []
                         }
                       ],
                       "valid_resource_count": 0,
@@ -25212,6 +27031,17 @@
                                   "requires_confirmation": {
                                     "title": "Requires Confirmation",
                                     "type": "boolean"
+                                  },
+                                  "target_scopes": {
+                                    "items": {
+                                      "enum": [
+                                        "SUBSCRIPTION",
+                                        "ASSOCIATED_RSS"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "title": "Target Scopes",
+                                    "type": "array"
                                   }
                                 },
                                 "required": [
@@ -25327,7 +27157,8 @@
                           "code": "示例",
                           "label": "示例",
                           "style": "示例",
-                          "requires_confirmation": true
+                          "requires_confirmation": true,
+                          "target_scopes": []
                         }
                       ],
                       "valid_resource_count": 0,
@@ -25908,6 +27739,17 @@
                                   "requires_confirmation": {
                                     "title": "Requires Confirmation",
                                     "type": "boolean"
+                                  },
+                                  "target_scopes": {
+                                    "items": {
+                                      "enum": [
+                                        "SUBSCRIPTION",
+                                        "ASSOCIATED_RSS"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "title": "Target Scopes",
+                                    "type": "array"
                                   }
                                 },
                                 "required": [
@@ -26024,7 +27866,8 @@
                           "code": "示例",
                           "label": "示例",
                           "style": "示例",
-                          "requires_confirmation": true
+                          "requires_confirmation": true,
+                          "target_scopes": []
                         }
                       ],
                       "valid_resource_count": 0,
@@ -26499,6 +28342,17 @@
                                   "requires_confirmation": {
                                     "title": "Requires Confirmation",
                                     "type": "boolean"
+                                  },
+                                  "target_scopes": {
+                                    "items": {
+                                      "enum": [
+                                        "SUBSCRIPTION",
+                                        "ASSOCIATED_RSS"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "title": "Target Scopes",
+                                    "type": "array"
                                   }
                                 },
                                 "required": [
@@ -26703,7 +28557,8 @@
                           "code": "示例",
                           "label": "示例",
                           "style": "示例",
-                          "requires_confirmation": true
+                          "requires_confirmation": true,
+                          "target_scopes": []
                         }
                       ],
                       "valid_resource_count": 0,
@@ -27251,6 +29106,17 @@
                                   "requires_confirmation": {
                                     "title": "Requires Confirmation",
                                     "type": "boolean"
+                                  },
+                                  "target_scopes": {
+                                    "items": {
+                                      "enum": [
+                                        "SUBSCRIPTION",
+                                        "ASSOCIATED_RSS"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "title": "Target Scopes",
+                                    "type": "array"
                                   }
                                 },
                                 "required": [
@@ -27366,7 +29232,8 @@
                           "code": "示例",
                           "label": "示例",
                           "style": "示例",
-                          "requires_confirmation": true
+                          "requires_confirmation": true,
+                          "target_scopes": []
                         }
                       ],
                       "valid_resource_count": 0,

@@ -692,6 +692,36 @@ class TestAppWorkbenchCandidateSelectionAndDraft:
                         "updated_episode": None, "updated_episode_status": "NOT_IMPLEMENTED",
                         "total_episodes": 28, "revision": 1, "origin": "single", "batch_id": None,
                         "created_at": "2026-09-12T00:00:00Z", "updated_at": None, "last_synced_at": None,
+                        "safe_info": None, "current_operation": None, "revalidation_issues": [],
+                        "external_mapping": None, "audit_events": [], "warnings": [],
+                    },
+                }, ensure_ascii=False),
+            ),
+        )
+        # US-316: the handoff lands on the formal tracking screen, whose list is
+        # the authority for the selection it just made.
+        page.route(
+            "**/api/v1/tracking/items*",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "ok": True,
+                    "result": {
+                        "items": [{
+                            "tracking_id": "tracking-wb-save", "request_id": "req-wb-save",
+                            "title": "葬送的芙莉莲", "season": 1, "subtitle_group": "喵萌奶茶屋",
+                            "poster_path": None, "status": "PENDING_SUBMIT", "status_label": "待提交",
+                            "status_group": "PENDING", "available_actions": [], "valid_resource_count": 1,
+                            "updated_episode": None, "updated_episode_status": "NOT_IMPLEMENTED",
+                            "total_episodes": 28, "revision": 1,
+                            "updated_at": "2026-09-13T00:00:00+00:00",
+                        }],
+                        "summary": {
+                            "total": 1, "pending": 1, "processing": 0,
+                            "active": 0, "needs_attention": 0, "unreadable": 0,
+                        },
+                        "warnings": [],
                     },
                 }, ensure_ascii=False),
             ),
@@ -709,7 +739,12 @@ class TestAppWorkbenchCandidateSelectionAndDraft:
         expect(page.locator("#single-review-save-button")).to_be_enabled()
         page.locator("#single-review-save-button").click()
         page.wait_for_url("**/app/tracking?tracking_id=tracking-wb-save")
-        page.wait_for_selector("#tracking-detail-target", timeout=5000)
+        # US-316: the handoff opens the formal tracking inspector (read-only —
+        # saving a draft never creates an external Auto Bangumi subscription).
+        inspector = page.locator(".tracking-inspector-detail")
+        expect(inspector).to_contain_text("葬送的芙莉莲", timeout=5000)
+        expect(inspector).to_contain_text("待提交")
+        assert page.locator("#batch-queue-list").count() == 0
         assert page.url.endswith("/app/tracking?tracking_id=tracking-wb-save")
         assert not list((storage_dir / "requests").glob("*.json"))
 

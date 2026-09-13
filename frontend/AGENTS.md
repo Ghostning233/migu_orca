@@ -3,23 +3,20 @@
 MiGuOrca 的 Vue 3 + TypeScript(strict) + Vite 前端工程。依赖与命令全部走 npm（`npm ci`），
 与后端 `uv` 分离；**不得**混用多个 lockfile（`package-lock.json` 是唯一来源）。
 
-## Stage 37 当前执行边界
+## Stage 38 执行边界（已完成并归档，2026-09-13）
 
-- 当前执行 PRD 是 `docs/MiGuOrca_stage37_plans_safe_info_PRD.md`，分支固定为
-  `ralph/stage37-plans-safe-info`，stories 为 US-294～US-302。
-- Stage 37 只实现 F-E：本地追番方案列表—详情、真实 SafeInfo、共享 saved Request 修改、复制再用
-  与精确 tracking 链接；不得顺带实现 F-F 正式追番管理或 F-G 设置/发布收尾。
-- US-294 只为现有 `RequestSummaryDTO` 追加可空 `season`/`updated_at`、把候选字幕组收紧为无 URL 的
-  严格公开摘要并同步 OpenAPI/generated；不新增端点、不改状态机/持久化 schema。其余 stories
-  不得继续扩展后端契约。
-- `getRequestSafeInfo` 是“全部信息”唯一数据源；`listTrackingItems` 仅作本地只读投影并按公开
-  `request_id` 唯一精确关联。不得推导 ID、读取 available actions 或调用任何同步/外部写动作。
-- `AnimeDraftEditor` 保持受控展示层；saved Request transport 由详情宿主调用 generated
-  `modifyRequest`，不得塞入 `useDraftSession` 或套用 draft revision/preview-modify 语义。
-- “复制再用”只使用一次性内存白名单 handoff；刷新失效，用户仍须明确搜索并选择真实 MiKan
-  合集、生成新草案。不得复制 Request/draft/RSS/capability 或自动保存、确认、外部提交。
-- 每次 Ralph 最多运行 3 个 stories；完成 US-296、US-299、US-302 后必须停下独立审核。普通 story
-  只跑定向检查，完整前端、后端非浏览器与 Chromium 门禁只在 US-302 运行。
+- 执行 PRD 是 `docs/MiGuOrca_stage38_tracking_management_PRD.md`，分支为
+  `ralph/stage38-tracking-management`，stories US-303～US-317 全部 `passes=true`。完成记录、逐 story
+  证据映射、最终门禁结果、视觉偏差与 F-G handoff 见该 PRD §11～§12；Ralph 状态归档在
+  `scripts/ralph/archive/2026-09-13-stage38-tracking-management/`。
+- Stage 38 只实现 F-F 正式追番管理；F-G Settings 简化、全局连接状态、跨页收敛、旧入口最终收敛和发布
+  Gate 5 不进入本阶段。本节的约束对 F-G 之前的**任何**后续改动继续有效（尤其是下面的凭据、写幂等、
+  删除与视觉偏差边界）。
+- US-303 仅补齐严格 generated modify patch 联合与 server-computed `target_scopes`；不得新增 endpoint、状态、持久化 schema、外部动作或业务语义。其余 stories 不得继续扩展后端契约。
+- 列表/详情只消费 generated tracking DTO；动作只取 `available_actions + target_scopes + 当前 capability` 交集。未知值 fail closed，不手写 DTO 或猜 scope。
+- 凭据只存在 TrackingView 实例与单次 POST body；外部动作必须显式触发并复用 revision、confirm、单意图 idempotency、回查和结果未知保护。
+- 删除只允许当前单条外部对象且请求无 `file` 字段；必须保留本地 Request、tracking、审计、任务与媒体。“已更新集数”仍固定待开发。
+- 每次 Ralph 最多运行 3 个 stories；完成 US-305、US-308、US-311、US-314、US-317 后必须停下独立审核。完整门禁只在 US-317 运行。
 
 ## 工程结构与约定
 
@@ -258,8 +255,15 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   class 落到原生 input 上），浏览器测试直接 `.batch-card-checkbox-row` 即可，
   不要写成 `.batch-card-checkbox-row input`；全选用 `#batch-select-all-checkbox`。
 
-## 提交队列（US-206）
+## 提交队列（US-206，US-316 已退出默认运行时）
 
+- **US-316 起本项目不再有队列页面**：`features/queue/QueueView.vue` 已从路由与默认运行时
+  退出（`/app/tracking` 由 `TrackingView` 接管，`/app/queue` 只是重定向）。组件与
+  `queueWorkbench.ts` 按 Stage 38 §10.2 **保留在仓库**用于回退，但**任何模块都不得再导入
+  `features/queue`**（`src/app/router/index.test.ts` 的引用搜索用例守护），也不会进入
+  production bundle（`tests/browser/test_app_tracking.py` 的 bundle 用例断言 dist 中不含
+  `batch-queue-*`/`正在读取提交前队列` 等队列专属标记）。旧 `batch_id` 深链只按下面的
+  US-316 兼容定位处理。以下 US-206 描述只作为历史语义与兼容端点参考保留。
 - 提交队列在 `features/queue/QueueView.vue`（`/app/tracking`）。纯函数逻辑收敛到
   `features/queue/queueWorkbench.ts`（`queueStatusLabel`/`queueStatusClass`/
   `queueItemSummary`/`queueItemCanRetry`/`queueItemCanRecover`/`buildAbConfig`/
@@ -281,10 +285,11 @@ npm run build                 # 先 typecheck 再 vite build → dist/
 - 失败语义（legacy parity）：HTTP 级失败**保留敏感输入与确认勾选**便于重试，只显示
   固定中文反馈（绝不渲染服务端 `error_message`/`error_type`）；队列读取失败显示
   脱敏错误态 + 重试。
-- 浏览器测试：`tests/browser/test_app_queue.py`（真实 Chromium）。mock 队列读取用
-  `page.route("**/api/v1/batches/{batch_id}/queue*", ...)`（注意 `*` 通配 storage_dir
-  query）；in-flight 用 conftest 的 `test-slow-submit`/`test-slow-retry` 延迟路由
-  （不 mock，真实返回 400）；SPA 通知断言用 `.global-notification:not(:empty)`。
+- 浏览器测试：`tests/browser/test_app_queue.py`（真实 Chromium）**在 US-316 已改写为旧
+  入口兼容套件**：旧 `/app/queue` 重定向、`batch_id` 一次性定位、不可定位的固定提示，以及
+  「后端兼容端点仍可用」。历史队列流程的 in-flight/mock 写法（`test-slow-submit` 等延迟路由）
+  随队列用例一起退出；需要观察 loading 时用 held route（见 US-316 一节）。
+  SPA 通知断言用 `.global-notification:not(:empty)`。
 
 ## 跨功能收敛（US-207）
 
@@ -301,9 +306,10 @@ npm run build                 # 先 typecheck 再 vite build → dist/
 - 状态不只靠颜色：status chip 必须带中文文本 label（如 `提交成功`）+ 状态 class，
   不能只改背景色。
 - reduced-motion：LoadingState/BaseButton spinner 在 `prefers-reduced-motion:
-  reduce` 下停动画但文本与 `aria-busy`/disabled 保留。浏览器测试用 conftest 的
-  服务端延迟路由（`test-slow-queue` 等）观察 loading——`time.sleep` 不能写在
-  `page.route` handler 里（会阻塞 Playwright 分发线程，loading 永远不可见）。
+  reduce` 下停动画但文本与 `aria-busy`/disabled 保留。观察 loading 用 **held route**
+  （handler 存下 `route`，断言完再 `fulfill`，见 US-316 一节）；`time.sleep` 不能写在
+  `page.route` handler 里（会阻塞 Playwright 分发线程，loading 永远不可见），所以
+  conftest 的 `test-slow-*` 延迟路由已随队列用例一并移除。
 - production build：vite.config.ts 用 functional `manualChunks` 把 `node_modules`
   打进 `vendor-*.js`（不要用 object 形式，会把全部依赖并成一个 chunk 破坏懒加载）；
   `sourcemap: false` 且 dist 永不提交 `.map`（`*.map` 已 gitignore）。
@@ -311,6 +317,215 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   （Vite 内容哈希文件名不可变），SPA shell 与其它 `/app/*` 返回 `no-cache`
   （部署换哈希后不会 pin 旧资源）。改 `routes_app.py` 后同步
   `src/apps/migu_orca_web/app_routes_test.py` 的缓存头断言。
-- 浏览器收敛测试文件：`tests/browser/test_app_responsive_a11y.py`（22 例）——
-  四路由 × 三视口无横向溢出、skip link、右侧候选详情焦点、状态文本、reduced-motion、
-  vendor chunk、无 sourcemap、缓存头。它**不重复**各 feature 的业务断言。
+- 浏览器收敛测试文件：`tests/browser/test_app_responsive_a11y.py`——
+  四路由 × 视口无横向溢出、skip link、右侧候选详情焦点、状态文本（US-316 起断言的是
+  tracking 列表的状态 label 与 `aria-hidden` 装饰条）、reduced-motion（held route）、
+  vendor chunk、无 sourcemap、缓存头。它**不重复**各 feature 的业务断言；tracking 专属的
+  多视口/200%/键盘/canary 收敛在 `tests/browser/test_app_tracking.py` 的 US-316 用例里。
+
+## 正式追番管理（Stage 38，US-305 起）
+
+- 页面在 `features/tracking/`：`TrackingView.vue`（状态总览 + 单选列表 + 右侧检查器）、
+  `TrackingInspector.vue`（安全详情 + 本地方案动作）、`trackingProjection.ts`（API-free
+  投影/意图纯函数）、`CredentialSessionDialog.vue`（页面级凭据会话）。列表与详情的权威
+  分别是 generated `listTrackingItems` / `getTrackingItemDetail`。
+- **列表读取与「服务端确认的写结果」必须各有请求代际**：`listSequence` 只让更新的列表
+  请求作废旧列表响应，`writeGeneration` 在写入服务端返回的 tracking 时递增，让**写之前**
+  发出的列表响应作废。共用一个代际会导致同步/复核结果被普通刷新丢弃并卡死按钮。
+- 返回值收敛统一走「服务端返回的 tracking 覆盖该条摘要」：inspector 通过
+  `@tracking-updated` 把 `result.tracking` 交给 `TrackingView.applyReturnedTracking`
+  （按 `tracking_id` 原位替换 + 递增 `writeGeneration`），不再二次 GET 详情；因此
+  `TrackingView` 的 inspector `:key` 不因写结果变化（否则会重挂载并丢掉写结果面板）。
+- 动作只由 `executableTrackingActions()` 投影：未知 code/style/scope 直接不渲染。
+  `REVALIDATE` 是**纯本地**动作（无 scope、无 capability 门控，不要求页面连接）；
+  `SUBMIT`/`RETRY` 需要 `subscription_submit=SUPPORTED`；管理动作需要 service-computed
+  `target_scopes` 与对应 `SUPPORTED` 能力。
+- **REVALIDATE 语义（US-309）**：body 只含最新 `expected_revision` 与相对 `storage_dir`
+  （**无** `ab_config`）；`ready=false` 是 HTTP 200 业务结果，用服务端 §11.5 `issues`
+  说明「尚未向 Auto Bangumi 创建订阅」（`projectRevalidateIssues` 只渲染已知 code，
+  未知 code 丢弃）；409 必须先清空意图、重新 GET 详情、再要求用户重新确认，绝不静默重发；
+  transport 失败保留意图以便显式重试复用同一 revision。
+- **外部写归页面所有（US-310 起）**：`SUBMIT`/`RETRY`/后续 `MODIFY`/`SET_ENABLED`/
+  `REFRESH_RSS`/`DELETE_EXTERNAL` 的请求、确认弹窗、opaque key 与结果面板都在
+  `TrackingView`（凭据只存在于该实例与单次 POST body）；`TrackingInspector` 只按
+  `credentialReady + capabilities + available_actions` 投影按钮，emit
+  `write-requested { action, item }` 把**最新 revision** 交回页面，并渲染页面传入的
+  `writeSession`（`trackingProjection.createWriteSession/projectWriteOutcome`，固定中文文案）。
+  **不要**把 `ab_config` 当 prop 往下传，否则凭据会离开 TrackingView 实例。
+- **submit 家族写动作（US-310/US-311）**：`SUBMIT` 与 `RETRY` 共用 `TrackingView.runTrackingWrite`
+  一条路径，端点与影响确认都由 action code 绑定（`WRITE_ACTION_ENDPOINTS` /
+  `WRITE_ACTION_CONFIRMATIONS`），不能一个动作配另一个动作的文案；只有
+  `isWriteActionCode()` 认识的 code 才会发请求，其余动作等各自 story。
+  `RETRY` 与 `SUBMIT` 在服务端互斥（起始状态不同），inspector 同一时刻只投影其一。
+- **写结果与回查（US-310/US-311）**：HTTP 200 用返回 `tracking` 收敛列表
+  （`applyReturnedTracking`），随后只通过 `TrackingInspector` 暴露的 `reload()`
+  （`fetchDetail(true)`，保留面板且不抢焦点）回查详情；409 与结果不明额外 `loadList(true)`
+  静默重读列表。**不要**用 `detailRevision`/`:key` 触发回查——那会重挂载检查器并丢掉写结果面板。
+- **冲突分流（US-311）**：submit 家族的全部 409（`tracking_revision_conflict`/
+  `tracking_idempotency_conflict`/`tracking_state_conflict`/`tracking_operation_in_progress`）
+  都发生在外部边界之前，因此冲突即「未提交到 Auto Bangumi」；每种类型有固定中文下一步
+  （`writeConflictMessage`，未知类型回退 `WRITE_CONFLICT_FALLBACK_MESSAGE`）。冲突体里的
+  tracking 不权威，页面固定「重读列表 + 重读详情 → 要求重新确认」，绝不静默重发。
+- **确定拒绝态（Stage 38 审核修复 / D38-08.5）**：结构化 HTTP 4xx（**409 除外**，
+  `isDefiniteWriteRejection`）在外部写入边界之前返回，是**确定拒绝**而非「结果未知」，
+  固定落到 `TrackingWriteState` 的 `REJECTED`（`WRITE_MESSAGES` 固定中文，绝不渲染服务端
+  `error_type`/原始状态，也不暗示可能已创建订阅）。该态 `writeSessionKeepsIntent()` 为 false：
+  释放页面级 intent（其他条目不再被写锁挡住），下一次确认生成**新 key**；仍然只读回查
+  （`recheckAfterAction(trackingId, true)`），绝不自动重发。只有网络失败/timeout/非 JSON/5xx/
+  不可读的 status 才继续走 `UNKNOWN` 并保留锁定 intent。
+- **幂等 key 生命周期（US-310/US-311）**：一次用户确认一个 key；只有
+  `writeSessionKeepsIntent()` 为 true（`UNKNOWN`/`VERIFYING_EXTERNAL`/`RECOVERY_REQUIRED`）
+  才保留锁定的 intent，显式重试复用**同 key 同 expected_revision**（服务端按 key+revision
+  判定重放，换 revision 会被判为同键不同绑定）；`ACTIVE`/`SUBMIT_FAILED`/`NEEDS_RECONFIRM`/
+  `CONFLICT`/`REJECTED`
+  一律释放 intent，下一次确认生成新 key。锁定期间若用户点到**另一个** action，直接不发请求
+  （既不换 key 也不按新动作重放）。外部写单飞：请求中只禁用外部写动作，
+  选择/筛选/刷新/其他条目的本地复核保持可用。
+- **结果未知恢复（US-312）**：恢复由 `TrackingView.runTrackingRecovery` 统一拥有，端点固定
+  `TRACKING_RECOVER_ENDPOINT`（`/api/v1/tracking/items/{tracking_id}/recover`）。服务端返回的
+  `RECOVER_AUTO`/`MARK_SUCCEEDED`/`MARK_FAILED` 是**纯本地**动作（无 capability、无凭据、无 scope），
+  只按 `available_actions` 渲染；`VERIFY_EXTERNAL` **永不出现**在 `available_actions` 里，它是恢复
+  流程自己的**只读**选择，只在 `credentialReady && external_verify=SUPPORTED` 且服务端标记该记录可恢复
+  （`RECOVER_AUTO` 存在）时渲染，且只核验同一 operation，绝不创建外部写。
+- **恢复请求体（US-312）**：由 `createTrackingRecoverBody()` 单点构造 —— `AUTO` 只发
+  `expected_revision + action`（无 `confirm`、无 `ab_config`，也不需要确认弹窗），`MARK_*` 只多一个
+  `confirm: true`，`VERIFY_EXTERNAL` 是唯一带 `ab_config` 的分支（缺 `base_url` 时返回 null，即不发请求）。
+  请求体形状本身无法表达外部 ID/URL/原始响应/备注。人工结论必须二次确认
+  （`RECOVERY_ACTION_CONFIRMATIONS`，`ConfirmDialog` 默认焦点即取消按钮）；`needs_manual` 时 inspector
+  渲染 `RECOVERY_NEEDS_MANUAL_NOTICE`，要求先在 Auto Bangumi 独立核对再选择人工结论。
+- **恢复状态与锁定（US-312）**：恢复会话独立于写会话
+  （`trackingProjection.createRecoverySession/createRecoveryConflictSession/projectRecoveryOutcome`），
+  没有 idempotency key；`recoverySessionKeepsLock()` 仅在 `UNKNOWN`/`RECOVERY_REQUIRED` 为 true，
+  `needs_manual` 以服务端字段为准（`RECOVERY_REQUIRED` 缺失该标志时也按人工核验处理），文档枚举之外的
+  `outcome` 一律落到 `UNKNOWN`，绝不当作成功。`inspectorIntentBusy` = 写/恢复在飞行中**或**其他条目仍
+  持有未决 intent，它同时喂给 submit/retry 与恢复按钮（`actionBusy`），因此一次未决恢复会锁住其他条目的
+  外部写（D38-09.4）；管理动作由服务端 `available_actions` 保证在恢复态根本不出现。`clearConnection()`
+  同时重置写与恢复 intent —— 服务端记录仍是权威，按需重读。
+- **外部修改（US-313）**：`MODIFY` 的请求归 `TrackingView.runTrackingManagement`，端点由
+  `MANAGEMENT_ACTION_ENDPOINTS` 按 action code 绑定，请求体由
+  `trackingManagement.createTrackingManagementBody()` 单点构造并按 scope 分派 patch ——
+  `SUBSCRIPTION` 只发 title/season/subtitle_group/filter_rule/offset/expected_folder_name，
+  `ASSOCIATED_RSS` 只发 name/aggregate/parser，形状本身无法表达跨 scope 字段、外部 ID 或 URL。
+  它复用凭据会话、影响确认（`MODIFY_SCOPE_CONFIRMATIONS`）、最新 revision、单意图 opaque key、
+  单飞、`applyReturnedTracking` 收敛与只读回查；409 与结构化非 409 4xx 的语义与 submit 家族一致。
+- **management_status 才是判据（US-313）**：管理写返回的是 `management_status`
+  （PREPARED/IN_PROGRESS/SUCCEEDED/FAILED/OUTCOME_UNKNOWN/RECOVERY_REQUIRED），**不是** submit 家族的
+  `outcome`；只有 `SUCCEEDED` 是成功，`FAILED` 是确定失败，其余（含文档枚举之外的值）一律
+  `UNKNOWN` + `needsManual`，只读回查而绝不重试，`safe_message` 不作为权威文案。
+  `managementSessionKeepsIntent()` 只在 `UNKNOWN` 为 true。管理写 409 的 error_type 与 submit 家族
+  不同（多出 `tracking_management_*`/`tracking_target_*`/`tracking_mapping_missing`），
+  固定中文表在 `MANAGEMENT_CONFLICT_MESSAGES`，未知类型回退 `MANAGEMENT_CONFLICT_FALLBACK_MESSAGE`。
+- **修改表单是「只写字段集」（US-313）**：页面**不读取** Auto Bangumi 的当前值（generated 详情也没有
+  安全的外部值），所以每个字段都是显式勾选（`TrackingModifyForm.vue` + `buildSubscriptionPatch`/
+  `buildRssPatch`）：未勾选 = 保持外部现值；勾选但留空 = 显式清空（`null`）。空 patch、非法数字、
+  URL/绝对路径（`isUnsafePatchValue`，与服务端 patch 校验同规则）都在页面直接拒绝、零请求。
+  `filter_rule` 的两个布尔开关总是随规则一起提交（Auto Bangumi 的 filter 是单条排除表达式），
+  两个文本条件只在各自勾选时提交。表单在 `tracking_id:revision` 变化时整体重置 —— 写结果回查会让
+  revision 前进，所以**写后再提交必须先重新勾选字段**（测试里不要假设旧选择还在）。
+- **启停与关联 RSS 刷新（US-314）**：`SET_ENABLED`/`REFRESH_RSS` 与 `MODIFY` 共用
+  `TrackingView.runTrackingManagement` 一条管理写路径，但**意图是多态联合**
+  （`TrackingManagementIntent`，按 action code 判别）：只有 `MODIFY` 带 `patch`，只有
+  `SET_ENABLED` 带 `enabled`，`REFRESH_RSS` 的 `targetScope` 被类型固定为 `ASSOCIATED_RSS`。
+  启停方向**不来自 emit**，而是 `managementEnableDirection(item.status)` 从服务端记录状态推导
+  （`DISABLED`→启用，`ACTIVE`/`EXTERNAL_ONLY`→停用，其余一律 null 即零请求）；刷新没有全局面板，
+  端点就是 `MANAGEMENT_ACTION_ENDPOINTS.REFRESH_RSS`，请求体由 `createTrackingManagementBody`
+  单点构造且**不含** `patch`/`enabled`。
+- **发送集合是页面自己的闸门（US-314/US-315）**：`SENDABLE_MANAGEMENT_ACTION_CODES`
+  （MODIFY/SET_ENABLED/REFRESH_RSS/DELETE_EXTERNAL）决定哪些动作能离开页面；inspector 用
+  `isSendableManagementActionCode` 过滤 offer，页面在 `runTrackingManagement` 再过滤一次，
+  `createTrackingManagementActionIntent` 第三个闸门按 action code 分派到各自 builder。
+  新增管理动作时必须三处同步：sendable 集合、dispatch 分支、`createTrackingManagementBody`
+  分支；只加 `available_actions` 的 server 投影不会让动作变成请求。
+- **逐条外部删除（US-315）**：`DELETE_EXTERNAL` 复用 `runTrackingManagement` 一条管理写路径，
+  但它是**逐条**动作（`TrackingExternalDelete.vue`，radio 选择目标，**无** checkbox/批量/全局），
+  删除目标由用户显式选择并经 `createTrackingDeleteExternalIntent` 用
+  `projectTrackingActionScopes(item, 'DELETE_EXTERNAL', scope, capabilities)` 重新校验
+  （`subscription_delete`/`rss_delete` 各自 prove）。确认弹窗是唯一 `danger: true` 的管理弹窗
+  （`ConfirmDialog` 默认焦点即取消按钮），文案固定声明保留本地方案、追番记录、审计、下载任务与
+  已下载媒体；生成的 delete body 里**没有** `file` 字段，所以「顺带删媒体」在类型上不可表达。
+  删除成功后服务端返回 `EXTERNAL_DELETED` 的 tracking，`applyReturnedTracking` 原位替换，
+  记录仍留在本地列表、仍可看审计并 `返回修改方案`（**不要**在写成功后移除列表项）。
+- **锁定意图的重放判据（US-314）**：`sameManagementRequest()` 比较 action + targetScope +
+  patch + enabled，**故意不比较** `expectedRevision` 与 `idempotencyKey` —— 服务端在外部边界
+  **之前**就把 revision +1 落盘，所以结果未知后回查到的 revision 必然前进，重放必须整份复用锁定
+  意图（key + 旧 revision），否则会被判同键不同绑定。写动作新增 `enabled`/方向语义时，
+  这个比对和确认文案（`managementConfirmation(intent)`，按 action+scope+方向取固定表）都要一起扩。
+- **管理结果文案按 action 分表（US-314）**：`MANAGEMENT_ACTION_MESSAGES` 在 `trackingProjection`
+  里按 action code × state 二维固定，一个刷新结果绝不会说「已应用本次修改」；`managementConflictMessage(errorType, action)`
+  只对 `tracking_management_patch_invalid` 做按动作的措辞覆盖（其余 409 与动作无关）。
+- 浏览器测试：`tests/browser/test_app_tracking.py`。Playwright **后注册的 route 优先**，
+  所以 revalidate/recover/modify/set-enabled/refresh 这类写端点要在 `_mock_list()` 之后单独
+  `page.route` 注册；否则会被更宽的 `**/api/v1/tracking/items*` 通配吃掉。写端点还要注册在
+  `**/api/v1/tracking/items/tracking-a` **之后**。详情路由的 mock 必须返回完整 envelope
+  （`{"ok": true, "result": {...}}`）；只返回裸对象会让客户端按 envelope 校验失败并渲染
+  「追番详情读取失败」。
+- 新写动作的浏览器用例模板：`_action_detail()` / `_action_success_payload()` 是 US-314
+  的详情与安全结果 mock，`_delete_detail()` / `_delete_success_payload()` 是 US-315 的删除 mock；
+  `_management_actions()` 同时返回 `DELETE_EXTERNAL`，所以「启停/刷新」那一段必须断言
+  `.tracking-management-actions-section` 内**没有** `[id*='delete-external']` 与 `button.danger-button`
+  （删除控件在自己的 section 里），而不是断言整页没有删除控件。
+- CSS 类命名避免父子同名：inspector 里的 `<section>` 用 `-section` 后缀
+  （`tracking-modify-section` / `tracking-management-actions-section` /
+  `tracking-delete-external-section`），子组件根节点用短名
+  （`tracking-modify` / `tracking-management-actions` / `tracking-external-delete`）。同名会让
+  Playwright 的 `.locator()` 触发 strict mode violation（两个元素）。
+
+### 兼容、安全与视觉收敛（US-316）
+
+- **旧 queue 运行时入口已退出**，但**没有删除任何后端兼容 endpoint**（`/api/v1/batches/*`
+  的 accept/queue/submit/retry/recover 仍在，`tests/browser/test_app_queue.py` 现在只验证
+  旧路由重定向、一次性兼容定位与「兼容端点仍可用」）。`QueueView.vue` 与 `queueWorkbench.ts`
+  按 Stage 38 §10.2 留在仓库供回退，**不得**再被任何模块导入；`RouteParityBaseline.view`
+  联合里也已移除 `QueueView`。
+- **旧 `batch_id` 深链只在 `trackingCompat.ts` 里一次性定位**：`/app/queue?batch_id=...`
+  先被路由重定向到 `/app/tracking?batch_id=...`，`TrackingView.resolveBatchCompat()` 再读
+  `getBatchQueue`（兼容投影），**只取每个队列项的公开 `request_id`**
+  （`projectQueueRequestIds`），用 `locateTrackingIdForBatch` 在本地 tracking 列表里按
+  `request_id` 相等定位（跳过 `EXTERNAL_DELETED`），绝不按标题/季度/文件名猜。定位成功用
+  `router.replace` 换成 `?tracking_id=...`（旧参数被消费，URL 里不再有第二个权威）；失败或
+  读取异常都用固定中文提示（`BATCH_COMPAT_NOT_LOCATED` / `BATCH_COMPAT_READ_FAILED`，
+  渲染在 `#tracking-compat-notice`，`role="status"`，**不含任何 id**）。状态、动作、选择始终
+  来自 tracking DTO —— 浏览器用例用「旧队列标题/状态不得出现」守住这条。
+- **多视口与 200%**：`tests/browser/test_app_tracking.py` 的
+  `TestAppTrackingViewportJourney` 在 1280×720 / 1440×900 / 1920×1080 × zoom 1/2 下跑两条
+  链路：只读关键旅程（筛选 → 单选 → 检查器 → 连接入口 → 刷新）与 D38-12.4 的完整链路
+  （连接 → 同步 → 提交 → 恢复 → danger 删除，每步真实 click + 固定中文结果面板断言），
+  并断言 `body.scrollWidth` 不超视口（zoom=1 时另断言关键控件 bounding box 在视口内）。
+  zoom 用 `document.documentElement.style.zoom = '2'` 模拟桌面 200%（与
+  `test_app_responsive_a11y.py` 同款）；「可完成」以**真实 click 成功**为准 ——
+  控件若被布局挤到不可点，Playwright 的 click 会直接失败。
+- **键盘/焦点/aria-live**：skip link 是首个 Tab 目标；筛选项都带 `for` 关联的 label；
+  列表项是原生 button，聚焦后 Enter 即可选中并把焦点留在 `[aria-current="true"]`（`aria-current`
+  而非仅颜色）；计数 `aria-live="polite"`、总览与所有结果面板 `role="status"`。
+- **观察 loading 的正确姿势（US-316 起）**：不要再为 tracking 加服务端延迟路由，改用
+  **held route** —— `page.route` handler 只把 `route` 存进列表（不 fulfill），
+  断言完 `.loading-state`/`aria-busy` 后再 `held[0].fulfill(...)`。`time.sleep` 写在 handler
+  里会阻塞 Playwright 分发线程，loading 永远看不到。reduced-motion 用例按此重写。
+- **敏感 canary**：`TestAppTrackingSensitiveCanary` 用固定的假凭据跑「探测 → 同步 → 提交成功」
+  与「提交 transport 未知 → 本地恢复」两条链路，断言 canary 不出现在 DOM 文本/标记/活动
+  输入值、URL、`history.state`、localStorage/sessionStorage 与 console（含 pageerror）；
+  同时断言凭据**确实**出现在单次 POST body 里，避免用例变成空断言。凭据对话框探测成功后会
+  整体卸载（`#tracking-ab-password`/`.credential-dialog-backdrop` 计数为 0），不要再断言
+  「字段值为空」。
+- **不提交 artifact**：`test_no_dist_trace_or_screenshot_artifact_is_tracked` 用
+  `git ls-files` 断言 `frontend/dist/`、`*.map`、`test-results/`、`playwright-report/`、
+  `trace.zip` 都不在版本控制里。
+- **视觉偏差（延后 F-G）**：两张 tracking 效果图的**全局「已连接」chip 在页头由 F-G 提供**，
+  Stage 38 不实现；tracking 页内以等价物代替 —— `#tracking-connect` 入口 +
+  `.tracking-connection-status`（含 `#tracking-capability-summary` 中文能力摘要）与
+  `清除连接`。`test_global_connection_chip_is_deferred_and_the_page_carries_its_own_state`
+  固化这条偏差：页头不得出现全局连接 chip，页内状态与入口必须存在。F-G 补全局 chip 时，必须
+  同步更新该用例与本节记录。
+
+### 最终门禁与归档（US-317）
+
+- Stage 38 的完整门禁只在 US-317 运行一次：`compileall`、`ruff`、`migu-orca-openapi --check`、
+  `pytest -m "not browser"`、`api:check`、`typecheck`、`lint`、`test:unit --run`、`build`、
+  `pytest tests/browser/`（真实 Chromium）与 `git diff --check`。跑浏览器套件前必须**先构建**
+  `frontend/dist`，并确认仓库根 `.migu_orca/storage` 不存在（陈旧 saved Request 会挂掉空列表用例）。
+- 计数基线（2026-09-13，全量一次通过）：后端非浏览器 1640 passed / 212 deselected；前端
+  46 files / 586 tests；真实 Chromium 212 passed。改动后若计数下降，先跑最小失败用例定位，不要
+  直接重跑全套。
+- Ralph 状态归档在 `scripts/ralph/archive/2026-09-13-stage38-tracking-management/`，其 `prd.json`
+  必须与最终 story 状态一致（US-303～US-317 全 `passes=true`）。归档是 Stage 收尾的一部分，
+  不是 `ralph.sh` 的自动行为（脚本只在分支切换时归档**上一个** run）。

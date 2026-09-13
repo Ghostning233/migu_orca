@@ -106,7 +106,7 @@
 
 | 方法 | OpenAPI path | 生命周期 | 替代关系或保留原因 | 数据权威 |
 | --- | --- | --- | --- | --- |
-| POST | `/api/v1/autobangumi/capabilities` | PRIMARY | 只读能力探测；管理写入时重新探测 | Capability probe |
+| POST | `/api/v1/autobangumi/capabilities` | PRIMARY | 只读能力探测；管理写入时重新探测；`subscription_submit` 仅由已验证的 3.1.18 password/legacy probe 支持 | Capability probe |
 | POST | `/api/v1/autobangumi/test-connection` | PRIMARY | 连接诊断，不替代管理写入校验 | Request-scoped probe |
 | POST | `/api/v1/qbittorrent/test-connection` | PRIMARY | 连接诊断 | Request-scoped probe |
 | GET | `/api/v1/preferences` | PRIMARY | 偏好读取 | Preference store |
@@ -284,7 +284,8 @@ JSON 损坏不阻塞健康列表，只增加 `unreadable` 计数与固定 warnin
 `TrackingItemDTO`（US-223 strict `extra="forbid"`）字段：`tracking_id`、`request_id?`、`title?`、
 `season?`、`subtitle_group?`、`poster_path?`（只允许同源 `/api/v1/mikan/posters/<opaque-key>`）、
 `status`、`status_label`（中文）、`status_group`、`available_actions[]`（服务端计算，只含当前可执行
-动作，`code`/`label`/`style`/`requires_confirmation`）、`valid_resource_count`、
+动作，`code`/`label`/`style`/`requires_confirmation`/`target_scopes`；其中非管理动作的
+`target_scopes` 为空，管理动作只列当前本地映射实际存在的 `SUBSCRIPTION` 或 `ASSOCIATED_RSS`）、`valid_resource_count`、
 `updated_episode: null`、`updated_episode_status: "NOT_IMPLEMENTED"`、`total_episodes: null`、
 `revision`、`updated_at`。
 
