@@ -5,7 +5,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 文档类型 | 工作目标 / 设计讨论基线（不是执行 PRD） |
-| 当前状态 | Gate 1～3、B-A～B-D、F-A～F-F 已完成；Stage 39 扩展 F-G PRD 已编写，未启动 |
+| 当前状态 | Gate 1～3、B-A～B-D、F-A～F-F 已完成；Stage 39 F-G 已形成实现候选，待 Gate 5 独立验收 |
 | 创建日期 | 2026-09-07 |
 | 适用范围 | MiGuOrca Web 前端的信息架构、用户流程、页面设计、视觉方案与后续实现 |
 | 前置事实 | Stage 26、Stage 27 已完成；Vue 3、TypeScript、Vite、OpenAPI 客户端和浏览器测试基线继续保留 |
@@ -391,7 +391,7 @@ Auto Bangumi 也必须通过 capability 探测适配，不能假设各版本写�
 | F-D 批量审核 | Stage 36 已完成（US-284～US-293） | 1/12/36、双栏、异常优先、部分成功、离开保护 | 由 Stage 35 generated 批量 save-confirm 接续完成 |
 | F-E 追番方案 | Stage 37 已完成（US-294～US-302，2026-09-13） | 列表—详情、SafeInfo、共享修改、复制再用、tracking 链接 | Stage 36 已合入；完成记录见 `docs/MiGuOrca_stage37_plans_safe_info_PRD.md` |
 | F-F 追番管理 | Stage 38 已完成（US-303～US-317，2026-09-13） | 正式管理、同步、提交/恢复、单条外部动作 | 完成记录与 handoff 见 `docs/MiGuOrca_stage38_tracking_management_PRD.md` |
-| F-G 设置与发布收尾 | Stage 39 PRD 已编写，未启动 | AB 部署配置、设置/全局摘要、退役旧执行与 qB、MiKan 封装、跨页/Gate 5 | 新增后端连接支撑 US-318～US-326 先独立验收 |
+| F-G 设置与发布收尾 | Stage 39 实现候选，Gate 5 待独立验收 | AB 部署配置、设置/全局摘要、退役旧执行与 qB、MiKan 封装、跨页/Gate 5 | US-318～US-340 已实现候选，需以实际门禁证据收口 |
 | 独立发布验收 | 待规划 | 跨流程 Chromium、无障碍/多视口/安全报告、文档切换 | 全部实现切片验收通过 |
 
 正式拆分原则：
@@ -400,7 +400,7 @@ Auto Bangumi 也必须通过 capability 探测适配，不能假设各版本写�
 - F-A 壳层与设计系统不依赖新业务 API，可以先行；F-B 共享审核核心必须先于单番/批量页面。
 - F-C 单番已完成为 Stage 35；F-D 批量已完成为 Stage 36；F-E 追番方案已完成并归档为 Stage 37。
   F-F 已完成独立页面边界评审，作为 Stage 38 交付并归档；F-G 新产品范围在本次讨论中确认，
-  Stage 39 开发 PRD 已编写，仍须先独立验收新增后端支撑，再实施页面，未启动或通过 Gate 5。
+  Stage 39 开发 PRD 已形成实现候选，仍须完成独立 Gate 5 验收；当前不宣称已发布。
 - 一个 Stage 可以包含一个小工作包，也可以把高风险工作包继续拆开；不能为了连续编号制造超大 PR。
 - 收尾可并入最后一个前端 Stage，也可在集成风险较高时单列，最终由未承担主要实现的 Agent 验收。
 
@@ -498,9 +498,9 @@ passes，2026-09-08，执行与完成记录见 `docs/MiGuOrca_stage28_draft_cons
 5. Stage 37 的 US-294～US-302 已全部完成并归档。F-F 已通过独立边界评审，作为
    [Stage 38](MiGuOrca_stage38_tracking_management_PRD.md) 交付 US-303～US-317 并归档：每批最多 3 个
    Ralph stories 后独立审核。2026-09-13 用户确认 F-G 新范围，
-   [Stage 39 开发 PRD](MiGuOrca_stage39_deployment_settings_PRD.md)已编写：仅 AB 部署连接持久化与绑定、
-   设置/全局安全摘要、无用旧 API/qB 退役、MiKan 搜索封装、跨页/文档/Gate 5。未启动，
-   新增后端工作包须先独立验收，不能把旧凭据会话或旧兼容保留规则套用到新目标。
+   [Stage 39 开发 PRD](MiGuOrca_stage39_deployment_settings_PRD.md)已形成实现候选：仅 AB 部署连接持久化与绑定、
+   设置/全局安全摘要、无用旧 API/qB 退役、MiKan 搜索封装、跨页/文档/Gate 5。当前仍待独立 Gate 5 验收，
+   不能把旧凭据会话或旧兼容保留规则套用到新目标。
 6. 后续实施包通过 Gate 4 评审后再生成 Ralph `prd.json`；通过评审的实施包按工作量映射
    Stage，不预先追求连续或固定数量的 Stage。
 7. 为每个正式 story 指定 API/单元/真实 Chromium/无障碍/多视口/敏感信息验收责任，并让未承担
