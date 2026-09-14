@@ -37,6 +37,7 @@ vi.mock('@/api/client', () => ({
 const apiGet = vi.mocked(api.get)
 const apiPost = vi.mocked(api.post)
 const apiPut = vi.mocked(api.put)
+const apiDelete = vi.mocked(api.delete)
 
 const DEFAULT_PREFERENCES = {
   version: 1,
@@ -95,6 +96,7 @@ describe('SettingsView storage panel (US-201)', () => {
     apiGet.mockReset()
     apiPost.mockReset()
     apiPut.mockReset()
+    apiDelete.mockReset()
     apiGet.mockResolvedValue(DEFAULT_PREFERENCES)
   })
 
@@ -390,7 +392,7 @@ describe('SettingsView qBittorrent panel (US-201)', () => {
   })
 })
 
-describe.skip('SettingsView Auto Bangumi panel (retired request-scoped flow)', () => {
+describe('SettingsView saved Auto Bangumi connection flow', () => {
   beforeEach(() => {
     localStorage.clear()
     sessionStorage.clear()
@@ -399,119 +401,49 @@ describe.skip('SettingsView Auto Bangumi panel (retired request-scoped flow)', (
     apiGet.mockResolvedValue(DEFAULT_PREFERENCES)
   })
 
-  it('test-connection sends password-mode config and clears credentials on success', async () => {
-    apiPost.mockResolvedValue({
-      reachable: true,
-      authenticated: true,
-      version: '3.1.18',
-      auth_mode: '账号密码',
-      adapter: 'legacy_3_1',
-      submit_supported: true,
-    })
+  it('saves a connection through the generated saved operation and clears inputs', async () => {
+    apiPut.mockResolvedValue({ configured: true, credential_present: true, connection_ref: 'ref-1', configuration_revision: 2, connection_status: 'CONFIGURED' } as never)
     const { wrapper } = await mountSettings()
     await nextTick()
 
     await wrapper.find('#settings-ab-endpoint').setValue('192.168.1.20:7890')
     await wrapper.find('#settings-ab-username').setValue('browser-user')
     await wrapper.find('#settings-ab-password').setValue('browser-secret-password')
-    await wrapper.find('#settings-ab-test-submit').trigger('click')
+    await wrapper.find('#settings-ab-save-form').trigger('submit')
     await nextTick()
     await nextTick()
 
-    const call = apiPost.mock.calls.find(([path]) => path === '/api/v1/autobangumi/test-connection')
-    expect(call).toBeTruthy()
-    expect(call?.[1]?.body).toEqual({
-      ab_config: {
-        auth_mode: 'password',
-        base_url: 'http://192.168.1.20:7890',
-        username: 'browser-user',
-        password: 'browser-secret-password',
-        fallback_enabled: false,
-      },
-    })
-    expect(wrapper.find('#settings-ab-submit-form .status-alert').text()).toContain('连接成功')
+    expect(apiPut).toHaveBeenCalledWith('/api/v1/settings/autobangumi', expect.objectContaining({ body: expect.objectContaining({ confirm: true, config: expect.objectContaining({ base_url: 'http://192.168.1.20:7890' }) }) }))
+    expect(JSON.stringify(apiPut.mock.calls[0])).not.toContain('browser-secret-password')
+    expect(wrapper.find('#settings-ab-save-form .status-alert').text()).toContain('已保存')
     expect(wrapper.find<HTMLInputElement>('#settings-ab-endpoint').element.value).toBe('')
     expect(wrapper.find<HTMLInputElement>('#settings-ab-password').element.value).toBe('')
     expect(localStorage.length).toBe(0)
     expect(sessionStorage.length).toBe(0)
   })
 
-  it('submit-ab uses request_id from the URL query and confirms first', async () => {
-    apiPost.mockResolvedValue({
-      request: { request_id: 'req-ab-1', status: 'ACCEPTED' },
-      summary: {},
-      ab_submit_result: {
-        success: true,
-        ab_subscription_id: 'sub-1',
-        ab_response: { id: 'sub-1' },
-        fallback_config: null,
-        error: null,
-      },
-    })
-    const { wrapper } = await mountSettings({ request_id: 'req-ab-1' })
-    await nextTick()
-
-    expect(wrapper.find('#settings-ab-request-id').text()).toBe('req-ab-1')
-    await wrapper.find('#settings-ab-endpoint').setValue('http://ab.example.invalid')
-    await wrapper.find('#settings-ab-username').setValue('browser-user')
-    await wrapper.find('#settings-ab-password').setValue('browser-secret-password')
-    await wrapper.find('#settings-ab-submit').trigger('submit')
-    await nextTick()
-
-    const dialog = wrapper.find('.confirm-dialog')
-    expect(dialog.exists()).toBe(true)
-    expect(dialog.text()).toContain('提交 Auto Bangumi')
-    await dialog.find('.danger-button').trigger('click')
-    await nextTick()
-    await nextTick()
-
-    const call = apiPost.mock.calls.find(([path]) => path === '/api/v1/requests/{request_id}/submit-ab')
-    expect(call).toBeTruthy()
-    expect(call?.[1]).toMatchObject({
-      path: { request_id: 'req-ab-1' },
-      query: {},
-      body: {
-        ab_config: {
-          auth_mode: 'password',
-          base_url: 'http://ab.example.invalid',
-          username: 'browser-user',
-          password: 'browser-secret-password',
-          fallback_enabled: false,
-        },
-      },
-    })
-    expect(wrapper.find('#settings-ab-submit-form .status-alert').text()).toContain('Auto Bangumi 提交成功')
-    expect(wrapper.find<HTMLInputElement>('#settings-ab-endpoint').element.value).toBe('')
-    expect(wrapper.find<HTMLInputElement>('#settings-ab-password').element.value).toBe('')
-    expect(localStorage.length).toBe(0)
-  })
-
-  it('submit-ab without request_id shows a Chinese error without calling the API', async () => {
+  it('probes only an already saved ref and revision', async () => {
+    apiPost.mockResolvedValue({ ...SAVED_PREFERENCES, probe_status: 'VERIFIED', version: '3.1.18' } as never)
+    apiGet.mockImplementation(async (path) => path === '/api/v1/settings/autobangumi'
+      ? { configured: true, credential_present: true, connection_ref: 'ref-1', configuration_revision: 2, connection_status: 'CONFIGURED' } as never
+      : DEFAULT_PREFERENCES as never)
     const { wrapper } = await mountSettings()
     await nextTick()
 
-    await wrapper.find('#settings-ab-submit').trigger('submit')
-    await nextTick()
-
-    expect(wrapper.find('#settings-ab-submit-form .status-alert').text()).toContain('缺少 request_id')
-    expect(apiPost).not.toHaveBeenCalledWith('/api/v1/requests/{request_id}/submit-ab', expect.anything())
+    await wrapper.find('#settings-ab-probe').trigger('click')
+    await flushPromises()
+    expect(apiPost).toHaveBeenCalledWith('/api/v1/settings/autobangumi/probe', { body: { connection_ref: 'ref-1', configuration_revision: 2 } })
   })
 
-  it('switching auth mode clears the sensitive fields (API Token mode)', async () => {
+  it('canceling clear leaves the saved connection untouched and performs no delete', async () => {
+    apiGet.mockImplementation(async (path) => path === '/api/v1/settings/autobangumi'
+      ? { configured: true, credential_present: true, connection_ref: 'ref-1', configuration_revision: 2, connection_status: 'CONFIGURED' } as never
+      : DEFAULT_PREFERENCES as never)
     const { wrapper } = await mountSettings()
     await nextTick()
-
-    await wrapper.find('#settings-ab-endpoint').setValue('http://ab.example.invalid')
-    await wrapper.find('#settings-ab-username').setValue('user')
-    await wrapper.find('#settings-ab-password').setValue('pw')
-    // Switch to API Token mode.
-    await wrapper.find('#settings-ab-auth-mode').setValue('api_token')
-    await wrapper.find('#settings-ab-auth-mode').trigger('change')
-    await nextTick()
-
-    expect(wrapper.find<HTMLInputElement>('#settings-ab-username').exists()).toBe(false)
-    expect(wrapper.find<HTMLInputElement>('#settings-ab-token').exists()).toBe(true)
-    // Old password-mode credentials were cleared by the mode switch.
-    expect(wrapper.find<HTMLInputElement>('#settings-ab-endpoint').element.value).toBe('')
+    await wrapper.find('#settings-ab-delete').trigger('click')
+    expect(wrapper.find('.confirm-dialog').exists()).toBe(true)
+    await wrapper.find('.confirm-dialog .secondary-button').trigger('click')
+    expect(apiDelete).not.toHaveBeenCalled()
   })
 })

@@ -277,3 +277,8 @@ Started: 2026-09-13
 ## 2026-09-14 / TrackingView 测试夹具迁移补充
 - 重构 TrackingView mount 夹具为 saved summary + explicit probe，覆盖未自动外调、显式 probe ref/revision、UNKNOWN 降级与代际变化清除。旧 71 个凭据流程用例以等价 saved-flow 核心行为替代。
 - 验证：SettingsView/TrackingView Vitest `18 passed`（4 个历史设置兼容场景 skipped）；真实 Chromium saved-flow `2 passed`；build、typecheck、api check、OpenAPI drift、Ruff、diff check 通过。
+
+## 2026-09-14 / 工作包 A 第五轮收口补充
+- Settings 历史 Auto Bangumi 兼容组已迁移为 saved connection 保存、显式 probe、取消清除测试；不再保留 skip 或旧 request-scoped endpoint/body 断言。TrackingView 测试继续使用安全摘要与显式 probe 夹具。
+- 验证：`frontend npx vitest run src/features/settings/SettingsView.test.ts src/features/tracking/TrackingView.test.ts --reporter=dot` → `21 passed`；`frontend npm run build`、`npm run api:check`、`npm run typecheck` 通过；`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q` → `3 passed`（真实 Chromium，临时服务端配置根，fake API route，保存→显式探测→追番摘要且无敏感泄漏）。
+- 遗留风险：本轮浏览器旅程已覆盖保存/探测/跨页安全摘要，但未在该文件中新增四类管理及 sync/VERIFY_EXTERNAL 的完整真实 Chromium 动作矩阵；这些动作的契约与投影测试仍需独立审核补跑。
