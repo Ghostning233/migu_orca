@@ -287,3 +287,8 @@ Started: 2026-09-13
 - 新增真实 Chromium saved-flow 管理动作参数化旅程，覆盖 MODIFY、SET_ENABLED、REFRESH_RSS、DELETE_EXTERNAL 安全门控；另覆盖显式 probe 后 sync 的 ref/revision body。每个请求均检查无 `ab_config`/password；DELETE_EXTERNAL 假记录无外部映射时验证 fail-closed 零写。
 - 验证：`frontend npm run build` 通过；`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q` → `8 passed`（真实 Chromium、fake envelope/page.route、临时服务端配置根）。
 - 遗留风险：本次未新增 VERIFY_EXTERNAL 成功动作及已绑定 DELETE_EXTERNAL 成功写入场景；当前 DELETE_EXTERNAL 浏览器用例专门证明缺少严格映射时零写，不能替代成功路径。
+
+## 2026-09-14 / 工作包 A 第三阶段缺口复核
+- 新增真实 Chromium unknown recovery 降级用例：未具备严格可执行恢复目标时 VERIFY_EXTERNAL 不显示、无外部调用；保留源绑定 fail-closed 语义。管理矩阵与 sync 用例继续验证 saved ref/revision body。
+- 验证：`frontend npm run build`；`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q` → `9 passed`；`uv run ruff check tests/browser/test_stage39_saved_flow_red.py`、`git diff --check` 通过。
+- 遗留风险：同 ref 且存在完整外部映射的 DELETE_EXTERNAL 成功浏览器写入、VERIFY_EXTERNAL 成功核验仍未被本轮真实 Chromium 覆盖；当前新增用例验证的是安全降级而非成功路径。

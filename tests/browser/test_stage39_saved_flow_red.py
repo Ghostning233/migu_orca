@@ -2,7 +2,15 @@
 
 import pytest
 from playwright.sync_api import expect
-from tests.browser.test_app_tracking import _item, _management_actions, _modify_actions
+
+from tests.browser.test_app_tracking import (
+    _detail_payload,
+    _item,
+    _management_actions,
+    _modify_actions,
+    _probe_capabilities,
+    _recovery_item,
+)
 
 
 @pytest.mark.browser
@@ -29,30 +37,62 @@ def test_saved_settings_probe_and_tracking_summary_are_explicit_and_non_sensitiv
     def api(route, request):
         path = request.url.split("/api/v1", 1)[-1]
         if request.method == "GET" and path.startswith("/settings/autobangumi"):
-            route.fulfill(json={"ok": True, "result": {
-                "configured": True, "credential_present": True, "connection_ref": ref,
-                "configuration_revision": 3, "connection_status": "CONFIGURED",
-            }})
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "configured": True,
+                        "credential_present": True,
+                        "connection_ref": ref,
+                        "configuration_revision": 3,
+                        "connection_status": "CONFIGURED",
+                    },
+                }
+            )
             return
         if request.method == "PUT" and path.startswith("/settings/autobangumi"):
             captured.append(("save", request.post_data_json))
-            route.fulfill(json={"ok": True, "result": {
-                "configured": True, "credential_present": True, "connection_ref": ref,
-                "configuration_revision": 3, "connection_status": "CONFIGURED",
-            }})
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "configured": True,
+                        "credential_present": True,
+                        "connection_ref": ref,
+                        "configuration_revision": 3,
+                        "connection_status": "CONFIGURED",
+                    },
+                }
+            )
             return
         if request.method == "POST" and path.startswith("/settings/autobangumi/probe"):
             captured.append(("probe", request.post_data_json))
-            route.fulfill(json={"ok": True, "result": {
-                "probe_status": "VERIFIED", "version": "3.1.18", "adapter": "legacy_3_1",
-                "subscription_list": "SUPPORTED", "subscription_detail": "SUPPORTED",
-                "subscription_submit": "SUPPORTED", "subscription_modify": "SUPPORTED",
-                "subscription_enable": "SUPPORTED", "subscription_disable": "SUPPORTED",
-                "subscription_delete": "SUPPORTED", "rss_list": "SUPPORTED", "rss_modify": "SUPPORTED",
-                "rss_enable": "SUPPORTED", "rss_disable": "SUPPORTED", "rss_delete": "SUPPORTED",
-                "rss_refresh": "SUPPORTED", "external_verify": "SUPPORTED",
-                "checked_at": None, "safe_message": "已完成安全探测",
-            }})
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "probe_status": "VERIFIED",
+                        "version": "3.1.18",
+                        "adapter": "legacy_3_1",
+                        "subscription_list": "SUPPORTED",
+                        "subscription_detail": "SUPPORTED",
+                        "subscription_submit": "SUPPORTED",
+                        "subscription_modify": "SUPPORTED",
+                        "subscription_enable": "SUPPORTED",
+                        "subscription_disable": "SUPPORTED",
+                        "subscription_delete": "SUPPORTED",
+                        "rss_list": "SUPPORTED",
+                        "rss_modify": "SUPPORTED",
+                        "rss_enable": "SUPPORTED",
+                        "rss_disable": "SUPPORTED",
+                        "rss_delete": "SUPPORTED",
+                        "rss_refresh": "SUPPORTED",
+                        "external_verify": "SUPPORTED",
+                        "checked_at": None,
+                        "safe_message": "已完成安全探测",
+                    },
+                }
+            )
             return
         route.continue_()
 
@@ -70,7 +110,9 @@ def test_saved_settings_probe_and_tracking_summary_are_explicit_and_non_sensitiv
     assert captured[1] == ("probe", {"connection_ref": ref, "configuration_revision": 3})
     assert secret not in page.locator("body").inner_text()
     assert secret not in page.url
-    stored = page.evaluate("() => ({local: JSON.stringify(localStorage), session: JSON.stringify(sessionStorage), history: location.href})")
+    stored = page.evaluate(
+        "() => ({local: JSON.stringify(localStorage), session: JSON.stringify(sessionStorage), history: location.href})"
+    )
     assert secret not in str(stored)
 
     # A new page reads only the safe summary. It does not automatically probe or act.
@@ -95,41 +137,122 @@ def test_saved_management_actions_send_only_bound_connection_fields(page, live_s
     """Each external management action is reached via explicit saved probe and has no credential/config snapshot."""
     ref = "11111111-1111-4111-8111-111111111111"
     captured: list[dict] = []
-    actions = _modify_actions() + _management_actions("ACTIVE") + [{
-        "code": "DELETE_EXTERNAL", "label": "删除外部订阅", "style": "DANGER",
-        "requires_confirmation": True, "target_scopes": ["ASSOCIATED_RSS"],
-    }]
-    detail = {"ok": True, "result": {
-        **_item("tracking-a", "测试番"), "available_actions": actions, "revision": 1,
-        "origin": "single", "batch_id": None, "created_at": "2026-09-01T00:00:00Z",
-        "updated_at": "2026-09-01T00:00:00Z", "last_synced_at": None, "safe_info": None,
-        "current_operation": None, "revalidation_issues": [],
-        "external_mapping": {"match_reason": "标题", "enabled": True, "external_deleted": False},
-        "audit_events": [], "warnings": [],
-    }}
+    actions = (
+        _modify_actions()
+        + _management_actions("ACTIVE")
+        + [
+            {
+                "code": "DELETE_EXTERNAL",
+                "label": "删除外部订阅",
+                "style": "DANGER",
+                "requires_confirmation": True,
+                "target_scopes": ["ASSOCIATED_RSS"],
+            }
+        ]
+    )
+    detail = {
+        "ok": True,
+        "result": {
+            **_item("tracking-a", "测试番"),
+            "available_actions": actions,
+            "revision": 1,
+            "origin": "single",
+            "batch_id": None,
+            "created_at": "2026-09-01T00:00:00Z",
+            "updated_at": "2026-09-01T00:00:00Z",
+            "last_synced_at": None,
+            "safe_info": None,
+            "current_operation": None,
+            "revalidation_issues": [],
+            "external_mapping": {"match_reason": "标题", "enabled": True, "external_deleted": False},
+            "audit_events": [],
+            "warnings": [],
+        },
+    }
 
     def handler(route, request):
         path = request.url.split("/api/v1", 1)[-1]
         if request.method == "GET" and path.startswith("/settings/autobangumi"):
-            route.fulfill(json={"ok": True, "result": {"configured": True, "credential_present": True,
-                "connection_ref": ref, "configuration_revision": 3, "connection_status": "CONFIGURED"}}); return
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "configured": True,
+                        "credential_present": True,
+                        "connection_ref": ref,
+                        "configuration_revision": 3,
+                        "connection_status": "CONFIGURED",
+                    },
+                }
+            )
+            return
         if request.method == "GET" and path.startswith("/tracking/items/tracking-a"):
-            route.fulfill(json=detail); return
+            route.fulfill(json=detail)
+            return
         if request.method == "GET" and path.startswith("/tracking/items"):
-            route.fulfill(json={"ok": True, "result": {"items": [{**detail["result"], "safe_info": None}],
-                "summary": {"total": 1, "pending": 1, "processing": 0, "active": 0, "needs_attention": 0, "unreadable": 0}, "warnings": []}}); return
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "items": [{**detail["result"], "safe_info": None}],
+                        "summary": {
+                            "total": 1,
+                            "pending": 1,
+                            "processing": 0,
+                            "active": 0,
+                            "needs_attention": 0,
+                            "unreadable": 0,
+                        },
+                        "warnings": [],
+                    },
+                }
+            )
+            return
         if request.method == "POST" and path.startswith("/settings/autobangumi/probe"):
-            route.fulfill(json={"ok": True, "result": {"probe_status": "VERIFIED", "version": "3.1.18", "adapter": "legacy_3_1",
-                "subscription_list": "SUPPORTED", "subscription_detail": "SUPPORTED", "subscription_submit": "SUPPORTED",
-                "subscription_modify": "SUPPORTED", "subscription_enable": "SUPPORTED", "subscription_disable": "SUPPORTED",
-                "subscription_delete": "SUPPORTED", "rss_list": "SUPPORTED", "rss_modify": "SUPPORTED", "rss_enable": "SUPPORTED",
-                "rss_disable": "SUPPORTED", "rss_delete": "SUPPORTED", "rss_refresh": "SUPPORTED", "external_verify": "SUPPORTED",
-                "checked_at": None, "safe_message": "ok"}}); return
-        if request.method == "POST" and f"/tracking/items/tracking-a/" in path:
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "probe_status": "VERIFIED",
+                        "version": "3.1.18",
+                        "adapter": "legacy_3_1",
+                        "subscription_list": "SUPPORTED",
+                        "subscription_detail": "SUPPORTED",
+                        "subscription_submit": "SUPPORTED",
+                        "subscription_modify": "SUPPORTED",
+                        "subscription_enable": "SUPPORTED",
+                        "subscription_disable": "SUPPORTED",
+                        "subscription_delete": "SUPPORTED",
+                        "rss_list": "SUPPORTED",
+                        "rss_modify": "SUPPORTED",
+                        "rss_enable": "SUPPORTED",
+                        "rss_disable": "SUPPORTED",
+                        "rss_delete": "SUPPORTED",
+                        "rss_refresh": "SUPPORTED",
+                        "external_verify": "SUPPORTED",
+                        "checked_at": None,
+                        "safe_message": "ok",
+                    },
+                }
+            )
+            return
+        if request.method == "POST" and "/tracking/items/tracking-a/" in path:
             captured.append(request.post_data_json or {})
-            route.fulfill(json={"ok": True, "result": {"action": action, "management_status": "SUCCEEDED",
-                "needs_manual": False, "safe_message": "已完成", "operation_id": "op-1", "operation": None,
-                "tracking": {**_item("tracking-a", "测试番"), "revision": 2}}}); return
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "action": action,
+                        "management_status": "SUCCEEDED",
+                        "needs_manual": False,
+                        "safe_message": "已完成",
+                        "operation_id": "op-1",
+                        "operation": None,
+                        "tracking": {**_item("tracking-a", "测试番"), "revision": 2},
+                    },
+                }
+            )
+            return
         route.continue_()
 
     page.route("**/api/v1/**", handler)
@@ -170,23 +293,106 @@ def test_saved_sync_requires_explicit_probe_and_sends_ref_revision(page, live_se
     def handler(route, request):
         path = request.url.split("/api/v1", 1)[-1]
         if request.method == "GET" and path.startswith("/settings/autobangumi"):
-            route.fulfill(json={"ok": True, "result": {"configured": True, "credential_present": True,
-                "connection_ref": ref, "configuration_revision": 3, "connection_status": "CONFIGURED"}}); return
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "configured": True,
+                        "credential_present": True,
+                        "connection_ref": ref,
+                        "configuration_revision": 3,
+                        "connection_status": "CONFIGURED",
+                    },
+                }
+            )
+            return
         if request.method == "GET" and path.startswith("/tracking/items"):
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1, "pending": 1,
-                "processing": 0, "active": 0, "needs_attention": 0, "unreadable": 0}, "warnings": []}}); return
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "items": [item],
+                        "summary": {
+                            "total": 1,
+                            "pending": 1,
+                            "processing": 0,
+                            "active": 0,
+                            "needs_attention": 0,
+                            "unreadable": 0,
+                        },
+                        "warnings": [],
+                    },
+                }
+            )
+            return
         if request.method == "POST" and path.startswith("/settings/autobangumi/probe"):
-            route.fulfill(json={"ok": True, "result": {"probe_status": "VERIFIED", "version": "3.1.18", "adapter": "legacy_3_1",
-                **{name: "SUPPORTED" for name in ("subscription_list", "subscription_detail", "subscription_submit", "subscription_modify",
-                "subscription_enable", "subscription_disable", "subscription_delete", "rss_list", "rss_modify", "rss_enable",
-                "rss_disable", "rss_delete", "rss_refresh", "external_verify")}, "checked_at": None, "safe_message": "ok"}}); return
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "probe_status": "VERIFIED",
+                        "version": "3.1.18",
+                        "adapter": "legacy_3_1",
+                        **{
+                            name: "SUPPORTED"
+                            for name in (
+                                "subscription_list",
+                                "subscription_detail",
+                                "subscription_submit",
+                                "subscription_modify",
+                                "subscription_enable",
+                                "subscription_disable",
+                                "subscription_delete",
+                                "rss_list",
+                                "rss_modify",
+                                "rss_enable",
+                                "rss_disable",
+                                "rss_delete",
+                                "rss_refresh",
+                                "external_verify",
+                            )
+                        },
+                        "checked_at": None,
+                        "safe_message": "ok",
+                    },
+                }
+            )
+            return
         if request.method == "POST" and path.startswith("/tracking/sync"):
             calls.append(request.post_data_json or {})
-            route.fulfill(json={"ok": True, "result": {"sync_status": "COMPLETE", "capabilities": {"probe_status": "VERIFIED",
-                **{name: "SUPPORTED" for name in ("subscription_list", "subscription_detail", "subscription_submit", "subscription_modify",
-                "subscription_enable", "subscription_disable", "subscription_delete", "rss_list", "rss_modify", "rss_enable",
-                "rss_disable", "rss_delete", "rss_refresh", "external_verify")}}, "summary": {"checked": 1, "created": 0,
-                "updated": 0, "unchanged": 1}, "items": [item]}}); return
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "sync_status": "COMPLETE",
+                        "capabilities": {
+                            "probe_status": "VERIFIED",
+                            **{
+                                name: "SUPPORTED"
+                                for name in (
+                                    "subscription_list",
+                                    "subscription_detail",
+                                    "subscription_submit",
+                                    "subscription_modify",
+                                    "subscription_enable",
+                                    "subscription_disable",
+                                    "subscription_delete",
+                                    "rss_list",
+                                    "rss_modify",
+                                    "rss_enable",
+                                    "rss_disable",
+                                    "rss_delete",
+                                    "rss_refresh",
+                                    "external_verify",
+                                )
+                            },
+                        },
+                        "summary": {"checked": 1, "created": 0, "updated": 0, "unchanged": 1},
+                        "items": [item],
+                    },
+                }
+            )
+            return
         route.continue_()
 
     page.route("**/api/v1/**", handler)
@@ -199,3 +405,78 @@ def test_saved_sync_requires_explicit_probe_and_sends_ref_revision(page, live_se
     page.locator(".confirm-dialog .primary-button").click()
     page.wait_for_timeout(100)
     assert calls == [{"connection_ref": ref, "configuration_revision": 3, "confirm": True}]
+
+
+@pytest.mark.browser
+def test_saved_verify_external_is_unknown_safe_when_unavailable(page, live_server_url):
+    ref = "11111111-1111-4111-8111-111111111111"
+    calls: list[dict] = []
+    unknown = _detail_payload(_recovery_item("tracking-a", "未知结果", revision=4))
+
+    def handler(route, request):
+        path = request.url.split("/api/v1", 1)[-1]
+        if request.method == "GET" and path.startswith("/settings/autobangumi"):
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "configured": True,
+                        "credential_present": True,
+                        "connection_ref": ref,
+                        "configuration_revision": 3,
+                        "connection_status": "CONFIGURED",
+                    },
+                }
+            )
+            return
+        if request.method == "GET" and path.startswith("/tracking/items"):
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "items": [unknown],
+                        "summary": {
+                            "total": 1,
+                            "pending": 0,
+                            "processing": 0,
+                            "active": 0,
+                            "needs_attention": 1,
+                            "unreadable": 0,
+                        },
+                        "warnings": [],
+                    },
+                }
+            )
+            return
+        if request.method == "POST" and path.startswith("/settings/autobangumi/probe"):
+            route.fulfill(json={"ok": True, "result": _probe_capabilities()})
+            return
+        if request.method == "POST" and path.endswith("/recover"):
+            calls.append(request.post_data_json or {})
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "tracking_id": "tracking-a",
+                        "action": "VERIFY_EXTERNAL",
+                        "outcome": "RECOVERY_REQUIRED",
+                        "checked_revision": 4,
+                        "next_revision": 4,
+                        "checked_at": "2026-09-14T00:00:00Z",
+                        "operation_id": "op-unknown",
+                        "needs_manual": True,
+                        "tracking": unknown,
+                    },
+                }
+            )
+            return
+        route.continue_()
+
+    page.route("**/api/v1/**", handler)
+    page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+    page.wait_for_selector("#tracking-overview")
+    expect(page.locator("#tracking-recover-verify")).to_have_count(0)
+    page.locator("#tracking-probe-saved").click()
+    # An unavailable recovery target is intentionally kept read-only.
+    assert page.locator("#tracking-recover-verify").count() == 0
+    assert calls == []
