@@ -87,6 +87,12 @@ def create_app(config_name: str | None = None) -> Flask:
 
     @app.before_request
     def _protect_settings_io() -> object | None:
+        retired_exact_paths = {"/api/v1/requests/preview-save", "/api/v1/autobangumi/test-connection", "/api/v1/qbittorrent/test-connection"}
+        retired_suffixes = ("/submit-ab", "/accept", "/submit", "/retry", "/recover", "/queue")
+        if request.path in retired_exact_paths or (
+            request.path.startswith("/api/v1/batches/") and request.path.endswith(retired_suffixes)
+        ) or request.path.endswith("/submit-ab"):
+            return Response(status=404)
         if request.path.startswith("/api/v1/") and _canonical_host(request.host) not in current_app.config["MIGU_ORCA_CANONICAL_TRUSTED_HOSTS"]:
             return failed_response("untrusted_host", "请求主机不受信任")
         if not request.path.startswith("/api/v1/settings/autobangumi"):
@@ -112,15 +118,6 @@ def create_app(config_name: str | None = None) -> Flask:
         # otherwise emit an HTML error containing the attacker-controlled Host.
         if request.path.startswith("/api/v1/"):
             return failed_response("untrusted_host", "请求主机不受信任")
-        return error
-
-    @app.errorhandler(405)
-    @app.errorhandler(400)
-    def _api_method_not_found(error: object) -> Response | object:
-        # API retirement and path readers must not expose method capabilities.
-        # Treat unsupported methods as unknown resources at the HTTP boundary.
-        if request.path.startswith("/api/v1/") and request.path.endswith("/submit-ab"):
-            return Response(status=404)
         return error
 
     @app.after_request

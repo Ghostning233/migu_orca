@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from apps.base import create_app
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -69,6 +71,27 @@ def test_batch_parse_contract_has_tracking_fields_only() -> None:
     assert '"queue_status"' not in openapi
     assert "queue_status:" not in generated
     assert "tracking_id" in dto and "tracking_ready" in dto
+
+
+def test_production_queue_controller_has_no_runtime_state_machine() -> None:
+    source = (ROOT / "src/batch_engine/controllers/batch_queue_controller.py").read_text(encoding="utf-8")
+    forbidden = (
+        "legacy_create_queue", "legacy_enqueue_item", "legacy_start_queue_item_submit",
+        "legacy_complete_queue_item_submit", "legacy_mark_queue_item_failed",
+        "legacy_mark_queue_item_retry_failed", "serialize_queue", "serialize_queue_item",
+        "queue_to_storage_dict", "queue_item_to_storage_dict",
+    )
+    for symbol in forbidden:
+        assert f"def {symbol}(" not in source
+    assert "def queue_from_storage_dict(" in source
+    assert "def queue_item_from_storage_dict(" in source
+
+
+def test_preview_save_is_not_a_public_endpoint() -> None:
+    client = create_app("testing").test_client()
+    for method in ("get", "post"):
+        response = getattr(client, method)("/api/v1/requests/preview-save")
+        assert response.status_code == 404, (method, response.status_code, response.get_data(as_text=True))
 
 
 def test_tracking_source_models_do_not_define_request_scoped_credentials() -> None:

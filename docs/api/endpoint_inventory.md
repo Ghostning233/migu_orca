@@ -431,7 +431,7 @@ Vue 3 + TypeScript + Vite 工程，生产构建由 Flask 在 `/app/` 同源托�
   相对目录名，绝对路径旧值在读取时被忽略并回退默认根目录）
 - `miguOrca.web.saveRequest`（`"true"`/`"false"`）
 
-其它敏感值（endpoint/token/cookie/密码/qBittorrent 凭据）**绝不**写入 localStorage/sessionStorage。
+其它敏感值（endpoint/token/cookie/密码/外部服务凭据）**绝不**写入 localStorage/sessionStorage。
 
 ### 5.2 URL 参数（SPA history 状态）
 
@@ -464,7 +464,7 @@ Vue 3 + TypeScript + Vite 工程，生产构建由 Flask 在 `/app/` 同源托�
 ## 6. 测试证明
 
 - `tests/api_contract/test_inventory_consistency.py`：清单 ↔ 实际 `url_map` 自动核对，
-  漏记端点即失败；不访问真实 MiKan/AutoBangumi/qBittorrent。
+  漏记端点即失败；测试不访问真实上游服务。
 - `tests/api_contract/test_golden_contracts.py`：每类端点族的成功、输入失败、
   业务失败与脱敏错误 golden contract（全部基于 fake/隔离，无真实外部写操作）；
   US-192 起断言 HTTP 状态（400/404/409/401/502/503/504/500）与 envelope 双语义。
