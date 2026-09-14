@@ -481,6 +481,6 @@ def test_saved_verify_external_is_unknown_safe_when_unavailable(page, live_serve
     page.wait_for_selector("#tracking-overview")
     expect(page.locator("#tracking-recover-verify")).to_have_count(0)
     page.locator("#tracking-probe-saved").click()
-    # An unavailable recovery target is intentionally kept read-only.
+    page.wait_for_timeout(300)
     assert page.locator("#tracking-recover-verify").count() == 0
     assert calls == []
