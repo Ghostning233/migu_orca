@@ -22457,42 +22457,6 @@
                   "ab_config"
                 ],
                 "properties": {
-                  "legacy_config": {
-                    "type": "object",
-                    "x-legacy": true,
-                    "properties": {
-                      "auth_mode": {
-                        "type": "string",
-                        "enum": [
-                          "password",
-                          "api_token"
-                        ]
-                      },
-                      "base_url": {
-                        "type": "string",
-                        "x-legacy": true
-                      },
-                      "username": {
-                        "type": "string",
-                        "x-legacy": true
-                      },
-                      "password": {
-                        "type": "string",
-                        "x-legacy": true
-                      },
-                      "token": {
-                        "type": "string",
-                        "x-legacy": true
-                      },
-                      "fallback_enabled": {
-                        "type": "boolean"
-                      }
-                    },
-                    "required": [
-                      "auth_mode",
-                      "fallback_enabled"
-                    ]
-                  },
                   "storage_dir": {
                     "type": [
                       "string",
@@ -22502,16 +22466,7 @@
                   }
                 }
               },
-              "example": {
-                "legacy_config": {
-                  "auth_mode": "示例",
-                  "base_url": null,
-                  "username": null,
-                  "password": null,
-                  "token": null,
-                  "fallback_enabled": true
-                }
-              }
+              "example": {}
             }
           },
           "description": "提交订阅方案到 Auto Bangumi"
@@ -28878,42 +28833,6 @@
                     ],
                     "description": "必须为 true：用户显式确认重试提交最新方案。"
                   },
-                  "legacy_config": {
-                    "type": "object",
-                    "x-legacy": true,
-                    "properties": {
-                      "auth_mode": {
-                        "type": "string",
-                        "enum": [
-                          "password",
-                          "api_token"
-                        ]
-                      },
-                      "base_url": {
-                        "type": "string",
-                        "x-legacy": true
-                      },
-                      "username": {
-                        "type": "string",
-                        "x-legacy": true
-                      },
-                      "password": {
-                        "type": "string",
-                        "x-legacy": true
-                      },
-                      "token": {
-                        "type": "string",
-                        "x-legacy": true
-                      },
-                      "fallback_enabled": {
-                        "type": "boolean"
-                      }
-                    },
-                    "required": [
-                      "auth_mode",
-                      "fallback_enabled"
-                    ]
-                  },
                   "storage_dir": {
                     "type": [
                       "string",
@@ -28926,15 +28845,7 @@
               "example": {
                 "expected_revision": 1,
                 "idempotency_key": "示例",
-                "confirm": true,
-                "legacy_config": {
-                  "auth_mode": "示例",
-                  "base_url": null,
-                  "username": null,
-                  "password": null,
-                  "token": null,
-                  "fallback_enabled": true
-                }
+                "confirm": true
               }
             }
           },
@@ -30944,42 +30855,6 @@
                     "type": "integer",
                     "minimum": 0
                   },
-                  "legacy_config": {
-                    "type": "object",
-                    "x-legacy": true,
-                    "properties": {
-                      "auth_mode": {
-                        "type": "string",
-                        "enum": [
-                          "password",
-                          "api_token"
-                        ]
-                      },
-                      "base_url": {
-                        "type": "string",
-                        "x-legacy": true
-                      },
-                      "username": {
-                        "type": "string",
-                        "x-legacy": true
-                      },
-                      "password": {
-                        "type": "string",
-                        "x-legacy": true
-                      },
-                      "token": {
-                        "type": "string",
-                        "x-legacy": true
-                      },
-                      "fallback_enabled": {
-                        "type": "boolean"
-                      }
-                    },
-                    "required": [
-                      "auth_mode",
-                      "fallback_enabled"
-                    ]
-                  },
                   "storage_dir": {
                     "type": [
                       "string",
@@ -30994,15 +30869,7 @@
                 "idempotency_key": "示例",
                 "confirm": true,
                 "connection_ref": "示例",
-                "configuration_revision": 1,
-                "legacy_config": {
-                  "auth_mode": "示例",
-                  "base_url": null,
-                  "username": null,
-                  "password": null,
-                  "token": null,
-                  "fallback_enabled": true
-                }
+                "configuration_revision": 1
               }
             }
           },

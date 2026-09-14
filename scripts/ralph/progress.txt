@@ -323,3 +323,9 @@ Started: 2026-09-13
 - management 四组与 recovery projection 从旧 credential body 断言迁移至 `connection_ref + configuration_revision`，保留 scope/capability/confirm/unknown/zero-write 语义；新增 source residual tests 均通过。
 - 验证：management/projection Vitest `61 passed`；Settings/Tracking Vitest `21 passed`；API residual/saved body contracts `5 passed`；OpenAPI/API generate/check、typecheck、build、Ruff、diff check、saved Chromium suite `9 passed`。
 - 遗留风险：为彻底退役旧 tracking browser fixture，旧大文件已替换为 saved-flow 入口；本轮未扩展每个历史 Stage 38 case 的独立 saved 等价覆盖，需审核确认覆盖面。
+
+## 2026-09-14 / 工作包 A P1 源契约与 CAS 修复补充
+- 直接从 `openapi_gen.py` 的 tracking submit/retry requestBody 删除 `legacy_config` 凭据块，并移除 schemas 中未使用的旧 TrackingSubmitPayload；同步重生 `docs/api/openapi.json` 与 generated client。非 tracking 历史端点未扩大清理范围。
+- CAS 浏览器测试按产品固定安全文案断言“配置已变化”，真实验证 409 后 GET 摘要重读、仅一次 PUT、输入密码仍留在受控表单且不进入公开页面状态。
+- 实证命令：`uv run pytest tests/api_contract/test_stage39_source_residual_red.py tests/api_contract/test_stage39_tracking_schema_residual_red.py tests/api_contract/test_stage39_saved_body_red.py -q`（5 passed）；`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q`（10 passed，真实 Chromium）；`cd frontend && npm run build`（通过）、`npm run api:generate`/`api:check`/`typecheck`（通过）；OpenAPI `--check`、受影响 Ruff、`git diff --check`（通过）。
+- 遗留风险：本轮未新增 settings probe failure/refresh/delete 与 submit/retry/generation 切换等完整独立 Chromium 场景；现有 saved-flow 证据覆盖显式 probe、四管理、sync、VERIFY_EXTERNAL unknown、CAS 与敏感 canary，需审核决定是否接受覆盖面。

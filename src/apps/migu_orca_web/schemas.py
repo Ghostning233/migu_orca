@@ -572,7 +572,7 @@ class AutoBangumiCapabilitiesConfigPayload(BaseModel):
 
 
 class TrackingSyncPayload(BaseModel):
-    """Request-scoped read-only external tracking synchronization."""
+    """Read-only synchronization request resolved through a saved generation."""
 
     model_config = ConfigDict(extra="forbid")
     connection_ref: UUID
@@ -766,7 +766,7 @@ class TrackingRevalidatePayload(BaseModel):
     The request carries only the server-observed ``expected_revision`` (a
     revision-aware compare, so a stale client never silently re-checks an
     outdated record) and an optional storage profile.  ``extra="forbid"``
-    rejects ``ab_config``/credentials/other leaked fields: revalidation is a
+    rejects credentials/other leaked fields: revalidation is a
     pure-local check that never accepts connection or capability config.
     ``tracking_id`` comes from the URL path.
     """
@@ -787,49 +787,6 @@ class TrackingRevalidatePayload(BaseModel):
 #: Opaque idempotency-key shape for the unified submit (mirrors the operation
 #: model's printable-token contract so a bad key fails at the boundary).
 _IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-:=]{0,199}$")
-
-
-class _RetiredTrackingSubmitPayload(BaseModel):
-    """Body for ``POST /api/v1/tracking/items/{tracking_id}/submit`` (US-225).
-
-    ``confirm`` must be strictly true and ``ab_config`` is request-scoped memory
-    only — it is never persisted, logged or returned.  ``expected_revision`` is
-    the server-observed revision the user is confirming; ``idempotency_key`` is
-    the opaque client operation id that makes network replays converge to one
-    external call.  ``extra="forbid"`` rejects leaked fields.
-    ``tracking_id`` comes from the URL path.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    tracking_id: str = ""
-    expected_revision: StrictInt = Field(default=1, ge=1)
-    idempotency_key: StrictStr = "request"
-    confirm: bool = True
-    connection_ref: UUID = UUID("00000000-0000-4000-8000-000000000000")
-    configuration_revision: StrictInt = Field(default=0, ge=0)
-    storage_dir: str | None = None
-
-    @field_validator("tracking_id")
-    @classmethod
-    def _clean_tracking_id(cls, value: str) -> str:
-        tracking_id = value.strip()
-        return tracking_id
-
-    @field_validator("idempotency_key")
-    @classmethod
-    def _clean_idempotency_key(cls, value: str) -> str:
-        key = value.strip()
-        if not _IDEMPOTENCY_KEY_RE.fullmatch(key):
-            raise ValueError("idempotency_key 包含不合法字符")
-        return key
-
-    @field_validator("expected_revision")
-    @classmethod
-    def _reject_bool_revision(cls, value: int) -> int:
-        if isinstance(value, bool):
-            raise ValueError("expected_revision 必须为正整数")
-        return value
 
 
 #: Fixed recovery-action enum accepted by

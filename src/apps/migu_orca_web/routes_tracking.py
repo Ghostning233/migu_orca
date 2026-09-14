@@ -75,7 +75,7 @@ class TrackingItemListView(GetView):
 
 @class_route(api_blueprint, "/api/v1/tracking/sync", methods=["POST"])
 class TrackingSyncView(PostView):
-    """Run one request-scoped, read-only Auto Bangumi tracking sync."""
+    """Run a read-only sync through the saved connection generation."""
 
     request_validator_model = TrackingSyncPayload
 
@@ -130,7 +130,7 @@ class TrackingItemRevalidateView(PostView):
     """Run the pure-local pre-submit revalidation for one tracking item (US-224).
 
     The request carries only ``expected_revision`` (plus an optional storage
-    profile) — never ``ab_config`` or connection/capability settings.  A
+    profile) — never accepts client credentials or connection settings.  A
     business revalidation failure is still HTTP 200 (``ready=false`` +
     ``next_status=NEEDS_RECONFIRM`` + the fixed §11.5 issue list); only a stale
     revision (409) or a non-revalidatable tracking state (409) raise.

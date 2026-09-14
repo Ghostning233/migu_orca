@@ -11342,28 +11342,8 @@ export interface operations {
         /** @description 提交订阅方案到 Auto Bangumi */
         requestBody: {
             content: {
-                /**
-                 * @example {
-                 *       "legacy_config": {
-                 *         "auth_mode": "示例",
-                 *         "base_url": null,
-                 *         "username": null,
-                 *         "password": null,
-                 *         "token": null,
-                 *         "fallback_enabled": true
-                 *       }
-                 *     }
-                 */
+                /** @example {} */
                 "application/json": {
-                    legacy_config?: {
-                        /** @enum {string} */
-                        auth_mode: "password" | "api_token";
-                        base_url?: string;
-                        username?: string;
-                        password?: string;
-                        token?: string;
-                        fallback_enabled: boolean;
-                    };
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
                     storage_dir?: string | null;
                 };
@@ -14527,15 +14507,7 @@ export interface operations {
                  * @example {
                  *       "expected_revision": 1,
                  *       "idempotency_key": "示例",
-                 *       "confirm": true,
-                 *       "legacy_config": {
-                 *         "auth_mode": "示例",
-                 *         "base_url": null,
-                 *         "username": null,
-                 *         "password": null,
-                 *         "token": null,
-                 *         "fallback_enabled": true
-                 *       }
+                 *       "confirm": true
                  *     }
                  */
                 "application/json": {
@@ -14548,15 +14520,6 @@ export interface operations {
                      * @enum {boolean}
                      */
                     confirm: true;
-                    legacy_config?: {
-                        /** @enum {string} */
-                        auth_mode: "password" | "api_token";
-                        base_url?: string;
-                        username?: string;
-                        password?: string;
-                        token?: string;
-                        fallback_enabled: boolean;
-                    };
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
                     storage_dir?: string | null;
                 };
@@ -15668,15 +15631,7 @@ export interface operations {
                  *       "idempotency_key": "示例",
                  *       "confirm": true,
                  *       "connection_ref": "示例",
-                 *       "configuration_revision": 1,
-                 *       "legacy_config": {
-                 *         "auth_mode": "示例",
-                 *         "base_url": null,
-                 *         "username": null,
-                 *         "password": null,
-                 *         "token": null,
-                 *         "fallback_enabled": true
-                 *       }
+                 *       "configuration_revision": 1
                  *     }
                  */
                 "application/json": {
@@ -15692,15 +15647,6 @@ export interface operations {
                     /** Format: uuid */
                     connection_ref: string;
                     configuration_revision: number;
-                    legacy_config?: {
-                        /** @enum {string} */
-                        auth_mode: "password" | "api_token";
-                        base_url?: string;
-                        username?: string;
-                        password?: string;
-                        token?: string;
-                        fallback_enabled: boolean;
-                    };
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
                     storage_dir?: string | null;
                 };

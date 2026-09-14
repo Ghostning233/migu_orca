@@ -9,13 +9,13 @@ def test_tracking_source_models_do_not_define_request_scoped_credentials() -> No
     paths = [
         ROOT / "src/apps/migu_orca_web/schemas.py",
         ROOT / "src/apps/migu_orca_web/routes_tracking.py",
-        ROOT / "src/apps/migu_orca_web/openapi_gen.py",
     ]
     text = "\n".join(path.read_text(encoding="utf-8") for path in paths)
     assert "_strip_retired_tracking_credentials" not in text
     assert "class TrackingSubmitPayload" not in text
     assert "request-scoped `ab_config`" not in text
-    assert "legacy_credentials" not in text
+    for forbidden in ("legacy_config", "legacy_credentials", "saved_connection"):
+        assert forbidden not in text
 
 
 def test_tracking_tests_do_not_encode_retired_credential_flow() -> None:

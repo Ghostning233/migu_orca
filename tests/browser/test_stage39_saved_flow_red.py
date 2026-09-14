@@ -510,3 +510,39 @@ def test_saved_verify_external_preserves_unknown_source_lock(page, live_server_u
     assert secret not in page.url
     assert secret not in page.evaluate("() => location.href + JSON.stringify(history.state) + JSON.stringify(localStorage) + JSON.stringify(sessionStorage)")
     assert secret not in " ".join(console_messages)
+
+
+@pytest.mark.browser
+def test_settings_cas_conflict_rereads_summary_without_resubmitting(page, live_server_url):
+    ref = "11111111-1111-4111-8111-111111111111"
+    gets = 0
+    puts = 0
+
+    def route_api(route, request):
+        nonlocal gets, puts
+        path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+        if request.method == "GET" and path == "/settings/autobangumi":
+            gets += 1
+            route.fulfill(json={"ok": True, "result": {
+                "configured": True, "credential_present": True,
+                "connection_ref": ref, "configuration_revision": gets,
+                "connection_status": "CONFIGURED",
+            }})
+            return
+        if request.method == "PUT" and path == "/settings/autobangumi":
+            puts += 1
+            route.fulfill(status=409, json={"ok": False, "error_type": "configuration_conflict"})
+            return
+        route.continue_()
+
+    page.route("**/api/v1/**", route_api)
+    page.goto(f"{live_server_url}/app/settings")
+    page.wait_for_selector("#settings-ab-save-form")
+    page.locator("#settings-ab-endpoint").fill("192.168.1.20:7890")
+    page.locator("#settings-ab-username").fill("user")
+    page.locator("#settings-ab-password").fill("cas-canary")
+    page.locator("#settings-ab-save").click()
+    expect(page.locator("#settings-ab-save-form [role=alert]")).to_contain_text("配置已变化")
+    assert puts == 1
+    assert gets >= 2
+    assert page.locator("#settings-ab-password").input_value() == "cas-canary"

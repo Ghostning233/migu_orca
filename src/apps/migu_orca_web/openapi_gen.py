@@ -839,34 +839,6 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             "type": "object",
             "required": ["ab_config"],
             "properties": {
-                "legacy_config": {
-                    "type": "object",
-                    "x-legacy": True,
-                    "properties": {
-                        "auth_mode": {
-                            "type": "string",
-                            "enum": ["password", "api_token"],
-                        },
-                        "base_url": {
-                            "type": "string",
-                            "x-legacy": True,
-                        },
-                        "username": {
-                            "type": "string",
-                            "x-legacy": True,
-                        },
-                        "password": {
-                            "type": "string",
-                            "x-legacy": True,
-                        },
-                        "token": {
-                            "type": "string",
-                            "x-legacy": True,
-                        },
-                        "fallback_enabled": {"type": "boolean"},
-                    },
-                    "required": ["auth_mode", "fallback_enabled"],
-                },
                 "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
             },
         },
@@ -1063,34 +1035,6 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 },
                 "connection_ref": {"type": "string", "format": "uuid"},
                 "configuration_revision": {"type": "integer", "minimum": 0},
-                "legacy_config": {
-                    "type": "object",
-                    "x-legacy": True,
-                    "properties": {
-                        "auth_mode": {
-                            "type": "string",
-                            "enum": ["password", "api_token"],
-                        },
-                        "base_url": {
-                            "type": "string",
-                            "x-legacy": True,
-                        },
-                        "username": {
-                            "type": "string",
-                            "x-legacy": True,
-                        },
-                        "password": {
-                            "type": "string",
-                            "x-legacy": True,
-                        },
-                        "token": {
-                            "type": "string",
-                            "x-legacy": True,
-                        },
-                        "fallback_enabled": {"type": "boolean"},
-                    },
-                    "required": ["auth_mode", "fallback_enabled"],
-                },
                 "storage_dir": {
                     "type": "string",
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
@@ -1141,34 +1085,6 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                     "type": "boolean",
                     "enum": [True],
                     "description": "必须为 true：用户显式确认重试提交最新方案。",
-                },
-                "legacy_config": {
-                    "type": "object",
-                    "x-legacy": True,
-                    "properties": {
-                        "auth_mode": {
-                            "type": "string",
-                            "enum": ["password", "api_token"],
-                        },
-                        "base_url": {
-                            "type": "string",
-                            "x-legacy": True,
-                        },
-                        "username": {
-                            "type": "string",
-                            "x-legacy": True,
-                        },
-                        "password": {
-                            "type": "string",
-                            "x-legacy": True,
-                        },
-                        "token": {
-                            "type": "string",
-                            "x-legacy": True,
-                        },
-                        "fallback_enabled": {"type": "boolean"},
-                    },
-                    "required": ["auth_mode", "fallback_enabled"],
                 },
                 "storage_dir": {
                     "type": "string",
