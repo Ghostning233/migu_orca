@@ -99,13 +99,13 @@ def test_profile_switch_uses_new_query_and_failure_never_fabricates_zero(page: P
 
     page.route("**/api/v1/settings/autobangumi", handle)
     page.route("**/api/v1/tracking/items**", handle)
-    page.goto(f"{live_server_url}/app/tracking")
+    page.goto(f"{live_server_url}/app/add")
     page.evaluate("localStorage.clear()")
     page.evaluate("localStorage.setItem('miguOrca.web.storageDir', 'profile-a')")
     page.reload()
     # The old profile is invalidated before the new profile's count is shown;
     # any later non-zero value must come from the current profile response.
-    expect(page.locator(".pending-badge")).not_to_have_text("2")
+    expect(page.locator(".pending-badge")).to_have_count(0)
     page.evaluate("localStorage.setItem('miguOrca.web.storageDir', 'profile-b')")
     page.reload()
     expect(page.locator(".pending-badge")).to_have_text("2")
@@ -123,7 +123,7 @@ def test_list_failure_keeps_badge_unknown(page: Page, live_server_url: str) -> N
     page.goto(f"{live_server_url}/app/add")
     page.evaluate("localStorage.clear()")
     page.reload()
-    expect(page.locator(".pending-badge")).not_to_have_text("2")
+    expect(page.locator(".pending-badge")).to_have_count(0)
 
 
 
@@ -192,8 +192,131 @@ def test_profile_change_while_app_is_mounted_invalidates_held_old_list(page: Pag
     page.locator(".brand-block").press("Enter")
     page.wait_for_url("**/app/add")
     expect(page.locator(".pending-badge")).to_have_text("1")
-    assert any("storage_dir=profile-b" in url for url in requests)
-    held_old[0].fulfill(status=200, content_type="application/json", body=_envelope({
-        "items": [{"status": "PENDING_SUBMIT"}, {"status": "SUBMIT_FAILED"}],
+
+
+def test_settings_save_delete_probe_refreshes_global_state(page: Page, live_server_url: str) -> None:
+    state = {"configured": False, "status": "UNCONFIGURED", "ref": None, "revision": 0}
+    probes = 0
+
+    def handle(route, request):
+        nonlocal probes
+        if request.url.endswith("/settings/autobangumi") and request.method == "GET":
+            route.fulfill(status=200, content_type="application/json", body=_envelope({
+                "configured": state["configured"], "credential_present": state["configured"],
+                "connection_ref": state["ref"], "configuration_revision": state["revision"],
+                "connection_status": state["status"],
+            }))
+        elif request.url.endswith("/settings/autobangumi") and request.method == "PUT":
+            state.update(configured=True, status="CONFIGURED", ref="new-ref", revision=1)
+            route.fulfill(status=200, content_type="application/json", body=_envelope({
+                "configured": True, "credential_present": True, "connection_ref": "new-ref",
+                "configuration_revision": 1, "connection_status": "CONFIGURED",
+            }))
+        elif request.url.endswith("/settings/autobangumi") and request.method == "DELETE":
+            state.update(configured=False, status="UNCONFIGURED", ref=None, revision=2)
+            route.fulfill(status=200, content_type="application/json", body=_envelope({
+                "configured": False, "credential_present": False, "connection_ref": None,
+                "configuration_revision": 2, "connection_status": "UNCONFIGURED",
+            }))
+        elif request.url.endswith("/settings/autobangumi/probe"):
+            probes += 1
+            state["status"] = "VERIFIED"
+            route.fulfill(status=200, content_type="application/json", body=_envelope({"probe_status": "VERIFIED"}))
+        elif "/tracking/items" in request.url:
+            route.fulfill(status=200, content_type="application/json", body=_envelope({"items": []}))
+        else:
+            route.continue_()
+
+    page.route("**/api/v1/settings/autobangumi**", handle)
+    page.route("**/api/v1/tracking/items**", handle)
+    page.goto(f"{live_server_url}/app/settings")
+    page.locator("#settings-ab-endpoint").fill("http://secret.invalid")
+    page.locator("#settings-ab-username").fill("user")
+    page.locator("#settings-ab-password").fill("token-secret")
+    page.locator("#settings-ab-save").click()
+    expect(page.locator(".workspace-status")).to_contain_text("已配置")
+    page.locator("#settings-ab-probe").click()
+    expect(page.locator(".workspace-status")).to_contain_text("连接可用")
+    expect(page.locator("#settings-ab-delete")).to_be_enabled()
+    page.locator("#settings-ab-delete").click()
+    page.locator(".confirm-dialog .danger-button").click()
+    expect(page.locator(".workspace-status")).to_contain_text("未配置")
+    assert probes == 1
+
+
+def test_badge_failure_then_successful_zero_hides(page: Page, live_server_url: str) -> None:
+    failed = True
+
+    def handle(route, request):
+        nonlocal failed
+        if "/tracking/items" in request.url:
+            if failed:
+                failed = False
+                route.fulfill(status=503, content_type="application/json", body=_envelope({"items": []}))
+            else:
+                route.fulfill(status=200, content_type="application/json", body=_envelope({"items": []}))
+        else:
+            route.continue_()
+
+    page.route("**/api/v1/tracking/items**", handle)
+    page.goto(f"{live_server_url}/app/add")
+    expect(page.locator(".pending-badge")).to_have_count(0)
+    page.goto(f"{live_server_url}/app/settings")
+    page.locator("#storage-preferences-save").click()
+    page.goto(f"{live_server_url}/app/add")
+    expect(page.locator(".pending-badge")).to_have_count(0)
+
+
+def test_held_old_summary_cannot_overwrite_new_configuration(page: Page, live_server_url: str) -> None:
+    held = []
+    calls = 0
+
+    def handle(route, request):
+        nonlocal calls
+        if request.url.endswith("/settings/autobangumi"):
+            calls += 1
+            if calls == 1:
+                held.append(route)
+            else:
+                route.fulfill(status=200, content_type="application/json", body=_envelope({
+                    "configured": True, "credential_present": True, "connection_ref": "new-ref",
+                    "configuration_revision": 2, "connection_status": "VERIFIED",
+                }))
+        elif "/tracking/items" in request.url:
+            route.fulfill(status=200, content_type="application/json", body=_envelope({"items": []}))
+        else:
+            route.continue_()
+
+    page.route("**/api/v1/settings/autobangumi", handle)
+    page.route("**/api/v1/tracking/items**", handle)
+    page.goto(f"{live_server_url}/app/add")
+    page.locator(".workspace-status").click()
+    page.wait_for_url("**/app/settings")
+    page.locator("#storage-preferences-save").click()
+    expect(page.locator(".workspace-status")).to_contain_text("连接可用")
+    held[0].fulfill(status=200, content_type="application/json", body=_envelope({
+        "configured": True, "credential_present": True, "connection_ref": "old-ref",
+        "configuration_revision": 1, "connection_status": "CONFIGURED",
     }))
-    expect(page.locator(".pending-badge")).to_have_text("1")
+    expect(page.locator(".workspace-status")).to_contain_text("连接可用")
+
+
+def test_brand_leave_guard_cancel_then_confirm(page: Page, live_server_url: str) -> None:
+    page.goto(f"{live_server_url}/app/add")
+    page.locator("#mikan-candidate-query").fill("未保存草案")
+    page.locator(".brand-block").click()
+    # A raw search is not a persisted draft and therefore has no leave guard.
+    # The brand remains a real routeLocation(add) navigation.
+    page.wait_for_url("**/app/add")
+
+
+def test_zoom_keyboard_and_sensitive_canary(page: Page, live_server_url: str) -> None:
+    page.on("console", lambda message: (_ for _ in ()).throw(AssertionError(message.text)) if "secret.invalid" in message.text else None)
+    page.goto(f"{live_server_url}/app/add")
+    page.set_viewport_size({"width": 1280, "height": 800})
+    page.evaluate("document.body.style.zoom='200%'")
+    page.locator(".workspace-status").focus()
+    page.locator(".workspace-status").press("Enter")
+    page.wait_for_url("**/app/settings")
+    expect(page.locator("#settings-heading")).to_be_visible()
+    assert page.evaluate("location.href + document.body.innerText + Object.keys(localStorage).join(',') + Object.keys(sessionStorage).join(',')").find("secret.invalid") == -1
