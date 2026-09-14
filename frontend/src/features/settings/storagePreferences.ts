@@ -23,8 +23,6 @@ export const SAVE_REQUEST_KEY = 'miguOrca.web.saveRequest'
 
 export interface StoragePreferences {
   storageDir: string
-  /** @deprecated Removed UI switch; accepted only for source compatibility and never persisted. */
-  saveRequest?: boolean
 }
 
 /** True when the value looks like a legacy absolute path (Unix or Windows). */

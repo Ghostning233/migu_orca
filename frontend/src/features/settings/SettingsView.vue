@@ -244,11 +244,13 @@ const qbittorrentPassword = computed({ get: () => qbittorrent.get('password'), s
 async function testQbittorrentConnection(): Promise<void> {
   const missing = qbittorrent.firstMissing()
   if (missing) { qbittorrentStatus.value = { kind: 'error', message: `测试 qBittorrent 前必须填写 ${missing}。` }; return }
+  const timeout = Number(qbittorrentTimeout.value)
+  if (!Number.isFinite(timeout) || timeout <= 0) { qbittorrentStatus.value = { kind: 'error', message: 'timeout_seconds 必须是大于 0 的有限数字。' }; return }
   const confirmed = await confirmDialog.value?.confirm({ title: '测试 qBittorrent 连接', message: '确认使用当前 qBittorrent 配置测试连接？', confirmLabel: '测试连接' })
   if (!confirmed) return
   qbittorrentLoading.value = true
   try {
-    const result = await api.post<{ status: string; reachable: boolean; version: string }>('/api/v1/qbittorrent/test-connection', { body: { qbittorrent_config: { endpoint: qbittorrent.get('endpoint'), username: qbittorrent.get('username'), password: qbittorrent.get('password'), timeout_seconds: Number(qbittorrentTimeout.value), verify_tls: qbittorrentVerifyTls.value } } })
+    const result = await api.post<{ status: string; reachable: boolean; version: string }>('/api/v1/qbittorrent/test-connection', { body: { qbittorrent_config: { endpoint: qbittorrent.get('endpoint'), username: qbittorrent.get('username'), password: qbittorrent.get('password'), timeout_seconds: timeout, verify_tls: qbittorrentVerifyTls.value } } })
     qbittorrentStatus.value = { kind: 'success', message: `status: ${result.status}；reachable: ${result.reachable}；version: ${result.version}` }
     qbittorrent.clearAll()
   } catch { qbittorrentStatus.value = { kind: 'error', message: 'qBittorrent 连接测试失败。请检查配置后重试。' }
@@ -545,7 +547,7 @@ onMounted(() => {
         <FormField label="endpoint" inputId="settings-qbittorrent-endpoint"><BaseInput id="settings-qbittorrent-endpoint" v-model="qbittorrentEndpoint" type="text" autocomplete="off" /></FormField>
         <FormField label="username" inputId="settings-qbittorrent-username"><BaseInput id="settings-qbittorrent-username" v-model="qbittorrentUsername" type="text" autocomplete="off" /></FormField>
         <FormField label="password" inputId="settings-qbittorrent-password"><BaseInput id="settings-qbittorrent-password" v-model="qbittorrentPassword" type="password" autocomplete="off" /></FormField>
-        <FormField label="timeout_seconds" inputId="settings-qbittorrent-timeout-seconds"><BaseInput id="settings-qbittorrent-timeout-seconds" v-model="qbittorrentTimeout" type="number" min="0.1" step="0.1" /></FormField>
+        <FormField label="timeout_seconds" inputId="settings-qbittorrent-timeout-seconds"><BaseInput id="settings-qbittorrent-timeout-seconds" v-model="qbittorrentTimeout" type="text" inputmode="decimal" /></FormField>
         <CheckboxRow id="settings-qbittorrent-verify-tls" v-model:checked="qbittorrentVerifyTls" label="verify_tls" />
         <StatusAlert :kind="qbittorrentStatus.kind" :message="qbittorrentStatus.message" />
         <div class="settings-actions"><BaseButton id="settings-qbittorrent-test-submit" type="submit" variant="primary" :loading="qbittorrentLoading">测试 qBittorrent 连接</BaseButton></div>

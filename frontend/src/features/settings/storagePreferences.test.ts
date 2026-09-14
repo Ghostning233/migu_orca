@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, expectTypeOf, it } from 'vitest'
 
 import {
   STORAGE_DIR_KEY,
@@ -85,22 +85,27 @@ describe('loadStoragePreferences / saveStoragePreferences (US-201)', () => {
   })
 
   it('persists only safe relative profiles', () => {
-    saveStoragePreferences({ storageDir: 'backups', saveRequest: false })
+    saveStoragePreferences({ storageDir: 'backups' })
     expect(window.localStorage.getItem(STORAGE_DIR_KEY)).toBe('backups')
     expect(window.localStorage.getItem(SAVE_REQUEST_KEY)).toBeNull()
   })
 
   it('never persists an unsafe profile (falls back to server root)', () => {
-    saveStoragePreferences({ storageDir: '/tmp/evil', saveRequest: true })
+    saveStoragePreferences({ storageDir: '/tmp/evil' })
     expect(window.localStorage.getItem(STORAGE_DIR_KEY)).toBeNull()
     expect(loadStoragePreferences().storageDir).toBe('')
   })
 
   it('clearStoragePreferences removes both keys and restores defaults', () => {
-    saveStoragePreferences({ storageDir: 'backups', saveRequest: false })
+    saveStoragePreferences({ storageDir: 'backups' })
     clearStoragePreferences()
     expect(window.localStorage.getItem(STORAGE_DIR_KEY)).toBeNull()
     expect(window.localStorage.getItem(SAVE_REQUEST_KEY)).toBeNull()
     expect(loadStoragePreferences()).toEqual({ storageDir: '' })
+  })
+
+  it('does not expose the retired saveRequest field in the public type (US-332)', () => {
+    type PublicStorage = Parameters<typeof saveStoragePreferences>[0]
+    expectTypeOf<PublicStorage>().not.toHaveProperty('saveRequest')
   })
 })

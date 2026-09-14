@@ -390,6 +390,28 @@ describe('SettingsView qBittorrent panel (US-201)', () => {
   })
 })
 
+describe('Stage 39 qBittorrent timeout validation', () => {
+  beforeEach(() => {
+    apiPost.mockReset()
+    apiGet.mockReset()
+    apiGet.mockResolvedValue(DEFAULT_PREFERENCES)
+  })
+
+  it.each(['0', '-1', 'NaN'])('rejects timeout %s before confirmation and POST', async (timeout) => {
+    const { wrapper } = await mountSettings()
+    await wrapper.find('#settings-qbittorrent-endpoint').setValue('http://private-qbt.local')
+    await wrapper.find('#settings-qbittorrent-username').setValue('user')
+    await wrapper.find('#settings-qbittorrent-password').setValue('pw')
+    await wrapper.find('#settings-qbittorrent-timeout-seconds').setValue(timeout)
+    await wrapper.find('#settings-qbittorrent-test-submit').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.find('.confirm-dialog').exists()).toBe(false)
+    expect(apiPost).not.toHaveBeenCalledWith('/api/v1/qbittorrent/test-connection', expect.anything())
+    expect(wrapper.find('#settings-qbittorrent-test-form .status-alert').text()).toContain('timeout_seconds 必须是大于 0 的有限数字')
+  })
+})
+
 describe('SettingsView saved Auto Bangumi connection flow', () => {
   beforeEach(() => {
     localStorage.clear()
