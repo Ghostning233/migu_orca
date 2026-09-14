@@ -125,7 +125,6 @@ _HTTP_CONFLICT_ERROR_TYPES.update(
 # 401 — authentication against the external service failed.
 _HTTP_UNAUTHORIZED_ERROR_TYPES = {
     "ab_auth_failed",
-    "qbittorrent_auth_failed",
 }
 # 502 — the upstream (MiKan/AutoBangumi/qBittorrent) is reachable but
 #       unhealthy (connection refused, HTTP 5xx, bad gateway).
@@ -138,9 +137,6 @@ _HTTP_BAD_GATEWAY_ERROR_TYPES = {
     "ab_connection_failed",
     "ab_http_failed",
     "ab_submit_failed",
-    "qbittorrent_connection_failed",
-    "qbittorrent_http_failed",
-    "qbittorrent_unexpected_response",
 }
 # 503 — the upstream is unavailable or the client version is unsupported.
 _HTTP_SERVICE_UNAVAILABLE_ERROR_TYPES = {
@@ -152,7 +148,6 @@ _HTTP_SERVICE_UNAVAILABLE_ERROR_TYPES = {
 _HTTP_GATEWAY_TIMEOUT_ERROR_TYPES = {
     "mikan_timeout",
     "ab_timeout",
-    "qbittorrent_timeout",
 }
 # 500 — internal/local-storage failures that are never the client's fault.
 _HTTP_INTERNAL_SERVER_ERROR_TYPES = {

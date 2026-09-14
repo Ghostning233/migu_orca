@@ -330,7 +330,7 @@ describe('SettingsView qBittorrent panel (US-201)', () => {
     await nextTick()
     await nextTick()
 
-    const call = apiPost.mock.calls.find(([path]) => path === '/api/v1/qbittorrent/test-connection')
+    const call = apiPost.mock.calls.find(([path]) => String(path) === '/api/v1/qbittorrent/test-connection')
     expect(call).toBeTruthy()
     expect(call?.[1]?.body).toEqual({
       qbittorrent_config: {

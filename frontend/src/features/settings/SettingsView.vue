@@ -236,30 +236,6 @@ async function resetPreferences(): Promise<void> {
   }
 }
 
-const qbittorrent = useSensitiveFields({ endpoint: { label: 'endpoint', required: true }, username: { label: 'username', required: true }, password: { label: 'password', required: true } })
-const qbittorrentTimeout = ref(10)
-const qbittorrentVerifyTls = ref(true)
-const qbittorrentLoading = ref(false)
-const qbittorrentStatus = ref<{ kind: 'success' | 'error' | 'info' | 'empty'; message: string }>({ kind: 'empty', message: '尚未测试 qBittorrent 连接。' })
-const qbittorrentEndpoint = computed({ get: () => qbittorrent.get('endpoint'), set: (v: string) => qbittorrent.set('endpoint', v) })
-const qbittorrentUsername = computed({ get: () => qbittorrent.get('username'), set: (v: string) => qbittorrent.set('username', v) })
-const qbittorrentPassword = computed({ get: () => qbittorrent.get('password'), set: (v: string) => qbittorrent.set('password', v) })
-async function testQbittorrentConnection(): Promise<void> {
-  const missing = qbittorrent.firstMissing()
-  if (missing) { qbittorrentStatus.value = { kind: 'error', message: `测试 qBittorrent 前必须填写 ${missing}。` }; return }
-  const timeout = Number(qbittorrentTimeout.value)
-  if (!Number.isFinite(timeout) || timeout <= 0) { qbittorrentStatus.value = { kind: 'error', message: 'timeout_seconds 必须是大于 0 的有限数字。' }; return }
-  const confirmed = await confirmDialog.value?.confirm({ title: '测试 qBittorrent 连接', message: '确认使用当前 qBittorrent 配置测试连接？', confirmLabel: '测试连接' })
-  if (!confirmed) return
-  qbittorrentLoading.value = true
-  try {
-    const result = await api.post<{ status: string; reachable: boolean; version: string }>('/api/v1/qbittorrent/test-connection', { body: { qbittorrent_config: { endpoint: qbittorrent.get('endpoint'), username: qbittorrent.get('username'), password: qbittorrent.get('password'), timeout_seconds: timeout, verify_tls: qbittorrentVerifyTls.value } } })
-    qbittorrentStatus.value = { kind: 'success', message: `status: ${result.status}；reachable: ${result.reachable}；version: ${result.version}` }
-    qbittorrent.clearAll()
-  } catch { qbittorrentStatus.value = { kind: 'error', message: 'qBittorrent 连接测试失败。请检查配置后重试。' }
-  } finally { qbittorrentLoading.value = false }
-}
-
 // ---------------------------------------------------------------------------
 // 3. Auto Bangumi saved deployment connection
 // ---------------------------------------------------------------------------
@@ -541,20 +517,6 @@ onMounted(() => {
             恢复默认
           </BaseButton>
         </div>
-      </form>
-    </PanelSection>
-
-    <!-- 3. qBittorrent -->
-    <PanelSection title="qBittorrent">
-      <form id="settings-qbittorrent-test-form" class="settings-form" @submit.prevent="testQbittorrentConnection">
-        <p class="field-help">配置仅用于本次连接测试；凭据不写入浏览器存储、URL 或订阅方案 JSON。</p>
-        <FormField label="endpoint" inputId="settings-qbittorrent-endpoint"><BaseInput id="settings-qbittorrent-endpoint" v-model="qbittorrentEndpoint" type="text" autocomplete="off" /></FormField>
-        <FormField label="username" inputId="settings-qbittorrent-username"><BaseInput id="settings-qbittorrent-username" v-model="qbittorrentUsername" type="text" autocomplete="off" /></FormField>
-        <FormField label="password" inputId="settings-qbittorrent-password"><BaseInput id="settings-qbittorrent-password" v-model="qbittorrentPassword" type="password" autocomplete="off" /></FormField>
-        <FormField label="timeout_seconds" inputId="settings-qbittorrent-timeout-seconds"><BaseInput id="settings-qbittorrent-timeout-seconds" v-model="qbittorrentTimeout" type="text" inputmode="decimal" /></FormField>
-        <CheckboxRow id="settings-qbittorrent-verify-tls" v-model:checked="qbittorrentVerifyTls" label="verify_tls" />
-        <StatusAlert :kind="qbittorrentStatus.kind" :message="qbittorrentStatus.message" />
-        <div class="settings-actions"><BaseButton id="settings-qbittorrent-test-submit" type="submit" variant="primary" :loading="qbittorrentLoading">测试 qBittorrent 连接</BaseButton></div>
       </form>
     </PanelSection>
 

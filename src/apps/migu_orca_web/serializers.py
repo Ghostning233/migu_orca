@@ -272,19 +272,6 @@ def _sanitize_ab_submit_result(result: dict[str, Any]) -> dict[str, Any]:
     return sanitized
 
 
-def _sanitize_qbittorrent_connection_summary(summary: dict[str, Any]) -> dict[str, Any]:
-    allowed_fields = {"status", "reachable", "version"}
-    sanitized = sanitize_error_data(
-        {
-            key: value
-            for key, value in summary.items()
-            if key in allowed_fields
-        }
-    )
-    assert isinstance(sanitized, dict)
-    return sanitized
-
-
 def _sanitize_ab_connection_summary(summary: dict[str, Any]) -> dict[str, Any]:
     allowed_fields = {
         "reachable",
