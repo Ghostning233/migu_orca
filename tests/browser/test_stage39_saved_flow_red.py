@@ -729,6 +729,65 @@ def test_local_recovery_needs_no_saved_probe_and_revalidate_is_local(page, live_
     page.locator("#tracking-revalidate").click()
     page.wait_for_timeout(100)
     assert any(kind == "revalidate" and payload == {"expected_revision": 4} for kind, payload in calls)
-    page.locator("#tracking-recover-auto").click()
-    page.wait_for_timeout(100)
-    assert any(kind == "recover" and payload == {"expected_revision": 4, "action": "AUTO"} for kind, payload in calls)
+
+
+@pytest.mark.browser
+def test_settings_bare_endpoint_is_normalized_and_navigation_cancels_save(page, live_server_url):
+    ref = "11111111-1111-4111-8111-111111111111"
+    puts: list[dict] = []
+
+    def handler(route, request):
+        path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+        if request.method == "GET" and path == "/settings/autobangumi":
+            route.fulfill(json={"ok": True, "result": {"configured": False, "credential_present": False, "connection_ref": None, "configuration_revision": 0, "connection_status": "UNCONFIGURED"}}); return
+        if request.method == "PUT" and path == "/settings/autobangumi":
+            puts.append(request.post_data_json or {})
+            route.fulfill(json={"ok": True, "result": {"configured": True, "credential_present": True, "connection_ref": ref, "configuration_revision": 1, "connection_status": "CONFIGURED"}}); return
+        route.continue_()
+
+    page.route("**/api/v1/**", handler)
+    page.goto(f"{live_server_url}/app/settings")
+    page.wait_for_selector("#settings-ab-save")
+    page.locator("#settings-ab-endpoint").fill("192.168.1.20:7890")
+    page.locator("#settings-ab-username").fill("user")
+    page.locator("#settings-ab-password").fill("cancel-canary")
+    page.goto(f"{live_server_url}/app/tracking")
+    assert puts == []
+    page.goto(f"{live_server_url}/app/settings")
+    page.wait_for_selector("#settings-ab-save")
+    page.locator("#settings-ab-endpoint").fill("192.168.1.20:7890")
+    page.locator("#settings-ab-username").fill("user")
+    page.locator("#settings-ab-password").fill("save-canary")
+    page.locator("#settings-ab-save").click()
+    page.wait_for_timeout(150)
+    assert len(puts) == 1
+    assert puts[0]["config"]["base_url"] == "http://192.168.1.20:7890"
+    assert "save-canary" not in page.locator("body").inner_text()
+
+
+@pytest.mark.browser
+def test_unconfigured_recovery_has_no_external_verify_or_probe(page, live_server_url):
+    item = _recovery_item("tracking-a", "未绑定恢复", revision=4)
+    detail = {"ok": True, "result": _detail_payload(item)}
+    external_calls: list[str] = []
+
+    def handler(route, request):
+        path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+        if request.method == "GET" and path == "/settings/autobangumi":
+            route.fulfill(json={"ok": True, "result": {"configured": False, "credential_present": False, "connection_ref": None, "configuration_revision": 0, "connection_status": "UNCONFIGURED"}}); return
+        if request.method == "GET" and path == "/tracking/items":
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}}); return
+        if request.method == "GET" and path == "/tracking/items/tracking-a":
+            route.fulfill(json=detail); return
+        if request.method == "POST":
+            external_calls.append(path)
+        route.continue_()
+
+    page.route("**/api/v1/**", handler)
+    page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+    page.wait_for_selector("#tracking-recover-auto")
+    assert page.locator("#tracking-recover-verify").count() == 0
+    assert external_calls == []
+    secret = "unbound-canary"
+    assert secret not in page.locator("body").inner_text()
+    assert secret not in page.evaluate("() => location.href + JSON.stringify(history.state) + JSON.stringify(localStorage) + JSON.stringify(sessionStorage)")
