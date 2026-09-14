@@ -5,6 +5,14 @@ import json
 import pytest
 from playwright.sync_api import Page, expect
 
+from tests.browser.conftest import preview_result_json
+from tests.browser.test_app_workbench import (
+    _candidate,
+    _candidate_result_json,
+    _preview_request,
+    _register_generation_capture,
+)
+
 pytestmark = pytest.mark.browser
 
 
@@ -192,6 +200,12 @@ def test_profile_change_while_app_is_mounted_invalidates_held_old_list(page: Pag
     page.locator(".brand-block").press("Enter")
     page.wait_for_url("**/app/add")
     expect(page.locator(".pending-badge")).to_have_text("1")
+    assert any("storage_dir=profile-a" in url for url in requests)
+    assert any("storage_dir=profile-b" in url for url in requests)
+    held_old[0].fulfill(status=200, content_type="application/json", body=_envelope({
+        "items": [{"status": "PENDING_SUBMIT"}, {"status": "SUBMIT_FAILED"}],
+    }))
+    expect(page.locator(".pending-badge")).to_have_text("1")
 
 
 def test_settings_save_delete_probe_refreshes_global_state(page: Page, live_server_url: str) -> None:
@@ -205,23 +219,29 @@ def test_settings_save_delete_probe_refreshes_global_state(page: Page, live_serv
                 "configured": state["configured"], "credential_present": state["configured"],
                 "connection_ref": state["ref"], "configuration_revision": state["revision"],
                 "connection_status": state["status"],
+                "raw_endpoint": "https://secret.invalid", "raw_token": "token-canary",
             }))
         elif request.url.endswith("/settings/autobangumi") and request.method == "PUT":
             state.update(configured=True, status="CONFIGURED", ref="new-ref", revision=1)
             route.fulfill(status=200, content_type="application/json", body=_envelope({
                 "configured": True, "credential_present": True, "connection_ref": "new-ref",
                 "configuration_revision": 1, "connection_status": "CONFIGURED",
+                "raw_endpoint": "https://secret.invalid", "raw_token": "token-canary",
             }))
         elif request.url.endswith("/settings/autobangumi") and request.method == "DELETE":
             state.update(configured=False, status="UNCONFIGURED", ref=None, revision=2)
             route.fulfill(status=200, content_type="application/json", body=_envelope({
                 "configured": False, "credential_present": False, "connection_ref": None,
                 "configuration_revision": 2, "connection_status": "UNCONFIGURED",
+                "raw_endpoint": "https://secret.invalid", "raw_token": "token-canary",
             }))
         elif request.url.endswith("/settings/autobangumi/probe"):
             probes += 1
             state["status"] = "VERIFIED"
-            route.fulfill(status=200, content_type="application/json", body=_envelope({"probe_status": "VERIFIED"}))
+            route.fulfill(status=200, content_type="application/json", body=_envelope({
+                "probe_status": "VERIFIED", "raw_endpoint": "https://secret.invalid",
+                "raw_token": "token-canary",
+            }))
         elif "/tracking/items" in request.url:
             route.fulfill(status=200, content_type="application/json", body=_envelope({"items": []}))
         else:
@@ -230,9 +250,9 @@ def test_settings_save_delete_probe_refreshes_global_state(page: Page, live_serv
     page.route("**/api/v1/settings/autobangumi**", handle)
     page.route("**/api/v1/tracking/items**", handle)
     page.goto(f"{live_server_url}/app/settings")
-    page.locator("#settings-ab-endpoint").fill("http://secret.invalid")
+    page.locator("#settings-ab-endpoint").fill("http://safe.invalid")
     page.locator("#settings-ab-username").fill("user")
-    page.locator("#settings-ab-password").fill("token-secret")
+    page.locator("#settings-ab-password").fill("safe-password")
     page.locator("#settings-ab-save").click()
     expect(page.locator(".workspace-status")).to_contain_text("已配置")
     page.locator("#settings-ab-probe").click()
@@ -242,6 +262,14 @@ def test_settings_save_delete_probe_refreshes_global_state(page: Page, live_serv
     page.locator(".confirm-dialog .danger-button").click()
     expect(page.locator(".workspace-status")).to_contain_text("未配置")
     assert probes == 1
+    evidence = page.evaluate("""() => ({
+      href: location.href,
+      history: history.length + ':' + (history.state ? JSON.stringify(history.state) : ''),
+      body: document.body.innerText,
+      local: JSON.stringify(localStorage),
+      session: JSON.stringify(sessionStorage),
+    })""")
+    assert all(secret not in json.dumps(evidence) for secret in ("https://secret.invalid", "token-canary"))
 
 
 def test_badge_failure_then_successful_zero_hides(page: Page, live_server_url: str) -> None:
@@ -302,12 +330,60 @@ def test_held_old_summary_cannot_overwrite_new_configuration(page: Page, live_se
 
 
 def test_brand_leave_guard_cancel_then_confirm(page: Page, live_server_url: str) -> None:
+    page.route(
+        "**/api/v1/mikan/candidates",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=_candidate_result_json(
+                "芙莉莲",
+                [_candidate(
+                    bangumi_id="2353",
+                    title="葬送的芙莉莲",
+                    mikan_url="https://mikan.example/Home/Bangumi/2353",
+                )],
+            ),
+        ),
+    )
+    preview = _preview_request("葬送的芙莉莲", "req-global-guard")
+    _register_generation_capture(page, [], body=preview_result_json(preview))
     page.goto(f"{live_server_url}/app/add")
-    page.locator("#mikan-candidate-query").fill("未保存草案")
+    page.locator("#mikan-candidate-query").fill("芙莉莲")
+    page.locator("#mikan-candidate-search-submit").click()
+    expect(page.locator(".candidate-card")).to_have_count(1)
+    page.locator(".candidate-card button:has-text('选择此合集')").click()
+    page.wait_for_selector("#detail-preview-edit-form")
+    page.locator("#preview-must-contain").fill("1080p")
     page.locator(".brand-block").click()
-    # A raw search is not a persisted draft and therefore has no leave guard.
-    # The brand remains a real routeLocation(add) navigation.
-    page.wait_for_url("**/app/add")
+    expect(page.locator(".confirm-dialog")).to_be_visible()
+    page.locator(".confirm-dialog .secondary-button").click()
+    expect(page).to_have_url(f"{live_server_url}/app/add")
+    expect(page.locator("#single-anime-review-step")).to_be_visible()
+    page.locator(".brand-block").click()
+    page.locator(".confirm-dialog .danger-button").click()
+    expect(page).to_have_url(f"{live_server_url}/app/add")
+    expect(page.locator("#mikan-candidate-search-form")).to_be_visible()
+
+
+def test_summary_loading_never_starts_probe(page: Page, live_server_url: str) -> None:
+    probe_calls: list[str] = []
+
+    def handle(route, request):
+        if request.url.endswith("/settings/autobangumi"):
+            route.fulfill(status=200, content_type="application/json", body=_envelope({
+                "configured": True, "credential_present": True, "connection_ref": "safe-ref",
+                "configuration_revision": 1, "connection_status": "CONFIGURED",
+            }))
+        elif request.url.endswith("/settings/autobangumi/probe"):
+            probe_calls.append(request.method)
+            route.fulfill(status=200, content_type="application/json", body=_envelope({"probe_status": "VERIFIED"}))
+        else:
+            route.continue_()
+
+    page.route("**/api/v1/settings/autobangumi**", handle)
+    page.goto(f"{live_server_url}/app/add")
+    expect(page.locator(".workspace-status")).to_contain_text("已配置")
+    assert probe_calls == []
 
 
 def test_zoom_keyboard_and_sensitive_canary(page: Page, live_server_url: str) -> None:

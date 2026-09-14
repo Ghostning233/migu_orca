@@ -61,6 +61,11 @@ watch(
   },
   { flush: 'post' },
 )
+
+function requestBrandReturn(event: MouseEvent): void {
+  event.preventDefault()
+  window.dispatchEvent(new Event('migu-orca:brand-return'))
+}
 </script>
 
 <template>
@@ -71,7 +76,7 @@ watch(
     <GlobalLoadingBar />
     <header class="app-header">
       <div class="app-header-inner">
-        <RouterLink :to="routeLocation('add')" class="brand-block" aria-label="返回添加番剧">
+        <RouterLink :to="routeLocation('add')" class="brand-block" aria-label="返回添加番剧" @click="requestBrandReturn">
           <span class="brand-mark" aria-hidden="true">M</span>
           <div class="header-copy">
             <p class="brand-eyebrow">桌面番剧工作台</p>

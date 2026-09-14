@@ -80,6 +80,10 @@ const leaveGuard = useLeaveGuard({
   cleanup: () => {
     session.invalidate()
     journey.discard()
+    // The shell brand can request the same /app/add route while this panel is
+    // mounted. Notify the workbench explicitly so the in-memory draft is
+    // discarded even though Vue Router does not remount the route.
+    emit('discard', 'input')
   },
 })
 

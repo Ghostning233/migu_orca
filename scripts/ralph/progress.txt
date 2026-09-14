@@ -392,3 +392,8 @@ Started: 2026-09-13
 - 继续修复 profile 失败响应代际门控：loadPending 错误仅在 request+当前 profile 同时匹配时写入 unknown；App 增加 profile 变化轮询触发受控刷新。global 浏览器矩阵扩展至 8 cases，旧 badge 不得伪装为当前 profile 的 2 条计数；定向 Vitest/build/typecheck/api:check/ESLint 通过。
 - 修正驻留 SPA held route 时序：默认 profile 首次请求先安全 fulfill，profile-a 首次响应建立 2 条徽标，第二次 A 请求 held；Settings 实际保存 profile-b 后立即隐藏旧徽标并读取 B=1，释放旧 A 响应不覆盖。global Chromium `8 passed`。
 - 新增 5 组 global Chromium 场景：Settings save/delete/probe 状态刷新、list failure/zero、held old summary、品牌 route、200% 键盘与敏感 canary；global status 文件最终 `14 passed`（真实 Chromium），frontend build 通过。原始搜索未生成服务端草案，品牌导航按产品规则无离开确认；已有草案离开保护由既有浏览器矩阵覆盖。
+
+## 2026-09-14 / 工作包 B 最终真实性收口
+- 修正品牌返回在当前 `/app/add` 路由内不会触发 Router 守卫的问题：shell 通过受控事件交给当前审核页的 leave guard，取消保持真实草案审核，确认清理内存草案并返回添加页；不改变公开 URL/query 契约。保留 qB、save/delete/probe 与 profile held 既有实现。
+- global Chromium 新增真实候选搜索→草案生成→变脏审核的品牌离开保护（取消/确认），save/delete/probe fake generated envelope 注入 `https://secret.invalid`、`token-canary` 意外字段并核验 console、URL/history、正文及 local/sessionStorage 均不泄漏；另验证摘要加载不自动 probe。global 文件最终 `15 passed`，组合 shell/settings/global `42 passed`（真实 Chromium，frontend build 后运行）。
+- 验证：`npm run test:unit -- --run src/app/stores/connectionStatus.stage39_red.test.ts src/features/settings/SettingsView.test.ts src/features/settings/storagePreferences.test.ts src/features/tracking/TrackingView.test.ts` → `44 passed`；`npm run build`、`npm run api:check`、`npm run typecheck`、受影响 ESLint、`uv run ruff check tests/browser/test_stage39_global_status.py`、`git diff --check` 全部通过。未访问真实 Auto Bangumi 上游。

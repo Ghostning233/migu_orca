@@ -28,20 +28,38 @@ export function useLeaveGuard(options: LeaveGuardOptions): { active: Ref<boolean
     event.returnValue = ''
   }
 
+  const onBrandReturn = async (): Promise<void> => {
+    if (!active.value || !options.shouldGuard()) {
+      await router.push({ path: '/add' })
+      return
+    }
+    if (await options.confirm()) {
+      options.cleanup()
+      await router.push({ path: '/add' })
+    }
+  }
+
   router.beforeEach(async (to, from) => {
     // Query-only updates (for example, syncing a public batch context id) do
     // not leave the owning review surface and must not discard its memory.
-    if (!active.value || to.path === from.path || !options.shouldGuard()) return true
+    // Query-only updates stay on the owning surface. A same-path navigation
+    // with a different route identity (notably the shell brand returning to
+    // /app/add from a dirty review) still needs the leave confirmation.
+    if (!active.value || (to.path === from.path && to.fullPath !== from.fullPath) || !options.shouldGuard()) return true
     const confirmed = await options.confirm()
     if (!confirmed) return false
     options.cleanup()
     return true
   })
 
-  onMounted(() => window.addEventListener('beforeunload', onBeforeUnload))
+  onMounted(() => {
+    window.addEventListener('beforeunload', onBeforeUnload)
+    window.addEventListener('migu-orca:brand-return', onBrandReturn)
+  })
   onBeforeUnmount(() => {
     active.value = false
     window.removeEventListener('beforeunload', onBeforeUnload)
+    window.removeEventListener('migu-orca:brand-return', onBrandReturn)
   })
 
   return { active }
