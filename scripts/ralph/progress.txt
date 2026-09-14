@@ -329,3 +329,8 @@ Started: 2026-09-13
 - CAS 浏览器测试按产品固定安全文案断言“配置已变化”，真实验证 409 后 GET 摘要重读、仅一次 PUT、输入密码仍留在受控表单且不进入公开页面状态。
 - 实证命令：`uv run pytest tests/api_contract/test_stage39_source_residual_red.py tests/api_contract/test_stage39_tracking_schema_residual_red.py tests/api_contract/test_stage39_saved_body_red.py -q`（5 passed）；`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q`（10 passed，真实 Chromium）；`cd frontend && npm run build`（通过）、`npm run api:generate`/`api:check`/`typecheck`（通过）；OpenAPI `--check`、受影响 Ruff、`git diff --check`（通过）。
 - 遗留风险：本轮未新增 settings probe failure/refresh/delete 与 submit/retry/generation 切换等完整独立 Chromium 场景；现有 saved-flow 证据覆盖显式 probe、四管理、sync、VERIFY_EXTERNAL unknown、CAS 与敏感 canary，需审核决定是否接受覆盖面。
+
+## 2026-09-14 / 工作包 A P1-3 saved Chromium 覆盖补充
+- 新增真实 Chromium journey：保存连接后显式 probe 失败仍保留安全摘要并跨刷新/跨页；追番刷新不自动 probe/sync；显式 probe 后能力降级时管理按钮 fail-closed、无外部写入。所有 route 使用 live server 与 fake envelope，并检查敏感 canary 不进入 DOM/URL/history/browser storage。
+- 验证：`npm --prefix frontend run build` 通过；`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q` → `13 passed`（真实 Chromium）。
+- 仍未新增独立 submit/retry generation 切换、取消/重复点击及 local recovery 多动作 journey；已有 suite 保留 submit/sync/管理/VERIFY_EXTERNAL unknown/CAS 覆盖。

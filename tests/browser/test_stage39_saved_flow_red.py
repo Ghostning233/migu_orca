@@ -546,3 +546,108 @@ def test_settings_cas_conflict_rereads_summary_without_resubmitting(page, live_s
     assert puts == 1
     assert gets >= 2
     assert page.locator("#settings-ab-password").input_value() == "cas-canary"
+
+
+@pytest.mark.browser
+def test_saved_probe_failure_keeps_summary_across_refresh_and_navigation(page, live_server_url):
+    """A failed explicit probe never deletes the saved generation or leaks input."""
+    ref = "11111111-1111-4111-8111-111111111111"
+    secret = "probe-failure-canary"
+    probe_calls = 0
+
+    def handler(route, request):
+        nonlocal probe_calls
+        path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+        if request.method == "GET" and path == "/settings/autobangumi":
+            route.fulfill(json={"ok": True, "result": {"configured": True, "credential_present": True,
+                "connection_ref": ref, "configuration_revision": 3, "connection_status": "CONFIGURED"}})
+            return
+        if request.method == "POST" and path == "/settings/autobangumi/probe":
+            probe_calls += 1
+            route.fulfill(status=503, json={"ok": False, "error_type": "upstream_unavailable", "error_message": secret})
+            return
+        route.continue_()
+
+    page.route("**/api/v1/**", handler)
+    page.goto(f"{live_server_url}/app/settings")
+    page.wait_for_selector("#settings-ab-probe")
+    page.locator("#settings-ab-probe").click()
+    expect(page.locator("#settings-ab-save-form .status-alert")).to_contain_text("探测失败")
+    assert probe_calls == 1
+    assert page.locator("#settings-ab-delete").is_enabled()
+    page.reload()
+    page.wait_for_selector("#settings-ab-probe")
+    assert page.locator("#settings-ab-delete").is_enabled()
+    page.goto(f"{live_server_url}/app/tracking")
+    page.wait_for_selector("#tracking-probe-saved")
+    assert page.locator("#tracking-probe-saved").is_enabled()
+    assert secret not in page.locator("body").inner_text()
+    assert secret not in page.evaluate("() => location.href + JSON.stringify(history.state) + JSON.stringify(localStorage) + JSON.stringify(sessionStorage)")
+
+
+@pytest.mark.browser
+def test_tracking_refresh_does_not_probe_or_sync_saved_connection(page, live_server_url):
+    """Loading and refreshing tracking remains read-only until the explicit probe."""
+    ref = "11111111-1111-4111-8111-111111111111"
+    calls: list[str] = []
+
+    def handler(route, request):
+        path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+        if request.method == "GET" and path == "/settings/autobangumi":
+            route.fulfill(json={"ok": True, "result": {"configured": True, "credential_present": True,
+                "connection_ref": ref, "configuration_revision": 3, "connection_status": "CONFIGURED"}})
+            return
+        if request.method == "GET" and path == "/tracking/items":
+            route.fulfill(json={"ok": True, "result": {"items": [], "summary": {"total": 0}, "warnings": []}})
+            return
+        if request.method == "POST":
+            calls.append(path)
+        route.continue_()
+
+    page.route("**/api/v1/**", handler)
+    page.goto(f"{live_server_url}/app/tracking")
+    page.wait_for_selector("#tracking-probe-saved")
+    page.reload()
+    page.wait_for_selector("#tracking-probe-saved")
+    assert calls == []
+    expect(page.locator("#tracking-sync")).to_have_count(0)
+
+
+@pytest.mark.browser
+def test_tracking_saved_capability_degrade_hides_management_actions(page, live_server_url):
+    """Unsupported capabilities fail closed and cannot produce a management write."""
+    ref = "11111111-1111-4111-8111-111111111111"
+    item = {**_item("tracking-a", "降级番"), "available_actions": _management_actions("ACTIVE"), "revision": 1}
+    detail = {"ok": True, "result": {**item, "origin": "single", "batch_id": None,
+        "created_at": "2026-09-01T00:00:00Z", "updated_at": "2026-09-01T00:00:00Z",
+        "last_synced_at": None, "safe_info": None, "current_operation": None,
+        "revalidation_issues": [], "external_mapping": None, "audit_events": [], "warnings": []}}
+    writes: list[str] = []
+
+    def handler(route, request):
+        path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+        if request.method == "GET" and path == "/settings/autobangumi":
+            route.fulfill(json={"ok": True, "result": {"configured": True, "credential_present": True,
+                "connection_ref": ref, "configuration_revision": 3, "connection_status": "CONFIGURED"}}); return
+        if request.method == "GET" and path == "/tracking/items":
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}}); return
+        if request.method == "GET" and path == "/tracking/items/tracking-a":
+            route.fulfill(json=detail); return
+        if request.method == "POST" and path == "/settings/autobangumi/probe":
+            route.fulfill(json={"ok": True, "result": {**_probe_capabilities(), "subscription_modify": "UNSUPPORTED",
+                "subscription_enable": "UNSUPPORTED", "rss_refresh": "UNSUPPORTED"}}); return
+        if request.method == "POST" and "/tracking/items/" in path:
+            writes.append(path)
+        route.continue_()
+
+    page.route("**/api/v1/**", handler)
+    page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+    page.wait_for_selector("#tracking-probe-saved")
+    page.locator("#tracking-probe-saved").click()
+    page.wait_for_timeout(150)
+    assert page.locator("#tracking-modify-subscription-submit").count() == 0
+    if page.locator("#tracking-set-enabled-submit").count():
+        expect(page.locator("#tracking-set-enabled-submit")).to_be_disabled()
+    if page.locator("#tracking-refresh-rss-submit").count():
+        expect(page.locator("#tracking-refresh-rss-submit")).to_be_disabled()
+    assert writes == []
