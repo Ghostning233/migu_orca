@@ -36,7 +36,8 @@ Stage 3 已完成本模块的离线可测契约：AB 提交结果 envelope、Req
 | ab_config | object | 是 | AB 地址、认证和降级开关等系统配置 |
 | fallback_enabled | bool | 否 | 是否允许生成降级配置 |
 
-当前 AutoBangumi 配置是 request-scoped 的双认证契约。默认账号密码模式：
+Stage 39 后 AutoBangumi 配置由服务端专用部署 repository 持久化；业务请求只携带 opaque
+`connection_ref` 与 `configuration_revision`。默认账号密码模式：
 
 ```json
 {
@@ -123,7 +124,7 @@ uv run migu-orca "番剧名" --action accept --submit-ab --ab-config config/user
 
 M10 不直接调用 qBittorrent。Auto Bangumi 创建订阅后的下载行为仍由 AB 间接管理，不在本模块内实现。
 
-Stage 12 已在独立 qBittorrent 边界中实现显式连接测试，用于验证用户临时提供的 qBittorrent Web API 配置。该能力不属于 M10，不创建下载任务，不创建订阅，也不改变 AB 提交流程。
+历史 qBittorrent Web 连接测试已退役；本模块不创建下载任务、不创建订阅，也不改变 AB 提交流程。
 
 如后续需要绕过 AB 直接调用 qBittorrent 启动下载或创建任务，应新增独立 Stage、独立验收标准和对应 Web UI 操作边界。
 

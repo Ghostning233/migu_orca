@@ -4,10 +4,8 @@
 
 管理真正需要变化的系统运行配置，避免把代码常量过早建设成配置系统。
 
-2026-09-13 产品修订：[Stage 39](../MiGuOrca_stage39_deployment_settings_PRD.md)目标为仅 AB 的专用
-部署配置持久化，跨页/刷新/重启保留，秘密不进入业务文件或公开 DTO；MiKan 搜索由服务端封装，
-qB 独立连接测试退役。该阶段尚未实现，下文“当前边界”仍描述既有代码，旧凭据全面禁止持久化
-规则不适用于新增 AB 私有配置例外；不因此新增通用 system-config engine。
+Stage 39 已交付仅 AB 的专用部署配置持久化，跨页/刷新/重启保留，秘密不进入业务文件或公开 DTO；
+MiKan 搜索由服务端封装，qB 独立连接测试退役。不新增通用 system-config engine。
 
 ## 2. 当前边界
 
@@ -56,14 +54,23 @@ config/user/default_rules.json
 
 接入真实外部系统后，再根据部署方式确定用户配置目录、环境变量、密钥管理和配置优先级；相关配置/部署向导可行性登记为远期 backlog BL-014。
 
-## 7. Stage 24 AutoBangumi request-scoped 配置（已完成）
+## 7. Stage 39 AutoBangumi 部署配置（已完成）
+
+1. `MIGU_ORCA_WEB_CONFIG_ROOT` 仅由服务端指定，默认 `.migu_orca/config`；`autobangumi.json`
+   与 Web storage/profile 隔离，目录 0700、文件 0600。
+2. 只有该专用文件允许保存 base_url、账号及 password/token；公开 API 只返回安全摘要。
+3. 保存生成新的 opaque `connection_ref` 与单调 revision；清除保留不含秘密的 tombstone。
+4. 运行数据备份与部署卷同样属于敏感资产；不提供加密保证。服务为单进程、默认本地监听且无内置认证，
+   暴露公网前必须由部署方提供认证与网络保护。
+
+## 8. 历史 request-scoped 配置与退役
 
 1. `auth_mode=password` 为默认，字段为 `base_url`、`username`、`password`；`auth_mode=api_token` 字段为 `base_url`、`token`。
 2. 两种模式字段互斥；base_url 仅允许 http/https 根地址，拒绝 userinfo、query、fragment，允许用户明确提供的局域网地址。
 3. 凭据只存在于当前 Web/CLI 请求和 client session，不进入配置目录、Request、队列、AB result、浏览器 storage、URL、日志或 trace。
 4. `fallback_enabled` 仍是 MiGuOrca 提交失败后的降级行为开关，不属于 AutoBangumi 认证字段。
 
-## 8. Stage 26 Web storage 根目录配置（已完成）
+## 9. Stage 26 Web storage 根目录配置（已完成）
 
 1. Web API 的 `storage_dir` 只能选择服务端根目录下的**相对 profile**；未传时回落服务端根本身（默认 `.migu_orca/storage`）。
 2. 服务端根可用 `MIGU_ORCA_WEB_STORAGE_ROOT` 环境变量覆盖（仅服务端可信配置，浏览器不可控）；绝对路径、`..` 穿越与符号链接逃逸统一返回 400 `invalid_storage_dir`，错误不回显原始路径。

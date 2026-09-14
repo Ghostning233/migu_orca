@@ -52,8 +52,9 @@
 截至 2026-09-13，最近完成阶段为 Stage 38「正式追番管理」（F-F，US-303～US-317 已全部完成并归档）。
 Stage 38 不实现 F-G 设置/发布收尾。2026-09-13 用户确认新目标：仅 AB 凭据保存在部署端，取消全局
 凭据弹窗、删除无用 qB/旧 Web 编排，MiKan 搜索由服务端封装。Stage 39 先独立验收新增后端支撑，
-再接入 F-G；US-318～US-326 已完成，US-327～US-340 待实现，Gate 5 未验收。活动 Ralph 状态为
-Stage 39；不得把后续 story 的文档目标当作现有能力。
+再接入 F-G；US-318～US-340 已在当前候选分支完成实现与定向验证，Gate 5 完整门禁记录见
+Stage 39 PRD §8.2 与 progress。US-338～US-340 仍需独立审核后才可作为发布候选，不将候选分支
+误称为已发布。
 
 ## Stage PRD
 
@@ -76,7 +77,7 @@ Stage 39；不得把后续 story 的文档目标当作现有能力。
 - Stage 36：[批量审核完整旅程](MiGuOrca_stage36_batch_review_journey_PRD.md)（F-D，US-284～US-293 已完成并归档；不实现 F-E～F-G）
 - Stage 37：[追番方案与安全信息](MiGuOrca_stage37_plans_safe_info_PRD.md)（F-E，US-294～US-302 已完成并归档；不实现 F-F～F-G）
 - Stage 38：[正式追番管理](MiGuOrca_stage38_tracking_management_PRD.md)（F-F，US-303～US-317 已完成并归档；不实现 F-G）
-- Stage 39：[部署连接配置与设置发布收尾](MiGuOrca_stage39_deployment_settings_PRD.md)（进行中；US-318～US-326 已完成，US-327～US-340 待实现）
+- Stage 39：[部署连接配置与设置发布收尾](MiGuOrca_stage39_deployment_settings_PRD.md)（候选验收中；US-318～US-340 已实现，等待独立审核）
 
 Stage PRD 记录单一阶段的范围、非目标、决策和验收结果。已完成阶段的 Ralph 执行快照位于 `../scripts/ralph/archive/`。
 

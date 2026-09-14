@@ -9,8 +9,7 @@
   Router history 和 Vite base 都是 `/app/`，RouterLink 不重复拼 `/app/` 前缀。
 - 四页面入口：`WorkbenchView`（add）、`RequestsView`（plans）、`TrackingView`（tracking）、
   `SettingsView`（settings）。旧路由仅重定向；`QueueView/queueWorkbench` 保留供回退，
-  不重新导入默认运行时。Stage 39 已明确目标为核对后删除旧队列/兼容编排，不保留无用 stub；
-  当前尚未删除，实施范围见 [Stage 39 PRD](../docs/MiGuOrca_stage39_deployment_settings_PRD.md)。
+  不重新导入默认运行时。Stage 39 已退役旧队列/兼容编排，`/app/queue` 仅安全重定向，历史读取器不作为 UI 门禁。
 - 共享审核复用 `CandidateCollectionList`、`AnimeDraftEditor`、`useDraftSession` 和旅程 composable。
   批量采用左卡右详情，不重新造候选浮层或另一套筛选/保存流程。
 - 设计基线见 `src/styles/` 和 `docs/design/frontend-ux-design-tokens-v1.md`；
@@ -27,9 +26,9 @@
 - 草案以服务端 `draft_id + base_revision` 修改；正式保存复用 save-confirm，
   不恢复 preview-save → accept 旧链。未保存会话只放内存，保存与外部提交分开确认。
 - 详情/全部信息复用安全摘要与真实 safe-info，不显示 raw snapshot、URL 或未知自由文本。
-- Tracking 外部写由页面统一持有临时凭据和意图；不把 `ab_config` 传给检查器或写持久 store。
+- Tracking 外部写由页面统一持有意图；不把 `ab_config` 传给检查器或写持久 store。
   动作由 `available_actions + target_scopes + capability` 交集投影，未知动作/范围不发请求。
-  以上临时凭据是当前实现：Stage 39 改为设置页保存部署配置、业务请求只发 generated 连接引用，
+  Stage 39 使用设置页保存部署配置、业务请求只发 generated 连接引用，
   浏览器不回读或持有已保存秘密；顶部状态入口进入设置，不新增全局凭据弹窗。
 - 写结果先用服务端 tracking 收敛，再只读回查；不要用改变 `:key` 重挂载来刷新详情，
   以免丢失结果面板。列表请求代际与写结果代际要分开，旧列表不能覆盖新写结果。

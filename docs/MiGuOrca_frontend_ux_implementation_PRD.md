@@ -5,7 +5,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 文档类型 | 候选执行 PRD / Gate 4 输入 |
-| 当前状态 | F-A～F-F 已完成为 Stage 33～38；F-G 新范围已确认为 Stage 39 开发 PRD，未启动 |
+| 当前状态 | F-A～F-G 已完成为 Stage 33～39；US-338～US-340 候选验收中，未发布 |
 | 创建日期 | 2026-09-07 |
 | Backlog | BL-026 |
 | 优先级 | P1；各切片按后端依赖分别解锁 |
@@ -134,7 +134,7 @@ ResourceSummary          有效资源与总集数摘要
 SafeInfoDialog           F-E 在已保存 Request 语境下只消费 safe-info DTO 的全部信息弹窗
 BatchReviewCard          批量摘要和字幕组快捷入口
 TrackingInspector        追番动作与外部状态检查器
-CredentialSessionDialog  当前页面内存凭据和连接引导
+CredentialSessionDialog  历史页面级凭据组件（已退役；设置页使用保存连接表单）
 ```
 
 `BatchReviewCard` 和 `AnimeDraftEditor` 的字幕组必须绑定同一个 item draft store；快捷修改不能在
@@ -233,7 +233,7 @@ CredentialSessionDialog  当前页面内存凭据和连接引导
 | F-D 批量审核 | 1/12/36、筛选、下一异常、部分成功、离开保护 | B-A、B-B tracking 建立 | AC-06～14、23～25 可独立通过 |
 | F-E 追番方案 | 本地列表/详情、修改、复制再用、历史、管理链接 | B-A safe-info、B-B 状态 | 本地方案职责与外部动作彻底分离 |
 | F-F 追番管理 | 总览、单选列表、检查器、凭据会话、提交/恢复、AB 完整管理 | B-B、B-C、B-D | AC-16～22 可独立通过 |
-| F-G 设置与发布收尾 | Stage 39：AB 部署连接、设置简化、跨页、旧执行退役、MiKan 封装、文档 | 前述全部 + 新增后端连接支撑先独立验收 | Gate 5 候选发布包，未启动 |
+| F-G 设置与发布收尾 | Stage 39：AB 部署连接、设置简化、跨页、旧执行退役、MiKan 封装、文档 | 前述全部 + 新增后端连接支撑已验收 | Gate 5 候选发布包，独立审核中 |
 
 推荐依赖顺序为 `F-A → F-B → (F-C, F-D, F-E) → F-F → F-G`。F-C、F-D、F-E 在共享核心
 稳定后可由不同执行会话并行，但共享 store/API 类型变更必须先合入基线，不能在三个 PR 中分别

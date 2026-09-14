@@ -48,7 +48,7 @@ HTTP/认证细节留在 adapter，持久化留在 repository，纯规则不混�
   不绕过 Auto Bangumi 创建 qBittorrent 下载，不顺带实现下一 Stage 或移动端。
 - Auto Bangumi 凭据的产品目标是保存在部署端专用私有配置，跨页、刷新和重启保留；
   实现与唯一持久化例外见 [Stage 39 PRD](docs/MiGuOrca_stage39_deployment_settings_PRD.md)。
-  当前代码仍为临时输入模式，不把新目标当作已实现能力。秘密不进入业务 JSON、公开 DTO、
+  当前实现仅允许 AB 秘密进入服务端专用配置文件，不把新目标误用于其他外部系统。秘密不进入业务 JSON、公开 DTO、
   URL/history、浏览器存储、日志、其余 DOM/属性、截图或 trace；必要编辑表单不是复制许可。
   Cookie、原始响应、完整 RSS URL、magnet、本地绝对路径仍不得公开或额外持久化。
 - 首期仅保存 AB 连接；MiKan 搜索配置由服务端封装，不要求用户配置。qB 独立连接测试及

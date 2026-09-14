@@ -26,7 +26,8 @@ MiGuOrca 使用 AI 名称解析和 MiKan 搜索生成可审核订阅草案
 2. 不绕过 Auto Bangumi 建立长期订阅状态机。
 3. 不复制 Auto Bangumi 已有的 MiKan 到下载链路。
 4. 不让 AI 静默自动接受最终合集。
-5. 所有外部配置和敏感值保持 request-scoped，不进入 storage JSON、浏览器 storage、URL、日志、截图或测试 trace。
+5. Auto Bangumi 是唯一允许持久化秘密的外部配置，且只能进入服务端专用配置文件；其余外部配置和敏感值
+   不进入业务 storage JSON、浏览器 storage、URL、日志、截图或测试 trace。
 
 ## 2. Stage 19: 批量输入与订阅草案卡片工作台（已完成）
 
@@ -363,6 +364,7 @@ Stage 32 generated contract 的严格 modify patch 与安全 target scopes，随
 原 handoff 范围在 2026-09-13 用户讨论中修订：
 [Stage 39 PRD](MiGuOrca_stage39_deployment_settings_PRD.md)增加仅 AB 的部署端私有配置和连接绑定，
 先独立验收后端，再完成 F-G；删除 qB 独立接入及无用旧 Web 编排，MiKan 搜索由项目封装，
-顶部状态只进入设置、不打开凭据弹窗。US-318～US-340 全部待实现，活动 Ralph 仍是 Stage 38。
+顶部状态只进入设置、不打开凭据弹窗。Stage 39 US-318～US-340 已实现，候选门禁与独立审核记录见
+`docs/MiGuOrca_stage39_deployment_settings_PRD.md`；未宣称已发布。
 本节以上的完成阶段/候选顺序是历史基线，不代表 Stage 39 已实现或继续要求保留旧兼容写路径。
 流式封面代理等未排期方向继续记录在 `docs/optional_features.md`。

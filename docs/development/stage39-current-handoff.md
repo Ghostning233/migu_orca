@@ -7,11 +7,11 @@
 
 - 仓库：`/home/ghostning/github/migu_orca`
 - 分支：`ralph/stage39-deployment-settings`
-- 已审核 HEAD：`0186de7`（US-326 后端交接独立验收记录）
-- US-318～US-326 已完成并独立审核；US-327～US-340 未完成。
+- 基线 HEAD：`bcd616a`（工作包 E 开始；以当前 git HEAD 为准）
+- US-318～US-337 已完成；US-338～US-340 已完成候选验收记录，等待独立审核。
 - 未 push、未建 PR、未合并；Stage 39 中间分支不能作为完成品部署。
-- 当前后端仅新增保存连接 API 与 saved service handoff；旧业务 HTTP/generated 输入按 PRD 保留至
-  US-328～US-330 原子迁移，不把目标能力误报为已接入前端。
+- 当前前端与后端均使用保存连接 generation；业务请求仅携带 `connection_ref` 与
+  `configuration_revision`。旧提交/队列 Web 写端点已退役，历史 reader 仍保留只读迁移能力。
 
 ## 新主会话启动方式
 
