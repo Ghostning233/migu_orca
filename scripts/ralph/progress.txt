@@ -363,3 +363,7 @@ Started: 2026-09-13
 ## 2026-09-14 / 工作包 A 时间序列锁 Chromium 补充
 - 新增 saved submit UNKNOWN 后刷新换代 journey：旧 ref 的一次提交锁不在新 ref 页面自动重放，刷新后需重新显式 probe；新增 unknown operation 在配置换代后 VERIFY_EXTERNAL 隐藏且零 recover 外调。
 - 验证：`npm --prefix frontend run build` 通过；`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q` → `26 passed`（真实 Chromium）。
+
+## 2026-09-14 / 工作包 A management intent 换代连续旅程
+- 扩展 management UNKNOWN 真实 journey：同 ref 显式 probe 后 MODIFY 写入返回 UNKNOWN，随后摘要刷新为新 generation，旧 intent 保持锁定且没有第二次 POST；补充新 generation 读取无旧 mapping 写入的页面断言。
+- 验证：`npm --prefix frontend run build` 通过；完整 saved Chromium suite `27 passed`，`git diff --check` 通过。

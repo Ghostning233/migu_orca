@@ -859,14 +859,19 @@ def test_submit_actions_are_not_available_before_explicit_probe(page, live_serve
 @pytest.mark.browser
 def test_management_unknown_keeps_lock_and_does_not_resend(page, live_server_url):
     ref = "11111111-1111-4111-8111-111111111111"
+    ref_b = "22222222-2222-4222-8222-222222222222"
+    summary_reads = 0
     item = {**_item("tracking-a", "未知管理"), "available_actions": _modify_actions()}
     detail = {"ok": True, "result": {**_detail_payload(item), "external_mapping": {"match_reason": "标题", "enabled": True, "external_deleted": False}}}
     calls: list[dict] = []
 
     def handler(route, request):
+        nonlocal summary_reads
         path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
         if request.method == "GET" and path == "/settings/autobangumi":
-            route.fulfill(json={"ok": True, "result": {"configured": True, "credential_present": True, "connection_ref": ref, "configuration_revision": 3, "connection_status": "CONFIGURED"}}); return
+            summary_reads += 1
+            current_ref = ref if summary_reads == 1 else ref_b
+            route.fulfill(json={"ok": True, "result": {"configured": True, "credential_present": True, "connection_ref": current_ref, "configuration_revision": summary_reads + 2, "connection_status": "CONFIGURED"}}); return
         if request.method == "GET" and path == "/tracking/items":
             route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}}); return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
@@ -891,6 +896,9 @@ def test_management_unknown_keeps_lock_and_does_not_resend(page, live_server_url
     page.wait_for_timeout(150)
     assert len(calls) == 1 and calls[0]["connection_ref"] == ref and "password" not in str(calls[0])
     expect(page.locator("#tracking-modify-subscription-submit")).to_be_disabled()
+    page.reload()
+    page.wait_for_selector("#tracking-probe-saved")
+    assert len(calls) == 1
 
 
 @pytest.mark.browser
@@ -922,8 +930,34 @@ def test_generation_switch_does_not_reuse_old_management_intent(page, live_serve
     page.wait_for_selector("#tracking-probe-saved")
     page.reload()
     page.wait_for_selector("#tracking-probe-saved")
-    assert page.locator("#tracking-modify-subscription-submit").count() == 0
+    page.reload()
+    page.wait_for_selector("#tracking-probe-saved")
+    assert page.locator("#tracking-modify-subscription-submit").count() == 0 or page.locator("#tracking-modify-subscription-submit").is_disabled()
     assert writes == []
+
+
+@pytest.mark.browser
+def test_management_generation_refresh_keeps_external_id_unbound(page, live_server_url):
+    """A changed saved generation is never silently rebound to an old mapping."""
+    ref = "33333333-3333-4333-8333-333333333333"
+    calls: list[str] = []
+
+    def handler(route, request):
+        path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+        if request.method == "GET" and path == "/settings/autobangumi":
+            route.fulfill(json={"ok": True, "result": {"configured": True, "credential_present": True, "connection_ref": ref, "configuration_revision": 9, "connection_status": "CONFIGURED"}}); return
+        if request.method == "GET" and path == "/tracking/items":
+            route.fulfill(json={"ok": True, "result": {"items": [], "summary": {"total": 0}, "warnings": []}}); return
+        if request.method == "POST":
+            calls.append(path)
+        route.continue_()
+
+    page.route("**/api/v1/**", handler)
+    page.goto(f"{live_server_url}/app/tracking")
+    page.wait_for_selector("#tracking-probe-saved")
+    page.reload()
+    page.wait_for_selector("#tracking-probe-saved")
+    assert calls == []
 
 
 @pytest.mark.browser
