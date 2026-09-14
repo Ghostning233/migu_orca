@@ -39,7 +39,7 @@ describe('Stage 39 global connection status invalidation', () => {
     // Saving/deleting a profile invalidates the in-memory cache and must
     // immediately converge to the newest server-owned safe summary.
     await vi.waitFor(() => expect(status.summary.value?.connection_ref).toBe('new-ref'))
-    expect(apiGet).toHaveBeenCalledTimes(2)
+    expect(apiGet.mock.calls.filter(([path]) => path === '/api/v1/settings/autobangumi')).toHaveLength(2)
   })
 
   it('clears the old badge and reads the current profile after switching profiles', async () => {
@@ -63,5 +63,17 @@ describe('Stage 39 global connection status invalidation', () => {
     const status = useConnectionStatus()
     await status.loadPending()
     expect(status.pendingCount.value).toBeNull()
+  })
+
+  it('refreshes the current profile pending badge together with the summary', async () => {
+    localStorage.setItem('miguOrca.web.storageDir', 'profile-b')
+    apiGet.mockImplementation(async (path) => path === '/api/v1/settings/autobangumi'
+      ? { configured: true, credential_present: true, connection_ref: 'new-ref', configuration_revision: 2, connection_status: 'VERIFIED' } as never
+      : { items: [{ status: 'PENDING_SUBMIT' }, { status: 'SUBMIT_FAILED' }, { status: 'DONE' }] } as never)
+    const status = useConnectionStatus()
+    status.invalidate()
+    await vi.waitFor(() => expect(status.summary.value?.connection_ref).toBe('new-ref'))
+    await vi.waitFor(() => expect(status.pendingCount.value).toBe(2))
+    expect(apiGet).toHaveBeenCalledWith('/api/v1/tracking/items', { query: { storage_dir: 'profile-b', sort: 'updated_at' } })
   })
 })

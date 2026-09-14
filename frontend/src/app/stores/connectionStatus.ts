@@ -61,6 +61,7 @@ export function useConnectionStatus() {
     summary.value = null
     pendingCount.value = null
     void loadSummary()
+    void loadPending()
   }
 
   return { summary, state, summaryLoading, pendingCount, loadSummary, loadPending, invalidate }

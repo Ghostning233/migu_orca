@@ -388,3 +388,4 @@ Started: 2026-09-13
 - 继续迁移旧 shell 断言并补状态入口路由断言；`uv run pytest tests/browser/test_app_shell.py tests/browser/test_app_settings.py -q` → `27 passed`（真实 Chromium）。
 - P1 修复：connectionStatus.invalidate 递增 generation 并主动重读安全摘要；保存 qB timeout 对 0/负数/NaN 在确认和 POST 前 fail closed；StoragePreferences 公共类型与 save 参数彻底移除 saveRequest，保留只读旧键迁移。测试 Agent 红测文件全部保留并转绿。
 - 最终验证：受影响 Vitest `36 passed`；frontend build、api:check、typecheck、受影响 ESLint 通过；真实 Chromium shell/settings `27 passed`；未访问真实上游。
+- 追加刷新与真实浏览器补证：`invalidate()` 现在同时使摘要与 profile 待处理徽标失效并重读，summary/list 各自代际校验；新增 `tests/browser/test_stage39_global_status.py` 覆盖未配置状态、键盘进入设置及 items-only 徽标。最终受影响 Vitest `44 passed`，真实 Chromium shell/settings/global `29 passed`，build/api:check/typecheck/受影响 ESLint 全部通过。
