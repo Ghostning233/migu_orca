@@ -211,6 +211,8 @@ def test_profile_change_while_app_is_mounted_invalidates_held_old_list(page: Pag
 def test_settings_save_delete_probe_refreshes_global_state(page: Page, live_server_url: str) -> None:
     state = {"configured": False, "status": "UNCONFIGURED", "ref": None, "revision": 0}
     probes = 0
+    console_messages: list[str] = []
+    page.on("console", lambda message: console_messages.append(message.text))
 
     def handle(route, request):
         nonlocal probes
@@ -270,6 +272,7 @@ def test_settings_save_delete_probe_refreshes_global_state(page: Page, live_serv
       session: JSON.stringify(sessionStorage),
     })""")
     assert all(secret not in json.dumps(evidence) for secret in ("https://secret.invalid", "token-canary"))
+    assert all(secret not in "\n".join(console_messages) for secret in ("https://secret.invalid", "token-canary"))
 
 
 def test_badge_failure_then_successful_zero_hides(page: Page, live_server_url: str) -> None:
