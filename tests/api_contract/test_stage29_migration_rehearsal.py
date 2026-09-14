@@ -22,7 +22,8 @@ touched.  Four contract scenarios are rehearsed:
    second external call.
 """
 
-from dataclasses import replace
+import json
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
@@ -65,7 +66,6 @@ from storage_engine.controllers.tracking_repository import (
     list_tracking_records,
     load_tracking_record,
 )
-from tests.legacy_queue_fixture import write_legacy_queue_fixture
 from tracking_engine.models.operation import (
     TRACKING_OPERATION_KIND_SUBMIT,
     TRACKING_OPERATION_STATE_IN_PROGRESS,
@@ -87,6 +87,13 @@ from tracking_engine.models.tracking import (
 )
 
 NOW = "2026-09-08T00:00:00+00:00"
+
+
+def write_legacy_queue_fixture(config: StorageConfig, queue: BatchSubmissionQueue) -> None:
+    config.queue_dir.mkdir(parents=True, exist_ok=True)
+    (config.queue_dir / f"{queue.batch_id}.json").write_text(
+        json.dumps(asdict(queue), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 # ---------------------------------------------------------------------------

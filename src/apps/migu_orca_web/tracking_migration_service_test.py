@@ -34,7 +34,6 @@ from storage_engine.controllers.tracking_repository import (
     list_tracking_records,
     load_tracking_record,
 )
-from tests.legacy_queue_fixture import write_legacy_queue_fixture
 from tracking_engine.controllers.migration import MIGRATION_REASON_MULTIPLE_QUEUE_SOURCES
 from tracking_engine.models.migration import MIGRATION_STATE_COMPLETE, MIGRATION_STATE_PARTIAL
 from tracking_engine.models.tracking import (
@@ -50,6 +49,15 @@ from tracking_engine.models.tracking import (
 )
 
 NOW = "2026-09-08T00:00:00+00:00"
+
+
+def write_legacy_queue_fixture(config: StorageConfig, queue: BatchSubmissionQueue) -> None:
+    import json
+    from dataclasses import asdict
+    config.queue_dir.mkdir(parents=True, exist_ok=True)
+    (config.queue_dir / f"{queue.batch_id}.json").write_text(
+        json.dumps(asdict(queue), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def _config(tmp_path: Path) -> StorageConfig:

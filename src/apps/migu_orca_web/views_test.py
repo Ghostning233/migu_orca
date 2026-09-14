@@ -50,9 +50,6 @@ from storage_engine.controllers.idempotency_repository import (
     load_idempotency_record,
 )
 from storage_engine.controllers.preference_repository import save_user_preferences
-from storage_engine.controllers.queue_repository import (
-    write_legacy_queue_fixture,
-)
 from storage_engine.controllers.request_repository import (
     load_request_snapshot,
     save_request_snapshot,
