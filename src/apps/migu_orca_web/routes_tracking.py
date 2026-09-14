@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from flask import request
+
 """Tracking-items family API routes (US-223).
 
 Provides the read-only unified tracking list and detail endpoints:
@@ -28,7 +30,6 @@ from apps.migu_orca_web.schemas import (
     TrackingRefreshRssPayload,
     TrackingRevalidatePayload,
     TrackingSetEnabledPayload,
-    TrackingSubmitPayload,
     TrackingSyncPayload,
 )
 from apps.migu_orca_web.services import _storage_dir
@@ -83,7 +84,7 @@ class TrackingSyncView(PostView):
         payload = self.request_validator_model
         config = load_storage_config(_storage_dir(payload.storage_dir))
         result = run_saved_tracking_sync(SavedTrackingSyncInput.model_validate({
-            "connection_ref": payload.connection_ref,
+            "connection_ref": str(payload.connection_ref),
             "configuration_revision": payload.configuration_revision,
             "confirm": payload.confirm,
             "storage_dir": payload.storage_dir,
@@ -165,12 +166,12 @@ class TrackingItemSubmitView(PostView):
     idempotency conflict, in-flight operation) raise.
     """
 
-    request_validator_model = TrackingSubmitPayload
+    request_validator_model = None
 
     def save(self) -> dict[str, object]:
-        assert isinstance(self.request_validator_model, TrackingSubmitPayload)
-        payload = self.request_validator_model
-        return run_saved_tracking_submit(SavedTrackingSubmitInput.model_validate(payload.model_dump()))
+        body = request.get_json(silent=True) or {}
+        payload = SavedTrackingSubmitInput.model_validate({**body, "tracking_id": request.view_args["tracking_id"]})
+        return run_saved_tracking_submit(load_storage_config(_storage_dir(payload.storage_dir)), payload=payload)
 
 
 @class_route(
@@ -191,12 +192,12 @@ class TrackingItemRetryView(PostView):
     non-retryable state, idempotency conflict, in-flight operation) raise.
     """
 
-    request_validator_model = TrackingSubmitPayload
+    request_validator_model = None
 
     def save(self) -> dict[str, object]:
-        assert isinstance(self.request_validator_model, TrackingSubmitPayload)
-        payload = self.request_validator_model
-        return run_saved_tracking_retry(SavedTrackingSubmitInput.model_validate(payload.model_dump()))
+        body = request.get_json(silent=True) or {}
+        payload = SavedTrackingSubmitInput.model_validate({**body, "tracking_id": request.view_args["tracking_id"]})
+        return run_saved_tracking_retry(load_storage_config(_storage_dir(payload.storage_dir)), payload=payload)
 
 
 @class_route(
@@ -222,7 +223,7 @@ class TrackingItemRecoverView(PostView):
         assert isinstance(self.request_validator_model, TrackingRecoverPayload)
         payload = self.request_validator_model
         return run_saved_tracking_recovery(SavedTrackingRecoveryInput.model_validate({
-            **payload.model_dump(), "tracking_id": payload.tracking_id,
+            **payload.model_dump(mode="json"), "tracking_id": payload.tracking_id,
         }))
 
 
@@ -256,7 +257,7 @@ def _management_result(config, *, tracking_id: str, action: str, result: dict[st
 
 def _run_management_route(payload, action: str, patch: dict[str, object] | None = None, enabled: bool | None = None) -> dict[str, object]:
     saved = SavedTrackingManagementInput.model_validate({
-        **payload.model_dump(), "operation": action, "patch": patch, "enabled": enabled,
+        **payload.model_dump(mode="json"), "operation": action, "patch": patch, "enabled": enabled,
     })
     config = load_storage_config(_storage_dir(payload.storage_dir))
     result = run_saved_tracking_management(saved)

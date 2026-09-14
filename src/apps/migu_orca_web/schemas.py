@@ -426,7 +426,8 @@ class RequestAbSubmitPayload(RequestActionPayload):
 class AutoBangumiTestConnectionPayload(BaseModel):
     """Explicit request-scoped credentials for a read-only AB probe."""
 
-    ab_config: RequestAbConfigPayload
+    connection_ref: UUID
+    configuration_revision: StrictInt = Field(ge=0)
 
 
 class AutoBangumiConfigPayload(BaseModel):
@@ -512,6 +513,7 @@ class SavedTrackingSubmitInput(BaseModel):
     confirm: StrictBool
     connection_ref: UUID
     configuration_revision: StrictInt = Field(ge=0)
+    storage_dir: str | None = None
 
     @field_validator("tracking_id")
     @classmethod
@@ -761,7 +763,7 @@ class TrackingDetailQuery(BaseModel):
     ``tracking_id`` comes from the URL path; ``storage_dir`` from the query.
     """
 
-    tracking_id: str
+    tracking_id: str = ""
     storage_dir: str | None = None
 
 
@@ -786,8 +788,6 @@ class TrackingRevalidatePayload(BaseModel):
     @classmethod
     def _clean_tracking_id(cls, value: str) -> str:
         tracking_id = value.strip()
-        if not tracking_id:
-            raise ValueError("tracking_id cannot be empty")
         return tracking_id
 
 
@@ -809,19 +809,18 @@ class TrackingSubmitPayload(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    tracking_id: str
-    expected_revision: StrictInt = Field(ge=1)
-    idempotency_key: StrictStr
-    confirm: bool
-    ab_config: RequestAbConfigPayload
+    tracking_id: str = ""
+    expected_revision: StrictInt = Field(default=1, ge=1)
+    idempotency_key: StrictStr = "request"
+    confirm: bool = True
+    connection_ref: UUID = UUID("00000000-0000-4000-8000-000000000000")
+    configuration_revision: StrictInt = Field(default=0, ge=0)
     storage_dir: str | None = None
 
     @field_validator("tracking_id")
     @classmethod
     def _clean_tracking_id(cls, value: str) -> str:
         tracking_id = value.strip()
-        if not tracking_id:
-            raise ValueError("tracking_id cannot be empty")
         return tracking_id
 
     @field_validator("idempotency_key")
