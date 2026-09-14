@@ -52,7 +52,7 @@ export function useConnectionStatus() {
         count + (item.status === 'PENDING_SUBMIT' || item.status === 'SUBMIT_FAILED' ? 1 : 0)
       ), 0)
     } catch {
-      if (request === trackingRequest) pendingCount.value = null
+      if (request === trackingRequest && profile === currentStorageDir()) pendingCount.value = null
     }
   }
 
