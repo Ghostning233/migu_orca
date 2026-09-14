@@ -37,7 +37,6 @@ from flask import redirect
 from apps.migu_orca_web import (  # noqa: F401
     routes_app,
     routes_batches,
-    routes_connections,
     routes_mikan,
     routes_requests,
     routes_settings,

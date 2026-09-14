@@ -6,14 +6,12 @@ These helpers were previously defined in ``views.py``. They reuse the existing
 engine/repository seams (title parsing, candidate search, preferences,
 corrections, request snapshots, batch queue) and never duplicate business
 rules. Keeping the seams importable here is what lets API tests monkeypatch
-external transports without touching real MiKan/AutoBangumi/qBittorrent.
+external transports without touching real MiKan or AutoBangumi.
 """
 
 import os
 import re
 from collections.abc import Callable
-from copy import deepcopy
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -22,21 +20,14 @@ from apps.migu_orca_entry.controllers.entry_controller import (
     apply_confirmation_action,
     apply_request_save_action,
 )
-from apps.migu_orca_web.schemas import RequestMikanConfigPayload
 from apps.migu_orca_web.serializers import (
     _optional_error,
     _raise_result_error,
-    _sanitize_ab_submit_result,
     _serialize_candidate,
 )
-from apps.migu_orca_web.tracking_handoff import ensure_confirmed_request_tracking
 from batch_engine.controllers.anime_title_parser import (
     AnimeTitleParsingProvider,
     RuleAnimeTitleParsingProvider,
-)
-from batch_engine.controllers.batch_accept_controller import (
-    AcceptOne,
-    LoadRequest,
 )
 from batch_engine.controllers.candidate_search_orchestrator import (
     CandidateSearchOutcome,
@@ -49,7 +40,6 @@ from batch_engine.controllers.preference_applicator import (
 from batch_engine.controllers.search_enhancer import enhance_search_queries
 from batch_engine.models import (
     AnimeTitleParseResult,
-    BatchSubmissionQueue,
 )
 from mikan_engine.controllers import mikan_client as mikan_client_module
 from mikan_engine.controllers.mikan_candidate_cache import (
@@ -58,7 +48,6 @@ from mikan_engine.controllers.mikan_candidate_cache import (
 )
 from mikan_engine.controllers.mikan_config import (
     MikanConfig,
-    default_mikan_config,
 )
 from request_engine.controllers.request_controller import (
     ACCEPTED,
@@ -66,27 +55,12 @@ from request_engine.controllers.request_controller import (
 )
 from shared.errors import Stage1Error
 from shared.models import TitleCorrection, VersionedUserPreference
-from storage_engine.controllers.ab_result_repository import (
-    load_ab_submit_result,
-    save_ab_submit_result,
-)
+from storage_engine.controllers.ab_result_repository import load_ab_submit_result
 from storage_engine.controllers.correction_repository import load_corrections
 from storage_engine.controllers.history_repository import load_status_history
 from storage_engine.controllers.preference_repository import load_user_preferences
-from storage_engine.controllers.queue_repository import (
-    load_submission_queue,
-    save_submission_queue,
-)
-from storage_engine.controllers.request_repository import (
-    load_request_snapshot,
-    save_request_snapshot,
-)
-from storage_engine.controllers.storage_config import (
-    DEFAULT_STORAGE_DIR,
-    StorageConfig,
-    load_storage_config,
-)
-from tracking_engine.models.tracking import TRACKING_ORIGIN_LEGACY_ACCEPT
+from storage_engine.controllers.request_repository import load_request_snapshot
+from storage_engine.controllers.storage_config import DEFAULT_STORAGE_DIR, StorageConfig, load_storage_config
 
 
 def _storage_dir(value: str | None) -> Path | None:
@@ -193,22 +167,6 @@ def set_web_storage_root(root: Path | None) -> None:
 def _web_storage_root() -> Path:
     """Return the resolved server-side Web storage root (for docs/tests)."""
     return _WEB_STORAGE_ROOT
-
-
-def _resolve_mikan_config(explicit: RequestMikanConfigPayload | None) -> MikanConfig:
-    """Build the MiKan config for a request, falling back to system defaults.
-
-    An explicit request-scoped ``mikan_config`` overrides the system default as a
-    test seam or for advanced callers. The resolved config is request-scoped only:
-    it is never written to browser storage, URL state, history, or Request
-    snapshots, and it contains no secrets.
-    """
-    if explicit is not None:
-        return MikanConfig(
-            search_endpoint=explicit.search_endpoint,
-            timeout_seconds=explicit.timeout_seconds,
-        )
-    return default_mikan_config()
 
 
 def _batch_title_parsing_provider() -> AnimeTitleParsingProvider:
@@ -392,7 +350,7 @@ def _build_batch_preview_request(
 ) -> dict[str, object]:
     """Build the editable in-memory draft (``preview_request``) for a parsed
     batch item so the card can enter the existing preview-modify /
-    preview-save / accept flow.
+    save-confirm flow.
 
     The draft is a PENDING_CONFIRM skeleton whose editable defaults come from
     the user preferences: the first preferred subtitle group, the default
@@ -400,7 +358,7 @@ def _build_batch_preview_request(
     the preferred folder name. RSS/seed data is intentionally absent — it is
     only available after a MiKan collection is chosen — so seeds start empty.
     Only non-sensitive public fields are included; the request-scoped
-    ``request_id`` is derived from the batch/item identity so preview-save can
+    ``request_id`` is derived from the batch/item identity so save-confirm can
     persist it without colliding across batches.
     """
     config = applied.to_dict() if applied is not None else None
@@ -448,126 +406,14 @@ def _build_batch_preview_request(
     }
 
 
-def _load_batch_queue_or_none(
-    config: StorageConfig,
-    batch_id: str,
-) -> BatchSubmissionQueue | None:
-    """Load a batch pre-submission queue, returning None when absent.
-
-    Only ``queue_not_found`` is mapped to None; storage/invalid-id errors
-    propagate so the caller never silently ignores a real read failure.
-    """
-    try:
-        return load_submission_queue(config, batch_id)
-    except Stage1Error as exc:
-        if exc.error_type == "queue_not_found":
-            return None
-        raise
 
 
-def _build_batch_load_request(storage_dir: Path | None) -> LoadRequest:
-    """Build the injected ``load_request`` for batch accept/submit services.
-
-    Resolves a request_id to its current snapshot, or None when the snapshot is
-    missing/deleted, so the batch services can classify items without coupling
-    to the storage layer.
-    """
-    config = load_storage_config(storage_dir)
-
-    def load_request(request_id: str) -> dict[str, Any] | None:
-        try:
-            return load_request_snapshot(config, request_id)
-        except Stage1Error:
-            return None
-
-    return load_request
 
 
-def _build_batch_accept_one(storage_dir: Path | None) -> AcceptOne:
-    """Build the injected ``accept_one`` for the batch accept service.
-
-    Mirrors the single-request accept view: load the PENDING_CONFIRM snapshot,
-    apply the shared accept action, record an ACCEPT history event, and persist
-    the updated ACCEPTED request. Auto Bangumi secrets never pass through here.
-    """
-    config = load_storage_config(storage_dir)
-
-    def accept_one(request_id: str) -> dict[str, Any]:
-        request = load_request_snapshot(config, request_id)
-        result = apply_confirmation_action(
-            {"success": True, "request": request, "error": None},
-            "accept",
-        )
-        if not result["success"]:
-            _raise_result_error(result)
-        history_event = _build_history_event(
-            request,
-            result["request"],
-            action="ACCEPT",
-        )
-        result = apply_request_save_action(
-            result,
-            True,
-            storage_dir=storage_dir,
-            history_events=[history_event],
-        )
-        if not result["success"]:
-            _raise_result_error(result)
-        # US-222: the batch accept entry also converges a newly ACCEPTED Request
-        # into the unified tracking list (legacy accept origin). A tracking
-        # write failure never rolls the confirmed Request back.
-        ensure_confirmed_request_tracking(
-            config=config,
-            request=result["request"],
-            origin=TRACKING_ORIGIN_LEGACY_ACCEPT,
-        )
-        return result["request"]
-
-    return accept_one
 
 
-def _build_batch_persist_submit_result(storage_dir: Path | None):
-    """Build the injected per-item AB-result persister for batch submit/retry.
-
-    Mirrors the single-item submit-ab storage contract: sanitize the AB result,
-    attach it to the Request snapshot, persist the snapshot, and write
-    ``ab_results/<request_id>.json`` so the Request detail API can read and show
-    the result. Auto Bangumi secrets (endpoint/token/cookie/raw response) never
-    reach the persisted data because the result was already normalized by the AB
-    submit contract and is sanitized again here.
-    """
-    config = load_storage_config(storage_dir)
-
-    def persist_submit_result(
-        request: dict[str, Any],
-        ab_submit_result: dict[str, Any],
-    ) -> dict[str, Any]:
-        sanitized = _sanitize_ab_submit_result(ab_submit_result)
-        updated = deepcopy(request)
-        updated["ab_submit_result"] = sanitized
-        updated["updated_at"] = datetime.now(UTC).isoformat()
-        save_request_snapshot(config, updated)
-        save_ab_submit_result(config, updated)
-        return updated
-
-    return persist_submit_result
 
 
-def _build_batch_persist_queue(config: StorageConfig):
-    """Build the injected per-item queue persister for batch submit/retry.
-
-    The submit service flushes each item's SUBMITTING status before the Auto
-    Bangumi call and its final status after the attempt; persisting through the
-    existing queue repository means an interruption between the external submit
-    and the final queue save can never leave READY_TO_SUBMIT on disk for an item
-    that already reached Auto Bangumi. The queue only holds non-sensitive public
-    fields, so writing it never stores Auto Bangumi secrets.
-    """
-
-    def persist_queue(queue: BatchSubmissionQueue) -> None:
-        save_submission_queue(config, queue)
-
-    return persist_queue
 
 
 def _load_history_section(config: StorageConfig, request_id: str) -> dict[str, object]:
@@ -605,7 +451,7 @@ def _load_ab_result_section(config: StorageConfig, request_id: str) -> dict[str,
 def _build_save_confirm_persist_pending(storage_dir: Path | None):
     """Build the seam that durably persists a PENDING_CONFIRM snapshot.
 
-    Mirrors ``preview-save``: only a PENDING_CONFIRM draft may enter the saved
+    Mirrors ``save-confirm``: only a PENDING_CONFIRM draft may enter the saved
     confirmation flow (accept/cancel/modify/delete). The draft content is the
     authoritative server-side snapshot returned by ``reserve_for_save`` — never
     a client-supplied Request.

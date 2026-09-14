@@ -38,24 +38,18 @@ from apps.base import create_app
 from apps.migu_orca_web.api_contract import (
     ApiErrorEnvelope,
     AutoBangumiCapabilitiesDTO,
-    AutoBangumiConnectionResultDTO,
-    BatchAcceptResultDTO,
+    AutoBangumiConnectionSummaryDTO,
     BatchParseResultDTO,
-    BatchQueueResultDTO,
     BatchSaveConfirmResultDTO,
-    BatchSubmitResultDTO,
     CorrectionsResultDTO,
     MikanCandidateResultDTO,
     PreferenceResultDTO,
-    QbittorrentConnectionResultDTO,
-    RequestAbSubmitResultDTO,
     RequestActionResultDTO,
     RequestCreateResultDTO,
     RequestDeleteResultDTO,
     RequestDetailResultDTO,
     RequestListResultDTO,
     RequestPreviewModifyResultDTO,
-    RequestPreviewSaveResultDTO,
     RequestSafeInfoResultDTO,
     RequestSaveConfirmResultDTO,
     TrackingDetailResultDTO,
@@ -80,7 +74,6 @@ DEFAULT_OUTPUT = Path(__file__).resolve().parents[3] / "docs" / "api" / "openapi
 _STORAGE_DIR_ERRORS: dict[str, dict[str, str]] = {
     "400": {"invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录"},
 }
-
 
 def _schema(model: type[BaseModel]) -> dict[str, Any]:
     """Return the JSON Schema for a pydantic model (dereferenced, no $defs)."""
@@ -285,9 +278,10 @@ _MANAGEMENT_COMMON = {
     "tracking_id": {"type": "string"},
     "target_scope": {"type": "string", "enum": ["SUBSCRIPTION", "ASSOCIATED_RSS"]},
     "expected_revision": {"type": "integer", "minimum": 1},
-    "idempotency_key": {"type": "string", "x-request-scoped": True},
+    "idempotency_key": {"type": "string"},
     "confirm": {"const": True},
-    "ab_config": _MANAGEMENT_AB_CONFIG,
+    "connection_ref": {"type": "string", "format": "uuid"},
+    "configuration_revision": {"type": "integer", "minimum": 0},
     "storage_dir": {"type": "string"},
 }
 _MANAGEMENT_ERRORS = {
@@ -296,13 +290,37 @@ _MANAGEMENT_ERRORS = {
     "409": {**{name: MANAGEMENT_ERROR_MESSAGES[name] for name in management_error_names_for_status(409)}},
 }
 
+_AUTOBANGUMI_CONNECTION_CONFIG = {
+    "oneOf": [
+        {
+            "type": "object", "additionalProperties": False,
+            "required": ["auth_mode", "base_url", "username", "password"],
+            "properties": {
+                "auth_mode": {"const": "password"},
+                "base_url": {"type": "string"},
+                "username": {"type": "string"},
+                "password": {"type": "string", "x-request-scoped": True, "writeOnly": True},
+            },
+        },
+        {
+            "type": "object", "additionalProperties": False,
+            "required": ["auth_mode", "base_url", "token"],
+            "properties": {
+                "auth_mode": {"const": "api_token"},
+                "base_url": {"type": "string"},
+                "token": {"type": "string", "x-request-scoped": True, "writeOnly": True},
+            },
+        },
+    ]
+}
+
 
 def _management_endpoint(operation_id: str, summary: str, *, extra: dict[str, Any] | None = None, required_extra: list[str] | None = None, scope: list[str] | None = None) -> dict[str, Any]:
     properties = {**_MANAGEMENT_COMMON, **(extra or {})}
     if scope is not None:
         properties["target_scope"] = {"type": "string", "enum": scope}
     properties = {key: value for key, value in properties.items() if key != "tracking_id"}
-    required = ["target_scope", "expected_revision", "idempotency_key", "confirm", "ab_config"] + (required_extra or [])
+    required = ["target_scope", "expected_revision", "idempotency_key", "confirm", "connection_ref", "configuration_revision"] + (required_extra or [])
     return {
         "operationId": operation_id,
         "summary": summary,
@@ -371,7 +389,7 @@ def _modify_request_body() -> dict[str, Any]:
         return {
             "type": "object",
             "additionalProperties": False,
-            "required": ["target_scope", "expected_revision", "idempotency_key", "confirm", "ab_config", "patch"],
+            "required": ["target_scope", "expected_revision", "idempotency_key", "confirm", "connection_ref", "configuration_revision", "patch"],
             "properties": {
                 **common,
                 "target_scope": {"const": scope},
@@ -383,6 +401,53 @@ def _modify_request_body() -> dict[str, Any]:
         "oneOf": [branch("SUBSCRIPTION", subscription_patch), branch("ASSOCIATED_RSS", rss_patch)],
     }
 _ENDPOINTS: dict[str, dict[str, Any]] = {
+    "GET /api/v1/settings/autobangumi": {
+        "operationId": "getAutoBangumiConnection",
+        "summary": "读取 Auto Bangumi 安全连接摘要",
+        "success": AutoBangumiConnectionSummaryDTO,
+        "errors": {"500": {"storage_error": "Auto Bangumi 配置存储不可用", "storage_json_error": "Auto Bangumi 配置内容无效"}},
+    },
+    "PUT /api/v1/settings/autobangumi": {
+        "operationId": "saveAutoBangumiConnection",
+        "summary": "保存 Auto Bangumi 部署连接",
+        "requestBody": {"type": "object", "additionalProperties": False, "required": ["confirm", "expected_configuration_revision", "config"], "properties": {
+            "confirm": {"const": True},
+            "expected_configuration_revision": {"type": "integer", "minimum": 0},
+            "config": _AUTOBANGUMI_CONNECTION_CONFIG,
+        }},
+        "success": AutoBangumiConnectionSummaryDTO,
+        "errors": {"400": {"validation_error": "请求参数校验失败", "config_error": "Auto Bangumi 配置无效"}, "409": {"configuration_revision_conflict": "Auto Bangumi 配置已变化，请重新读取后重试", "connection_in_use": "Auto Bangumi 连接正在使用中"}, "500": {"storage_error": "Auto Bangumi 配置存储不可用"}},
+    },
+    "DELETE /api/v1/settings/autobangumi": {
+        "operationId": "deleteAutoBangumiConnection",
+        "summary": "清除 Auto Bangumi 部署连接",
+        "requestBody": {"type": "object", "additionalProperties": False, "required": ["confirm", "expected_configuration_revision"], "properties": {
+            "confirm": {"const": True},
+            "expected_configuration_revision": {"type": "integer", "minimum": 0},
+        }},
+        "success": AutoBangumiConnectionSummaryDTO,
+        "errors": {"400": {"validation_error": "请求参数校验失败"}, "409": {"configuration_revision_conflict": "Auto Bangumi 配置已变化，请重新读取后重试", "connection_in_use": "Auto Bangumi 连接正在使用中"}, "500": {"storage_error": "Auto Bangumi 配置存储不可用"}},
+    },
+    "POST /api/v1/settings/autobangumi/probe": {
+        "operationId": "probeSavedAutoBangumiCapabilities",
+        "summary": "探测已保存 Auto Bangumi 连接能力",
+        "description": "显式只读探测当前保存配置；请求仅携带 opaque connection_ref 与 configuration_revision，服务端以不可变快照和 lease 执行，结果不持久化原始响应。",
+        "requestBody": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["connection_ref", "configuration_revision"],
+            "properties": {
+                "connection_ref": {"type": "string", "format": "uuid"},
+                "configuration_revision": {"type": "integer", "minimum": 0},
+            },
+        },
+        "success": AutoBangumiCapabilitiesDTO,
+        "errors": {
+            "400": {"data_validation_errors": "请求参数校验失败", "config_error": "Auto Bangumi 配置未配置或引用无效"},
+            "409": {"configuration_revision_conflict": "Auto Bangumi 配置已变化，请重新读取后重试", "connection_ref_conflict": "Auto Bangumi 配置引用已变化"},
+            "500": {"storage_error": "Auto Bangumi 配置存储不可用", "storage_json_error": "Auto Bangumi 配置内容无效"},
+        },
+    },
     "POST /api/v1/tracking/items/<path:tracking_id>/modify": {
         **_management_endpoint("modifyTrackingItem", "修改外部追番方案", required_extra=["patch"]),
         "requestBody": _modify_request_body(),
@@ -457,21 +522,12 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     },
     "POST /api/v1/requests": {
         "operationId": "createRequest",
-        "summary": "生成订阅方案（可保存）",
-        "description": "按标题生成 Request。save_request=false 时仅返回内存预览，并签发服务端权威 draft_id 与 draft_revision（US-194/211：preview-modify/preview-save 只接受 draft_id，不接受客户端完整 Request；US-211 起响应同时携带单调 draft_revision 供下次修改作为 base_revision）；save_request=true 时持久化为 PENDING_CONFIRM 草案。mikan_config/mikan_bangumi/candidate_context 均为 request-scoped，绝不落盘。",
+        "summary": "生成订阅草案",
+        "description": "按标题生成订阅草案。Web 统一使用服务端 MiKan 配置；服务端签发权威 draft_id 与 draft_revision，持久化仅由 save-confirm 完成。",
         "requestBody": {
             "type": "object",
             "properties": {
                 "title": {"type": "string", "description": "番剧名称（必填）。"},
-                "source": {
-                    "type": "string",
-                    "enum": ["static-fixture", "mikan"],
-                    "default": "static-fixture",
-                },
-                "save_request": {
-                    "type": "boolean",
-                    "default": False,
-                },
                 "season_confirmation": {
                     "type": "integer",
                     "description": "用户确认的季数（1-99）。",
@@ -479,23 +535,12 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "candidate_context": {
                     "type": "string",
                     "description": "候选搜索签发的一次性 opaque token（request-scoped）。",
-                    "x-request-scoped": True,
-                },
-                "mikan_config": {
-                    "type": "object",
-                    "description": "MiKan 搜索配置（request-scoped，不落盘）。",
-                    "properties": {
-                        "search_endpoint": {
-                            "type": "string",
-                            "x-request-scoped": True,
-                        },
-                        "timeout_seconds": {"type": "number"},
-                    },
+                    "x-legacy": True,
                 },
                 "mikan_bangumi": {
                     "type": "string",
                     "description": "MiKan 详情页 URL（request-scoped）。",
-                    "x-request-scoped": True,
+                    "x-legacy": True,
                 },
             },
             "required": ["title"],
@@ -534,7 +579,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "draft_id": {
                     "type": "string",
                     "description": "生成/上次修改时服务端签发的 opaque draft_id（request-scoped，不落盘）。",
-                    "x-request-scoped": True,
+                    "x-legacy": True,
                 },
                 "base_revision": {
                     "type": "integer",
@@ -575,40 +620,6 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "draft_evicted": "订阅草案已失效（服务器容量已满），请重新生成",
                 "draft_replayed": "订阅草案已被保存，请勿重复保存",
                 "draft_revision_conflict": "草案已被更新，请基于最新版本重试",
-            },
-        },
-    },
-    "POST /api/v1/requests/preview-save": {
-        "operationId": "previewSaveRequest",
-        "summary": "保存未修改的预览草案",
-        "description": "US-194/US-212：以 draft_id + base_revision 预留服务端权威草案，持久化成功后才提交重放 tombstone；持久化失败会释放预留，同一 draft/revision 可安全重试，不再因写盘失败丢失草案。仅允许 PENDING_CONFIRM 草案落盘并返回保存结果。",
-        "requestBody": {
-            "type": "object",
-            "required": ["draft_id", "base_revision"],
-            "properties": {
-                "draft_id": {
-                    "type": "string",
-                    "description": "生成/修改时服务端签发的 opaque draft_id（一次性，保存成功后失效）。",
-                    "x-request-scoped": True,
-                },
-                "base_revision": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "客户端最后观察到的草案 revision（US-212，预留校验；不匹配返回 409 draft_revision_conflict）。",
-                },
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
-            },
-        },
-        "success": RequestPreviewSaveResultDTO,
-        "errors": {
-            "400": {"invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录"},
-            "409": {
-                "invalid_request_status": "只有待确认的订阅草案可以保存",
-                "draft_expired": "订阅草案已过期或不存在，请重新生成",
-                "draft_evicted": "订阅草案已失效（服务器容量已满），请重新生成",
-                "draft_replayed": "订阅草案已被保存，请勿重复保存",
-                "draft_revision_conflict": "草案已被更新，请基于最新版本重试",
-                "draft_reserved": "订阅草案正在保存中，请稍后重试",
             },
         },
     },
@@ -758,61 +769,6 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             "404": {"request_not_found": "订阅方案不存在"},
         },
     },
-    "POST /api/v1/requests/<path:request_id>/submit-ab": {
-        "operationId": "submitRequestToAutoBangumi",
-        "summary": "提交订阅方案到 Auto Bangumi",
-        "description": "ab_config 为 request-scoped 凭据，绝不进入 storage、URL、浏览器 storage、日志或 trace。",
-        "requestBody": {
-            "type": "object",
-            "required": ["ab_config"],
-            "properties": {
-                "ab_config": {
-                    "type": "object",
-                    "x-request-scoped": True,
-                    "properties": {
-                        "auth_mode": {
-                            "type": "string",
-                            "enum": ["password", "api_token"],
-                        },
-                        "base_url": {
-                            "type": "string",
-                            "x-request-scoped": True,
-                        },
-                        "username": {
-                            "type": "string",
-                            "x-request-scoped": True,
-                        },
-                        "password": {
-                            "type": "string",
-                            "x-request-scoped": True,
-                        },
-                        "token": {
-                            "type": "string",
-                            "x-request-scoped": True,
-                        },
-                        "fallback_enabled": {"type": "boolean"},
-                    },
-                    "required": ["auth_mode", "fallback_enabled"],
-                },
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
-            },
-        },
-        "success": RequestAbSubmitResultDTO,
-        "errors": {
-            "400": {
-                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
-                "config_error": "Auto Bangumi 配置无效",
-            },
-            "404": {"request_not_found": "订阅方案不存在"},
-            "409": {"invalid_request_status": "只有已确认订阅方案可以提交"},
-            "502": {
-                "ab_connection_failed": "Auto Bangumi HTTP 连接失败",
-                "ab_submit_failed": "Auto Bangumi HTTP 提交失败",
-            },
-            "503": {"ab_submit_unsupported": "当前 Auto Bangumi 版本或认证模式暂不支持提交"},
-            "504": {"ab_timeout": "Auto Bangumi HTTP 请求超时"},
-        },
-    },
     "GET /api/v1/tracking/items": {
         "operationId": "listTrackingItems",
         "summary": "列出统一追番记录安全摘要",
@@ -865,29 +821,23 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "tracking_storage_error": "追番记录存储失败",
                 "tracking_migration_error": "历史数据迁移失败",
             },
+            "401": {"ab_auth_failed": "Auto Bangumi 认证失败"},
+            "502": {"ab_connection_failed": "Auto Bangumi 连接失败", "ab_submit_failed": "Auto Bangumi 提交失败"},
+            "503": {"ab_submit_unsupported": "Auto Bangumi 提交能力不可用", "ab_unsupported_version": "Auto Bangumi 版本不受支持", "ab_probe_unsupported": "Auto Bangumi 探测能力不可用"},
+            "504": {"ab_timeout": "Auto Bangumi 请求超时"},
         },
     },
     "POST /api/v1/tracking/sync": {
         "operationId": "syncTrackingItems",
         "summary": "同步外部追番安全投影",
-        "description": "US-233：使用 request-scoped Auto Bangumi 配置执行一次只读同步。confirm 必须为 true；响应只返回能力、安全计数与 TrackingItemDTO，不返回上游对象、外部 ID、URL 或凭据。",
+        "description": "US-233：使用已保存连接 generation 执行一次只读同步。confirm 必须为 true；响应只返回能力、安全计数与 TrackingItemDTO，不返回上游对象、外部 ID、URL 或凭据。",
         "requestBody": {
             "type": "object",
             "additionalProperties": False,
-            "required": ["ab_config", "confirm"],
+            "required": ["connection_ref", "configuration_revision", "confirm"],
             "properties": {
-                "ab_config": {
-                    "type": "object", "additionalProperties": False, "x-request-scoped": True,
-                    "properties": {
-                        "auth_mode": {"type": "string", "enum": ["password", "api_token"]},
-                        "base_url": {"type": "string", "x-request-scoped": True},
-                        "username": {"type": "string", "x-request-scoped": True},
-                        "password": {"type": "string", "x-request-scoped": True},
-                        "token": {"type": "string", "x-request-scoped": True},
-                        "fallback_enabled": {"type": "boolean"},
-                    },
-                    "required": ["auth_mode", "fallback_enabled"],
-                },
+                "connection_ref": {"type": "string", "format": "uuid"},
+                "configuration_revision": {"type": "integer", "minimum": 0},
                 "storage_dir": {"type": "string"},
                 "confirm": {"const": True},
             },
@@ -979,10 +929,10 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     "POST /api/v1/tracking/items/<path:tracking_id>/submit": {
         "operationId": "submitTrackingItem",
         "summary": "提交统一追番方案到 Auto Bangumi（可靠顺序）",
-        "description": "US-225：对单条统一追番记录执行可靠提交流程。confirm 必须严格为 true，ab_config 只在单次请求内存中存在（绝不进入 storage/URL/日志/trace）。服务端重新读取最新本地 Request 并执行完整本地复核（纯本地，不信任浏览器 fingerprint）；复核不通过时不访问 Auto Bangumi，已落盘业务结果仍返回 HTTP 200，outcome 为 NEEDS_RECONFIRM/SUBMIT_FAILED/VERIFYING_EXTERNAL/RECOVERY_REQUIRED/ACTIVE。仅 Request fingerprint 变化且其余复核通过时，confirm=true 表示采纳最新方案并继续同一次提交。外部调用前先持久化 TrackingRecord=SUBMITTING 与 operation=IN_PROGRESS 作为外部可能发生的持久化边界；同 idempotency_key 重放复用原 operation，并发同键只允许一次外部调用。expected_revision 过期 → 409 tracking_revision_conflict；confirm=false → 400 tracking_confirmation_required；同键不同绑定 → 409 tracking_idempotency_conflict；进行中的提交操作 → 409 tracking_operation_in_progress。",
+        "description": "US-225：对单条统一追番记录执行可靠提交流程。confirm 必须严格为 true，连接通过已保存 generation 引用。服务端重新读取最新本地 Request 并执行完整本地复核；复核不通过时不访问 Auto Bangumi，已落盘业务结果仍返回 HTTP 200。外部调用前先持久化 TrackingRecord 与 operation；同 idempotency_key 重放复用原 operation。expected_revision 过期或绑定冲突时返回 409；confirm=false 返回 400。",
         "requestBody": {
             "type": "object",
-            "required": ["expected_revision", "idempotency_key", "confirm", "ab_config"],
+            "required": ["expected_revision", "idempotency_key", "confirm", "connection_ref", "configuration_revision"],
             "properties": {
                 "expected_revision": {
                     "type": "integer",
@@ -998,34 +948,8 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                     "enum": [True],
                     "description": "必须为 true：用户显式确认提交最新方案。",
                 },
-                "ab_config": {
-                    "type": "object",
-                    "x-request-scoped": True,
-                    "properties": {
-                        "auth_mode": {
-                            "type": "string",
-                            "enum": ["password", "api_token"],
-                        },
-                        "base_url": {
-                            "type": "string",
-                            "x-request-scoped": True,
-                        },
-                        "username": {
-                            "type": "string",
-                            "x-request-scoped": True,
-                        },
-                        "password": {
-                            "type": "string",
-                            "x-request-scoped": True,
-                        },
-                        "token": {
-                            "type": "string",
-                            "x-request-scoped": True,
-                        },
-                        "fallback_enabled": {"type": "boolean"},
-                    },
-                    "required": ["auth_mode", "fallback_enabled"],
-                },
+                "connection_ref": {"type": "string", "format": "uuid"},
+                "configuration_revision": {"type": "integer", "minimum": 0},
                 "storage_dir": {
                     "type": "string",
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
@@ -1058,10 +982,10 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     "POST /api/v1/tracking/items/<path:tracking_id>/retry": {
         "operationId": "retryTrackingItem",
         "summary": "重试明确失败的统一追番提交（可靠顺序）",
-        "description": "US-226：只允许从 SUBMIT_FAILED 重试；VERIFYING_EXTERNAL/RECOVERY_REQUIRED 必须先 recover 再 retry。请求 shape 与 submit 相同（confirm 严格 true、ab_config 只在单次请求内存、opaque idempotency_key）。服务复用统一提交序列：重新读取最新本地 Request 并复核、bind 新 operation=PREPARED、持久化 TrackingRecord=SUBMITTING、operation=IN_PROGRESS 作为外部边界、单次 Auto Bangumi 调用、结果分类与落盘。同 idempotency_key 网络重放复用原 operation。expected_revision 过期 → 409 tracking_revision_conflict；非 SUBMIT_FAILED → 409 tracking_state_conflict；confirm=false → 400 tracking_confirmation_required；同键不同绑定 → 409 tracking_idempotency_conflict。",
+        "description": "US-226：只允许从 SUBMIT_FAILED 重试；VERIFYING_EXTERNAL/RECOVERY_REQUIRED 必须先 recover 再 retry。请求使用已保存连接 generation 与 opaque idempotency_key。服务复用统一提交序列并在外部边界前持久化 operation；同键网络重放复用原 operation。expected_revision 过期、状态冲突或绑定冲突返回 409；confirm=false 返回 400。",
         "requestBody": {
             "type": "object",
-            "required": ["expected_revision", "idempotency_key", "confirm", "ab_config"],
+            "required": ["expected_revision", "idempotency_key", "confirm", "connection_ref", "configuration_revision"],
             "properties": {
                 "expected_revision": {
                     "type": "integer",
@@ -1076,34 +1000,6 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                     "type": "boolean",
                     "enum": [True],
                     "description": "必须为 true：用户显式确认重试提交最新方案。",
-                },
-                "ab_config": {
-                    "type": "object",
-                    "x-request-scoped": True,
-                    "properties": {
-                        "auth_mode": {
-                            "type": "string",
-                            "enum": ["password", "api_token"],
-                        },
-                        "base_url": {
-                            "type": "string",
-                            "x-request-scoped": True,
-                        },
-                        "username": {
-                            "type": "string",
-                            "x-request-scoped": True,
-                        },
-                        "password": {
-                            "type": "string",
-                            "x-request-scoped": True,
-                        },
-                        "token": {
-                            "type": "string",
-                            "x-request-scoped": True,
-                        },
-                        "fallback_enabled": {"type": "boolean"},
-                    },
-                    "required": ["auth_mode", "fallback_enabled"],
                 },
                 "storage_dir": {
                     "type": "string",
@@ -1137,7 +1033,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     "POST /api/v1/tracking/items/<path:tracking_id>/recover": {
         "operationId": "recoverTrackingItem",
         "summary": "恢复统一追番记录（AUTO 纯本地或人工核验）",
-        "description": "US-234：解决外部结果未知（VERIFYING_EXTERNAL）、本地结果落盘失败（RECOVERY_REQUIRED）或状态未知（UNKNOWN）的追番记录。action 允许 AUTO/MARK_SUCCEEDED/MARK_FAILED/VERIFY_EXTERNAL：AUTO 纯本地；VERIFY_EXTERNAL 仅在本次请求内接收 ab_config 并调用 3.1.18 只读管理读取，能力未知、无匹配或多匹配保持 RECOVERY_REQUIRED；人工动作必须 confirm=true。绝不接收外部 ID/URL/原始结果或调用管理写操作。",
+        "description": "US-330：恢复追番记录；AUTO/人工动作纯本地，VERIFY_EXTERNAL 仅使用已保存连接的 connection_ref + configuration_revision 执行 3.1.18 只读核验。",
         "requestBody": {
             "type": "object",
             "required": ["expected_revision", "action"],
@@ -1150,29 +1046,17 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "action": {
                     "type": "string",
                     "enum": ["AUTO", "MARK_SUCCEEDED", "MARK_FAILED", "VERIFY_EXTERNAL"],
-                    "description": "恢复动作：AUTO=纯本地；VERIFY_EXTERNAL=只读外部核验（需 request-scoped ab_config）；MARK_SUCCEEDED/MARK_FAILED=人工核验（需 confirm=true）。",
+                    "description": "恢复动作：AUTO=纯本地；VERIFY_EXTERNAL=只读外部核验（需 saved connection generation）；MARK_SUCCEEDED/MARK_FAILED=人工核验（需 confirm=true）。",
                 },
                 "confirm": {
                     "type": "boolean",
                     "description": "人工动作必须为 true；AUTO 忽略该字段。",
                 },
+                "connection_ref": {"type": ["string", "null"], "format": "uuid"},
+                "configuration_revision": {"type": ["integer", "null"], "minimum": 0},
                 "storage_dir": {
                     "type": "string",
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
-                },
-                "ab_config": {
-                    "type": "object",
-                    "x-request-scoped": True,
-                    "description": "仅 VERIFY_EXTERNAL 使用；连接配置只在本次请求内存中存在。",
-                    "properties": {
-                        "auth_mode": {"type": "string", "enum": ["password", "api_token"]},
-                        "base_url": {"type": "string", "x-request-scoped": True},
-                        "username": {"type": "string", "x-request-scoped": True},
-                        "password": {"type": "string", "x-request-scoped": True},
-                        "token": {"type": "string", "x-request-scoped": True},
-                        "fallback_enabled": {"type": "boolean"},
-                    },
-                    "required": ["auth_mode", "base_url", "fallback_enabled"],
                 },
             },
         },
@@ -1200,22 +1084,12 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     "POST /api/v1/mikan/candidates": {
         "operationId": "searchMikanCandidates",
         "summary": "搜索 MiKan 候选",
-        "description": "按标题搜索 MiKan 候选，返回公开候选元数据。mikan_config 为 request-scoped。",
+        "description": "按标题搜索 MiKan 候选，返回公开候选元数据。搜索配置由服务端提供。",
         "requestBody": {
             "type": "object",
             "required": ["query"],
             "properties": {
                 "query": {"type": "string"},
-                "mikan_config": {
-                    "type": "object",
-                    "properties": {
-                        "search_endpoint": {
-                            "type": "string",
-                            "x-request-scoped": True,
-                        },
-                        "timeout_seconds": {"type": "number"},
-                    },
-                },
             },
         },
         "success": MikanCandidateResultDTO,
@@ -1356,16 +1230,6 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             "required": ["raw_input"],
             "properties": {
                 "raw_input": {"type": "string"},
-                "mikan_config": {
-                    "type": "object",
-                    "properties": {
-                        "search_endpoint": {
-                            "type": "string",
-                            "x-request-scoped": True,
-                        },
-                        "timeout_seconds": {"type": "number"},
-                    },
-                },
                 "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
             },
         },
@@ -1430,280 +1294,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             },
         },
     },
-    "POST /api/v1/batches/<batch_id>/accept": {
-        "operationId": "acceptBatchItems",
-        "summary": "接受批量卡片进入提交前队列",
-        "requestBody": {
-            "type": "object",
-            "required": ["batch_id", "items"],
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "item_id": {"type": "string"},
-                            "request_id": {"type": "string"},
-                            "title": {"type": "string"},
-                        },
-                        "required": ["item_id"],
-                    },
-                },
-                "item_ids": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "可选：只接受指定卡片（缺省接受全部）。",
-                },
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
-            },
-        },
-        "success": BatchAcceptResultDTO,
-        "errors": {
-            "400": {
-                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
-                "invalid_batch_id": "batch_id 不能包含路径片段",
-            },
-        },
-    },
-    "GET /api/v1/batches/<batch_id>/queue": {
-        "operationId": "getBatchQueue",
-        "summary": "读取提交前队列",
-        "parameters": [
-            {
-                "name": "batch_id",
-                "in": "path",
-                "required": True,
-                "schema": {"type": "string"},
-            },
-            {
-                "name": "storage_dir",
-                "in": "query",
-                "required": False,
-                "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
-                "schema": {"type": "string"},
-            },
-        ],
-        "success": BatchQueueResultDTO,
-        "errors": {
-            "400": {
-                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
-                "invalid_batch_id": "batch_id 不能包含路径片段",
-            },
-        },
-    },
-    "POST /api/v1/batches/<batch_id>/submit": {
-        "operationId": "submitBatchQueue",
-        "summary": "提交队列到 Auto Bangumi",
-        "requestBody": {
-            "type": "object",
-            "required": ["batch_id", "confirm"],
-            "properties": {
-                "ab_config": {
-                    "type": "object",
-                    "x-request-scoped": True,
-                    "description": "Auto Bangumi 凭据（request-scoped，绝不落盘）。",
-                    "properties": {
-                        "auth_mode": {"type": "string", "enum": ["password", "api_token"]},
-                        "base_url": {"type": "string", "x-request-scoped": True},
-                        "username": {"type": "string", "x-request-scoped": True},
-                        "password": {"type": "string", "x-request-scoped": True},
-                        "token": {"type": "string", "x-request-scoped": True},
-                        "fallback_enabled": {"type": "boolean"},
-                    },
-                    "required": ["auth_mode", "fallback_enabled"],
-                },
-                "confirm": {"type": "boolean", "description": "显式用户确认。"},
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
-            },
-        },
-        "success": BatchSubmitResultDTO,
-        "errors": {
-            "400": {
-                "validation_error": "缺少 ab_config 或 confirm",
-                "queue_not_found": "队列不存在",
-                "invalid_batch_id": "batch_id 不能包含路径片段",
-                "config_error": "Auto Bangumi 配置无效",
-                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
-            },
-            "502": {
-                "ab_connection_failed": "Auto Bangumi HTTP 连接失败",
-                "ab_submit_failed": "Auto Bangumi HTTP 提交失败",
-            },
-            "503": {"ab_submit_unsupported": "当前 Auto Bangumi 版本或认证模式暂不支持提交"},
-            "504": {"ab_timeout": "Auto Bangumi HTTP 请求超时"},
-        },
-    },
-    "POST /api/v1/batches/<batch_id>/retry": {
-        "operationId": "retryBatchQueueItem",
-        "summary": "重试队列中单个失败项目",
-        "requestBody": {
-            "type": "object",
-            "required": ["batch_id", "request_id", "confirm"],
-            "properties": {
-                "request_id": {"type": "string"},
-                "ab_config": {
-                    "type": "object",
-                    "x-request-scoped": True,
-                    "properties": {
-                        "auth_mode": {"type": "string", "enum": ["password", "api_token"]},
-                        "base_url": {"type": "string", "x-request-scoped": True},
-                        "username": {"type": "string", "x-request-scoped": True},
-                        "password": {"type": "string", "x-request-scoped": True},
-                        "token": {"type": "string", "x-request-scoped": True},
-                        "fallback_enabled": {"type": "boolean"},
-                    },
-                    "required": ["auth_mode", "fallback_enabled"],
-                },
-                "confirm": {"type": "boolean"},
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
-            },
-        },
-        "success": BatchSubmitResultDTO,
-        "errors": {
-            "400": {
-                "validation_error": "缺少 ab_config/confirm/request_id",
-                "queue_not_found": "队列不存在",
-                "invalid_batch_id": "batch_id 不能包含路径片段",
-                "config_error": "Auto Bangumi 配置无效",
-                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
-            },
-            "404": {"queue_item_not_found": "队列中不存在该 request_id"},
-            "502": {
-                "ab_connection_failed": "Auto Bangumi HTTP 连接失败",
-                "ab_submit_failed": "Auto Bangumi HTTP 提交失败",
-            },
-            "503": {"ab_submit_unsupported": "当前 Auto Bangumi 版本或认证模式暂不支持提交"},
-            "504": {"ab_timeout": "Auto Bangumi HTTP 请求超时"},
-        },
-    },
-    "POST /api/v1/batches/<batch_id>/recover": {
-        "operationId": "recoverBatchQueueItem",
-        "summary": "恢复卡住的队列项目",
-        "requestBody": {
-            "type": "object",
-            "required": ["batch_id", "request_id", "action"],
-            "properties": {
-                "request_id": {"type": "string"},
-                "action": {
-                    "type": "string",
-                    "enum": ["auto", "succeeded", "failed"],
-                },
-                "confirm": {"type": "boolean"},
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
-            },
-        },
-        "success": BatchSubmitResultDTO,
-        "errors": {
-            "400": {
-                "validation_error": "action 非法或缺少确认",
-                "invalid_batch_id": "batch_id 不能包含路径片段",
-                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
-            },
-            "404": {"queue_item_not_found": "队列中不存在该 request_id"},
-        },
-    },
-    "POST /api/v1/qbittorrent/test-connection": {
-        "operationId": "testQbittorrentConnection",
-        "summary": "测试 qBittorrent 连接",
-        "description": "qbittorrent_config 为 request-scoped 凭据；成功响应只回白名单字段。",
-        "requestBody": {
-            "type": "object",
-            "required": ["qbittorrent_config"],
-            "properties": {
-                "qbittorrent_config": {
-                    "type": "object",
-                    "x-request-scoped": True,
-                    "properties": {
-                        "endpoint": {"type": "string", "x-request-scoped": True},
-                        "username": {"type": "string", "x-request-scoped": True},
-                        "password": {"type": "string", "x-request-scoped": True},
-                        "timeout_seconds": {"type": "number"},
-                        "verify_tls": {"type": "boolean"},
-                    },
-                    "required": ["endpoint", "username", "password"],
-                }
-            },
-        },
-        "success": QbittorrentConnectionResultDTO,
-        "errors": {
-            "400": {"config_error": "qBittorrent 配置无效"},
-            "401": {"qbittorrent_auth_failed": "认证失败"},
-            "502": {
-                "qbittorrent_connection_failed": "连接失败",
-                "qbittorrent_http_failed": "HTTP 请求失败",
-                "qbittorrent_unexpected_response": "响应无法识别",
-            },
-            "504": {"qbittorrent_timeout": "请求超时"},
-        },
-    },
-    "POST /api/v1/autobangumi/test-connection": {
-        "operationId": "testAutoBangumiConnection",
-        "summary": "测试 Auto Bangumi 连接",
-        "description": "ab_config 为 request-scoped 凭据；成功响应只回白名单字段。",
-        "requestBody": {
-            "type": "object",
-            "required": ["ab_config"],
-            "properties": {
-                "ab_config": {
-                    "type": "object",
-                    "x-request-scoped": True,
-                    "properties": {
-                        "auth_mode": {"type": "string", "enum": ["password", "api_token"]},
-                        "base_url": {"type": "string", "x-request-scoped": True},
-                        "username": {"type": "string", "x-request-scoped": True},
-                        "password": {"type": "string", "x-request-scoped": True},
-                        "token": {"type": "string", "x-request-scoped": True},
-                        "fallback_enabled": {"type": "boolean"},
-                    },
-                    "required": ["auth_mode", "fallback_enabled"],
-                }
-            },
-        },
-        "success": AutoBangumiConnectionResultDTO,
-        "errors": {
-            "400": {"config_error": "Auto Bangumi 配置无效"},
-            "401": {"ab_auth_failed": "认证失败"},
-            "502": {
-                "ab_connection_failed": "连接失败",
-                "ab_submit_failed": "提交失败",
-            },
-            "503": {
-                "ab_unsupported_version": "版本不受支持",
-                "ab_probe_unsupported": "当前认证模式不支持此探测方式",
-            },
-            "504": {"ab_timeout": "请求超时"},
-        },
-    },
-    "POST /api/v1/autobangumi/capabilities": {
-        "operationId": "probeAutoBangumiCapabilities",
-        "summary": "探测 Auto Bangumi 只读能力",
-        "description": "ab_config 仅为 request-scoped 凭据；响应严格白名单，未知能力 fail closed。",
-        "requestBody": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["ab_config"],
-            "properties": {
-                "ab_config": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "x-request-scoped": True,
-                    "properties": {
-                        "auth_mode": {"type": "string", "enum": ["password", "api_token"]},
-                        "base_url": {"type": "string", "x-request-scoped": True},
-                        "username": {"type": "string", "x-request-scoped": True},
-                        "password": {"type": "string", "x-request-scoped": True},
-                        "token": {"type": "string", "x-request-scoped": True},
-                        "fallback_enabled": {"type": "boolean"},
-                    },
-                    "required": ["auth_mode", "fallback_enabled"],
-                }
-            },
-        },
-        "success": AutoBangumiCapabilitiesDTO,
-        "errors": {"400": {"config_error": "Auto Bangumi 配置无效"}},
-    },
 }
-
 
 def _normalized_path(path: str) -> str:
     """Convert url_map <...> placeholders to OpenAPI {param} form."""
@@ -1774,8 +1365,7 @@ def _operation_id(method: str, path: str) -> str:
     This is the fallback for endpoints without an explicit ``operationId`` in
     ``_ENDPOINTS`` (every current endpoint declares an explicit readable id,
     so the derivation only guards future additions). ``GET
-    /api/v1/requests/{request_id}`` → ``getRequestsByRequestId``; ``POST
-    /api/v1/batches/{batch_id}/submit`` → ``postBatchesByBatchIdSubmit``.
+    /api/v1/requests/{request_id}`` → ``getRequestsByRequestId``.
     Path params are inlined so each endpoint gets a distinct name and
     TypeScript client generators get deterministic identifiers.
     """

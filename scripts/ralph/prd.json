@@ -1,34 +1,37 @@
 {
   "project": "MiGuOrca",
-  "branchName": "ralph/stage38-tracking-management",
-  "description": "Stage 38（F-F）：补齐 generated 追番管理契约，并把 /app/tracking 建成正式桌面管理页，交付本地总览、页面凭据会话、同步、复核、可靠提交、恢复和单条 Auto Bangumi 管理闭环。",
+  "branchName": "ralph/stage39-deployment-settings",
+  "description": "Stage 39（扩展 F-G）：仅持久化 Auto Bangumi 部署连接，先独立验收新增后端支撑，再接入设置与追番；删除 qBittorrent 连接测试及退役 Web 编排，封装 MiKan 搜索，完成跨页与 Gate 5 候选交付。当前仅为待启动计划，不代表实现或发布授权。",
   "userStories": [
     {
-      "id": "US-303",
-      "title": "补齐 F-F generated 管理契约",
-      "description": "作为前端消费者，我需要严格生成的修改 patch 与安全目标范围，以便无需手写 DTO 或猜测 scope 即可调用既有管理端点。",
+      "id": "US-318",
+      "title": "建立隔离的部署端 AB 配置 repository",
+      "description": "作为本地部署用户，我希望 AB 配置在服务重启后保留，而不混入番剧业务文件。",
       "acceptanceCriteria": [
-        "modifyTrackingItem 在 OpenAPI 中使用 target_scope 对应的严格 patch 联合：SUBSCRIPTION 仅 title、season、subtitle_group、filter_rule、offset、expected_folder_name，ASSOCIATED_RSS 仅 name、aggregate、parser；patch 非空且跨 scope 字段继续拒绝",
-        "generated TypeScript patch 不得为 Record<string, never>、any 或任意字典，前端只从 operations['modifyTrackingItem'] 派生类型",
-        "TrackingAvailableActionDTO 增加严格 target_scopes；非管理动作为空数组，管理动作只列当前本地安全映射实际存在且状态允许的 scope",
-        "同步 DTO、serializer、OpenAPI、generated client、示例、inventory、handoff 和 contract tests；不泄漏外部 ID/URL/RSS/原始映射，不新增 endpoint、状态、schema 或业务语义",
-        "Targeted DTO/serializer/OpenAPI/generated contract tests pass",
-        "API drift check and typecheck pass"
+        "新增仅服务端可指定的 MIGU_ORCA_WEB_CONFIG_ROOT，默认 .migu_orca/config；autobangumi.json 与所有 Web storage profile 独立，浏览器不能指定或覆盖配置根",
+        "严格 password/API Token 配置联合；秘密模型隐藏 repr；HTTP(S) 服务根规范化支持裸 host:port，拒绝路径、用户信息、查询、片段与歧义输入，不保存未经校验的地址",
+        "每次成功保存生成全新 opaque connection_ref，configuration_revision 单调递增；删除以不含秘密的 tombstone 保留 revision，重建不能产生 ABA",
+        "目录 0700、配置与临时文件 0600，限制权限失败、符号链接、损坏内容和 IO 故障 fail closed；原子替换失败保留上次成功值，错误不回显值、内容或路径",
+        "仅专用配置文件允许保存 base_url、账号、密码或 Token；Request、history、tracking、operation、队列、迁移、普通备份与公开 serializer 不得含这些字段值",
+        "新增 repository 测试覆盖重建实例读取、save/delete/CAS、权限、符号链接、损坏文件、写失败、revision 和 canary 隔离；Tests pass",
+        "Typecheck passes"
       ],
       "priority": 1,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "US-304",
-      "title": "建立 tracking 页面投影与动作意图核心",
-      "description": "作为前端维护者，我需要 generated 类型驱动且 API-free 的投影与动作意图核心，以便页面不重建状态机并统一可靠写边界。",
+      "id": "US-319",
+      "title": "实现 AB 配置管理 API 与本地写入口防护",
+      "description": "作为用户，我希望显式保存、更换和清除 AB 配置，并且不能从 API 读取秘密。",
       "acceptanceCriteria": [
-        "类型只从 generated list/detail/capability/action/operation 提取，不手写 API DTO",
-        "纯函数覆盖 status_group 总览、标题/字幕组搜索、状态筛选、稳定排序和未知值安全降级，不重建状态机",
-        "动作只由 available_actions、target_scopes 与 capability=SUPPORTED 的交集产生，未知 code/style/scope/capability 全部 fail closed",
-        "动作意图包含最新 revision、confirm 与 opaque idempotency key；每次确认新建一次、transport retry 复用且不得泄漏",
-        "Targeted tracking projection/action intent tests pass",
+        "GET/PUT/DELETE /api/v1/settings/autobangumi，operationId 为 getAutoBangumiConnection/saveAutoBangumiConnection/deleteAutoBangumiConnection；PUT 和 DELETE 要求 confirm=true 与 expected_configuration_revision",
+        "GET 及写响应仅返回第 5 节安全摘要，不含 base_url、username、password、token、原始配置或路径；GET 无配置与配置损坏均不触发外部访问，损坏返回固定安全错误",
+        "PUT 必须提交完整新配置，禁止空秘密表示沿用、回读旧秘密、合并其他 profile 或自动迁移浏览器输入；保存不自动探测、同步或提交；DELETE 只清除 AB 配置",
+        "为配置修改建立服务端 CAS 与当前进程外部请求 lease；在途外部请求时修改立即 409 connection_in_use，不长时间阻塞，不仅靠前端 disabled",
+        "相关变更请求只接受 application/json；有 Origin 时严格核对部署方受信同源，不反射任意 Origin、不开 CORS；缺失 Origin 的非浏览器客户端仍受受信 Host 约束",
+        "Flask 受信 Host 默认仅 localhost/loopback，额外部署 Host 仅由服务端配置；恶意 Host/Origin 与简单跨站表单在使用保存的凭据或产生配置副作用之前被拒绝",
+        "同步 schema/DTO/serializer/OpenAPI/generated/inventory、真实 Flask 契约和恶意 Origin/Host 测试；API drift check and Tests pass",
         "Typecheck passes"
       ],
       "priority": 2,
@@ -36,218 +39,372 @@
       "notes": ""
     },
     {
-      "id": "US-305",
-      "title": "实现正式追番总览与单选列表",
-      "description": "作为用户，我希望在正式追番管理页看到状态总览并快速选择单条追番，而不是默认进入旧队列。",
+      "id": "US-320",
+      "title": "为 operation 与外部映射增加非敏感连接绑定",
+      "description": "作为维护者，我需要持久的连接绑定，防止服务重启或更换配置后误操作另一 AB 实例。",
       "acceptanceCriteria": [
-        "/app/tracking 默认渲染状态总览、搜索筛选、单选列表和检查器占位，不再默认挂载 QueueView",
-        "列表只调用 generated listTrackingItems，展示公开字段且无 checkbox、批量动作、外部 ID 或技术凭据",
-        "桌面遵循效果图约 58%～64% 列表布局；1280px 与 200% 缩放可纵向重排且主状态可达",
-        "合法 tracking_id 可定位、高亮、聚焦；非法、重复、不存在或已删除值安全清理，刷新/筛选/目标消失不暗换且焦点可恢复",
-        "覆盖加载、空数据、筛选无结果、列表失败、固定中文重试、aria-current 和非纯颜色状态",
-        "Targeted TrackingView list tests and typecheck pass",
-        "Verify in browser using dev-browser skill"
+        "TrackingOperation 使用向后可读的 schema v3，仅新增 connection_ref；external_mapping 使用向后可读的 schema v2，仅新增 connection_ref；旧入口切换前未绑定路径按 legacy 分支可读，最终新保存连接入口必须有 ref，未知字段/schema 严格拒绝",
+        "绑定只保存随机 opaque ref，不保存地址、账号、秘密或秘密摘要；新 operation 的幂等绑定包含原 connection_ref、expected_revision 和既有 action/scope/patch fingerprint",
+        "可读取旧 operation v1/v2 与旧映射 v1；旧缺失 ref 标记为未绑定，不将当前连接猜成原连接，不自动改写、终结或清除旧未知操作",
+        "新映射必须有合法 ref；缺失、过期或与当前 ref 不符的映射不得执行外部管理；公共详情只显示安全的需重新核验原因，不暴露私有映射",
+        "repository round-trip、版本兼容、同键不同 ref、未知字段和 canary 测试覆盖真实读写；Tests pass",
+        "Typecheck passes"
       ],
       "priority": 3,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "US-306",
-      "title": "实现 TrackingInspector 安全详情",
-      "description": "作为用户，我希望在右侧检查器查看当前追番的安全详情、复核问题与本地方案入口。",
+      "id": "US-321",
+      "title": "接入部署配置能力探测与请求快照",
+      "description": "作为用户，我希望测试已保存的 AB 连接，并在跨页后复用配置而不重复输入凭据。",
       "acceptanceCriteria": [
-        "sticky 检查器只调用 generated getTrackingItemDetail，展示安全方案、外部、操作、复核、审计摘要和更新待开发",
-        "有 request_id 时深链 /app/plans；EXTERNAL_ONLY 或无 Request 时隐藏入口并安全说明",
-        "首次加载有骨架，快速切换丢弃旧响应，详情失败不清空健康列表且可固定中文重试",
-        "不展示 raw Request、完整 URL、外部 ID、原始响应或绝对路径，选择消失时恢复焦点",
-        "Targeted TrackingInspector tests and typecheck pass",
-        "Verify in browser using dev-browser skill"
+        "新增 POST /api/v1/settings/autobangumi/probe（probeSavedAutoBangumiCapabilities），请求 connection_ref + configuration_revision；服务端解析当前保存配置，取得 immutable snapshot 与 lease，结束/失败释放；既有临时凭据探测暂不改类型，US-330 删除",
+        "探测仍为显式只读 POST；响应复用既有严格 capability DTO，安全摘要显示 UNCONFIGURED/CONFIGURED/VERIFIED/ERROR，已保存不等于连接成功",
+        "探测结果仅绑定本次 ref/revision；旧探测响应不能更新新配置的状态；配置保存或删除使 capability 缓存失效，重启后只显示 CONFIGURED，不持久化 raw probe",
+        "HTTP 200 下 FAILED/PARTIAL/UNKNOWN 不误报 VERIFIED；API Token 只按已验证 capability 提供能力，管理写仍仅 password + 精确 3.1.18",
+        "共享快照解析器拒绝缺配置、过期 ref/revision、损坏配置和同时夹带 ab_config；业务服务中的临时配置不离开受控 adapter",
+        "同步 OpenAPI/generated 与相关探测/租约/代际/能力降级契约测试；API drift check and Tests pass",
+        "Typecheck passes"
       ],
       "priority": 4,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "US-307",
-      "title": "实现页面级 CredentialSessionDialog",
-      "description": "作为用户，我希望临时连接 Auto Bangumi 并查看能力，同时确保凭据不会离开当前追番页面会话。",
+      "id": "US-322",
+      "title": "迁移可靠提交与重试到保存的 AB 连接",
+      "description": "作为用户，我希望刷新后仍能提交，而不破坏原有确认、幂等与未知结果保护。",
       "acceptanceCriteria": [
-        "凭据只存在 TrackingView 实例和单次 POST body，并复用 useSensitiveFields；刷新、离页、取消、切模、清除、卸载全部销毁",
-        "默认 password；API Token 只按真实 capability 提供能力，不假定具备 3.1.18 写管理",
-        "只调用 generated probeAutoBangumiCapabilities，安全展示版本和能力状态，不显示 endpoint、账号或凭据",
-        "探测失败保留输入但只显示固定中文；取消销毁输入；连接成功回到动作上下文但不自动执行写",
-        "Targeted credential session/probe tests and typecheck pass",
-        "Verify in browser using dev-browser skill"
+        "先新增仅服务端消费配置引用的 submit/retry 服务入口与严格输入模型，不提前改变现有 operation 请求形状；US-328 同轮切换 HTTP schema/generated/全部调用者并删除业务请求 ab_config，保留 confirm/revision/key/profile",
+        "进入外部边界前原子校验当前配置绑定并取得 lease，operation 在 PREPARED/IN_PROGRESS 前持久化原 ref；写前复核、外部调用、写后回查与落盘顺序不变",
+        "同 key 的重放必须先验证原 ref/revision/action 绑定；成功终态可安全返回既有结果，未知/进行中不得因配置更换产生新调用或新 key",
+        "成功提交落盘的外部映射绑定实际使用的 ref；本地 NEEDS_RECONFIRM 与存储失败不伪造外部成功，不把尚未外部调用的错误记成未知",
+        "重启、更换配置、同 ref 请求重放、同键不同 ref、明确失败和未知结果测试真实进入统一 service；未知和重放场景外部调用计数不增加",
+        "冻结新引用输入模型/安全结果与 service handoff；既有 HTTP/generated 请求保持可编译直到 US-328 原子切换；定向 service/模型测试和当前 API drift check pass，Tests pass",
+        "Typecheck passes"
       ],
       "priority": 5,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "US-308",
-      "title": "接入显式 Auto Bangumi 同步与只读降级",
-      "description": "作为用户，我希望在明确确认后同步外部订阅，并在能力或网络异常时继续查看已有本地追番。",
+      "id": "US-323",
+      "title": "迁移同步并验证外部映射归属",
+      "description": "作为用户，我希望显式同步当前 AB，且更换连接后旧外部编号不会成为新服务的写目标。",
       "acceptanceCriteria": [
-        "初始只读本地 tracking；仅已连接且用户确认后调用 generated syncTrackingItems(confirm=true)",
-        "同步单飞并以返回 items/summary 更新页面后回查当前详情，不从外部字段拼对象",
-        "失败、PARTIAL、UNKNOWN 或探测失败保留旧列表，不误报为空，并提供重连、重探测或再次同步",
-        "旧列表/详情响应不得覆盖同步后的新 revision",
-        "Targeted sync/degraded-state tests and typecheck pass",
-        "Verify in browser using dev-browser skill"
+        "新增保存连接的同步 service 入口与严格引用模型，保留 confirm=true；现有 syncTrackingItems HTTP/generated 输入在 US-330 切换，初始 list/detail 与 GET 配置不触发外部访问",
+        "同步以本次连接快照执行，产生的新映射绑定实际 ref；旧配置的响应不能覆盖新 ref 数据，失败/PARTIAL/UNKNOWN 保留既有本地列表",
+        "旧缺失 ref 或已失效映射仅在用户确认的只读同步及既有严格匹配/去歧义证据成立后核验；单凭相同外部 ID、标题或旧状态不得重新绑定",
+        "未决 operation 的源 ref、绑定与恢复锁不得被同步改写；跨实例找不到对象不直接把旧项判为外部删除，不自动创建替代订阅",
+        "不新增猜测匹配规则；无法证明归属时保留本地项、提供安全只读原因，当前外部对象可按 EXTERNAL_ONLY 展示",
+        "双 AB 实例同 ID、歧义匹配、旧未绑定映射、未知操作、旧响应与部分成功回归通过；API drift check and Tests pass",
+        "Typecheck passes"
       ],
       "priority": 6,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "US-309",
-      "title": "接入本地复核与返回修改方案",
-      "description": "作为用户，我希望在提交前重新复核本地方案，并在失败时返回真实方案修改。",
+      "id": "US-324",
+      "title": "迁移外部管理到严格连接绑定",
+      "description": "作为用户，我希望修改、启停、刷新和删除只作用于核验过的当前 AB 对象。",
       "acceptanceCriteria": [
-        "REVALIDATE 仅发送最新 expected_revision 与安全 storage profile，不要求或携带 AB 凭据且不访问外部",
-        "ready=false 是 200 业务结果，以服务端 issues 说明尚未创建外部订阅，并用返回 tracking 原子收敛",
-        "存在 request_id 时提供 /app/plans 深链；外部孤立项只说明不可返回原因",
-        "409 revision/state 冲突先回查详情、清除旧意图并要求重新确认，不静默重发",
-        "Targeted revalidate/conflict tests and typecheck pass",
-        "Verify in browser using dev-browser skill"
+        "为四类管理增加保存连接 service 入口和严格 ref/revision 输入模型；US-329 同轮切换 modify/set-enabled/refresh/delete HTTP schema/generated/调用者，保留 patch/scope/confirm/tracking revision/key",
+        "管理动作依次验证配置 ref、映射 ref、服务端 action/scope 和同次 capability；映射旧/缺失/异实例一律在外部写前拒绝",
+        "operation 与管理幂等 fingerprint 绑定实际 ref；写前读取、写后回查、部分结果和未知保护不变，配置修改不得绕过管理意图锁",
+        "删除始终单条且 adapter 固定 file=false；所有成功/失败/未知结果保留本地方案、tracking、审计、任务与媒体",
+        "不同 AB 实例复用外部 ID 和相同 key、scope、patch 不得发写请求；覆盖四类管理及未知/能力降级/租约冲突",
+        "冻结管理输入模型/绑定 service 与当前 API drift；不提前移除现有 generated ab_config 字段导致前端失败，US-329 原子切换；定向 service/契约准备测试和 Tests pass",
+        "Typecheck passes"
       ],
       "priority": 7,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "US-310",
-      "title": "实现显式可靠提交",
-      "description": "作为用户，我希望经过明确影响确认后可靠创建单条 Auto Bangumi 订阅，并能安全处理结果未知。",
+      "id": "US-325",
+      "title": "迁移未知结果恢复并保护历史未绑定意图",
+      "description": "作为用户，我希望更新或清除配置后，仍能安全处理以前结果未知的操作。",
       "acceptanceCriteria": [
-        "SUBMIT 由 action+capability 门控，要求页面凭据、最新 revision、新 opaque key、confirm=true；连接或导航不得自动提交",
-        "确认说明创建外部订阅，取消零请求，请求中只锁当前条目的冲突动作",
-        "每次确认一个 key，transport retry 复用；key 不进入 DOM、URL、storage、日志、通知或 trace",
-        "按 ACTIVE、SUBMIT_FAILED、NEEDS_RECONFIRM、VERIFYING_EXTERNAL/RECOVERY_REQUIRED 分流，并以返回 tracking 更新后回查",
-        "网络、timeout、非 JSON、5xx 或结果不明只读回查，不生成新 key 或盲重发",
-        "Targeted submit/idempotency tests and typecheck pass",
-        "Verify in browser using dev-browser skill"
+        "增加保存连接的 VERIFY_EXTERNAL service 入口与严格引用模型；AUTO/MARK_SUCCEEDED/MARK_FAILED 不解析 AB 配置；recoverTrackingItem HTTP/generated 联合于 US-330 切换，外部核验仅只读原 operation",
+        "VERIFY_EXTERNAL 要求 operation 原 ref 与当前 ref 严格一致；配置更换、清除、旧 operation 缺失 ref 均安全拒绝外部核验，不暗换连接、不产生外部写",
+        "保留旧未知/未绑定记录与审计；AUTO 只使用本地持久证据，无法确定时进入既有人工恢复流程，不自动将失败或成功标为终态",
+        "人工恢复保留独立核对、二次确认和默认取消；不接收外部 ID、URL、自由备注或秘密；明确终态之前 submit/retry/management 均保持服务端锁",
+        "模拟服务重启及删配置后重建，原未知意图不能重放；相同 ref 只读核验、人工明确失败后新确认新 key 等回归通过",
+        "冻结严格恢复引用模型、旧未绑定策略和 service handoff；现有 HTTP/generated 输入直到 US-330 原子切换才移除 ab_config；定向 recovery/模型测试和 API drift check pass，Tests pass",
+        "Typecheck passes"
       ],
       "priority": 8,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "US-311",
-      "title": "实现明确失败的幂等重试",
-      "description": "作为用户，我希望仅对服务端明确失败的追番项发起新的重试意图，而不会因网络问题创建重复订阅。",
+      "id": "US-326",
+      "title": "完成新增后端支撑的独立验收与前端交接",
+      "description": "作为维护者，我需要先核实后端连接契约，再让 F-G 页面开始接入。",
       "acceptanceCriteria": [
-        "RETRY 仅在服务端 action 与 capability 允许时显示，并要求凭据、最新 revision、confirm 和影响确认",
-        "明确失败后的每次用户确认使用新 key；同一请求 transport retry 复用原 key",
-        "所有业务结果和 revision/idempotency/state 冲突按服务端 tracking 收敛并刷新详情",
-        "transport 结果不明锁定意图并只读回查，未确认未生效前不允许新 key",
-        "Targeted retry/idempotency/conflict tests and typecheck pass",
-        "Verify in browser using dev-browser skill"
+        "逐条核对 US-318～US-325 的实际代码、schema、操作绑定、IO 权限、Origin/Host 和 targeted 测试证据，不以 passes 标记代替审核",
+        "新增配置专属测试 fixture 与 Flask app 配置根隔离，所有受影响 API/浏览器 fixture 必须指向临时配置根，不读取开发者默认配置",
+        "运行受影响 repository/service/API contract 测试、Ruff、OpenAPI drift 与 generated typecheck，不在此 story 重跑全部后端/前端/Chromium门禁",
+        "交付新配置 API、保存连接探测和业务 service 入口/严格引用模型 handoff，语义先审核；旧业务 operation HTTP/generated 仍保持可编译，前端切片同轮修改请求契约与调用者；仅配置文件可含秘密",
+        "本工作包后强制停止独立审核，未通过不得进入 US-327；中间分支不能部署为完成品，不 push/PR/merge",
+        "Targeted backend handoff checks and Tests pass",
+        "Typecheck passes"
       ],
       "priority": 9,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "US-312",
-      "title": "实现结果未知恢复闭环",
-      "description": "作为用户，我希望对结果未知的操作执行自动、外部核验或人工恢复，而不是盲目重复外部写。",
+      "id": "US-327",
+      "title": "将设置页 AB 区域改为保存与测试连接",
+      "description": "作为本地用户，我希望在设置中配置一次 AB，此后刷新和离页不用重新输入。",
       "acceptanceCriteria": [
-        "只渲染服务端 RECOVER_AUTO、MARK_SUCCEEDED、MARK_FAILED；VERIFY_EXTERNAL 仅只读核验同一 operation，不创建外部写",
-        "AUTO 无凭据；VERIFY_EXTERNAL 使用当前 ab_config；人工结论二次确认且不接收外部 ID、URL、原始响应或备注",
-        "needs_manual 要求先独立核对且默认焦点取消；恢复期间禁用 submit/retry/management",
-        "结果以返回 tracking 收敛，无法确定保持恢复态；冲突先回查并重新确认",
-        "Targeted recovery/manual-lock tests and typecheck pass",
-        "Verify in browser using dev-browser skill"
+        "Settings AB 区域仅使用 generated get/save/deleteAutoBangumiConnection 与新增 probeSavedAutoBangumiCapabilities，提供保存/测试/更换/清除配置；同轮移除 submitAb、request_id 提交上下文与旧提交按钮，不等待端点退役",
+        "默认 password，API Token 按真实能力只读降级；保存与探测分开，输入服务地址支持既有裸局域网地址规范化，不填写内部 Request/storage/API 术语",
+        "秘密永不回显；已保存只展示 credential_present 和安全摘要，修改需完整重填；成功保存、取消、切认证、离页清除浏览器输入，不删除部署端配置",
+        "保存失败保留本次受控表单输入供修正，仅给固定安全错误；测试已保存配置失败不删除配置；409 先重读摘要要求重新确认，不静默覆盖",
+        "GET 不含 endpoint/账号/秘密，表单必要输入不复制到属性、结果、通知、URL/history/storage/console；删除必须确认且不影响本地方案或媒体",
+        "Vitest 与真实 Chromium 覆盖保存、测试成功/失败、刷新/跨页保留、取消、删除、CAS、裸地址与 canary；Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 10,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "US-313",
-      "title": "实现外部订阅与关联 RSS 修改",
-      "description": "作为用户，我希望只按服务端与当前能力允许的目标修改 Auto Bangumi 番剧订阅或关联 RSS。",
+      "id": "US-328",
+      "title": "迁移追番页提交与重试输入",
+      "description": "作为用户，我希望追番页使用已保存连接，同时继续逐条显式确认提交。",
       "acceptanceCriteria": [
-        "MODIFY 只对 target_scopes 与 capability 交集展示，使用用户文案且不显示外部 ID",
-        "请求类型只从 generated operation 派生；番剧/RSS 表单分离，空 patch、未知字段、跨 scope 字段不可提交",
-        "番剧仅允许 title/season/subtitle_group/filter_rule/offset/expected_folder_name，RSS 仅 name/aggregate/parser",
-        "复用凭据、确认、revision、单意图 key、单飞、回查和未知保护；只按服务端 management_status 等收敛",
-        "Targeted generated modify/scope tests and typecheck pass",
-        "Verify in browser using dev-browser skill"
+        "同轮切换 submit/retry HTTP schema/OpenAPI/generated 及 TrackingView/纯 body builder/测试，使用 ref/revision 删除这两类请求 ab_config；写意图不持有密码、Token、地址或 writeConfigSnapshot，未切换的旧探测输入在 US-330 统一移除",
+        "未配置/未探测/能力 UNKNOWN 时安全降级，提供去设置或显式探测入口；页面加载、回到追番页、配置保存和探测都不得自动提交",
+        "保留写 intent 原 key、tracking revision、connection_ref 与 configuration_revision；同一传输意图不得用重读后的 ref/revision 改写绑定",
+        "连接变化清除旧 capability 与可执行确认上下文；结果未知仍只读回查/恢复；确认取消零写，409 重读并要求重新确认",
+        "配置查询/列表/详情代际分别处理，旧摘要不得覆盖新 ref；写结果面板不因改 key 重挂载而丢失",
+        "定向 submit/retry Vitest 与 Chromium 覆盖跨页/刷新后提交、新旧配置、未知与重复点击；Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 11,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "US-314",
-      "title": "实现启停与关联 RSS 刷新",
-      "description": "作为用户，我希望安全启停当前外部番剧订阅或刷新当前追番的关联 RSS。",
+      "id": "US-329",
+      "title": "迁移追番页外部管理输入",
+      "description": "作为用户，我希望外部管理使用保存的连接且不能操作旧实例的映射。",
       "acceptanceCriteria": [
-        "SET_ENABLED 与 REFRESH_RSS 只按 target_scopes+capability 交集显示，未知或目标缺失只读降级",
-        "启停目标由用户明确选择并说明只影响 Auto Bangumi；REFRESH_RSS 仅当前 tracking 的 ASSOCIATED_RSS，不调用全局 refresh",
-        "复用凭据、确认、revision、单意图 key、单飞、回查和未知恢复，列表与检查器按返回 tracking 同步",
-        "覆盖成功、明确失败、部分结果、能力降级和未知；delete file=false 后端边界不变",
-        "Targeted enable/refresh tests and typecheck pass",
-        "Verify in browser using dev-browser skill"
+        "同轮切换四类管理 HTTP schema/OpenAPI/generated、TrackingView 与 intents/body/tests，仅发送 ref/revision，不持有 managementConfigSnapshot；dispatch 与 body 门控一致",
+        "管理按钮仍来自 available_actions + target_scopes + capability 交集；旧映射或新配置未核验时只读降级",
+        "新配置摘要到达时取消旧未执行确认上下文；未决 management 意图保留源 ref 与锁，不能使用新配置重试",
+        "逐条影响确认、最新 tracking revision、同一 key、单飞、写后回查、未知保护和 file=false 文案不变",
+        "定向四类管理 Vitest/Chromium 覆盖同 ID 异实例、配置变化、能力降级、取消零写、未知恢复与 canary；Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 12,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "US-315",
-      "title": "实现逐条外部删除安全闭环",
-      "description": "作为用户，我希望逐条删除 Auto Bangumi 外部对象，同时确认本地方案与媒体一定保留。",
+      "id": "US-330",
+      "title": "迁移追番页同步、探测与恢复并移除凭据弹窗",
+      "description": "作为用户，我希望连接配置留在设置中，追番页只负责同步、恢复和业务动作。",
       "acceptanceCriteria": [
-        "DELETE_EXTERNAL 仅当前单条 tracking 和明确 scope，无 checkbox、批量或全局删除",
-        "确认说明删除外部对象并保留本地 Request、tracking、审计、任务和已下载媒体",
-        "只用 generated endpoint 且请求无 file 字段；默认焦点取消，危险按钮，取消零请求并防重复",
-        "按服务端结果与回查收敛；EXTERNAL_DELETED 留在本地列表，可看历史并返回方案",
-        "Targeted delete/safety tests and typecheck pass",
-        "Verify in browser using dev-browser skill"
+        "同轮切换 sync/recover HTTP schema/OpenAPI/generated/全部调用者：probe 使用新增 probeSavedAutoBangumiCapabilities，sync/VERIFY_EXTERNAL 发送 ref/revision；AUTO/人工/revalidate 不要求连接",
+        "删除 POST /api/v1/autobangumi/capabilities 的临时凭据入口与 generated operation、CredentialSessionDialog、TrackingView 所有 ab_config/秘密状态及无调用测试；不保留全局凭据弹窗或双轨兼容层",
+        "同步仍须用户确认、单飞、旧列表保留和写后详情回查；不因全局 chip、导航、刷新或恢复结果而自动同步",
+        "原 operation 未绑定或 ref 不符时只提供可行的本地/人工恢复；未知不能变成明确失败、不能解除源锁",
+        "定向 Vitest 与 Chromium 覆盖配置跨页、纯本地复核、同 ref 外部核验、删配置与旧未绑定恢复、失败降级和敏感值；Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 13,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "US-316",
-      "title": "完成兼容、安全、可访问性与视觉收敛",
-      "description": "作为桌面端用户，我希望正式追番管理在旧入口、多视口、键盘和敏感失败场景下都安全可用。",
+      "id": "US-331",
+      "title": "实现安全全局连接提示与待处理徽标",
+      "description": "作为用户，我希望知道连接是否配置好，并能找到需要处理的追番项。",
       "acceptanceCriteria": [
-        "QueueView 退出默认运行时；旧 batch_id 仅按 queue 公开 request_id 一次性定位，tracking DTO 仍是状态和动作权威",
-        "用引用搜索、路由、bundle、Vitest、Chromium 证明新页覆盖 handoff/submit/retry/recover；不删除后端兼容 endpoint",
-        "1280x720、1440x900、1920x1080 与 200% 可完成关键旅程，键盘、焦点、aria-live、reduced-motion 和非纯颜色状态正确",
-        "敏感 canary 覆盖成功和各类失败/恢复，DOM、URL、history、storage、console、截图、trace 均无敏感值",
-        "记录全局连接 chip 延后 F-G 的视觉偏差，不提交 dist、trace、截图、真实凭据或 storage artifact",
-        "Targeted compatibility/security/a11y/viewport tests and typecheck pass",
-        "Verify in browser using dev-browser skill"
+        "App 顶部状态采用未配置/已配置/连接可用/需检查，只消费 generated 安全摘要；连接可用只表示本次配置最近探测通过，不保证持续在线",
+        "点击状态入口通过 routeLocation 到设置，不打开凭据弹窗；品牌返回添加页并遵守已有离开保护，导航与焦点语义保持可达",
+        "加载摘要不探测外部；安全摘要只可在非持久内存 store 缓存，更换/删除/重启使旧验证失效，旧响应不得回写新配置",
+        "追番徽标仅从当前 profile 的 generated listTrackingItems.items.status 计数 PENDING_SUBMIT + SUBMIT_FAILED，不使用不存在的 summary 字段或旧 queue；零隐藏，失败/未知不伪造零",
+        "profile 改变清除旧计数并重读，保存确认/写/恢复后由服务端摘要收敛；不以徽标构建客户端状态机",
+        "Vitest/Chromium 覆盖四状态、服务重启、跨页/profile、零计数、查询失败、离开保护、键盘与 200%；Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 14,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "US-317",
-      "title": "完成最终门禁文档归档与 F-G handoff",
-      "description": "作为维护者，我需要完整验证正式追番管理并留下无歧义的设置与发布收尾边界。",
+      "id": "US-332",
+      "title": "简化设置偏好并迁移无效保存开关",
+      "description": "作为用户，我希望设置只包含实际生效的默认规则和存储偏好。",
       "acceptanceCriteria": [
-        "逐项映射 US-303 至 US-316 验收证据，story、提交历史和工作区一致",
-        "完整 api:check、typecheck、lint、Vitest、build、Python compileall、Ruff、非浏览器 pytest 全部通过",
-        "按 dev-browser skill 运行完整 Chromium，覆盖正常/复核失败/同步/提交/恢复/管理/旧路由/多视口/200%/敏感信息",
-        "对照两张 tracking 效果图记录实现偏差，并明确全局连接 chip 延后 F-G",
-        "同步长期文档并归档 prd.json/progress.txt，archive 与最终 story 状态一致",
-        "handoff 限定 F-G 为 Settings 简化、全局连接/跨页、旧入口最终收敛、文档和 Gate 5",
-        "No dist, trace, screenshot, credential or local storage artifact is committed",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "移除默认保存订阅方案控件、saveRequest 类型/摘要和无消费者键写入；读到旧 miguOrca.web.saveRequest 只删除该明确旧键，不清空其他 localStorage",
+        "相对 storage profile 保留；默认规则保存范围不变，既有方案不静默改写，恢复默认仍确认且失败回到上次服务端成功值",
+        "设置按 AB 连接、默认字幕/过滤、存储与目录、高级诊断分组；高级技术字段默认折叠，安全版本/capability 使用中文说明",
+        "设置消费的 API 类型从 generated 提取，移除重复手写 UserPreferences DTO，但保留 DEFAULT_PREFERENCES 和纯转换函数",
+        "不显示绝对路径、外部 ID、原始配置/响应/日志，也不新增后台日志查询接口；不把设置变成业务提交页",
+        "定向设置/偏好/存储 Vitest 与 Chromium 覆盖旧键迁移、恢复默认、表单失败和敏感输入；Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 15,
       "passes": true,
       "notes": ""
+    },
+    {
+      "id": "US-333",
+      "title": "删除 qBittorrent 连接测试全链路",
+      "description": "作为维护者，我希望项目不承担与当前目标无关的 qBittorrent 配置和集成。",
+      "acceptanceCriteria": [
+        "删除 Settings qB 区域与专属状态/输入/调用，删除 POST /api/v1/qbittorrent/test-connection、qB 专属 schema/DTO/serializer/error mapping/endpoint 注册",
+        "确认不存在生产调用者后删除 src/qbittorrent_engine 及其专属测试/exports/pyproject wheel 注册，不保留空 engine、兼容 stub 或未来下载占位",
+        "同步 OpenAPI/generated/inventory、包装构建清单和相关测试；qB 功能测试删除对应已退役功能，增加真实 Flask 404 与默认 bundle 无 qB 接入断言",
+        "主添加/追番/设置不访问 qB、不接收 qB 配置；不删除用户运行数据，也不删除 AB 负责下载这一产品边界说明",
+        "定向设置 Vitest/Chromium、受影响契约与引用检查证明不存在 qB 生产依赖；API drift check and Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": true,
+      "notes": "qB Web/engine/契约/设置链路删除；Flask 404、OpenAPI 与前端构建验证通过。"
+    },
+    {
+      "id": "US-334",
+      "title": "移除旧单番提交与重复保存 Web API",
+      "description": "作为维护者，我希望单番只保留一个正式保存确认与一个可靠外部提交入口。",
+      "acceptanceCriteria": [
+        "确认 US-327 已移除 Settings submitAb/request_id 提交上下文与旧跳转，再删除 POST /api/v1/requests/<request_id>/submit-ab 与 POST /api/v1/requests/preview-save",
+        "删除 POST /api/v1/autobangumi/test-connection，由已保存配置能力探测替代；删除这些端点独占的 Web schema/DTO/serializer/helper/测试，不保留410/stub",
+        "同轮删除 Web Request create 的 save_request 选项及直接保存分支，更新 candidateSearch/batchWorkbench/generated/测试为只签发服务端草案；保留 CLI 显式保存 helper，不保留另一条 Web preview-save→accept 主流程",
+        "复用现有 save-confirm 与 tracking submit；保留仍被 CLI 使用的 apply_ab_submit_action/AB adapter，保留本地 accept/cancel/modify/delete 与 preview-modify",
+        "更新路由 settings query 白名单使旧 request_id 安全清理，不产生写；现有方案编辑、SafeInfo、复制再用与 tracking 深链继续可用",
+        "OpenAPI/generated/inventory 与真实 Flask URL map 同步；已退役端点 404，单番保存确认和提交只经过正式服务",
+        "定向单番/设置/方案/API contract Vitest 与 Chromium 验证无旧写请求且取消零写；API drift check and Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": true,
+      "notes": "旧单番端点取消注册并以 404 处理，Request create 仅签发服务端草案；类型/构建通过。"
+    },
+    {
+      "id": "US-335",
+      "title": "删除旧批量接受与队列外部写 API",
+      "description": "作为维护者，我希望批量审核只负责保存确认，外部写统一逐条经 tracking。",
+      "acceptanceCriteria": [
+        "删除 POST /api/v1/batches/<batch_id>/accept、submit、retry、recover 四类旧端点与端点独占的 schema/response DTO/route 编排",
+        "批量 parse、逐项服务端 draft、save-confirm 及其部分成功/1～36边界保留；不新增批量外部提交或服务端批量现场",
+        "没有 CLI/有效生产调用者的旧 batch_accept/batch_submit 写编排删除；不得仅因名称类似删除仍用于保存确认或纯规则的共享函数",
+        "删除旧 Web 到 CLI submit 与 queue 外部写反射路径；用户结果未知记录仍由 tracking 恢复，不清理任何历史数据文件",
+        "契约清单/generated 与 URL map 不再含这些动作；真实 Flask 404 与正式批量保存部分成功回归通过",
+        "受影响契约/批量 Vitest 与 Chromium 定向测试通过，证明默认运行时不调用旧批量写；API drift check and Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 18,
+      "passes": true,
+      "notes": "旧批量 accept/submit/retry/recover 路由取消注册，save-confirm 保留；URL map/OpenAPI/构建通过。"
+    },
+    {
+      "id": "US-336",
+      "title": "删除旧队列运行时与兼容投影写入",
+      "description": "作为维护者，我希望退出默认运行时的旧队列不继续占用生产代码和维护成本。",
+      "acceptanceCriteria": [
+        "删除 GET /api/v1/batches/<batch_id>/queue、QueueView/queueWorkbench、trackingCompat 旧 batch_id 定位桥，以及仅供旧队列的接线与测试",
+        "追番页不再接受 batch_id query；/app/queue 保留小型安全重定向到 /app/tracking 并清理旧 query，不调用旧 API或暗选条目",
+        "删除 tracking_queue_compat 与 submission/recovery 中 queue 写投影钩子；确认保存确认、tracking 状态与未知恢复仍以统一服务为权威",
+        "删除无调用的 queue 写 repository/controller；历史 migration 所需读取模型/纯解析器最小化保留，明确只读，不为了零引用破坏已有数据可读性",
+        "无运行数据删除、无媒体删除；旧 queue/history 文件继续可迁移，不批量改写历史操作",
+        "默认 bundle/引用/URL map 不含旧队列执行逻辑；历史迁移/API/Vitest/Chromium 定向回归通过；API drift check and Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": true,
+      "notes": "队列 UI/compat 投影删除，tracking 不再接受 batch_id；旧队列 API 404，前端构建通过。"
+    },
+    {
+      "id": "US-337",
+      "title": "封装 MiKan Web 搜索并收敛用户语言",
+      "description": "作为普通番剧用户，我希望输入番名就能搜索，不必了解或配置 MiKan 服务。",
+      "acceptanceCriteria": [
+        "Web candidate search/batch parse/Request create 删除 mikan_config 公共字段和 RequestMikanConfigPayload，仅使用服务端 default_mikan_config；旧字段严格拒绝，不静默覆盖",
+        "Web Request create 删除用户 source 选择，正式默认真实 MiKan；离线 fixture 通过测试 fixture/transport 注入，不能令生产用户被默认假数据搜索",
+        "前端与 generated 请求不发送 source 或 MiKan endpoint/timeout；主入口文案为搜索番剧/选择合集，候选仍人工选择真实合集",
+        "保留默认折叠的可选合集直连救援入口，但不把它作为配置要求；不持久化 MiKan 账号、Cookie、地址或搜索词",
+        "保留 CLI 显式源与配置这一独立高级信任边界，保持离线示例可用；不为 Web 封装删除仍被 engine/RSS/CLI 使用的 MikanConfig/transport",
+        "沿用端点级有界等待预算、忙锁、FOUND/EMPTY/FAILED 和中文错误分类；mock transport 隔离实站，覆盖无配置搜索、直连、批量与失败",
+        "同步前端相关调用/文案/Vitest/Chromium 与 Web schema/OpenAPI/generated；API drift check and Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 20,
+      "passes": true,
+      "notes": "Web MiKan 搜索/批量解析/Request create 统一服务端 default_mikan_config，严格拒绝旧 mikan_config/source；同步 OpenAPI/generated 与前端 payload/中文入口，保留直连救援和端点预算。定向 API/OpenAPI/Vitest/typecheck/build/Ruff 通过；浏览器 workbench/batch 已验证候选、批量、直连与失败路径，旧测试存储断言仍有既有环境问题。"
+    },
+    {
+      "id": "US-338",
+      "title": "完成跨页配置、安全与桌面旅程验收",
+      "description": "作为用户，我希望配置一次后跨页使用，并且秘密只存在于部署端配置和必要输入中。",
+      "acceptanceCriteria": [
+        "真实 Chromium 经真实 Flask 配置 API 保存 fake AB 配置，再跨设置/添加/方案/追番及浏览器刷新；至少一条旅程不 mock 配置 API，AB 只通过 fake transport",
+        "实际重建 app/repository 或重启测试服务，验证保存配置仍可使用，配置状态重置为已配置；新 fake AB 连接不重用旧 operation key/ref，不连接真实服务",
+        "独立 canary 覆盖地址、账号、密码、Token；仅专用测试配置文件和受控输入允许出现，公开响应、业务 JSON、DOM其余区域/属性、URL/history/storage/console/截图/trace 均干净",
+        "恶意 Origin/Host、表单请求、配置CAS、保存失败、清除、更换配置、同 ID异实例、原未知恢复与旧未绑定记录均有真实后端负例",
+        "覆盖单番和批量 1/12/36、部分成功、返回修改、同步/提交/恢复/四类管理、未配置仍可搜索；无旧端点请求，无自动外部写",
+        "验证1280x720/1440x900/1920x1080与200%缩放、键盘/焦点、aria-live、非纯颜色状态、reduced-motion；Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 21,
+      "passes": true,
+      "notes": "真实 Chromium 配置 API 旅程与完整 tests/browser 已通过（197 passed）；非 browser pytest 1528 passed/197 deselected。覆盖 saved generation 跨页/刷新、重建配置、probe、submit/retry、sync、恢复、四管理、CAS、代际锁、未配置与敏感 canary；所有外部交互均为 fake transport，未访问真实上游。"
+    },
+    {
+      "id": "US-339",
+      "title": "同步用户文档、模块边界与退役记录",
+      "description": "作为维护者，我需要区分新目标、真实交付与旧阶段历史，避免开发文档再要求保留旧实现。",
+      "acceptanceCriteria": [
+        "按实际完成事实同步 README、docs索引/main PRD/future stages/backlog、架构、M10/M13/M14、根/模块AGENTS及前端交互/实施/后端支撑文档",
+        "明确 AB 专用部署配置的唯一秘密持久化例外、文件权限/备份敏感性、容器持久卷、清除配置、无加密保证、单进程与无认证部署限制",
+        "记录旧端点/字段退役及外部调用迁移方式；保留旧Stage PRD/归档作为历史，不改历史 passes 或抹掉历史测试证据",
+        "更新 dev-browser/前端handoff 的旧队列与canary规则：配置 API 不全用 route mock，运行数据与测试配置根双隔离，已退役功能不再作为门禁",
+        "Ralph progress仅记录实际命令/结果与剩余风险，文档链接/路径/冲突检查通过；不伪造发布时间、CI、截图或线程链接",
+        "Documentation checks and affected handoff tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 22,
+      "passes": true,
+      "notes": "已按实际实现同步 README、docs 索引/main/future/backlog、架构、M10/M13/M14、根与模块 AGENTS、前端交互/实施、后端支撑、API handoff、dev-browser 现行规则；明确 AB 专用配置为唯一秘密持久化例外及权限/备份/卷/清除/无加密/单进程/无认证边界，记录退役端点字段与历史 reader。未修改 archive。文档路径冲突检查、typecheck/lint/build 通过。"
+    },
+    {
+      "id": "US-340",
+      "title": "完成完整门禁、归档与 Gate 5 候选交付",
+      "description": "作为维护者，我需要在完整验收后判断本轮前端重构能否作为候选发布包。",
+      "acceptanceCriteria": [
+        "逐条映射US-318～US-339的代码/提交/证据，尤其检查秘密持久化例外、跨配置未知保护、被删除功能与保留的历史读取器",
+        "完整执行api:check/typecheck/lint/Vitest/build、Python compileall/Ruff/OpenAPI drift、非浏览器pytest、真实Chromium各一轮；不重复组合含浏览器的完整pytest",
+        "全部通过且没有skip冒充后才标本story通过；失败先最小用例，记录真实计数，删除退役专属测试导致计数变化必须能逐项解释",
+        "按第8节Gate5矩阵完成正常/失败/部分成功/未知/配置重启与跨页/多视口/200%/敏感信息验收，不将mock实现或自述当作独立审核",
+        "归档prd/progress和阶段完成记录一致，不提交dist、trace、截图、配置、秘密、storage artifact；下一步停下交用户审核",
+        "本story不授权git提交、push、PR、merge、安装包或删分支；未获发布授权不宣称已发布",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 23,
+      "passes": true,
+      "notes": "完整门禁实际通过：compileall、Ruff、OpenAPI check、frontend api:check/typecheck/lint/Vitest 46 files/545 tests/build；非 browser pytest 1528 passed/197 deselected；真实 Chromium tests/browser 197 passed。Gate 5 正/失败/partial/unknown/restart/cross-page/viewports/200%/敏感信息证据已在受影响测试与配置旅程中覆盖；无 skip 冒充，未访问真实上游。US-340 按授权不创建 git 提交。"
     }
   ]
 }

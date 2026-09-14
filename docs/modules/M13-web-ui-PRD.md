@@ -1,5 +1,9 @@
 # M13 Web UI / 管理界面模块 PRD
 
+2026-09-13 新目标：[Stage 39](../MiGuOrca_stage39_deployment_settings_PRD.md)将设置改为保存/测试
+部署 AB 配置，不再业务提交或使用全局凭据弹窗；删除 qB 接入与旧队列执行，MiKan 用户无配置搜索。
+已实现；下文历史记录仅供追溯，当前页面使用保存连接 generation，旧队列写执行已退役。
+
 ## 1. 模块目标
 
 M13 负责 Web UI 或管理界面能力，用于展示订阅方案、执行确认操作、管理配置和查看历史记录。Stage 7～26 已逐步完成 Flask Web UI、Request 操作、Settings、真实 MiKan 候选、可编辑预览、批量工作台、提交前队列、偏好展示、媒体缓存、AutoBangumi 兼容、标题季数解析展示和 Web API 契约固化。单个/批量入口通过分段控件管理，标题解析、真实候选和订阅草案状态明确分离；Stage 27 已在 OpenAPI/DTO 基线上把页面迁移到独立前端工程（Vue 3 + TypeScript + Vite，Flask 在 `/app/` 同源托管），并删除旧 Flask/Jinja 页面与 `app.js`；Stage 28 已接入草案 revision、可靠保存与保存确认，`draft_id`/revision/idempotency_key 只在页面内存流转。
@@ -65,7 +69,7 @@ M13 负责 Web UI 或管理界面能力，用于展示订阅方案、执行确�
 | Stage 35 | 单番添加完整旅程 | 已完成并归档 | F-C 已交付单番三步旅程、原子 save-confirm、确认失败恢复与 tracking 只读 handoff；不实现批量重构、SafeInfo 或正式 tracking 管理动作 |
 | Stage 36 | 批量审核完整旅程 | 已完成并归档 | F-D 已交付 1/12/36 双栏批量审核、异常优先筛选、共享详情、原子 save-confirm、部分成功、逐项恢复与离开保护；F-E/F-F/F-G 仍分阶段负责 SafeInfo、正式 tracking 管理和设置收尾 |
 | Stage 37 | 追番方案与安全信息 | 已完成并归档 | F-E 已交付本地方案列表—详情、Request 安全摘要补口、真实 SafeInfo、共享修改、复制再用与精确 tracking 链接；不实现 F-F 外部管理或 F-G 设置收尾 |
-| Stage 38 | 正式追番管理 | 已完成并归档 | F-F 已交付 `/app/tracking` 总览、单选列表、检查器、页面级临时凭据会话、显式同步、本地复核、可靠提交/幂等重试/结果未知恢复与 MODIFY/SET_ENABLED/REFRESH_RSS/DELETE_EXTERNAL 单条外部管理；QueueView 退出默认运行时但保留组件与后端兼容端点；不实现 F-G |
+| Stage 38 | 正式追番管理 | 已完成并归档 | F-F 已交付正式追番管理；Stage 39 已接入保存连接 generation 并退役旧队列写编排 |
 
 以上能力都不应把真实 MiKan、Auto Bangumi 或 qBittorrent 的 endpoint、token、username、password、cookie、SID、原始 HTML、原始 RSS XML、原始响应体或本地绝对路径写入 storage JSON、状态历史、浏览器 storage、URL、日志、截图或测试 trace。Stage 15 只允许将非敏感 Storage 偏好写入浏览器 `localStorage`，URL query 只允许携带 `request_id` 等非敏感上下文。Stage 16 的 `mikan_bangumi` 和 Stage 17 的候选搜索/选择/直连 fallback 的 `mikan_config` 都是 request-scoped 字段，不应写入浏览器 storage、URL、history 或持久配置；候选搜索响应只包含公开候选元数据和 display-only 推荐标签。Stage 19 的批量解析和卡片展示只应渲染 batch/item 状态、解析元数据、公开 MiKan 候选字段、白名单过滤器摘要和种子标题摘要；raw HTML、raw RSS XML、cookie、token、magnet、完整失败 URL、原始响应体和本地绝对路径必须被忽略或脱敏。Stage 20 的提交前队列只展示队列项目标题、状态、尝试次数、时间和脱敏结果摘要；endpoint、token、Authorization header、cookie、原始响应体、完整 RSS URL、magnet 和本地绝对路径必须被忽略或脱敏，AB 配置只存在于当前提交 POST body，不写入 URL、localStorage、sessionStorage、队列 JSON 或 Request snapshot。Stage 21 的偏好表单是非敏感表面，只提交已定义的非敏感偏好字段，拒绝的敏感输入回退到上次有效值；批量卡片只渲染 `preference_hits`/`preference_warnings`/`review_hints`/`applied_preferences`/`enhanced_search_queries` 中的公开规则摘要和中文提示，endpoint、token、cookie、raw HTML、raw RSS XML、magnet、完整失败 URL、原始响应体和本地绝对路径必须被忽略或脱敏。Stage 26 的 `storage_dir` 只允许服务端根目录下的相对 profile（空值回落服务端根，绝对路径/穿越/符号链接逃逸被拒绝），未保存草案只通过 opaque `draft_id` 交互，完整 Request、draft 内容与外部敏感配置绝不进入 URL 或浏览器 storage；OpenAPI 示例全部使用虚构脱敏值，凭据字段标记 `x-request-scoped`。Stage 28 的 `draft_revision`/`idempotency_key` 与 `draft_id` 一样只在请求体与组件内存中流转，绝不进入 URL/browser storage；save-confirm 错误与批量逐条结果只返回脱敏 error_type + 固定中文，`safe-info` 是“全部信息”的唯一允许数据源（`extra="forbid"` DTO + 默认拒绝 serializer）。
 
@@ -220,6 +224,14 @@ Web UI 后续可以支持：
 5. 当前最新播出集数登记为 BL-020；在公开稳定数据源未证明前继续显示安全占位，不根据种子、RSS 或下载状态猜测。
 
 ## 5. 待确认问题
+
+## Stage 39 当前实现边界
+
+设置页通过真实 Flask 配置 API 保存、测试、更换和清除 Auto Bangumi 连接；跨页业务请求只携带
+`connection_ref` 与 `configuration_revision`，浏览器不回读已保存秘密。配置 API 不由浏览器 route
+mock 代替，测试仅对 MiKan/Auto Bangumi 外部 transport 使用 fake，并隔离业务 storage 与测试配置根。
+旧 queue、submit-ab 与 request-scoped 凭据入口已退役；历史数据只保留必要的只读 reader。桌面验收覆盖
+1280/1440/1920 宽度、200% 缩放、键盘/焦点、aria-live、非颜色状态和 reduced-motion。
 
 | 编号 | 问题 | 是否阻塞定稿 | 当前处理 |
 | --- | --- | --- | --- |

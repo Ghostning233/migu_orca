@@ -29,12 +29,15 @@
   tracking 写失败不回滚已确认方案，不伪造状态，后续访问可补偿。
 - TrackingRecord/TrackingOperation 的 CAS/持久化由 repository 处理，外部写前持久化意图，
   写后回查并落安全结果；未知结果进入恢复，不能误记成直接可重试失败。
-- 旧 submit/batch queue 复用统一 tracking submission/recovery，queue 只是兼容投影；
-  已落盘成功不被旧投影降级，默认前端退出旧队列不代表允许删兼容端点。
+- 旧 submit/batch queue Web 写端点已退役；统一 tracking submission/recovery 是唯一运行时写路径。
+  历史 queue 文件仅由迁移所需只读解析器读取，不为清理无用路径而删除历史数据。
 - revalidate/AUTO 恢复纯本地；VERIFY_EXTERNAL 才携带临时 AB 配置做能力校验的只读恢复。
   管理写仅在精确 3.1.18 password 能力开放，read-before-write/confirm/key/revision 必须保留。
 - 删除媒体参数在 adapter 固定 file=false，不能通过客户端输入覆盖；
   关联 RSS 操作只处理已映射单条集合，不扩大到全局对象。
+- Stage 39 已交付 AB 专用部署配置 repository，与业务 storage/profile 隔离，唯一允许保存 AB
+  地址/账号/秘密；不从客户端选择配置根、不回显秘密、不把 snapshot 送入普通 repository。
+  接口使用配置引用、operation/映射归属、CAS/lease 与同源/受信 Host 校验。
 
 ## 展示与服务边界
 

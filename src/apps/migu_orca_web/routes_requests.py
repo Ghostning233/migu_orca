@@ -11,11 +11,11 @@ safe-info whitelist for the read-only "全部信息" dialog.
 from pathlib import Path
 from typing import Any
 
-from ab_engine.controllers.ab_config import build_ab_config
+from flask import abort
+
 from apps.migu_orca_entry.controllers.entry_controller import (
     _build_history_event,
     _confirmation_history_details,
-    apply_ab_submit_action,
     apply_confirmation_action,
     apply_modify_action,
     apply_request_save_action,
@@ -42,7 +42,6 @@ from apps.migu_orca_web.save_confirm_service import (
     run_save_confirm,
 )
 from apps.migu_orca_web.schemas import (
-    RequestAbSubmitPayload,
     RequestActionPayload,
     RequestCancelPayload,
     RequestCreatePayload,
@@ -50,12 +49,10 @@ from apps.migu_orca_web.schemas import (
     RequestListQuery,
     RequestModifyPayload,
     RequestPreviewModifyPayload,
-    RequestPreviewSavePayload,
     RequestSaveConfirmPayload,
 )
 from apps.migu_orca_web.serializers import (
     _raise_result_error,
-    _sanitize_ab_submit_result,
     serialize_request_detail,
     serialize_request_safe_info,
 )
@@ -64,16 +61,14 @@ from apps.migu_orca_web.services import (
     _build_save_confirm_persist_pending,
     _load_ab_result_section,
     _load_history_section,
-    _resolve_mikan_config,
     _storage_dir,
     _storage_profile,
 )
 from apps.migu_orca_web.tracking_handoff import ensure_confirmed_request_tracking
-from apps.migu_orca_web.tracking_queue_compat import reflect_ab_result_into_tracking
 from extensions.flask_api import class_route
 from extensions.flask_api.views import GetView, PostView
+from mikan_engine.controllers.mikan_config import default_mikan_config
 from request_engine.controllers.request_controller import (
-    PENDING_CONFIRM,
     summarize_request,
 )
 from shared.errors import Stage1Error
@@ -160,6 +155,8 @@ class RequestSafeInfoView(GetView):
 
     def get_object(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, RequestDetailQuery)
+        if self.request_validator_model.request_id.endswith("/submit-ab"):
+            abort(404)
         storage_dir = _storage_dir(self.request_validator_model.storage_dir)
         config = load_storage_config(storage_dir)
         request_id = self.request_validator_model.request_id
@@ -207,6 +204,8 @@ class RequestDetailView(GetView):
 
     def get_object(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, RequestDetailQuery)
+        if self.request_validator_model.request_id.endswith("/submit-ab"):
+            abort(404)
         config = load_storage_config(_storage_dir(self.request_validator_model.storage_dir))
         request_id = self.request_validator_model.request_id
         request = load_request_snapshot(config, request_id)
@@ -225,13 +224,10 @@ class RequestCreateView(PostView):
     def save(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, RequestCreatePayload)
         payload = self.request_validator_model
-        mikan_config = None
-        if payload.source == "mikan":
-            mikan_config = _resolve_mikan_config(payload.mikan_config)
         result = generate_request(
             EntryRequest(raw_title=payload.title),
-            source_mode="mikan_http" if payload.source == "mikan" else "static_fixture",
-            mikan_config=mikan_config,
+            source_mode="mikan_http",
+            mikan_config=default_mikan_config(),
             mikan_bangumi=payload.mikan_bangumi,
         )
         if not result["success"]:
@@ -255,25 +251,15 @@ class RequestCreateView(PostView):
             result["request"], trusted_hint, payload.season_confirmation
         )
 
-        result = apply_request_save_action(
-            result,
-            payload.save_request,
-            storage_dir=_storage_dir(payload.storage_dir),
-        )
-        if not result["success"]:
-            _raise_result_error(result)
-
         request = result["request"]
         response: dict[str, object] = {
             "request": request,
             "summary": summarize_request(request),
         }
-        if "saved_request" in result:
-            response["saved_request"] = result["saved_request"]
-        elif not payload.save_request:
+        if True:
             # US-194: an unsaved draft is server-authoritative. Store it in the
             # bounded draft store and hand the client only an opaque draft_id;
-            # preview-modify/preview-save reference this id instead of a
+            # preview-modify reference this id instead of a
             # client-supplied full Request. The draft itself never enters URL,
             # browser storage, history, logs or screenshots. US-211: the
             # monotonic draft_revision is returned alongside the id so the
@@ -314,7 +300,7 @@ class RequestPreviewModifyView(PostView):
         req = result["request"]
         # CAS against the revision the client observed. On success the
         # server-side draft is replaced atomically and the revision bumps by 1
-        # so preview-save persists the exact state the user just reviewed.
+        # so save-confirm persists the exact state the user just reviewed.
         new_revision, swap_reason = draft_store.compare_and_swap(
             payload.draft_id,
             payload.base_revision,
@@ -335,71 +321,6 @@ class RequestPreviewModifyView(PostView):
             "draft_id": payload.draft_id,
             "draft_revision": new_revision,
         }
-
-
-@class_route(api_blueprint, "/api/v1/requests/preview-save", methods=["POST"])
-class RequestPreviewSaveView(PostView):
-    request_validator_model = RequestPreviewSavePayload
-
-    def save(self) -> dict[str, object]:
-        assert isinstance(self.request_validator_model, RequestPreviewSavePayload)
-        payload = self.request_validator_model
-        # US-194/US-212: preview-save *reserves* the draft against the
-        # base_revision the client observed, persists the authoritative
-        # snapshot, and only then commits the replay tombstone. A persistence
-        # failure releases the reservation so the same draft_id/revision can be
-        # retried — the user never loses their edit and is never forced to
-        # re-search (the old consume-before-persist destroyed the draft on a
-        # failed disk write). The authoritative draft content never comes from
-        # the client; a stale/expired/already-saved/reserved id returns a
-        # stable 409.
-        request, save_reason = draft_store.reserve_for_save(
-            payload.draft_id, payload.base_revision
-        )
-        if request is None or save_reason != REASON_OK:
-            # US-211 parity: a revision conflict re-reads so the safe error
-            # data carries the true current revision for the retry.
-            current_revision = None
-            if save_reason == REASON_REVISION_CONFLICT:
-                latest_read, latest_reason = draft_store.get(payload.draft_id)
-                if latest_read is not None and latest_reason == REASON_OK:
-                    current_revision = latest_read.revision
-            raise _draft_store_error(save_reason, current_revision=current_revision)
-        try:
-            # Only a PENDING_CONFIRM draft may be saved; this keeps the saved
-            # object entering the existing confirmation flow
-            # (accept/cancel/modify/delete).
-            if request.get("status") != PENDING_CONFIRM:
-                raise Stage1Error(
-                    "invalid_request_status",
-                    "只有待确认的订阅草案可以保存",
-                    "save_preview_request",
-                    {"status": request.get("status")},
-                )
-            result = apply_request_save_action(
-                {"success": True, "request": request, "error": None},
-                True,
-                storage_dir=_storage_dir(payload.storage_dir),
-            )
-            if not result["success"]:
-                _raise_result_error(result)
-            # The Request is durable; only now consume the draft (replay
-            # protection) so a later save of the same id is ``draft_replayed``.
-            draft_store.commit_save(payload.draft_id)
-            req = result["request"]
-            response: dict[str, object] = {
-                "request": req,
-                "summary": summarize_request(req),
-            }
-            if "saved_request" in result:
-                response["saved_request"] = result["saved_request"]
-            return response
-        except Exception:
-            # Persistence (or a validation guard) failed before commit: keep the
-            # draft alive at its current revision so the client can retry the
-            # exact same save.
-            draft_store.release_save(payload.draft_id)
-            raise
 
 
 def _run_draft_save_confirm(
@@ -671,57 +592,3 @@ class RequestDeleteView(PostView):
         payload = self.request_validator_model
         config = load_storage_config(_storage_dir(payload.storage_dir))
         return delete_request_snapshot(config, payload.request_id)
-
-
-@class_route(api_blueprint, "/api/v1/requests/<path:request_id>/submit-ab", methods=["POST"])
-class RequestAbSubmitView(PostView):
-    request_validator_model = RequestAbSubmitPayload
-
-    def save(self) -> dict[str, object]:
-        assert isinstance(self.request_validator_model, RequestAbSubmitPayload)
-        payload = self.request_validator_model
-        storage_dir = _storage_dir(payload.storage_dir)
-        config = load_storage_config(storage_dir)
-        request = load_request_snapshot(config, payload.request_id)
-        ab_config = build_ab_config(payload.ab_config.model_dump(exclude_none=True))
-
-        result = apply_ab_submit_action(
-            {"success": True, "request": request, "error": None},
-            True,
-            ab_config=ab_config,
-        )
-        if not result["success"]:
-            _raise_result_error(result)
-
-        result["ab_submit_result"] = _sanitize_ab_submit_result(
-            result["ab_submit_result"]
-        )
-        result["request"]["ab_submit_result"] = result["ab_submit_result"]
-        result = apply_request_save_action(
-            result,
-            True,
-            storage_dir=storage_dir,
-        )
-        if not result["success"]:
-            _raise_result_error(result)
-
-        # US-226 compat projection: the legacy single submit-ab path drives the
-        # old Request submit, so mirror its classified outcome into the unified
-        # TrackingRecord (best-effort, never raising, never downgrading ACTIVE).
-        reflect_ab_result_into_tracking(
-            config,
-            request_id=payload.request_id,
-            ab_result=result["ab_submit_result"],
-        )
-
-        req = result["request"]
-        response: dict[str, object] = {
-            "request": req,
-            "summary": summarize_request(req),
-            "ab_submit_result": result["ab_submit_result"],
-        }
-        if "saved_request" in result:
-            response["saved_request"] = result["saved_request"]
-        if "saved_ab_result" in result:
-            response["saved_ab_result"] = result["saved_ab_result"]
-        return response

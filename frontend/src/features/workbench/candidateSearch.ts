@@ -145,10 +145,8 @@ export function buildCandidateCreatePayload(
 ): Record<string, unknown> {
   const payload: Record<string, unknown> = {
     title: candidate.title || '未命名合集',
-    source: 'mikan',
     mikan_bangumi: candidate.mikan_url,
     storage_dir: options.storageDir || null,
-    save_request: false,
   }
   if (typeof candidate.candidate_context === 'string' && candidate.candidate_context) {
     payload.candidate_context = candidate.candidate_context
@@ -166,10 +164,8 @@ export function buildFallbackCreatePayload(
 ): Record<string, unknown> {
   return {
     title: options.title || 'MiKan 直连合集',
-    source: 'mikan',
     mikan_bangumi: fallbackValue.trim(),
     storage_dir: options.storageDir || null,
-    save_request: false,
   }
 }
 

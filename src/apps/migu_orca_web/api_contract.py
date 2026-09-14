@@ -14,7 +14,7 @@ Scope notes
   half of the contract.
 - Deep engine dicts that are intentionally opaque to the frontend
   (``request`` snapshots, preference/correction objects, batch items,
-  ``parse_result``, queue items, AB/qBittorrent results) are typed as
+  ``parse_result`` and historical result records) are typed as
   ``dict[str, Any]``/``list[dict[str, Any]]`` *inside* a whitelisted
   envelope.  The DTOs therefore guarantee the envelope shape and the
   **top-level** result keys, while per-field secret sanitization stays in the
@@ -27,6 +27,7 @@ Scope notes
 """
 
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -212,7 +213,7 @@ class AbSubmitResultRecordDTO(_SnapshotBase):
     """Lenient copy of the sanitized AB submit result for the Audit section.
 
     The strict ``AbSubmitResultDTO`` (extra="forbid") whitelists the
-    submit-ab *response*; records read back from storage may carry extra
+    historical external-submit records; records read back from storage may carry extra
     fields, so the detail panel uses this lenient variant.
     """
 
@@ -354,14 +355,6 @@ class RequestPreviewModifyResultDTO(_StrictBase):
     draft_revision: int | None = None
 
 
-class RequestPreviewSaveResultDTO(_StrictBase):
-    """preview-save result equals the create result shape (draft consumed)."""
-
-    request: RequestSnapshotDTO
-    summary: RequestSummaryDTO
-    saved_request: RequestSnapshotDTO | None = None
-
-
 class RequestSaveConfirmHandoffDTO(_StrictBase):
     """Public ``handoff`` of a confirmed save (US-214 + US-222).
 
@@ -440,11 +433,6 @@ class AbSubmitResultDTO(_StrictBase):
     ab_response: dict[str, Any]
     fallback_config: dict[str, Any] | None = None
     error: dict[str, Any] | None = None
-
-
-class RequestAbSubmitResultDTO(RequestCreateResultDTO):
-    ab_submit_result: AbSubmitResultDTO
-    saved_ab_result: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -570,7 +558,6 @@ class BatchParseItemDTO(_SnapshotBase):
     item_id: str | None = None
     raw_title: str | None = None
     status: str | None = None
-    queue_status: str | None = None
     canonical_title_candidates: list[str] = []
     season_hint: str | None = None
     search_queries: list[str] = []
@@ -597,33 +584,6 @@ class BatchParseResultDTO(_StrictBase):
     items: list[BatchParseItemDTO]
 
 
-class BatchQueueItemDTO(_SnapshotBase):
-    """One public pre-submission queue item (non-sensitive fields only)."""
-
-    queue_id: str | None = None
-    batch_id: str | None = None
-    item_id: str | None = None
-    request_id: str | None = None
-    title: str | None = None
-    status: str | None = None
-    status_label: str | None = None
-    attempts: int | None = None
-    last_error: str | None = None
-    ab_result_summary: str | None = None
-    created_at: str | None = None
-    updated_at: str | None = None
-
-
-class BatchQueueDTO(_SnapshotBase):
-    """The public pre-submission queue (idempotent, sanitized summaries)."""
-
-    queue_id: str | None = None
-    batch_id: str | None = None
-    created_at: str | None = None
-    updated_at: str | None = None
-    items: list[BatchQueueItemDTO] = []
-
-
 class BatchResultItemDTO(_SnapshotBase):
     """One accept/submit result item (public Chinese reason only).
 
@@ -640,22 +600,6 @@ class BatchResultItemDTO(_SnapshotBase):
     error_type: str | None = None
     queued: bool | None = None
     attempts: int | None = None
-
-
-class BatchQueueResultDTO(_StrictBase):
-    batch_id: str
-    queue: BatchQueueDTO | None = None
-
-
-class BatchAcceptResultDTO(_StrictBase):
-    batch_id: str
-    queue: BatchQueueDTO
-    items: list[BatchResultItemDTO]
-    summary: dict[str, int]
-
-
-class BatchSubmitResultDTO(BatchAcceptResultDTO):
-    """submit/retry/recover results equal the accept result shape."""
 
 
 class BatchSaveConfirmItemResultDTO(_StrictBase):
@@ -1144,25 +1088,6 @@ class TrackingManagementResultDTO(_StrictBase):
 # ---------------------------------------------------------------------------
 
 
-class QbittorrentConnectionResultDTO(_StrictBase):
-    """Public whitelist; endpoint/username/password/cookie never appear."""
-
-    status: str
-    reachable: bool
-    version: str
-
-
-class AutoBangumiConnectionResultDTO(_StrictBase):
-    """Public whitelist; base_url/token/credentials never appear."""
-
-    reachable: bool
-    authenticated: bool
-    version: str
-    auth_mode: str
-    adapter: str
-    submit_supported: bool
-
-
 class AutoBangumiCapabilitiesDTO(_StrictBase):
     probe_status: Literal["VERIFIED", "PARTIAL", "FAILED"]
     version: str | None
@@ -1183,6 +1108,19 @@ class AutoBangumiCapabilitiesDTO(_StrictBase):
     external_verify: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
     checked_at: str | None
     safe_message: str | None
+
+
+class AutoBangumiConnectionSummaryDTO(_StrictBase):
+    """Safe deployment configuration summary; never contains its address."""
+
+    configured: bool
+    configuration_revision: int
+    connection_ref: UUID | None
+    auth_mode: Literal["password", "api_token"] | None
+    credential_present: bool
+    connection_status: Literal["UNCONFIGURED", "CONFIGURED", "VERIFIED", "ERROR"]
+    checked_at: str | None
+    capabilities: AutoBangumiCapabilitiesDTO | None = None
 
 
 class TrackingSyncSummaryDTO(_StrictBase):

@@ -47,9 +47,11 @@ import re
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
-TRACKING_OPERATION_SCHEMA_VERSION = 2
+TRACKING_OPERATION_SCHEMA_VERSION = 3
 TRACKING_OPERATION_LEGACY_SCHEMA_VERSION = 1
+TRACKING_OPERATION_MANAGEMENT_SCHEMA_VERSION = 2
 
 # -- operation kinds ----------------------------------------------------------
 #: The only operation kind Stage 29 B-B produces.  Future B-C actions
@@ -162,7 +164,20 @@ _OPERATION_FIELDS = frozenset(
         "target_scope",
         "previous_tracking_status",
         "expected_external_fingerprint",
+        "connection_ref",
     }
+)
+_OPERATION_BASE_FIELDS = frozenset(
+    _OPERATION_FIELDS - {
+        "target_scope",
+        "previous_tracking_status",
+        "expected_external_fingerprint",
+        "connection_ref",
+    }
+)
+_OPERATION_MANAGEMENT_FIELDS = frozenset(
+    _OPERATION_BASE_FIELDS
+    | {"target_scope", "previous_tracking_status", "expected_external_fingerprint"}
 )
 
 #: Safe opaque idempotency-key shape.  The key never becomes a file name (the
@@ -219,6 +234,7 @@ class TrackingOperation:
     target_scope: str | None = None
     previous_tracking_status: str | None = None
     expected_external_fingerprint: str | None = None
+    connection_ref: str | None = None
 
 
 def utc_now() -> str:
@@ -236,6 +252,7 @@ def create_tracking_operation(
     target_scope: str | None = None,
     previous_tracking_status: str | None = None,
     expected_external_fingerprint: str | None = None,
+    connection_ref: str | UUID | None = None,
     attempt: int = 1,
     now: str | None = None,
 ) -> TrackingOperation:
@@ -263,6 +280,7 @@ def create_tracking_operation(
     clean_fingerprint = _require_non_empty_str(
         request_fingerprint, "request_fingerprint"
     )
+    clean_connection_ref = _optional_connection_ref(connection_ref)
     if not isinstance(attempt, int) or isinstance(attempt, bool) or attempt < 1:
         raise ValueError("attempt must be a positive integer")
     timestamp = now or utc_now()
@@ -281,6 +299,7 @@ def create_tracking_operation(
         target_scope=target_scope,
         previous_tracking_status=previous_tracking_status,
         expected_external_fingerprint=expected_external_fingerprint,
+        connection_ref=clean_connection_ref,
     )
 
 
@@ -326,7 +345,7 @@ def operation_to_storage_dict(operation: TrackingOperation) -> dict[str, Any]:
     an accidental sensitive field can never reach disk.
     """
     payload = {
-        "schema_version": TRACKING_OPERATION_SCHEMA_VERSION,
+        "schema_version": operation.schema_version,
         "operation_id": operation.operation_id,
         "tracking_id": operation.tracking_id,
         "operation": operation.operation,
@@ -359,6 +378,8 @@ def operation_to_storage_dict(operation: TrackingOperation) -> dict[str, Any]:
                 "expected_external_fingerprint": operation.expected_external_fingerprint,
             }
         )
+    if operation.connection_ref is not None:
+        payload["connection_ref"] = _optional_connection_ref(operation.connection_ref)
     return payload
 
 
@@ -372,13 +393,23 @@ def operation_from_storage_dict(data: Any) -> TrackingOperation:
     """
     if not isinstance(data, dict):
         raise ValueError("tracking operation JSON must be an object")
-    unknown = sorted(set(data) - _OPERATION_FIELDS)
+    schema_version = data.get("schema_version")
+    if type(schema_version) is not int:
+        raise ValueError("schema_version must be an integer")
+    allowed_fields = {
+        TRACKING_OPERATION_LEGACY_SCHEMA_VERSION: _OPERATION_BASE_FIELDS,
+        TRACKING_OPERATION_MANAGEMENT_SCHEMA_VERSION: _OPERATION_MANAGEMENT_FIELDS,
+        TRACKING_OPERATION_SCHEMA_VERSION: _OPERATION_FIELDS,
+    }.get(schema_version)
+    unknown = sorted(
+        set(data) - (_OPERATION_FIELDS if allowed_fields is None else allowed_fields)
+    )
     if unknown:
         raise ValueError(f"unknown tracking operation fields: {', '.join(unknown)}")
 
-    schema_version = data.get("schema_version")
     if schema_version not in {
         TRACKING_OPERATION_LEGACY_SCHEMA_VERSION,
+        TRACKING_OPERATION_MANAGEMENT_SCHEMA_VERSION,
         TRACKING_OPERATION_SCHEMA_VERSION,
     }:
         raise ValueError(
@@ -416,9 +447,14 @@ def operation_from_storage_dict(data: Any) -> TrackingOperation:
     created_at = _require_non_empty_str(data.get("created_at"), "created_at")
     updated_at = _require_non_empty_str(data.get("updated_at"), "updated_at")
 
-    target_scope = data.get("target_scope") if schema_version == TRACKING_OPERATION_SCHEMA_VERSION else None
-    previous_tracking_status = data.get("previous_tracking_status") if schema_version == TRACKING_OPERATION_SCHEMA_VERSION else None
-    expected_external_fingerprint = data.get("expected_external_fingerprint") if schema_version == TRACKING_OPERATION_SCHEMA_VERSION else None
+    target_scope = data.get("target_scope") if schema_version in {TRACKING_OPERATION_MANAGEMENT_SCHEMA_VERSION, TRACKING_OPERATION_SCHEMA_VERSION} else None
+    previous_tracking_status = data.get("previous_tracking_status") if schema_version in {TRACKING_OPERATION_MANAGEMENT_SCHEMA_VERSION, TRACKING_OPERATION_SCHEMA_VERSION} else None
+    expected_external_fingerprint = data.get("expected_external_fingerprint") if schema_version in {TRACKING_OPERATION_MANAGEMENT_SCHEMA_VERSION, TRACKING_OPERATION_SCHEMA_VERSION} else None
+    connection_ref = (
+        _optional_connection_ref(data.get("connection_ref"))
+        if schema_version == TRACKING_OPERATION_SCHEMA_VERSION
+        else None
+    )
     _validate_management_binding(
         operation, target_scope, previous_tracking_status, expected_external_fingerprint
     )
@@ -445,6 +481,7 @@ def operation_from_storage_dict(data: Any) -> TrackingOperation:
         target_scope=target_scope,
         previous_tracking_status=previous_tracking_status,
         expected_external_fingerprint=expected_external_fingerprint,
+        connection_ref=connection_ref,
     )
 
 
@@ -472,6 +509,23 @@ def _optional_clean_str(value: Any, name: str) -> str | None:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{name} must be a non-empty string or null")
     return value.strip()
+
+
+def _optional_connection_ref(value: Any) -> str | None:
+    """Normalize the UUID reference without treating it as a credential."""
+    if value is None:
+        return None
+    if isinstance(value, UUID):
+        return str(value)
+    if not isinstance(value, str):
+        raise ValueError("connection_ref must be a canonical UUID or null")
+    try:
+        parsed = UUID(value)
+    except (ValueError, AttributeError):
+        raise ValueError("connection_ref must be a canonical UUID or null") from None
+    if str(parsed) != value:
+        raise ValueError("connection_ref must be a canonical UUID or null")
+    return value
 
 
 def _validate_management_binding(
@@ -505,6 +559,7 @@ __all__ = [
     "TRACKING_OPERATION_KIND_DELETE_EXTERNAL",
     "TRACKING_OPERATION_KIND_REFRESH_RSS",
     "TRACKING_OPERATION_SCHEMA_VERSION",
+    "TRACKING_OPERATION_MANAGEMENT_SCHEMA_VERSION",
     "TRACKING_OPERATION_LEGACY_SCHEMA_VERSION",
     "TRACKING_OPERATION_TARGET_SCOPE_SUBSCRIPTION",
     "TRACKING_OPERATION_TARGET_SCOPE_ASSOCIATED_RSS",

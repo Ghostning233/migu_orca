@@ -116,10 +116,8 @@ describe('candidateSearch payload builders', () => {
     )
     expect(payload).toEqual({
       title: '葬送的芙莉莲',
-      source: 'mikan',
       mikan_bangumi: 'https://mikan.example/Home/Bangumi/2353',
       storage_dir: 'backups',
-      save_request: false,
       candidate_context: 'opaque-context',
       season_confirmation: 4,
     })
@@ -129,10 +127,8 @@ describe('candidateSearch payload builders', () => {
     const payload = buildCandidateCreatePayload(candidate(), { storageDir: '', confirmedSeason: null })
     expect(payload).toEqual({
       title: '葬送的芙莉莲',
-      source: 'mikan',
       mikan_bangumi: 'https://mikan.example/Home/Bangumi/2353',
       storage_dir: null,
-      save_request: false,
     })
     expect('candidate_context' in payload).toBe(false)
     expect('season_confirmation' in payload).toBe(false)
@@ -142,10 +138,8 @@ describe('candidateSearch payload builders', () => {
     const payload = buildFallbackCreatePayload(' 2353 ', { storageDir: 'backups', title: '芙莉莲' })
     expect(payload).toEqual({
       title: '芙莉莲',
-      source: 'mikan',
       mikan_bangumi: '2353',
       storage_dir: 'backups',
-      save_request: false,
     })
     expect('mikan_config' in payload).toBe(false)
   })

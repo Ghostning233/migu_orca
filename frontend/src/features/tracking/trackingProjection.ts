@@ -19,7 +19,7 @@ export type TrackingActionCode = TrackingAction['code']
 export type TrackingActionStyle = TrackingAction['style']
 export type TrackingScope = NonNullable<TrackingAction['target_scopes']>[number]
 export type CapabilityResult = NonNullable<
-  operations['probeAutoBangumiCapabilities']['responses']['200']['content']['application/json']['result']
+  operations['probeSavedAutoBangumiCapabilities']['responses']['200']['content']['application/json']['result']
 >
 export type CapabilityState = CapabilityResult['subscription_modify']
 export type TrackingRevalidateBody = NonNullable<
@@ -60,8 +60,10 @@ export type TrackingRecoverResult = NonNullable<
  * body builder normalizes it into the strict recover shape and refuses to send a
  * credential that has no server address at all.
  */
-export type TrackingSessionAbConfig =
-  operations['probeAutoBangumiCapabilities']['requestBody']['content']['application/json']['ab_config']
+export interface TrackingSessionAbConfig {
+  connection_ref?: string | null
+  configuration_revision?: number
+}
 
 export const TRACKING_STATUS_GROUPS = [
   'PENDING', 'PROCESSING', 'ACTIVE', 'ATTENTION', 'INACTIVE',
@@ -357,7 +359,7 @@ export function capabilityState(value: unknown): CapabilityState {
 }
 
 export function capabilityStateLabel(value: unknown): string {
-  return CAPABILITY_STATE_LABELS[capabilityState(value)]
+  return CAPABILITY_STATE_LABELS[capabilityState(value)] ?? '未知'
 }
 
 export function probeStatusLabel(status: string): string {
@@ -729,17 +731,17 @@ export interface TrackingRecoveryIntent {
 export function createTrackingRecoverBody(
   action: TrackingRecoveryActionCode,
   expectedRevision: number,
-  abConfig: TrackingSessionAbConfig | null,
+  connection: TrackingSessionAbConfig | null,
   storageDir?: string,
 ): TrackingRecoverBody | null {
   const storage = storageDir ? { storage_dir: storageDir } : {}
   if (action === 'VERIFY_EXTERNAL') {
-    const baseUrl = typeof abConfig?.base_url === 'string' ? abConfig.base_url.trim() : ''
-    if (!abConfig || !baseUrl) return null
+    if (!connection) return null
     return {
       expected_revision: expectedRevision,
       action: RECOVERY_ACTION_BODIES[action],
-      ab_config: { ...abConfig, base_url: baseUrl },
+      connection_ref: connection.connection_ref,
+      configuration_revision: connection.configuration_revision,
       ...storage,
     }
   }

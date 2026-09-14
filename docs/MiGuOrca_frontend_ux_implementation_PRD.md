@@ -5,7 +5,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 文档类型 | 候选执行 PRD / Gate 4 输入 |
-| 当前状态 | F-A～F-F 已完成为 Stage 33～38（US-257～US-317）；F-G 待评审 |
+| 当前状态 | F-A～F-G 已完成为 Stage 33～39；US-338～US-340 候选验收中，未发布 |
 | 创建日期 | 2026-09-07 |
 | Backlog | BL-026 |
 | 优先级 | P1；各切片按后端依赖分别解锁 |
@@ -19,7 +19,8 @@
 执行边界分别见 `docs/MiGuOrca_stage35_single_anime_journey_PRD.md` 与
 `docs/MiGuOrca_stage36_batch_review_journey_PRD.md`；F-E 已冻结为 Stage 37，执行边界见
 `docs/MiGuOrca_stage37_plans_safe_info_PRD.md`；F-F 已作为 Stage 38 交付并归档，完成记录与 handoff 见
-`docs/MiGuOrca_stage38_tracking_management_PRD.md`；F-G 仍需独立评审。实现 Agent
+`docs/MiGuOrca_stage38_tracking_management_PRD.md`；F-G 新目标以
+[Stage 39 开发 PRD](MiGuOrca_stage39_deployment_settings_PRD.md)为准，先独立验收后端前置支撑。实现 Agent
 每次只接收一个切片及其已经冻结的 API，不得一边写页面一边设计后端契约。
 
 ## 2. 产品目标
@@ -55,7 +56,8 @@
 5. 保存确认后自动切换追番管理并定位待提交项；外部提交必须再次由用户显式确认。
 6. 追番方案承担本地方案查看、修改、复制再用与历史；追番管理承担外部状态和动作。
 7. 对加载、空、无结果、过期、冲突、部分成功、提交失败、能力降级和人工恢复提供就地反馈。
-8. 保持敏感信息只在当前页面组件内存，确保 DOM、URL、storage、日志、trace 和 sourcemap 无泄漏。
+8. AB 凭据仅保存在部署端专用私有配置；浏览器仅有必要编辑输入和安全摘要，公开 DTO、业务存储、
+   其余 DOM、URL、浏览器 storage、日志、trace 和 sourcemap 无秘密泄漏。
 9. 每个切片同时完成 TypeScript、Vitest、真实 Chromium、键盘、读屏和目标桌面宽度验收。
 
 ### 3.2 非目标
@@ -111,11 +113,11 @@
 | 单番/批量两份输入 | 添加番剧 route-local store | 否 |
 | candidate context、draft ID、revision | 详情 draft store | 否 |
 | 当前批量卡片、勾选、筛选、滚动位置 | 批量工作台 store | 否 |
-| Auto Bangumi 凭据 | 追番管理页面局部 credential session | 否；离开/刷新清空 |
+| Auto Bangumi 凭据 | 部署端专用配置；设置页仅编辑本次输入 | 是，仅服务端私有文件；跨页/刷新/重启保留 |
 | Request、tracking、队列、capability | 服务端权威；前端只缓存公开 DTO | 否，重新读取 |
 | 非敏感用户偏好 | 服务端；必要的相对 profile 可沿用现有安全策略 | 按现有契约 |
 
-不得新增持久化 Pinia 插件。页面组件卸载时清除 draft、candidate 和凭据；离开保护只负责提醒，
+不得新增持久化 Pinia 插件。页面组件卸载时清除 draft、candidate 和未保存凭据输入，不删除部署端配置；离开保护只负责提醒，
 不借机把现场写入 localStorage、sessionStorage 或 IndexedDB。
 
 ### 6.2 必须复用的领域组件
@@ -132,7 +134,7 @@ ResourceSummary          有效资源与总集数摘要
 SafeInfoDialog           F-E 在已保存 Request 语境下只消费 safe-info DTO 的全部信息弹窗
 BatchReviewCard          批量摘要和字幕组快捷入口
 TrackingInspector        追番动作与外部状态检查器
-CredentialSessionDialog  当前页面内存凭据和连接引导
+CredentialSessionDialog  历史页面级凭据组件（已退役；设置页使用保存连接表单）
 ```
 
 `BatchReviewCard` 和 `AnimeDraftEditor` 的字幕组必须绑定同一个 item draft store；快捷修改不能在
@@ -183,9 +185,9 @@ CredentialSessionDialog  当前页面内存凭据和连接引导
 1. 页面由状态总览、约 58%～64% 列表和 36%～42% sticky 检查器组成。
 2. 列表是单选行，不显示复选框，不提供批量外部删除；当前行使用背景、边界/指示条和
    `aria-current` 的等价语义。
-3. 初始可读取本地安全投影；用户提供临时凭据并“同步 Auto Bangumi”后才访问外部系统。
-4. 凭据在该页面实例内可复用；离开 `/app/tracking`、刷新、取消或明确清除时立即销毁，不进入
-   Pinia 持久化、URL、storage、通知、日志或错误 DOM。
+3. 初始只读取本地安全投影及保存连接的安全摘要；用户显式探测、同步或确认业务动作后才访问 AB。
+4. 凭据由部署端保存，业务请求只携带 generated 配置引用；跨页或刷新不删除配置。更换配置
+   使旧能力摘要失效，不重绑旧未知操作；秘密不进入浏览器持久化、URL、通知、日志或错误 DOM。
 5. 待提交项的检查器以“提交到 Auto Bangumi”为唯一强主操作。点击后显示影响说明并确认，
    服务端复核通过才外部写入。
 6. 复核失败显示“尚未创建外部订阅”、问题列表和“返回修改方案”；深链到对应本地方案详情。
@@ -197,11 +199,12 @@ CredentialSessionDialog  当前页面内存凭据和连接引导
 
 ### 7.5 设置
 
-1. 使用分组卡片，只承载默认规则、相对 storage profile、qBittorrent/Auto Bangumi 连接测试和
-   脱敏诊断。
+1. 使用分组卡片，只承载默认规则、相对 storage profile、AB 部署连接保存/更换/清除/测试和
+   安全诊断；删除 qB 连接测试，MiKan 服务由项目封装，不提供用户配置。
 2. 删除“默认保存订阅方案”偏好；普通流程固定使用“保存并确认”，不再要求用户预先理解保存策略。
 3. 高级技术字段默认折叠，展开前使用用户语言说明用途；不把 Settings 变成业务提交入口。
-4. 连接测试成功/失败都清除敏感字段；失败只显示固定中文恢复建议。
+4. 保存成功、取消、切模式或离页清除本次浏览器敏感输入；保存失败可就地修正。测试已保存
+   配置不发送秘密，失败只显示固定中文，不删除部署端配置或要求重新输入。
 5. 恢复默认必须确认，失败时回到上次服务端成功值，不让客户端猜测最终配置。
 
 ## 8. API 依赖矩阵
@@ -215,7 +218,7 @@ CredentialSessionDialog  当前页面内存凭据和连接引导
 | 追番方案 | Request list/detail/modify/history | safe-info、tracking 链接/状态 |
 | 追番管理本地态 | 当前 Request/queue 可迁移 | tracking list/detail、复核、统一幂等提交 |
 | 追番管理外部态 | 当前连接/创建基础 | capability、sync、管理 adapter、映射与动作 |
-| 设置 | 当前 preferences/connections | capability 摘要；移除旧偏好契约（如存在） |
+| 设置 | preferences 与 Stage 39 新配置 API | 私有部署配置、严格引用、绑定校验；移除旧偏好与 qB 契约 |
 
 实现 Agent 不得用前端连续调用 `preview-save → accept` 代替 save-confirm，不得根据当前 queue
 拼装永久 tracking 列表，也不得根据连接测试的单个 `submit_supported` 猜测完整管理能力。
@@ -230,7 +233,7 @@ CredentialSessionDialog  当前页面内存凭据和连接引导
 | F-D 批量审核 | 1/12/36、筛选、下一异常、部分成功、离开保护 | B-A、B-B tracking 建立 | AC-06～14、23～25 可独立通过 |
 | F-E 追番方案 | 本地列表/详情、修改、复制再用、历史、管理链接 | B-A safe-info、B-B 状态 | 本地方案职责与外部动作彻底分离 |
 | F-F 追番管理 | 总览、单选列表、检查器、凭据会话、提交/恢复、AB 完整管理 | B-B、B-C、B-D | AC-16～22 可独立通过 |
-| F-G 设置与发布收尾 | 设置简化、连接诊断、跨页验收、旧路由收敛、文档 | 前述全部 | Gate 5 候选发布包 |
+| F-G 设置与发布收尾 | Stage 39：AB 部署连接、设置简化、跨页、旧执行退役、MiKan 封装、文档 | 前述全部 + 新增后端连接支撑已验收 | Gate 5 候选发布包，独立审核中 |
 
 推荐依赖顺序为 `F-A → F-B → (F-C, F-D, F-E) → F-F → F-G`。F-C、F-D、F-E 在共享核心
 稳定后可由不同执行会话并行，但共享 store/API 类型变更必须先合入基线，不能在三个 PR 中分别

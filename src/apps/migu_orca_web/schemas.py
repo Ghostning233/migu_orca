@@ -9,8 +9,9 @@ response DTOs stay in ``api_contract.py`` (which is the Stage 27 contract).
 
 import re
 from typing import Any, Literal
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, field_validator, model_validator
 
 from tracking_engine.models.tracking import (
     TRACKING_STATUS_GROUP_ACTIVE,
@@ -30,25 +31,9 @@ class RequestDetailQuery(BaseModel):
     storage_dir: str | None = None
 
 
-class RequestMikanConfigPayload(BaseModel):
-    search_endpoint: str
-    timeout_seconds: float = Field(gt=0)
-
-    @field_validator("search_endpoint")
-    @classmethod
-    def validate_search_endpoint(cls, value: str) -> str:
-        endpoint = value.strip()
-        if not endpoint:
-            raise ValueError("search_endpoint cannot be empty")
-        return endpoint
-
-
 class MikanCandidateSearchPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     query: str
-    mikan_config: RequestMikanConfigPayload | None = Field(
-        default=None,
-        validate_default=True,
-    )
 
     @field_validator("query")
     @classmethod
@@ -60,11 +45,8 @@ class MikanCandidateSearchPayload(BaseModel):
 
 
 class BatchParsePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     raw_input: str
-    mikan_config: RequestMikanConfigPayload | None = Field(
-        default=None,
-        validate_default=True,
-    )
     storage_dir: str | None = None
 
 
@@ -72,7 +54,7 @@ class BatchItemDescriptorPayload(BaseModel):
     """One batch card descriptor for the accept endpoint.
 
     ``request_id`` is present only when the card already has a saved Request
-    (unsaved preview drafts are persisted through preview-save before accept).
+    (legacy descriptor retained only for local parsing compatibility).
     """
 
     item_id: str
@@ -96,73 +78,6 @@ class BatchItemDescriptorPayload(BaseModel):
         if not request_id:
             raise ValueError("request_id cannot be empty")
         return request_id
-
-
-class BatchAcceptPayload(BaseModel):
-    """Accept selected or all batch cards into the pre-submission queue.
-
-    ``batch_id`` comes from the URL path; ``items`` describes the batch cards
-    (the server never persists the parsed batch, so the client sends the cards
-    it currently holds). ``item_ids`` optionally filters which cards are
-    accepted (omit for accept-all, preserving batch order).
-    """
-
-    batch_id: str
-    items: list[BatchItemDescriptorPayload]
-    item_ids: list[str] | None = None
-    storage_dir: str | None = None
-
-
-class BatchQueueQuery(BaseModel):
-    """Read a batch pre-submission queue (URL path + query args only)."""
-
-    batch_id: str
-    storage_dir: str | None = None
-
-
-class BatchSubmitPayload(BaseModel):
-    """Submit a batch queue to Auto Bangumi with explicit request-scoped config.
-
-    ``ab_config`` is optional in the payload so the view can raise a Chinese
-    ``validation_error`` envelope when it is missing (instead of the default
-    English pydantic envelope); ``confirm`` is the explicit user confirmation
-    field. Neither value is ever persisted into the queue storage.
-    """
-
-    batch_id: str
-    ab_config: RequestAbConfigPayload | None = Field(default=None)
-    confirm: bool = False
-    storage_dir: str | None = None
-
-
-class BatchRetryPayload(BatchSubmitPayload):
-    """Retry a single FAILED/RETRYABLE queue item with explicit AB config.
-
-    ``request_id`` selects the queue item to retry; only FAILED/RETRYABLE items
-    are retried (already-SUCCEEDED items are skipped server-side). The request-
-    scoped ``ab_config``/``confirm`` contract matches ``BatchSubmitPayload`` and
-    is never persisted into the queue storage.
-    """
-
-    request_id: str
-
-
-class BatchRecoverPayload(BaseModel):
-    """Recover a stuck queue item (SUBMITTING / RESULT_PERSIST_FAILED).
-
-    ``action`` selects the recovery mode: ``auto`` (only for SUBMITTING, uses a
-    previously persisted AB result to finalize SUCCEEDED), ``succeeded``
-    (manual confirmation that Auto Bangumi created the subscription), or
-    ``failed`` (manual confirmation that it did not, turning the item into a
-    normal retryable FAILED). Manual actions require ``confirm=True`` so a
-    wrong click cannot silently mark a subscription as created.
-    """
-
-    batch_id: str
-    request_id: str
-    action: str
-    confirm: bool = False
-    storage_dir: str | None = None
 
 
 class PreferenceQuery(BaseModel):
@@ -206,15 +121,10 @@ class CorrectionSavePayload(BaseModel):
 
 
 class RequestCreatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     title: str
-    source: str = "static-fixture"
-    mikan_config: RequestMikanConfigPayload | None = Field(
-        default=None,
-        validate_default=True,
-    )
     mikan_bangumi: str | None = None
     storage_dir: str | None = None
-    save_request: bool = False
     season_confirmation: int | None = None
     candidate_context: str | None = None
 
@@ -225,14 +135,6 @@ class RequestCreatePayload(BaseModel):
         if not title:
             raise ValueError("title cannot be empty")
         return title
-
-    @field_validator("source")
-    @classmethod
-    def validate_source(cls, value: str) -> str:
-        source = value.strip()
-        if source not in {"static-fixture", "mikan"}:
-            raise ValueError("source must be static-fixture or mikan")
-        return source
 
     @field_validator("mikan_bangumi")
     @classmethod
@@ -293,20 +195,6 @@ class RequestPreviewModifyPayload(BaseModel):
     draft_id: str
     base_revision: int = Field(ge=1)
     patch: dict[str, Any]
-    storage_dir: str | None = None
-
-
-class RequestPreviewSavePayload(BaseModel):
-    """Persist an unsaved, already-modified preview draft.
-
-    US-194: ``draft_id`` is a one-time capability. US-212: the save reserves
-    the draft against ``base_revision`` and only commits the replay tombstone
-    after the Request is written to disk; a failed persist releases the draft
-    so the same id/revision can be retried instead of forcing a re-search.
-    """
-
-    draft_id: str
-    base_revision: int = Field(ge=1)
     storage_dir: str | None = None
 
 
@@ -417,14 +305,133 @@ class RequestAbConfigPayload(BaseModel):
     fallback_enabled: bool
 
 
-class RequestAbSubmitPayload(RequestActionPayload):
-    ab_config: RequestAbConfigPayload
+class AutoBangumiConfigPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    auth_mode: Literal["password", "api_token"] = Field(repr=False)
+    base_url: str = Field(repr=False)
+    username: str | None = Field(default=None, repr=False)
+    password: str | None = Field(default=None, repr=False)
+    token: str | None = Field(default=None, repr=False)
+
+    @model_validator(mode="after")
+    def validate_auth_union(self) -> AutoBangumiConfigPayload:
+        if self.base_url is None:
+            raise ValueError("base_url is required")
+        if self.auth_mode == "password":
+            if self.username is None or self.password is None or self.token is not None:
+                raise ValueError("password credentials required")
+        elif self.token is None or self.username is not None or self.password is not None:
+            raise ValueError("token credential required")
+        return self
 
 
-class AutoBangumiTestConnectionPayload(BaseModel):
-    """Explicit request-scoped credentials for a read-only AB probe."""
+class AutoBangumiConfigSavePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirm: StrictBool
+    expected_configuration_revision: StrictInt = Field(ge=0)
+    config: AutoBangumiConfigPayload
 
-    ab_config: RequestAbConfigPayload
+    @model_validator(mode="after")
+    def require_literal_true(self) -> AutoBangumiConfigSavePayload:
+        if self.confirm is not True:
+            raise ValueError("confirm must be true")
+        return self
+
+
+class AutoBangumiConfigDeletePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirm: StrictBool
+    expected_configuration_revision: StrictInt = Field(ge=0)
+
+    @model_validator(mode="after")
+    def require_literal_true(self) -> AutoBangumiConfigDeletePayload:
+        if self.confirm is not True:
+            raise ValueError("confirm must be true")
+        return self
+
+
+class SavedAutoBangumiProbePayload(BaseModel):
+    """Reference one immutable, server-owned saved configuration generation."""
+
+    model_config = ConfigDict(extra="forbid")
+    connection_ref: UUID
+    configuration_revision: StrictInt = Field(ge=0)
+
+    @field_validator("connection_ref", mode="before")
+    @classmethod
+    def require_canonical_connection_ref(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            raise ValueError("connection_ref 必须是规范 UUID")
+        try:
+            parsed = UUID(value)
+        except (ValueError, AttributeError, TypeError) as exc:
+            raise ValueError("connection_ref 必须是规范 UUID") from exc
+        if str(parsed) != value:
+            raise ValueError("connection_ref 必须是规范 UUID")
+        return value
+
+
+class SavedTrackingSubmitInput(BaseModel):
+    """Strict server-side handoff for submit/retry using saved AB config.
+
+    This model is intentionally not an HTTP replacement for
+    :class:`TrackingSubmitPayload` yet.  US-328 switches the public request
+    shape; until then the new service seam consumes only the opaque saved
+    connection generation and the existing tracking submit fields.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tracking_id: StrictStr
+    expected_revision: StrictInt = Field(ge=1)
+    idempotency_key: StrictStr
+    confirm: StrictBool
+    connection_ref: UUID
+    configuration_revision: StrictInt = Field(ge=0)
+    storage_dir: str | None = None
+
+    @field_validator("tracking_id")
+    @classmethod
+    def _clean_tracking_id(cls, value: str) -> str:
+        tracking_id = value.strip()
+        if not tracking_id:
+            raise ValueError("tracking_id cannot be empty")
+        return tracking_id
+
+    @field_validator("idempotency_key")
+    @classmethod
+    def _clean_saved_submit_key(cls, value: str) -> str:
+        key = value.strip()
+        if not _IDEMPOTENCY_KEY_RE.fullmatch(key):
+            raise ValueError("idempotency_key 包含不合法字符")
+        return key
+
+    @field_validator("connection_ref", mode="before")
+    @classmethod
+    def _require_canonical_saved_submit_ref(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            raise ValueError("connection_ref 必须是规范 UUID")
+        try:
+            parsed = UUID(value)
+        except (ValueError, AttributeError, TypeError) as exc:
+            raise ValueError("connection_ref 必须是规范 UUID") from exc
+        if str(parsed) != value:
+            raise ValueError("connection_ref 必须是规范 UUID")
+        return value
+
+    @model_validator(mode="after")
+    def _require_confirmation(self) -> SavedTrackingSubmitInput:
+        if self.confirm is not True:
+            raise ValueError("confirm must be true")
+        return self
+
+
+# Retry deliberately has the same strict handoff shape.  Separate aliases keep
+# the two service entry points discoverable without introducing a second input
+# contract that could drift from submit.
+SavedTrackingRetryInput = SavedTrackingSubmitInput
+SavedTrackingSubmitPayload = SavedTrackingSubmitInput
+SavedTrackingRetryPayload = SavedTrackingRetryInput
 
 
 class AutoBangumiCapabilitiesConfigPayload(BaseModel):
@@ -439,56 +446,86 @@ class AutoBangumiCapabilitiesConfigPayload(BaseModel):
     fallback_enabled: bool
 
 
-class AutoBangumiCapabilitiesPayload(BaseModel):
-    """Request-scoped credentials for the read-only capability probe."""
-
-    model_config = ConfigDict(extra="forbid")
-    ab_config: AutoBangumiCapabilitiesConfigPayload
-
-
 class TrackingSyncPayload(BaseModel):
-    """Request-scoped read-only external tracking synchronization."""
+    """Read-only synchronization request resolved through a saved generation."""
 
     model_config = ConfigDict(extra="forbid")
-    ab_config: AutoBangumiCapabilitiesConfigPayload
+    connection_ref: UUID
+    configuration_revision: StrictInt = Field(ge=0)
     storage_dir: str | None = None
     confirm: Literal[True]
 
 
-class QbittorrentConfigPayload(BaseModel):
-    endpoint: str
-    username: str
-    password: str
-    timeout_seconds: float = Field(gt=0)
-    verify_tls: bool = True
+class SavedTrackingSyncInput(BaseModel):
+    """Strict handoff for syncing through a server-owned AB connection."""
+    model_config = ConfigDict(extra="forbid")
+    connection_ref: str
+    configuration_revision: StrictInt = Field(ge=0)
+    confirm: StrictBool
+    storage_dir: str | None = None
 
-    @field_validator("endpoint")
+    @field_validator("connection_ref")
     @classmethod
-    def validate_endpoint(cls, value: str) -> str:
-        endpoint = value.strip()
-        if not endpoint:
-            raise ValueError("endpoint cannot be empty")
-        return endpoint
+    def _canonical_ref(cls, value: str) -> str:
+        try:
+            parsed = UUID(value)
+        except (ValueError, AttributeError, TypeError) as exc:
+            raise ValueError("connection_ref 必须是规范 UUID") from exc
+        if str(parsed) != value:
+            raise ValueError("connection_ref 必须是规范 UUID")
+        return value
 
-    @field_validator("username")
+    @model_validator(mode="after")
+    def _confirmed(self) -> SavedTrackingSyncInput:
+        if self.confirm is not True:
+            raise ValueError("confirm must be true")
+        return self
+
+
+class SavedTrackingRecoveryInput(BaseModel):
+    """Strict recovery handoff for a server-owned AB connection."""
+
+    model_config = ConfigDict(extra="forbid")
+    tracking_id: StrictStr
+    expected_revision: StrictInt = Field(ge=1)
+    action: Literal["AUTO", "MARK_SUCCEEDED", "MARK_FAILED", "VERIFY_EXTERNAL"]
+    confirm: StrictBool = False
+    connection_ref: UUID | None = None
+    configuration_revision: StrictInt | None = Field(default=None, ge=0)
+    storage_dir: str | None = None
+
+    @field_validator("tracking_id")
     @classmethod
-    def validate_username(cls, value: str) -> str:
-        username = value.strip()
-        if not username:
-            raise ValueError("username cannot be empty")
-        return username
+    def _clean_recovery_tracking_id(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("tracking_id cannot be empty")
+        return value
 
-    @field_validator("password")
+    @field_validator("connection_ref", mode="before")
     @classmethod
-    def validate_password(cls, value: str) -> str:
-        password = value.strip()
-        if not password:
-            raise ValueError("password cannot be empty")
-        return password
+    def _require_canonical_recovery_ref(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            raise ValueError("connection_ref 必须是规范 UUID")
+        try:
+            parsed = UUID(value)
+        except (ValueError, AttributeError, TypeError) as exc:
+            raise ValueError("connection_ref 必须是规范 UUID") from exc
+        if str(parsed) != value:
+            raise ValueError("connection_ref 必须是规范 UUID")
+        return value
 
-
-class QbittorrentTestConnectionPayload(BaseModel):
-    qbittorrent_config: QbittorrentConfigPayload
+    @model_validator(mode="after")
+    def _manual_confirmation(self) -> SavedTrackingRecoveryInput:
+        if self.action in {"MARK_SUCCEEDED", "MARK_FAILED"} and self.confirm is not True:
+            raise ValueError("confirm must be true")
+        supplied = self.model_fields_set
+        if self.action == "VERIFY_EXTERNAL":
+            if self.connection_ref is None or self.configuration_revision is None:
+                raise ValueError("VERIFY_EXTERNAL requires saved connection generation")
+        elif supplied & {"connection_ref", "configuration_revision"}:
+            raise ValueError("local recovery cannot include saved connection generation")
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -558,7 +595,7 @@ class TrackingDetailQuery(BaseModel):
     ``tracking_id`` comes from the URL path; ``storage_dir`` from the query.
     """
 
-    tracking_id: str
+    tracking_id: str = ""
     storage_dir: str | None = None
 
 
@@ -568,7 +605,7 @@ class TrackingRevalidatePayload(BaseModel):
     The request carries only the server-observed ``expected_revision`` (a
     revision-aware compare, so a stale client never silently re-checks an
     outdated record) and an optional storage profile.  ``extra="forbid"``
-    rejects ``ab_config``/credentials/other leaked fields: revalidation is a
+    rejects credentials/other leaked fields: revalidation is a
     pure-local check that never accepts connection or capability config.
     ``tracking_id`` comes from the URL path.
     """
@@ -583,58 +620,12 @@ class TrackingRevalidatePayload(BaseModel):
     @classmethod
     def _clean_tracking_id(cls, value: str) -> str:
         tracking_id = value.strip()
-        if not tracking_id:
-            raise ValueError("tracking_id cannot be empty")
         return tracking_id
 
 
 #: Opaque idempotency-key shape for the unified submit (mirrors the operation
 #: model's printable-token contract so a bad key fails at the boundary).
 _IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-:=]{0,199}$")
-
-
-class TrackingSubmitPayload(BaseModel):
-    """Body for ``POST /api/v1/tracking/items/{tracking_id}/submit`` (US-225).
-
-    ``confirm`` must be strictly true and ``ab_config`` is request-scoped memory
-    only — it is never persisted, logged or returned.  ``expected_revision`` is
-    the server-observed revision the user is confirming; ``idempotency_key`` is
-    the opaque client operation id that makes network replays converge to one
-    external call.  ``extra="forbid"`` rejects leaked fields.
-    ``tracking_id`` comes from the URL path.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    tracking_id: str
-    expected_revision: StrictInt = Field(ge=1)
-    idempotency_key: StrictStr
-    confirm: bool
-    ab_config: RequestAbConfigPayload
-    storage_dir: str | None = None
-
-    @field_validator("tracking_id")
-    @classmethod
-    def _clean_tracking_id(cls, value: str) -> str:
-        tracking_id = value.strip()
-        if not tracking_id:
-            raise ValueError("tracking_id cannot be empty")
-        return tracking_id
-
-    @field_validator("idempotency_key")
-    @classmethod
-    def _clean_idempotency_key(cls, value: str) -> str:
-        key = value.strip()
-        if not _IDEMPOTENCY_KEY_RE.fullmatch(key):
-            raise ValueError("idempotency_key 包含不合法字符")
-        return key
-
-    @field_validator("expected_revision")
-    @classmethod
-    def _reject_bool_revision(cls, value: int) -> int:
-        if isinstance(value, bool):
-            raise ValueError("expected_revision 必须为正整数")
-        return value
 
 
 #: Fixed recovery-action enum accepted by
@@ -661,14 +652,15 @@ class TrackingRecoverPayload(BaseModel):
     action: str
     confirm: bool = False
     storage_dir: str | None = None
-    ab_config: RequestAbConfigPayload | None = None
+    connection_ref: UUID | None = None
+    configuration_revision: StrictInt | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _verify_external_requires_config(self) -> TrackingRecoverPayload:
-        if self.action == "VERIFY_EXTERNAL" and self.ab_config is None:
-            raise ValueError("VERIFY_EXTERNAL requires ab_config")
-        if self.action != "VERIFY_EXTERNAL" and self.ab_config is not None:
-            raise ValueError("ab_config is only accepted by VERIFY_EXTERNAL")
+        if self.action == "VERIFY_EXTERNAL" and (self.connection_ref is None or self.configuration_revision is None):
+            raise ValueError("VERIFY_EXTERNAL requires saved connection generation")
+        if self.action != "VERIFY_EXTERNAL" and (self.connection_ref is not None or self.configuration_revision is not None):
+            raise ValueError("local recovery cannot include saved connection generation")
         return self
 
     @field_validator("tracking_id")
@@ -759,7 +751,8 @@ class _TrackingManagementBasePayload(BaseModel):
     expected_revision: StrictInt = Field(ge=1)
     idempotency_key: StrictStr
     confirm: Literal[True]
-    ab_config: AutoBangumiCapabilitiesConfigPayload
+    connection_ref: UUID
+    configuration_revision: StrictInt = Field(ge=0)
     storage_dir: str | None = None
 
     @field_validator("tracking_id")
@@ -814,3 +807,56 @@ class TrackingRefreshRssPayload(_TrackingManagementBasePayload):
         if value != "ASSOCIATED_RSS":
             raise ValueError("刷新操作只能作用于 ASSOCIATED_RSS")
         return value
+
+
+class SavedTrackingManagementInput(BaseModel):
+    """Strict handoff for management through one saved AB generation."""
+    model_config = ConfigDict(extra="forbid")
+    tracking_id: StrictStr
+    target_scope: StrictStr
+    operation: Literal["MODIFY", "SET_ENABLED", "DELETE_EXTERNAL", "REFRESH_RSS"]
+    expected_revision: StrictInt = Field(ge=1)
+    idempotency_key: StrictStr
+    confirm: StrictBool
+    connection_ref: UUID
+    configuration_revision: StrictInt = Field(ge=0)
+    patch: dict[str, Any] | None = None
+    enabled: StrictBool | None = None
+    storage_dir: str | None = None
+
+    @field_validator("connection_ref", mode="before")
+    @classmethod
+    def _canonical_management_ref(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            raise ValueError("connection_ref 必须是规范 UUID")
+        try:
+            parsed = UUID(value)
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ValueError("connection_ref 必须是规范 UUID") from exc
+        if str(parsed) != value:
+            raise ValueError("connection_ref 必须是规范 UUID")
+        return value
+
+    @model_validator(mode="after")
+    def _strict_management_input(self) -> SavedTrackingManagementInput:
+        if self.confirm is not True:
+            raise ValueError("confirm must be true")
+        if not self.tracking_id.strip() or not _IDEMPOTENCY_KEY_RE.fullmatch(self.idempotency_key.strip()):
+            raise ValueError("tracking_id 或 idempotency_key 无效")
+        if self.target_scope not in _MANAGEMENT_SCOPES:
+            raise ValueError("target_scope 无效")
+        if self.operation == "MODIFY":
+            if not isinstance(self.patch, dict) or not self.patch:
+                raise ValueError("MODIFY 必须提供 patch")
+            patch_model = TrackingSubscriptionPatch if self.target_scope == "SUBSCRIPTION" else TrackingRssPatch
+            patch_model.model_validate(self.patch)
+            if self.enabled is not None:
+                raise ValueError("MODIFY 不得提供 enabled")
+        elif self.operation == "SET_ENABLED":
+            if type(self.enabled) is not bool or self.patch is not None:
+                raise ValueError("SET_ENABLED 必须仅提供 enabled")
+        elif self.patch is not None or self.enabled is not None:
+            raise ValueError("该管理操作不得提供 patch 或 enabled")
+        if self.operation == "REFRESH_RSS" and self.target_scope != "ASSOCIATED_RSS":
+            raise ValueError("刷新操作只能作用于 ASSOCIATED_RSS")
+        return self

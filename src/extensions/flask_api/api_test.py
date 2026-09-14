@@ -111,13 +111,11 @@ def test_error_http_status_maps_semantic_categories() -> None:
     assert _error_http_status("invalid_modify_patch_field") == 400
     assert _error_http_status("invalid_input") == 400
     assert _error_http_status("config_error") == 400
-    assert _error_http_status("queue_not_found") == 400
     assert _error_http_status("invalid_storage_dir") == 400
     # US-215 batch input over the 36-work limit → 400.
     assert _error_http_status("batch_limit_exceeded") == 400
     # Missing resources → 404
     assert _error_http_status("request_not_found") == 404
-    assert _error_http_status("queue_item_not_found") == 404
     assert _error_http_status("poster_not_found") == 404
     # State conflicts / replay → 409
     assert _error_http_status("invalid_request_status") == 409
@@ -135,7 +133,6 @@ def test_error_http_status_maps_semantic_categories() -> None:
     assert _error_http_status("save_confirm_failed") == 409
     # External auth → 401
     assert _error_http_status("ab_auth_failed") == 401
-    assert _error_http_status("qbittorrent_auth_failed") == 401
     # Upstream bad gateway → 502
     assert _error_http_status("mikan_connection_failed") == 502
     assert _error_http_status("ab_submit_failed") == 502
@@ -144,7 +141,6 @@ def test_error_http_status_maps_semantic_categories() -> None:
     # Upstream timeout → 504
     assert _error_http_status("mikan_timeout") == 504
     assert _error_http_status("ab_timeout") == 504
-    assert _error_http_status("qbittorrent_timeout") == 504
     # Unknown error types default to 400 (client-visible, never 500).
     assert _error_http_status("some_future_error") == 400
     assert _error_http_status("") == 400

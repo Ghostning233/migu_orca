@@ -46,6 +46,7 @@ from dataclasses import replace
 from pathlib import Path
 from threading import RLock
 from typing import Any
+from uuid import UUID
 
 from shared.errors import Stage1Error
 from storage_engine.controllers.storage_config import (
@@ -53,6 +54,7 @@ from storage_engine.controllers.storage_config import (
     ensure_storage_layout,
 )
 from tracking_engine.models.operation import (
+    TRACKING_OPERATION_SCHEMA_VERSION,
     TRACKING_OPERATION_STATE_FAILED,
     TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN,
     TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
@@ -88,6 +90,7 @@ _IMMUTABLE_FIELDS = (
     "target_scope",
     "previous_tracking_status",
     "expected_external_fingerprint",
+    "connection_ref",
 )
 
 
@@ -102,6 +105,7 @@ def bind_tracking_operation(
     target_scope: str | None = None,
     previous_tracking_status: str | None = None,
     expected_external_fingerprint: str | None = None,
+    connection_ref: str | UUID | None = None,
     attempt: int = 1,
     now: str | None = None,
 ) -> tuple[TrackingOperation, bool]:
@@ -121,6 +125,7 @@ def bind_tracking_operation(
     Returns ``(operation, created)``.
     """
     clean_key = _validated_idempotency_key(idempotency_key, "bind_tracking_operation")
+    clean_connection_ref = _normalize_connection_ref(connection_ref)
     operation_id = tracking_operation_id_for_idempotency_key(clean_key)
     ensure_storage_layout(config)
 
@@ -138,6 +143,7 @@ def bind_tracking_operation(
                 target_scope=target_scope,
                 previous_tracking_status=previous_tracking_status,
                 expected_external_fingerprint=expected_external_fingerprint,
+                connection_ref=clean_connection_ref,
             )
             return existing, False
         try:
@@ -150,6 +156,7 @@ def bind_tracking_operation(
                 target_scope=target_scope,
                 previous_tracking_status=previous_tracking_status,
                 expected_external_fingerprint=expected_external_fingerprint,
+                connection_ref=clean_connection_ref,
                 attempt=attempt,
                 now=now,
             )
@@ -210,6 +217,12 @@ def compare_and_swap_tracking_operation(
                     "expected_state": expected_state,
                     "current_state": current.state,
                 },
+            )
+        if current.schema_version != TRACKING_OPERATION_SCHEMA_VERSION:
+            raise Stage1Error(
+                "tracking_operation_legacy_read_only",
+                "旧版提交操作仅支持读取，不能修改",
+                "compare_and_swap_tracking_operation",
             )
         if record.operation_id != clean_id:
             raise Stage1Error(
@@ -272,6 +285,12 @@ def recover_tracking_operation(
     ensure_storage_layout(config)
     with _key_lock(clean_id):
         current = _load_tracking_operation(config, clean_id, "recover_tracking_operation")
+        if current.schema_version != TRACKING_OPERATION_SCHEMA_VERSION:
+            raise Stage1Error(
+                "tracking_operation_legacy_read_only",
+                "旧版提交操作仅支持读取，不能恢复",
+                "recover_tracking_operation",
+            )
         if current.state != expected_state:
             raise Stage1Error("tracking_operation_state_conflict", "提交操作状态已变化，请重新读取后重试", "recover_tracking_operation")
         recovered = replace(
@@ -293,6 +312,7 @@ def _check_binding(
     target_scope: str | None = None,
     previous_tracking_status: str | None = None,
     expected_external_fingerprint: str | None = None,
+    connection_ref: str | None = None,
 ) -> None:
     """Raise ``tracking_idempotency_conflict`` when the binding differs."""
     binding = (
@@ -303,6 +323,7 @@ def _check_binding(
         existing.target_scope,
         existing.previous_tracking_status,
         existing.expected_external_fingerprint,
+        existing.connection_ref,
     )
     incoming = (
         tracking_id,
@@ -312,6 +333,7 @@ def _check_binding(
         target_scope,
         previous_tracking_status,
         expected_external_fingerprint,
+        connection_ref,
     )
     if binding != incoming:
         raise Stage1Error(
@@ -446,6 +468,37 @@ def _validated_idempotency_key(idempotency_key: Any, failed_step: str) -> str:
             {"field": "idempotency_key"},
         )
     return clean_key
+
+
+def _normalize_connection_ref(value: str | UUID | None) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, UUID):
+        return str(value)
+    if not isinstance(value, str):
+        raise Stage1Error(
+            "invalid_tracking_operation",
+            "提交操作参数无效",
+            "bind_tracking_operation",
+            {"field": "connection_ref"},
+        )
+    try:
+        parsed = UUID(value)
+    except (ValueError, AttributeError):
+        raise Stage1Error(
+            "invalid_tracking_operation",
+            "提交操作参数无效",
+            "bind_tracking_operation",
+            {"field": "connection_ref"},
+        ) from None
+    if str(parsed) != value:
+        raise Stage1Error(
+            "invalid_tracking_operation",
+            "提交操作参数无效",
+            "bind_tracking_operation",
+            {"field": "connection_ref"},
+        )
+    return value
 
 
 def _validated_operation_id(operation_id: Any, failed_step: str) -> str:

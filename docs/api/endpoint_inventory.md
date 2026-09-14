@@ -36,13 +36,13 @@
     US-194 的 `draft_expired`/`draft_evicted`/`draft_replayed`/`draft_mismatch` 与
     US-211 的 `draft_revision_conflict`、US-212 的 `draft_reserved`、US-213 的
     `idempotency_conflict`、US-214 的 `save_confirm_failed` 也归此类）。
-  - `401`：外部服务认证失败（`ab_auth_failed`、`qbittorrent_auth_failed`）。
+  - `401`：外部服务认证失败（`ab_auth_failed`）。
   - `502`：上游不可达/不健康（`mikan_connection_failed`、`mikan_http_failed`、
     `mikan_parse_failed`、`poster_unavailable`、`ab_connection_failed`、`ab_submit_failed`、
-    `qbittorrent_connection_failed` 等）。
+    等）。
   - `503`：上游不可用/版本不受支持（`ab_unsupported_version`、`ab_submit_unsupported`、
     `ab_probe_unsupported`）。
-  - `504`：上游超时（`mikan_timeout`、`ab_timeout`、`qbittorrent_timeout`）。
+  - `504`：上游超时（`mikan_timeout`、`ab_timeout`）。
   - `500`：服务端内部错误（`storage_error`、`storage_json_error`、未知异常）。
 - 唯一二进制端点 `/api/v1/mikan/posters/<key>` 不经 JSON envelope，成功返回图片字节；
   失败返回 JSON envelope + 分类状态码（US-198 校准后与 OpenAPI 声明一致）：
@@ -62,29 +62,22 @@
 | GET | `/api/v1/requests/<path:request_id>/safe-info` | `migu_orca_web_api.RequestSafeInfoView` | RequestSafeInfoView |
 | POST | `/api/v1/requests` | `migu_orca_web_api.RequestCreateView` | RequestCreateView |
 | POST | `/api/v1/requests/preview-modify` | `migu_orca_web_api.RequestPreviewModifyView` | RequestPreviewModifyView |
-| POST | `/api/v1/requests/preview-save` | `migu_orca_web_api.RequestPreviewSaveView` | RequestPreviewSaveView |
 | POST | `/api/v1/requests/save-confirm` | `migu_orca_web_api.RequestSaveConfirmView` | RequestSaveConfirmView |
 | POST | `/api/v1/requests/<path:request_id>/accept` | `migu_orca_web_api.RequestAcceptView` | RequestAcceptView |
 | POST | `/api/v1/requests/<path:request_id>/cancel` | `migu_orca_web_api.RequestCancelView` | RequestCancelView |
 | POST | `/api/v1/requests/<path:request_id>/modify` | `migu_orca_web_api.RequestModifyView` | RequestModifyView |
 | POST | `/api/v1/requests/<path:request_id>/delete` | `migu_orca_web_api.RequestDeleteView` | RequestDeleteView |
-| POST | `/api/v1/requests/<path:request_id>/submit-ab` | `migu_orca_web_api.RequestAbSubmitView` | RequestAbSubmitView |
 | POST | `/api/v1/mikan/candidates` | `migu_orca_web_api.MikanCandidateSearchView` | MikanCandidateSearchView |
 | GET | `/api/v1/mikan/posters/<key>` | `migu_orca_web_api.mikan_poster` | mikan_poster（函数视图） |
 | GET | `/api/v1/preferences` | `migu_orca_web_api.PreferenceView` | PreferenceView |
 | POST | `/api/v1/preferences` | `migu_orca_web_api.PreferenceSaveView` | PreferenceSaveView |
 | GET | `/api/v1/corrections` | `migu_orca_web_api.CorrectionView` | CorrectionView |
 | POST | `/api/v1/corrections` | `migu_orca_web_api.CorrectionSaveView` | CorrectionSaveView |
+| GET | `/api/v1/settings/autobangumi` | `migu_orca_web_api.AutoBangumiConfigView` | AutoBangumiConfigView |
+| PUT | `/api/v1/settings/autobangumi` | `migu_orca_web_api.AutoBangumiConfigSaveView` | AutoBangumiConfigSaveView |
+| DELETE | `/api/v1/settings/autobangumi` | `migu_orca_web_api.AutoBangumiConfigDeleteView` | AutoBangumiConfigDeleteView |
 | POST | `/api/v1/batches/parse` | `migu_orca_web_api.BatchParseView` | BatchParseView |
 | POST | `/api/v1/batches/<batch_id>/save-confirm` | `migu_orca_web_api.BatchSaveConfirmView` | BatchSaveConfirmView |
-| POST | `/api/v1/batches/<batch_id>/accept` | `migu_orca_web_api.BatchAcceptView` | BatchAcceptView |
-| GET | `/api/v1/batches/<batch_id>/queue` | `migu_orca_web_api.BatchQueueView` | BatchQueueView |
-| POST | `/api/v1/batches/<batch_id>/submit` | `migu_orca_web_api.BatchSubmitView` | BatchSubmitView |
-| POST | `/api/v1/batches/<batch_id>/retry` | `migu_orca_web_api.BatchRetryView` | BatchRetryView |
-| POST | `/api/v1/batches/<batch_id>/recover` | `migu_orca_web_api.BatchRecoverView` | BatchRecoverView |
-| POST | `/api/v1/qbittorrent/test-connection` | `migu_orca_web_api.QbittorrentTestConnectionView` | QbittorrentTestConnectionView |
-| POST | `/api/v1/autobangumi/test-connection` | `migu_orca_web_api.AutoBangumiTestConnectionView` | AutoBangumiTestConnectionView |
-| POST | `/api/v1/autobangumi/capabilities` | `migu_orca_web_api.AutoBangumiCapabilitiesView` | AutoBangumiCapabilitiesView |
 | POST | `/api/v1/tracking/sync` | `migu_orca_web_api.TrackingSyncView` | TrackingSyncView |
 | GET | `/api/v1/tracking/items` | `migu_orca_web_api.TrackingItemListView` | TrackingItemListView |
 | GET | `/api/v1/tracking/items/<path:tracking_id>` | `migu_orca_web_api.TrackingItemDetailView` | TrackingItemDetailView |
@@ -106,9 +99,10 @@
 
 | 方法 | OpenAPI path | 生命周期 | 替代关系或保留原因 | 数据权威 |
 | --- | --- | --- | --- | --- |
-| POST | `/api/v1/autobangumi/capabilities` | PRIMARY | 只读能力探测；管理写入时重新探测；`subscription_submit` 仅由已验证的 3.1.18 password/legacy probe 支持 | Capability probe |
-| POST | `/api/v1/autobangumi/test-connection` | PRIMARY | 连接诊断，不替代管理写入校验 | Request-scoped probe |
-| POST | `/api/v1/qbittorrent/test-connection` | PRIMARY | 连接诊断 | Request-scoped probe |
+| GET | `/api/v1/settings/autobangumi` | PRIMARY | 部署端 Auto Bangumi 安全摘要读取 | Deployment config repository |
+| PUT | `/api/v1/settings/autobangumi` | PRIMARY | 部署端 Auto Bangumi 配置保存 | Deployment config repository |
+| DELETE | `/api/v1/settings/autobangumi` | PRIMARY | 部署端 Auto Bangumi 配置清除 | Deployment config repository |
+| POST | `/api/v1/settings/autobangumi/probe` | PRIMARY | 使用已保存连接执行显式只读能力探测；结果仅绑定当前 ref/revision | Capability probe cache |
 | GET | `/api/v1/preferences` | PRIMARY | 偏好读取 | Preference store |
 | POST | `/api/v1/preferences` | PRIMARY | 偏好保存 | Preference store |
 | GET | `/api/v1/corrections` | PRIMARY | 纠正规则读取 | Correction store |
@@ -138,13 +132,6 @@
 | POST | `/api/v1/requests/<path:request_id>/cancel` | RECOVERY | 待确认 Request 的显式取消 | Request store |
 | POST | `/api/v1/requests/<path:request_id>/modify` | RECOVERY | 已保存 Request 的兼容修改入口 | Request store |
 | POST | `/api/v1/requests/<path:request_id>/delete` | RECOVERY | 本地 Request 显式删除入口 | Request store |
-| POST | `/api/v1/requests/<path:request_id>/submit-ab` | COMPATIBILITY | 旧单番提交；改由统一 TrackingRecord/operation 收敛 | TrackingRecord + operation |
-| POST | `/api/v1/requests/preview-save` | COMPATIBILITY | 旧预览保存；由 save-confirm 替代，保持可用 | DraftStore + TrackingRecord |
-| POST | `/api/v1/batches/<batch_id>/accept` | COMPATIBILITY | 旧批量接受；由批量 save-confirm 替代，保持可用 | TrackingRecord + queue projection |
-| GET | `/api/v1/batches/<batch_id>/queue` | COMPATIBILITY | 旧队列读取；保留为兼容投影 | TrackingRecord; queue projection |
-| POST | `/api/v1/batches/<batch_id>/submit` | COMPATIBILITY | 旧批量提交；收敛到统一提交服务 | TrackingRecord + operation |
-| POST | `/api/v1/batches/<batch_id>/retry` | COMPATIBILITY | 旧批量重试；收敛到统一恢复保护 | TrackingRecord + operation |
-| POST | `/api/v1/batches/<batch_id>/recover` | COMPATIBILITY | 旧批量恢复；收敛到统一恢复保护 | TrackingRecord + operation |
 
 所有旧入口继续可调用，不删除、不重定向、不隐藏请求/响应语义。外部提交流程以
 `TrackingRecord` 为唯一权威；旧 queue 与 AB result 只作为兼容投影或迁移证据。
@@ -170,15 +157,13 @@ CLI 显式 `--storage-dir` 行为不受影响）。
 | GET `/api/v1/requests` | `storage_dir?` | `{"requests": [summary...]}` | 损坏 snapshot → `storage_json_error` |
 | GET `/api/v1/requests/<request_id>` | `request_id`（路径）、`storage_dir?` | `{"request": <snapshot>, "history": {available, events, error}, "ab_result": {available, record, error}}` | 缺失 → `request_not_found`；路径片段 → `invalid_request_id` |
 | GET `/api/v1/requests/<request_id>/safe-info` | `request_id`（路径）、`storage_dir?` | `{"safe_info": <RequestSafeInfoDTO>}`（US-217 严格白名单，`extra="forbid"`） | 缺失 → `request_not_found`；路径片段 → `invalid_request_id`；损坏 → `storage_json_error` |
-| POST `/api/v1/requests` | `title`、`source`（`static-fixture`/`mikan`）、`mikan_config?`、`mikan_bangumi?`、`storage_dir?`、`save_request`（默认 false）、`season_confirmation?`、`candidate_context?` | `{"request", "summary", "saved_request"?}`；`save_request=false` 时另含 `draft_id` + `draft_revision`（US-194/211：服务端权威草案 opaque id 与单调 revision） | `data_validation_errors`（title 缺失）；`candidate_context_invalid`；保存失败 → `storage_error` |
+| POST `/api/v1/requests` | `title`、`mikan_bangumi?`、`storage_dir?`、`season_confirmation?`、`candidate_context?` | `{"request", "summary", "draft_id", "draft_revision"}`（仅签发服务端权威草案） | `data_validation_errors`（title 缺失）；`candidate_context_invalid` |
 | POST `/api/v1/requests/preview-modify` | `draft_id`（US-194，不再收完整 `request`）、`base_revision`（US-211 必填，compare-and-swap）、`patch`、`storage_dir?` | `{"request", "summary", "draft_id", "draft_revision"}` | `invalid_modify_patch_field`；draft 失效 → `draft_expired`/`draft_evicted`/`draft_replayed`（409）；`base_revision` 过期 → `draft_revision_conflict`（409，error_data 只含 `field`/`current_revision`） |
-| POST `/api/v1/requests/preview-save` | `draft_id`（US-194，一次性预留）、`base_revision`（US-212 必填，预留校验）、`storage_dir?` | `{"request", "summary", "saved_request"?}` | draft 失效/重放 → `draft_expired`/`draft_evicted`/`draft_replayed`（409）；`base_revision` 过期 → `draft_revision_conflict`；正在保存 → `draft_reserved`（409） |
-| POST `/api/v1/requests/save-confirm` | `draft_id`、`base_revision`、`idempotency_key`、`storage_dir?`（US-214；不接受完整 Request） | `{"outcome": "CONFIRMED", "request", "summary", "handoff": {request_id, status: "ACCEPTED", next_action: "OPEN_TRACKING", tracking_id, tracking_status?, tracking_ready, safe_message?}}`（US-222 起 handoff 携带 unified tracking 身份；tracking 写失败时 `tracking_ready=false` + 固定 `safe_message`，不回滚已确认 Request） | 同 preview-save 的 draft 409；同键不同 payload/操作 → `idempotency_conflict`（409）；确认失败 → `save_confirm_failed`（409，details 只含 `outcome=SAVED_CONFIRM_FAILED`/`request_id`/`retry_action=ACCEPT_SAVED_REQUEST`） |
+| POST `/api/v1/requests/save-confirm` | `draft_id`、`base_revision`、`idempotency_key`、`storage_dir?`（不接受完整 Request） | `{"outcome": "CONFIRMED", "request", "summary", "handoff": {...}}` | draft 冲突；`idempotency_conflict`；`save_confirm_failed` |
 | POST `/api/v1/requests/<request_id>/accept` | `request_id`（路径）、`storage_dir?` | `{"request", "summary", "saved_request"?}` | 缺失 → `request_not_found`；状态冲突 → `invalid_request_status` |
 | POST `/api/v1/requests/<request_id>/cancel` | `request_id`（路径）、`cancel_reason?`、`storage_dir?` | `{"request", "summary", "saved_request"?}` | 同上 |
 | POST `/api/v1/requests/<request_id>/modify` | `request_id`（路径）、`patch`、`storage_dir?` | `{"request", "summary", "saved_request"?}` | `invalid_modify_patch_field` |
 | POST `/api/v1/requests/<request_id>/delete` | `request_id`（路径）、`storage_dir?` | `{"request_id", "storage", "directory", "filename", "deleted": true}` | 缺失 → `request_not_found` |
-| POST `/api/v1/requests/<request_id>/submit-ab` | `request_id`（路径）、`ab_config`（`auth_mode`/`base_url`/`username`/`password`/`token`/`fallback_enabled`）、`storage_dir?` | `{"request", "summary", "ab_submit_result", "saved_request"?, "saved_ab_result"?}` | 非 ACCEPTED → `invalid_request_status` |
 
 `summary` 形状（`request_engine.controllers.request_controller.summarize_request`）：
 `request_id`、`status`、`bangumi_title`、`season`、`updated_at`、`candidate_subtitle_groups[]`
@@ -206,7 +191,7 @@ torrent 文件名，不含 magnet/下载 URL/原始 RSS）、`folder_name`（安
 
 | 端点 | 请求字段 | 成功 `result` | 业务失败示例 |
 | --- | --- | --- | --- |
-| POST `/api/v1/mikan/candidates` | `query`、`mikan_config?`（`search_endpoint`/`timeout_seconds`） | `{"query", "status", "parse_result", "attempted_queries", "candidates": [candidate...], "error"?}` | 空 query → `data_validation_errors`；搜索失败 → 结果内 `error` + `status=FAILED` |
+| POST `/api/v1/mikan/candidates` | `query` | `{"query", "status", "parse_result", "attempted_queries", "candidates": [candidate...], "error"?}` | 空 query → `data_validation_errors`；搜索失败 → 结果内 `error` + `status=FAILED` |
 | GET `/api/v1/mikan/posters/<key>` | `key`（路径，opaque） | 图片字节（`image/jpeg`/`image/png`/`image/gif`/`image/webp`），`Cache-Control: private, max-age=86400` | 见 §4.3 |
 
 `candidate` 形状：`bangumi_id`、`title`、`mikan_url`、`poster_url`（同源 opaque 代理 URL 或 null）、
@@ -226,13 +211,8 @@ torrent 文件名，不含 magnet/下载 URL/原始 RSS）、`folder_name`（安
 
 | 端点 | 请求字段 | 成功 `result` | 业务失败示例 |
 | --- | --- | --- | --- |
-| POST `/api/v1/batches/parse` | `raw_input`、`mikan_config?`、`storage_dir?` | `{"batch_id", "raw_input", "items": [item...]}` | 空输入 → `validation_error`「请至少输入一个番剧名称」；超过 36 个非空行 → `batch_limit_exceeded`（400，details 只含 `field=raw_input`/`limit=36`/`actual`，任何标题解析/MiKan/持久化 seam 前拒绝） |
+| POST `/api/v1/batches/parse` | `raw_input`、`storage_dir?` | `{"batch_id", "raw_input", "items": [item...]}` | 空输入 → `validation_error`「请至少输入一个番剧名称」；超过 36 个非空行 → `batch_limit_exceeded`（400，details 只含 `field=raw_input`/`limit=36`/`actual`，任何标题解析/MiKan/持久化 seam 前拒绝） |
 | POST `/api/v1/batches/<batch_id>/save-confirm` | `batch_id`（路径）、`items[]`（`item_id`/`draft_id`/`base_revision`/`idempotency_key`）、`item_ids?`、`storage_dir?` | `{"batch_id", "results": [{item_id, outcome, request_id?, status?, error_type?, error_message?, tracking_id?, tracking_ready?}], "summary": {requested, confirmed, failed}}`（HTTP 200 逐条部分成功；US-222 起 CONFIRMED 项携带 `tracking_id`/`tracking_ready`，单条 tracking 写失败不回滚该已确认项或其他条目） | 每条复用单番 save-confirm 用例；可预期单条失败（`draft_expired`/`draft_revision_conflict`/`draft_reserved`/`idempotency_conflict`/`save_confirm_failed` 等）→ 逐条 `failed` 脱敏结果，不回滚成功项；重复 `item_id` → `skipped`；请求级错误仍走普通失败 envelope（缺 item 字段/idempotency_key → `data_validation_errors`；非法 storage_dir → `invalid_storage_dir`） |
-| POST `/api/v1/batches/<batch_id>/accept` | `batch_id`（路径）、`items[]`（`item_id`/`request_id?`/`title?`）、`item_ids?`、`storage_dir?` | `serialize_batch_accept_result`：`{batch_id, queue, items[], summary}` | 单卡不可接受 → 项内中文 reason |
-| GET `/api/v1/batches/<batch_id>/queue` | `batch_id`（路径）、`storage_dir?` | `{"batch_id", "queue": {...} | null}` | — |
-| POST `/api/v1/batches/<batch_id>/submit` | `batch_id`（路径）、`ab_config?`、`confirm`、`storage_dir?` | `serialize_batch_submit_result` | 缺 `ab_config` → `validation_error`「请提供 Auto Bangumi 配置」；缺 `confirm` → `validation_error`；queue 缺失 → `queue_not_found` |
-| POST `/api/v1/batches/<batch_id>/retry` | 同上 + `request_id` | 同上 | 未知 request_id → `queue_item_not_found` |
-| POST `/api/v1/batches/<batch_id>/recover` | `batch_id`、`request_id`、`action`（`auto`/`succeeded`/`failed`）、`confirm`、`storage_dir?` | 同上 | 非法 action → `validation_error`；未知 request_id → `queue_item_not_found` |
 
 `parse` 的 `item` 形状：`item_id`、`raw_title`、`status`（`RAW`/`PARSED`/`FOUND`/`EMPTY`/`FAILED`）、
 `canonical_title_candidates[]`、`season_hint`、`search_queries[]`、`confidence`、
@@ -240,16 +220,7 @@ torrent 文件名，不含 magnet/下载 URL/原始 RSS）、`folder_name`（安
 `attempted_queries[]`、`candidates[]`、`applied_preferences?`、`preference_hits?`、
 `preference_warnings[]`、`review_hints[]`、`enhanced_search_queries[]`、`preview_request?`、`error?`。
 
-### 3.5 连接测试（`/api/v1/.../test-connection`）
-
-| 端点 | 请求字段 | 成功 `result`（白名单） | 业务失败示例 |
-| --- | --- | --- | --- |
-| POST `/api/v1/qbittorrent/test-connection` | `qbittorrent_config`（`endpoint`/`username`/`password`/`timeout_seconds`/`verify_tls`） | `{"status", "reachable", "version"}` | `qbittorrent_auth_failed` / `qbittorrent_timeout` / `qbittorrent_connection_failed` |
-| POST `/api/v1/autobangumi/test-connection` | `ab_config`（`auth_mode`/`base_url`/`username`/`password`/`token`/`fallback_enabled`） | `{"reachable", "authenticated", "version", "auth_mode", "adapter", "submit_supported"}` | `ab_auth_failed` / `ab_connection_failed` / `ab_timeout` / `ab_unsupported_version` |
-
-两类连接测试的请求凭据都保持 request-scoped：不写入 storage、URL、浏览器 storage、日志或测试 trace。
-
-### 3.6 Tracking（`/api/v1/tracking/items`，US-223 + US-224 + US-225 + US-226）
+### 3.5 Tracking（`/api/v1/tracking/items`，US-223 + US-224 + US-225 + US-226）
 
 Tracking 读端点全部是纯本地操作：执行前先运行历史回填协调器（manifest `COMPLETE` 后不再全量扫描），
 绝不访问外部系统。列表/详情/复核只返回 TrackingRecord 与 Request 的安全白名单投影；单条 tracking
@@ -301,12 +272,11 @@ issues、外部安全映射摘要和最近 20 条审计事件；绝不回显完�
   `SID`、`username`、`password`、`magnet`、raw HTML、raw RSS XML、原始响应体、
   完整失败 URL、本地绝对路径。
 - 连接测试成功响应只回白名单字段；`_sanitize_ab_connection_summary` /
-  `_sanitize_qbittorrent_connection_summary` 主动丢弃其他字段。
 - 失败 details 经 `sanitize_error_data` 与 `_strip_sensitive_result_fields` 双重脱敏。
 
 ### 4.2 request-scoped 配置（不进入 storage JSON / 浏览器 storage / URL / 日志 / trace）
 
-- `mikan_config`、`mikan_bangumi`、`ab_config`、`qbittorrent_config`、`candidate_context`、
+  - `mikan_bangumi`、`ab_config`、`candidate_context`、
   `draft_id`（US-194：draft 内容由服务端持有，客户端只持有 opaque id，绝不进入 URL /
   browser storage / 日志 / trace）。
 - `base_revision`/`draft_revision`（US-211：单调草案 revision 只在请求体与组件内存，
@@ -327,14 +297,14 @@ issues、外部安全映射摘要和最近 20 条审计事件；绝不回显完�
   `services._storage_dir` 返回 `_WEB_STORAGE_ROOT`），绝不返回 `None`——返回 `None` 会让
   `load_storage_config(None)` 回退 CLI 默认 `DEFAULT_STORAGE_DIR`（仓库根），绕过服务端
   root 覆盖；golden contract 已覆盖「不传 `storage_dir` 的保存写入服务端根而非仓库根」。
-- US-194：`preview-modify`/`preview-save` 不再接收客户端完整 Request，只接受服务端签发的
+- US-194：`preview-modify` 不再接收客户端完整 Request，只接受服务端签发的
   `draft_id`；未保存草案由 `DraftStore`（`apps/migu_orca_web/drafts.py`）持有，TTL 30 分钟、
   容量 128、一次性保存与重放保护，失效/重放统一 409 `draft_expired`/`draft_evicted`/
   `draft_replayed`，错误 details 不回显 draft_id 或草案内容。
 - US-210/211：每个草案带单调 revision（签发为 1，成功 CAS 修改 +1）。`preview-modify`
   必填 `base_revision` 做 compare-and-swap，过期 base → 409 `draft_revision_conflict`，
   error_data 只含 `field=base_revision` 与 `current_revision`，绝不回显 draft_id 或草案内容。
-- US-212：`preview-save` 改为「预留 → 持久化 → 提交/释放」。`draft_id` + `base_revision`
+- US-212：`save-confirm` 采用「预留 → 持久化 → 提交/释放」。`draft_id` + `base_revision`
   通过 `reserve_for_save` 校验并预留草案；Request 成功落盘后才 `commit_save`（写入重放
   tombstone），持久化异常用 `release_save` 释放并保留原 revision——同一草案写盘失败后可重试，
   不再先 pop 后持久化导致用户重新搜索。预留期间的并发修改/保存返回 409 `draft_reserved`。
@@ -461,31 +431,29 @@ Vue 3 + TypeScript + Vite 工程，生产构建由 Flask 在 `/app/` 同源托�
   相对目录名，绝对路径旧值在读取时被忽略并回退默认根目录）
 - `miguOrca.web.saveRequest`（`"true"`/`"false"`）
 
-其它敏感值（endpoint/token/cookie/密码/qBittorrent 凭据）**绝不**写入 localStorage/sessionStorage。
+MiKan Web 的公共请求不接受 `mikan_config` 或 `source`；搜索配置统一由服务端提供。CLI/engine 仍可在其独立信任边界显式传入 MiKan source/config。
+其它敏感值（endpoint/token/cookie/密码/外部服务凭据）**绝不**写入 localStorage/sessionStorage。
 
 ### 5.2 URL 参数（SPA history 状态）
 
 - `?request_id=<id>`：详情选择状态（SPA RequestsView 从 URL query 读取，刷新恢复）。
-- `?batch_id=<id>`：批量队列恢复状态（SPA QueueView 从 URL query 读取）。
+- `?batch_id=<id>`：退役队列入口仅用于安全重定向，Tracking 不读取该参数。
 - `?storage_dir=<profile>`：通过统一 transport 追加到 GET 请求（US-193 起为相对 profile，
   绝不携带绝对路径）。
 
 ### 5.3 生命周期（US-190 在 OpenAPI 中记录）
 
-- **request_id**：`POST /api/v1/requests` 生成 → 保存后进入待确认流程（PENDING_CONFIRM）→
-  accept/cancel/modify/delete/submit-ab；删除后 `request_not_found`。
-  预览草案（`save_request: false`）由服务端权威 draft 持有（见 draft_id），
-  `preview-save` 持久化成功后才消费 draft（US-212：写盘失败释放预留可重试），随后获得持久
-  request_id。
-- **batch_id**：`POST /api/v1/batches/parse` 返回 → accept 建立队列 → queue/submit/retry/recover
+- **request_id**：`POST /api/v1/requests` 生成服务端草案 → save-confirm 后进入待确认流程；
+  accept/cancel/modify/delete；删除后 `request_not_found`。
+- **batch_id**：`POST /api/v1/batches/parse` 返回并仅用于批量 save-confirm。
   通过 URL `batch_id` 恢复；服务端不持久化解析后的批量（客户端回传卡片）。
 - **candidate_context**：`POST /api/v1/mikan/candidates` 在季数需确认时签发（`CandidateSelectionContextStore`，
   TTL 300s、容量 128、单次消费、绑定 mikan_url）；`POST /api/v1/requests` 用
   `candidate_context` + `season_confirmation` 消费，失效 → `candidate_context_invalid`。
-- **draft_id**（US-194）：候选与直连生成（`save_request=false`）签发 opaque `draft_id`，
+- **draft_id**（US-194）：候选与直连生成签发 opaque `draft_id`，
   服务端在 `DraftStore`（`apps/migu_orca_web/drafts.py`）保存权威 PENDING_CONFIRM 草案；
   `preview-modify` 只收 `draft_id` + `base_revision` + 允许 patch（返回更新草案、同一
-  draft_id 与新 draft_revision，US-211），`preview-save` 预留并持久化有效 `draft_id` +
+  draft_id 与新 draft_revision，US-211），`save-confirm` 预留并持久化有效 `draft_id` +
   `base_revision`（成功后才消费，重放 → 409 `draft_replayed`；US-212 起写盘失败不丢草案）。
   draft store 有 TTL（默认 30 分钟）、容量上限（128）、自动清理与一次性保存/重放保护；
   过期/逐出/未知 → 409 `draft_expired`/`draft_evicted`；`base_revision` 过期 → 409
@@ -497,7 +465,7 @@ Vue 3 + TypeScript + Vite 工程，生产构建由 Flask 在 `/app/` 同源托�
 ## 6. 测试证明
 
 - `tests/api_contract/test_inventory_consistency.py`：清单 ↔ 实际 `url_map` 自动核对，
-  漏记端点即失败；不访问真实 MiKan/AutoBangumi/qBittorrent。
+  漏记端点即失败；测试不访问真实上游服务。
 - `tests/api_contract/test_golden_contracts.py`：每类端点族的成功、输入失败、
   业务失败与脱敏错误 golden contract（全部基于 fake/隔离，无真实外部写操作）；
   US-192 起断言 HTTP 状态（400/404/409/401/502/503/504/500）与 envelope 双语义。

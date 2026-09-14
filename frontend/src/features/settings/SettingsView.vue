@@ -5,16 +5,14 @@
 // (PanelSection/FormField/BaseInput/BaseTextarea/BaseSelect/CheckboxRow,
 // ConfirmDialog/StatusAlert, useSensitiveFields). Four panels:
 //
-//   1. Storage 偏好 — non-sensitive browser preferences (storage profile +
-//      default-save) stored ONLY in localStorage (legacy keys), sanitized to
+//   1. Storage 偏好 — non-sensitive browser preferences (storage profile)
+//      stored ONLY in localStorage, sanitized to
 //      a server-root-relative profile (US-193).
 //   2. 偏好默认值 — non-sensitive preference defaults read/saved through
 //      `/api/v1/preferences` (defaults when absent).
-//   3. qBittorrent — explicit request-scoped connection test; credentials
-//      live only in component memory (useSensitiveFields) and are cleared on
-//      success/cancel/unmount, never persisted.
-//   4. Auto Bangumi — request-scoped connection test + submit context
-//      (request_id from the URL query). Credentials live only in memory and
+//   3. Auto Bangumi deployment settings — credentials live only in component
+//      memory (useSensitiveFields) and are cleared on success/cancel/unmount.
+//   4. Auto Bangumi deployment settings. Credentials live only in memory and
 //      are cleared on success/cancel/unmount.
 //
 // Security boundary: endpoint/username/password/token/base_url values are
@@ -23,11 +21,11 @@
 // AB submit context (request_id) is read from the URL query but the
 // credentials themselves never go into the URL.
 import { computed, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
 
 import { api } from '@/api/client'
-import { routeLocation } from '@/app/router/catalog'
+import type { operations } from '@/api/generated/api'
 import { useNotificationStore } from '@/app/stores/notification'
+import { refreshConnectionStatus } from '@/app/stores/connectionStatus'
 import { useSensitiveFields } from '@/app/composables/useSensitiveFields'
 import ConfirmDialog from '@/components/feedback/ConfirmDialog.vue'
 import StatusAlert from '@/components/feedback/StatusAlert.vue'
@@ -52,14 +50,13 @@ import {
   type StoragePreferences,
 } from './storagePreferences'
 
-const route = useRoute()
 const notification = useNotificationStore()
 
 // ---------------------------------------------------------------------------
 // 1. Storage 偏好 (localStorage)
 // ---------------------------------------------------------------------------
 
-const storageForm = ref<StoragePreferences>({ storageDir: '', saveRequest: true })
+const storageForm = ref<StoragePreferences>({ storageDir: '' })
 const storageStatus = ref<{ kind: 'success' | 'error' | 'info' | 'empty'; message: string }>({
   kind: 'empty',
   message: '尚未读取浏览器偏好。',
@@ -70,15 +67,14 @@ function restoreStoragePreferences(): void {
   const text = storageForm.value.storageDir
     ? `storage profile：${storageForm.value.storageDir}`
     : '默认服务器 storage 根目录'
-  const saveText = storageForm.value.saveRequest ? '默认保存订阅方案 JSON' : '默认只生成预览'
-  storageStatus.value = { kind: 'empty', message: `已读取浏览器偏好。当前使用${text}；${saveText}。可在 Settings 修改。` }
+  storageStatus.value = { kind: 'empty', message: `已读取浏览器偏好。当前使用${text}。` }
 }
 
 function persistStoragePreferences(): void {
   const rawDir = storageForm.value.storageDir
   const safeDir = sanitizeStorageProfile(rawDir)
-  const saveRequest = Boolean(storageForm.value.saveRequest)
-  saveStoragePreferences({ storageDir: safeDir, saveRequest })
+  saveStoragePreferences({ storageDir: safeDir })
+  refreshConnectionStatus()
   storageForm.value.storageDir = safeDir
   const migrationNote =
     safeDir !== rawDir.trim() && rawDir.trim() !== ''
@@ -89,10 +85,11 @@ function persistStoragePreferences(): void {
 
 function clearStorage(): void {
   clearStoragePreferences()
-  storageForm.value = { storageDir: '', saveRequest: true }
+  refreshConnectionStatus()
+  storageForm.value = { storageDir: '' }
   storageStatus.value = {
     kind: 'info',
-    message: '偏好已清除；订阅方案工作台将使用服务器默认 storage 根目录并保存订阅方案 JSON。',
+    message: '偏好已清除；订阅方案工作台将使用服务器默认 storage 根目录。',
   }
 }
 
@@ -238,89 +235,7 @@ async function resetPreferences(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// 3. qBittorrent connection test
-// ---------------------------------------------------------------------------
-
-const qbittorrent = useSensitiveFields({
-  endpoint: { label: 'endpoint', required: true },
-  username: { label: 'username', required: true },
-  password: { label: 'password', required: true },
-})
-const qbittorrentTimeout = ref(10)
-const qbittorrentVerifyTls = ref(true)
-const qbittorrentLoading = ref(false)
-const qbittorrentStatus = ref<{ kind: 'success' | 'error' | 'info' | 'empty'; message: string }>({
-  kind: 'empty',
-  message: '尚未测试 qBittorrent 连接。',
-})
-
-const qbittorrentEndpoint = computed({
-  get: () => qbittorrent.get('endpoint'),
-  set: (value: string) => qbittorrent.set('endpoint', value),
-})
-const qbittorrentUsername = computed({
-  get: () => qbittorrent.get('username'),
-  set: (value: string) => qbittorrent.set('username', value),
-})
-const qbittorrentPassword = computed({
-  get: () => qbittorrent.get('password'),
-  set: (value: string) => qbittorrent.set('password', value),
-})
-
-async function testQbittorrentConnection(): Promise<void> {
-  const missing = qbittorrent.firstMissing()
-  if (missing) {
-    qbittorrentStatus.value = { kind: 'error', message: `测试 qBittorrent 前必须填写 ${missing}。` }
-    return
-  }
-  const timeout = Number(qbittorrentTimeout.value)
-  if (!Number.isFinite(timeout) || timeout <= 0) {
-    qbittorrentStatus.value = { kind: 'error', message: '测试 qBittorrent 前 timeout_seconds 必须为正数。' }
-    return
-  }
-  const confirmed = await confirmDialog.value?.confirm({
-    title: '测试 qBittorrent 连接',
-    message: '确认使用当前 qBittorrent 配置测试连接？',
-    confirmLabel: '测试连接',
-  })
-  if (!confirmed) return
-
-  qbittorrentLoading.value = true
-  qbittorrentStatus.value = { kind: 'info', message: '正在测试 qBittorrent 连接...' }
-  try {
-    const result = await api.post<{ status: string; reachable: boolean; version: string }>(
-      '/api/v1/qbittorrent/test-connection',
-      {
-        body: {
-          qbittorrent_config: {
-            endpoint: qbittorrent.get('endpoint'),
-            username: qbittorrent.get('username'),
-            password: qbittorrent.get('password'),
-            timeout_seconds: timeout,
-            verify_tls: qbittorrentVerifyTls.value,
-          },
-        },
-      },
-    )
-    qbittorrentStatus.value = {
-      kind: 'success',
-      message: `status: ${result.status}；reachable: ${result.reachable}；version: ${result.version}`,
-    }
-    qbittorrent.clearAll()
-  } catch (error) {
-    // 只显示固定中文反馈，绝不把服务端原始错误（可能含 endpoint/凭据）渲染出来。
-    void error
-    qbittorrentStatus.value = {
-      kind: 'error',
-      message: 'qBittorrent 连接测试失败。请检查配置后重试。',
-    }
-  } finally {
-    qbittorrentLoading.value = false
-  }
-}
-
-// ---------------------------------------------------------------------------
-// 4. Auto Bangumi connection test + submit context
+// 3. Auto Bangumi saved deployment connection
 // ---------------------------------------------------------------------------
 
 const ab = useSensitiveFields({
@@ -334,8 +249,12 @@ const abFallbackEnabled = ref(false)
 const abLoading = ref(false)
 const abStatus = ref<{ kind: 'success' | 'error' | 'info' | 'empty'; message: string }>({
   kind: 'empty',
-  message: '可先测试 Auto Bangumi 连接；从已确认订阅方案详情进入后，可提交订阅方案。认证信息不会持久化。',
+  message: '已保存连接只显示安全摘要；秘密不会回显。',
 })
+type ConnectionSummary = NonNullable<operations['getAutoBangumiConnection']['responses']['200']['content']['application/json']['result']>
+type SaveConnectionBody = NonNullable<operations['saveAutoBangumiConnection']['requestBody']['content']['application/json']>
+type ProbeResult = NonNullable<operations['probeSavedAutoBangumiCapabilities']['responses']['200']['content']['application/json']['result']>
+const savedConnection = ref<ConnectionSummary | null>(null)
 
 const abBaseUrl = computed({
   get: () => ab.get('baseUrl'),
@@ -353,12 +272,6 @@ const abToken = computed({
   get: () => ab.get('token'),
   set: (value: string) => ab.set('token', value),
 })
-
-const requestId = computed(() => {
-  const value = route.query.request_id
-  return typeof value === 'string' ? value.trim() : ''
-})
-const hasRequestContext = computed(() => requestId.value.length > 0)
 
 function buildAbConfig(): Record<string, string | boolean> {
   const serviceRoot = validateAutoBangumiServiceRoot(ab.get('baseUrl'))
@@ -401,22 +314,18 @@ async function testAbConnection(): Promise<void> {
   abLoading.value = true
   abStatus.value = { kind: 'info', message: '正在测试 Auto Bangumi 连接...' }
   try {
-    const result = await api.post<{
-      reachable: boolean
-      authenticated: boolean
-      version: string
-      auth_mode: string
-      adapter: string
-      submit_supported: boolean
-    }>('/api/v1/autobangumi/test-connection', {
-      body: { ab_config: buildAbConfig() },
-    })
-    abStatus.value = {
-      kind: 'success',
-      message: `连接成功；版本：${result.version}；认证方式：${result.auth_mode}`,
-    }
+    const body: SaveConnectionBody = { confirm: true, expected_configuration_revision: savedConnection.value?.configuration_revision ?? 0, config: buildAbConfig() as SaveConnectionBody['config'] }
+    const result = await api.put<ConnectionSummary>('/api/v1/settings/autobangumi', { body })
+    savedConnection.value = result
+    refreshConnectionStatus()
+    abStatus.value = { kind: 'success', message: 'Auto Bangumi 连接已保存。请点击“测试已保存连接”进行显式探测。' }
     ab.clearAll()
   } catch (error) {
+    if (typeof error === 'object' && error !== null && 'status' in error && error.status === 409) {
+      await loadSavedConnection()
+      abStatus.value = { kind: 'error', message: '配置已变化，已重新读取摘要；请重新确认后再保存。' }
+      return
+    }
     // 只显示固定中文反馈，绝不把服务端原始错误（可能含凭据）渲染出来。
     void error
     abStatus.value = {
@@ -427,75 +336,22 @@ async function testAbConnection(): Promise<void> {
     abLoading.value = false
   }
 }
-
-async function submitAb(): Promise<void> {
-  if (!requestId.value) {
-    abStatus.value = { kind: 'error', message: '缺少 request_id，无法提交 Auto Bangumi。' }
-    return
-  }
-  const validation = abValidate()
-  if (validation) {
-    abStatus.value = { kind: 'error', message: validation }
-    return
-  }
-  const confirmed = await confirmDialog.value?.confirm({
-    title: '提交 Auto Bangumi',
-    message: '确认提交此订阅方案到 Auto Bangumi？',
-    confirmLabel: '确认提交',
-    danger: true,
-  })
-  if (!confirmed) return
-
-  abLoading.value = true
-  abStatus.value = { kind: 'info', message: '正在提交 Auto Bangumi...' }
-  try {
-    const result = await api.post<{
-      ab_submit_result: {
-        success: boolean
-        ab_subscription_id: string | null
-        ab_response: Record<string, unknown>
-        fallback_config: Record<string, unknown> | null
-        error: Record<string, unknown> | null
-      }
-    }>('/api/v1/requests/{request_id}/submit-ab', {
-      path: { request_id: requestId.value },
-      query: preferenceQuery(),
-      body: { ab_config: buildAbConfig() },
-    })
-    const submitResult = result.ab_submit_result
-    const subscriptionId = submitResult.ab_subscription_id
-      ? `；ab_subscription_id: ${submitResult.ab_subscription_id}`
-      : ''
-    abStatus.value = {
-      kind: 'success',
-      message: `Auto Bangumi 提交成功；request_id: ${requestId.value}${subscriptionId}`,
-    }
-    notification.success('Auto Bangumi 提交成功', `订阅方案 ${requestId.value}`)
-    ab.clearAll()
-  } catch (error) {
-    // 只显示固定中文反馈，绝不把服务端原始错误（可能含凭据）渲染出来。
-    void error
-    abStatus.value = {
-      kind: 'error',
-      message: 'Auto Bangumi 提交失败。请检查配置与订阅方案状态后重试。',
-    }
-    notification.error('Auto Bangumi 提交失败', '请检查配置与订阅方案状态后重试。')
-  } finally {
-    abLoading.value = false
-  }
-}
+async function loadSavedConnection(): Promise<void> { try { savedConnection.value = await api.get<ConnectionSummary>('/api/v1/settings/autobangumi') } catch { savedConnection.value = null } }
+async function probeSavedConnection(): Promise<void> { if (!savedConnection.value?.connection_ref) return; abLoading.value = true; try { const result = await api.post<ProbeResult>('/api/v1/settings/autobangumi/probe', { body: { connection_ref: savedConnection.value.connection_ref, configuration_revision: savedConnection.value.configuration_revision } }); abStatus.value = { kind: 'success', message: `连接探测结果：${result.probe_status}` }; refreshConnectionStatus() } catch { abStatus.value = { kind: 'error', message: '连接探测失败；已保存配置未删除。' } } finally { abLoading.value = false } }
+async function deleteSavedConnection(): Promise<void> { const ok = await confirmDialog.value?.confirm({ title: '清除 Auto Bangumi 连接', message: '确认清除已保存连接？不会影响本地方案或媒体。', confirmLabel: '清除', danger: true }); if (!ok || !savedConnection.value) return; try { savedConnection.value = await api.delete<ConnectionSummary>('/api/v1/settings/autobangumi', { body: { confirm: true, expected_configuration_revision: savedConnection.value.configuration_revision } }); abStatus.value = { kind: 'success', message: '已清除 Auto Bangumi 连接。' }; refreshConnectionStatus() } catch { abStatus.value = { kind: 'error', message: '清除失败，请重新读取后重试。' } } }
 
 const confirmDialog = ref<InstanceType<typeof ConfirmDialog> | null>(null)
 
 onMounted(() => {
   restoreStoragePreferences()
   void loadPreferences()
+  void loadSavedConnection()
 })
 </script>
 
 <template>
   <div class="settings-view">
-    <h2 id="settings-heading" class="settings-title">Settings</h2>
+    <h2 id="settings-heading" class="settings-title">设置</h2>
     <p class="field-help">
       配置与连接测试集中在 Settings；敏感外部系统配置保持显式输入，不写入浏览器存储、URL 或本地订阅方案 JSON。
     </p>
@@ -521,13 +377,6 @@ onMounted(() => {
             autocomplete="off"
           />
         </FormField>
-
-        <CheckboxRow
-          id="settings-save-request"
-          v-model:checked="storageForm.saveRequest"
-          label="默认保存订阅方案"
-          help="开启后订阅方案工作台默认写入订阅方案 JSON；关闭时只生成预览。"
-        />
 
         <StatusAlert :kind="storageStatus.kind" :message="storageStatus.message" />
 
@@ -669,87 +518,14 @@ onMounted(() => {
       </form>
     </PanelSection>
 
-    <!-- 3. qBittorrent -->
-    <PanelSection title="qBittorrent">
-      <form id="settings-qbittorrent-test-form" class="settings-form" @submit.prevent="testQbittorrentConnection">
-        <p class="field-help">
-          配置仅用于本次连接测试；endpoint、username 和 password 不写入浏览器存储、URL 或订阅方案 JSON。
-        </p>
-
-        <FormField label="endpoint" inputId="settings-qbittorrent-endpoint">
-          <BaseInput
-            id="settings-qbittorrent-endpoint"
-            v-model="qbittorrentEndpoint"
-            name="qbittorrent_endpoint"
-            type="text"
-            placeholder="qBittorrent Web UI endpoint"
-            autocomplete="off"
-          />
-        </FormField>
-
-        <FormField label="username" inputId="settings-qbittorrent-username">
-          <BaseInput
-            id="settings-qbittorrent-username"
-            v-model="qbittorrentUsername"
-            name="qbittorrent_username"
-            type="text"
-            autocomplete="off"
-          />
-        </FormField>
-
-        <FormField label="password" inputId="settings-qbittorrent-password">
-          <BaseInput
-            id="settings-qbittorrent-password"
-            v-model="qbittorrentPassword"
-            name="qbittorrent_password"
-            type="password"
-            autocomplete="off"
-          />
-        </FormField>
-
-        <FormField label="timeout_seconds" inputId="settings-qbittorrent-timeout-seconds">
-          <BaseInput
-            id="settings-qbittorrent-timeout-seconds"
-            v-model="qbittorrentTimeout"
-            name="qbittorrent_timeout_seconds"
-            type="number"
-            min="0.1"
-            step="0.1"
-          />
-        </FormField>
-
-        <CheckboxRow
-          id="settings-qbittorrent-verify-tls"
-          v-model:checked="qbittorrentVerifyTls"
-          label="verify_tls"
-        />
-        <p class="field-help">提交前需要确认；成功后只显示 status、reachable 和 version，并清空敏感输入。</p>
-
-        <StatusAlert :kind="qbittorrentStatus.kind" :message="qbittorrentStatus.message" />
-
-        <div class="settings-actions">
-          <BaseButton id="settings-qbittorrent-test-submit" type="submit" variant="primary" :loading="qbittorrentLoading">
-            测试 qBittorrent 连接
-          </BaseButton>
-        </div>
-      </form>
-    </PanelSection>
-
     <!-- 4. Auto Bangumi -->
     <PanelSection title="Auto Bangumi">
       <div id="settings-ab-context" class="settings-ab-context">
-        <p v-if="hasRequestContext" class="field-help">
-          当前 request_id：<code id="settings-ab-request-id">{{ requestId }}</code>。仅已确认订阅方案可提交。
-        </p>
-        <p v-else class="field-help">
-          可先测试 Auto Bangumi 连接；从已确认订阅方案详情进入后，可提交订阅方案。认证信息不会持久化。
-        </p>
+        <p class="field-help">已保存连接：{{ savedConnection?.credential_present ? '已配置' : '未配置' }}；配置版本 {{ savedConnection?.configuration_revision ?? 0 }}。</p>
       </div>
 
-      <form id="settings-ab-submit-form" class="settings-form" @submit.prevent="submitAb">
-        <p class="field-help">
-          服务地址和认证信息只用于本次请求，不写入浏览器存储、URL 或订阅方案 JSON。
-        </p>
+      <form id="settings-ab-save-form" class="settings-form" @submit.prevent="testAbConnection">
+        <p class="field-help">保存与探测分离；秘密仅提交到服务端保存配置接口，永不回显。</p>
 
         <FormField label="认证方式" inputId="settings-ab-auth-mode">
           <BaseSelect
@@ -822,22 +598,22 @@ onMounted(() => {
         <StatusAlert :kind="abStatus.kind" :message="abStatus.message" />
 
         <div class="settings-actions">
-          <BaseButton id="settings-ab-test-submit" :disabled="abLoading" @click="testAbConnection">
-            测试连接
-          </BaseButton>
-          <BaseButton id="settings-ab-submit" type="submit" variant="primary" :loading="abLoading">
-            提交 Auto Bangumi
-          </BaseButton>
-          <RouterLink
-            v-if="hasRequestContext"
-            id="settings-ab-return-link"
-            class="base-button secondary-button"
-            :to="routeLocation('plans', { request_id: requestId })"
-          >
-            返回订阅方案详情
-          </RouterLink>
+          <BaseButton id="settings-ab-save" type="submit" variant="primary" :loading="abLoading">保存连接</BaseButton>
+          <BaseButton id="settings-ab-probe" type="button" :disabled="abLoading || !savedConnection?.connection_ref" @click="probeSavedConnection">测试已保存连接</BaseButton>
+          <BaseButton id="settings-ab-delete" type="button" variant="danger" :disabled="abLoading || !savedConnection?.credential_present" @click="deleteSavedConnection">清除连接</BaseButton>
         </div>
       </form>
+    </PanelSection>
+
+    <PanelSection title="高级诊断">
+      <details id="settings-advanced-diagnostics">
+        <summary>显示安全诊断信息</summary>
+        <p class="field-help">仅显示当前客户端支持的安全能力说明；不会显示地址、外部 ID、原始响应或日志。</p>
+        <dl class="settings-diagnostics">
+          <dt>客户端版本</dt><dd>MiGuOrca 桌面工作台</dd>
+          <dt>连接能力</dt><dd>仅在用户显式探测后更新；已配置不代表持续在线。</dd>
+        </dl>
+      </details>
     </PanelSection>
 
     <ConfirmDialog ref="confirmDialog" />

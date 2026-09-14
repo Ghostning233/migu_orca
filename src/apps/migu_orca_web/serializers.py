@@ -13,6 +13,7 @@ from typing import Any
 
 from flask import url_for
 
+from apps.migu_orca_web.autobangumi_probe_service import cached_capabilities
 from apps.migu_orca_web.contexts import candidate_selection_contexts
 from batch_engine.controllers.candidate_search_orchestrator import (
     CandidateSearchOutcome,
@@ -33,6 +34,7 @@ from mikan_engine.controllers.mikan_client import MikanCandidate
 from mikan_engine.controllers.mikan_poster_service import MikanPosterService
 from shared.errors import Stage1Error
 from shared.season_evidence import candidate_season_evidence
+from storage_engine.controllers.autobangumi_config_repository import AutoBangumiConfigRecord
 
 poster_service = MikanPosterService()
 
@@ -270,19 +272,6 @@ def _sanitize_ab_submit_result(result: dict[str, Any]) -> dict[str, Any]:
     return sanitized
 
 
-def _sanitize_qbittorrent_connection_summary(summary: dict[str, Any]) -> dict[str, Any]:
-    allowed_fields = {"status", "reachable", "version"}
-    sanitized = sanitize_error_data(
-        {
-            key: value
-            for key, value in summary.items()
-            if key in allowed_fields
-        }
-    )
-    assert isinstance(sanitized, dict)
-    return sanitized
-
-
 def _sanitize_ab_connection_summary(summary: dict[str, Any]) -> dict[str, Any]:
     allowed_fields = {
         "reachable",
@@ -297,6 +286,31 @@ def _sanitize_ab_connection_summary(summary: dict[str, Any]) -> dict[str, Any]:
     )
     assert isinstance(sanitized, dict)
     return sanitized
+
+
+def serialize_autobangumi_connection_summary(record: AutoBangumiConfigRecord) -> dict[str, Any]:
+    """Serialize the deployment repository record through an explicit whitelist."""
+    configured = bool(getattr(record, "configured", False))
+    capabilities = cached_capabilities(record)
+    capability_result = capabilities.to_public_dict() if capabilities is not None else None
+    if not configured:
+        connection_status = "UNCONFIGURED"
+    elif capabilities is None:
+        connection_status = "CONFIGURED"
+    elif capabilities.probe_status == "VERIFIED":
+        connection_status = "VERIFIED"
+    else:
+        connection_status = "ERROR"
+    return {
+        "configured": configured,
+        "configuration_revision": getattr(record, "configuration_revision"),
+        "connection_ref": record.connection_ref,
+        "auth_mode": getattr(getattr(record, "config", None), "auth_mode", None),
+        "credential_present": configured,
+        "connection_status": connection_status,
+        "checked_at": capabilities.checked_at if capabilities is not None else None,
+        "capabilities": capability_result,
+    }
 
 
 # ---------------------------------------------------------------------------

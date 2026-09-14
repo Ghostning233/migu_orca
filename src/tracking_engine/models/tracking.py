@@ -26,8 +26,9 @@ Security
   poster_path); ``poster_path`` may only be an opaque same-origin poster route.
 - ``audit_events`` keep a fixed safe shape; ``last_error`` keeps only a stable
   ``error_type``/``reason_code``/``safe_message`` summary.
-- ``external_mapping``/``recovery`` are future (B-C) opaque objects; they are
-  deep-cleaned on write so even an accidental sensitive value cannot persist.
+- ``external_mapping`` is a strict v1/v2 object and ``recovery`` remains a
+  future (B-C) opaque object; both are deep-cleaned on write so an accidental
+  sensitive value cannot persist.
 - Unknown top-level schema fields fail closed on read (never guessed).
 """
 
@@ -38,10 +39,11 @@ import re
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 TRACKING_SCHEMA_VERSION = 1
-EXTERNAL_MAPPING_SCHEMA_VERSION = 1
+EXTERNAL_MAPPING_SCHEMA_VERSION = 2
+EXTERNAL_MAPPING_LEGACY_SCHEMA_VERSION = 1
 EXTERNAL_MAPPING_MAX_RSS_IDS = 128
 EXTERNAL_OPAQUE_TOKEN_MAX_LENGTH = 128
 
@@ -266,7 +268,11 @@ _EXTERNAL_MAPPING_FIELDS = frozenset(
         "enabled",
         "missing_sync_count",
         "last_verified_at",
+        "connection_ref",
     }
+)
+_EXTERNAL_MAPPING_LEGACY_FIELDS = frozenset(
+    _EXTERNAL_MAPPING_FIELDS - {"connection_ref"}
 )
 _EXTERNAL_MATCH_REASONS = frozenset(
     {"EXTERNAL_ID", "EXACT_FIELDS", "EXTERNAL_ONLY"}
@@ -324,14 +330,19 @@ def tracking_id_for_request(request_id: str) -> str:
     return f"trk_{digest[:32]}"
 
 
-def tracking_id_for_external(adapter: str, object_kind: str, external_id: str) -> str:
+def tracking_id_for_external(
+    adapter: str, object_kind: str, external_id: str, connection_ref: str | UUID | None = None
+) -> str:
     """Return the stable opaque id for one external object (D30-09)."""
     adapter = _require_opaque_token(adapter, "adapter")
     object_kind = _require_opaque_token(object_kind, "object_kind")
     external_id = _require_opaque_token(external_id, "external_id")
-    digest = hashlib.sha256(
-        f"migu-orca/tracking/external/v1\x00{adapter}\x00{object_kind}\x00{external_id}".encode()
-    ).hexdigest()
+    clean_ref = _optional_connection_ref(connection_ref)
+    if clean_ref is None:
+        seed = f"migu-orca/tracking/external/v1\x00{adapter}\x00{object_kind}\x00{external_id}"
+    else:
+        seed = f"migu-orca/tracking/external/v2\x00connection\x00{clean_ref}\x00{adapter}\x00{object_kind}\x00{external_id}"
+    digest = hashlib.sha256(seed.encode()).hexdigest()
     return f"trk_{digest[:32]}"
 
 
@@ -485,6 +496,7 @@ def create_external_tracking_record(
     enabled: bool = True,
     missing_sync_count: int = 0,
     last_verified_at: str | None = None,
+    connection_ref: str | UUID | None = None,
     now: str | None = None,
 ) -> TrackingRecord:
     """Create an external-only record without fabricating a Request.
@@ -496,23 +508,29 @@ def create_external_tracking_record(
     adapter = _require_opaque_token(adapter, "adapter")
     object_kind = _require_opaque_token(object_kind, "object_kind")
     external_id = _require_opaque_token(external_id, "external_id")
-    mapping = _clean_external_mapping(
-        {
-            "schema_version": EXTERNAL_MAPPING_SCHEMA_VERSION,
-            "adapter": adapter,
-            "subscription_id": subscription_id,
-            "rss_ids": list(rss_ids),
-            "match_reason": match_reason,
-            "external_deleted": external_deleted,
-            "enabled": enabled,
-            "missing_sync_count": missing_sync_count,
-            "last_verified_at": last_verified_at,
-        }
-    )
+    clean_connection_ref = _optional_connection_ref(connection_ref)
+    mapping_payload: dict[str, Any] = {
+        "schema_version": (
+            EXTERNAL_MAPPING_SCHEMA_VERSION
+            if clean_connection_ref is not None
+            else EXTERNAL_MAPPING_LEGACY_SCHEMA_VERSION
+        ),
+        "adapter": adapter,
+        "subscription_id": subscription_id,
+        "rss_ids": list(rss_ids),
+        "match_reason": match_reason,
+        "external_deleted": external_deleted,
+        "enabled": enabled,
+        "missing_sync_count": missing_sync_count,
+        "last_verified_at": last_verified_at,
+    }
+    if clean_connection_ref is not None:
+        mapping_payload["connection_ref"] = clean_connection_ref
+    mapping = _clean_external_mapping(mapping_payload)
     timestamp = now or utc_now()
     status = TRACKING_STATUS_EXTERNAL_DELETED if external_deleted else TRACKING_STATUS_EXTERNAL_ONLY
     record = TrackingRecord(
-        tracking_id=tracking_id_for_external(adapter, object_kind, external_id),
+        tracking_id=tracking_id_for_external(adapter, object_kind, external_id, clean_connection_ref),
         request_id=None,
         origin=TRACKING_ORIGIN_EXTERNAL_SYNC,
         status=status,
@@ -734,14 +752,49 @@ def _require_opaque_token(value: Any, name: str) -> str:
     return value
 
 
+def _optional_connection_ref(value: Any) -> str | None:
+    """Normalize the deployment connection UUID without storing credentials."""
+    if value is None:
+        return None
+    if isinstance(value, UUID):
+        return str(value)
+    if not isinstance(value, str):
+        raise ValueError("connection_ref must be a canonical UUID")
+    try:
+        parsed = UUID(value)
+    except (ValueError, AttributeError):
+        raise ValueError("connection_ref must be a canonical UUID") from None
+    if str(parsed) != value:
+        raise ValueError("connection_ref must be a canonical UUID")
+    return value
+
+
 def _clean_external_mapping(value: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("external_mapping must be an object or null")
-    unknown = sorted(set(value) - _EXTERNAL_MAPPING_FIELDS)
+    schema_version = value.get("schema_version")
+    if type(schema_version) is not int:
+        raise ValueError("external_mapping schema_version must be an integer")
+    allowed_fields = (
+        _EXTERNAL_MAPPING_LEGACY_FIELDS
+        if schema_version == EXTERNAL_MAPPING_LEGACY_SCHEMA_VERSION
+        else _EXTERNAL_MAPPING_FIELDS
+    )
+    unknown = sorted(set(value) - allowed_fields)
     if unknown:
         raise ValueError(f"unknown external_mapping fields: {', '.join(unknown)}")
-    if value.get("schema_version") != EXTERNAL_MAPPING_SCHEMA_VERSION:
+    if schema_version not in {
+        EXTERNAL_MAPPING_LEGACY_SCHEMA_VERSION,
+        EXTERNAL_MAPPING_SCHEMA_VERSION,
+    }:
         raise ValueError("unsupported external_mapping schema_version")
+    connection_ref = (
+        _optional_connection_ref(value.get("connection_ref"))
+        if schema_version == EXTERNAL_MAPPING_SCHEMA_VERSION
+        else None
+    )
+    if schema_version == EXTERNAL_MAPPING_SCHEMA_VERSION and connection_ref is None:
+        raise ValueError("external_mapping.connection_ref is required")
     adapter = _require_opaque_token(value.get("adapter"), "external_mapping.adapter")
     subscription_id = value.get("subscription_id")
     if subscription_id is not None:
@@ -764,8 +817,8 @@ def _clean_external_mapping(value: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(missing, int) or isinstance(missing, bool) or not 0 <= missing <= 1_000_000:
         raise ValueError("external_mapping.missing_sync_count must be bounded")
     verified = _optional_str(value.get("last_verified_at"), "external_mapping.last_verified_at")
-    return {
-        "schema_version": EXTERNAL_MAPPING_SCHEMA_VERSION,
+    cleaned = {
+        "schema_version": schema_version,
         "adapter": adapter,
         "subscription_id": subscription_id,
         "rss_ids": normalized_rss_ids,
@@ -775,6 +828,9 @@ def _clean_external_mapping(value: dict[str, Any]) -> dict[str, Any]:
         "missing_sync_count": missing,
         "last_verified_at": verified,
     }
+    if connection_ref is not None:
+        cleaned["connection_ref"] = connection_ref
+    return cleaned
 
 
 def _read_external_mapping(value: Any) -> dict[str, Any] | None:
@@ -947,6 +1003,7 @@ __all__ = [
     "TRACKING_ORIGIN_MIGRATED_AB_RESULT",
     "TRACKING_ORIGIN_EXTERNAL_SYNC",
     "EXTERNAL_MAPPING_SCHEMA_VERSION",
+    "EXTERNAL_MAPPING_LEGACY_SCHEMA_VERSION",
     "EXTERNAL_MAPPING_MAX_RSS_IDS",
     "tracking_id_for_external",
     "create_external_tracking_record",

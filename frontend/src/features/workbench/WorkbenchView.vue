@@ -9,7 +9,7 @@
 //      handling and the auditable title-parse summary;
 //   2. 直连合集 fallback — optional checkbox reveals the direct MiKan
 //      URL/ID form; both paths generate an unsaved server-authoritative draft
-//      (save_request=false) through POST /api/v1/requests;
+//      through POST /api/v1/requests;
 //   3. 订阅草案 preview — the returned draft_id + display snapshot render in
 //      SingleAnimeReviewPanel (editable preview-modify + atomic save-confirm).
 //
@@ -350,7 +350,7 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
     <AnimeModeSwitch :model-value="mode" :disabled="singleBusy" @update:model-value="changeMode" />
 
     <form v-if="mode === 'single' && !hasResults" id="mikan-candidate-search-form" class="workbench-search-form" @submit.prevent="searchCandidates">
-      <p class="step-label">步骤 1 · 输入番剧</p>
+      <p class="step-label">步骤 1 · 搜索番剧</p>
       <label for="mikan-candidate-query">番剧标题</label>
       <AnimeTitleInput
         ref="singleInput"
@@ -370,7 +370,7 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
       </p>
       <div class="notification-actions">
         <BaseButton id="mikan-candidate-search-submit" type="submit" variant="primary" :loading="searchLoading" :disabled="singleBusy || !query.trim()">
-          搜索候选
+          搜索番剧
         </BaseButton>
       </div>
     </form>
@@ -434,7 +434,7 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
         message="未找到候选合集。可调整番剧标题后重试，或勾选「搜索无结果时使用直连合集」直接生成订阅草案。"
       />
       <template v-else-if="searchResult && hasResults">
-        <p class="step-label">步骤 2 · 选择候选合集</p>
+        <p class="step-label">步骤 2 · 选择合集</p>
         <p class="candidate-search-summary" role="status">
           已搜索「{{ searchResult.query }}」，请选择要审核的 MiKan 合集。
         </p>

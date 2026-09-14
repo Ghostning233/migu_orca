@@ -22,7 +22,8 @@ MANAGEMENT_OUTCOME_RECOVERY_REQUIRED = "RECOVERY_REQUIRED"
 
 
 def canonical_management_fingerprint(
-    *, action: str, target_scope: str, expected_projection: Any
+    *, action: str, target_scope: str, expected_projection: Any,
+    connection_ref: str | None = None,
 ) -> str:
     """Return a deterministic SHA-256 digest without retaining the projection."""
     if action not in {"MODIFY", "SET_ENABLED", "DELETE_EXTERNAL", "REFRESH_RSS"}:
@@ -30,8 +31,14 @@ def canonical_management_fingerprint(
     if target_scope not in {"SUBSCRIPTION", "ASSOCIATED_RSS"}:
         raise ValueError("unsupported management target scope")
     try:
+        binding = {"action": action, "scope": target_scope, "projection": expected_projection}
+        # Preserve the historical digest for legacy/unbound operations.  A
+        # saved connection is isolated only when an actual canonical ref is
+        # present.
+        if connection_ref is not None:
+            binding["connection_ref"] = connection_ref
         encoded = json.dumps(
-            {"action": action, "scope": target_scope, "projection": expected_projection},
+            binding,
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),

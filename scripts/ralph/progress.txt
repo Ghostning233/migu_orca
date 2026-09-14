@@ -1,331 +1,425 @@
 # Ralph Progress Log
-Started: Sun Sep 13 08:40:00 CST 2026
+Started: 2026-09-13
 ---
 
 ## Codebase Patterns
 
-- Stage 38 只完成 F-F 正式追番管理；F-G Settings 简化、全局连接状态、跨页收敛和发布 Gate 5 不进入本阶段。
-- 每个 Ralph 迭代只完成一个 story；每次最多运行 3 个 stories，完成 US-305、US-308、US-311、US-314、US-317 后停止并由主 Agent 独立审核。
-- 普通 story 只运行定向检查；完整前端、后端非浏览器和真实 Chromium 门禁只在 US-317 运行一次。测试失败先跑最小失败用例，无代码变化不得重复全量检查。
-- US-303 仅补齐既有管理契约表达：严格 modify patch 联合与 server-computed target_scopes；不得新增 endpoint、状态、持久化 schema、外部动作或业务语义。
-- 前端 API 类型全部从 `frontend/src/api/generated/api.ts` 的 operations 提取，不手写 DTO、不读取 Python 常量、不根据标签或状态字符串猜动作。
-- `/app/tracking` 的列表/详情权威仅为 generated `listTrackingItems`/`getTrackingItemDetail`；动作只取 `available_actions + target_scopes + 本次 capability` 交集，未知值 fail closed。
-- 页面初始只读本地 tracking；probe、sync、submit、retry、verify 和管理动作仅由用户显式发起。revalidate 是纯本地动作，不带 AB 凭据。
-- 凭据只存在 TrackingView 当前实例和单次 POST body；刷新、离页、取消、切模、清除和卸载后销毁，不进入 URL、storage、日志、通知、DOM、截图或 trace。
-- 外部写全部使用最新 revision、confirm、单意图 opaque idempotency key、单飞、服务端返回收敛和结果未知只读回查；不得盲重试或用新 key 掩盖未知结果。
-- 幂等重放绑定是 **idempotency_key + expected_revision**（服务端 `_guard_replay_binding` 先于 `_guard_expected_revision`）：transport 重试必须整份复用锁定 intent（含 revision），只复用 key 会被判同键不同绑定 409。submit 家族的全部 409 都发生在外部边界之前，即「未提交到 Auto Bangumi」；按 `error_type` 给固定中文，并固定「重读列表+重读详情 → 要求重新确认」，绝不静默重发。
-- 外部写的请求/确认/key/结果面板固定在 `TrackingView`（凭据所在实例），**不要**把 `ab_config` 当 prop 传给 inspector；inspector 只按 `credentialReady + capabilities + available_actions` 投影按钮并 emit intent（携带最新 detail revision），写后回查用 inspector `defineExpose` 的 `reload()`，绝不用 `detailRevision`/`:key` 重挂载（会丢写结果面板）。
-- DELETE_EXTERNAL 始终逐条操作且请求无 `file` 字段，必须明确并实际保留本地 Request、tracking、审计、任务和已下载媒体。
-- 追番管理动作「能不能发」由页面自己决定，必须三处同步：`SENDABLE_MANAGEMENT_ACTION_CODES`、`createTrackingManagementActionIntent` 的 dispatch 分支、`createTrackingManagementBody` 的 body 分支。服务端 `available_actions` 只是投影，不是许可；漏掉 body/dispatch 分支会得到「按钮渲染了但点了没反应」。
-- 浏览器测试里 inspector 的外层 `<section>` 与子组件根节点**不能同名**：section 一律带 `-section` 后缀（如 `tracking-modify-section` / `tracking-management-actions-section`），子组件根用短名。同名会让 Playwright `.locator()` 触发 strict mode violation（解析到 2 个元素），症状是断言莫名报 “resolved to 2 elements”。
-- “已更新集数”固定为待开发；不得根据资源数、RSS、下载或文件名猜测。自动化只用 fake/route mock，不连接真实 MiKan、Auto Bangumi 或 qBittorrent。
-- 旧 QueueView 红灯已由 US-316 收口（这批用例在 US-309～US-315 期间是已知遗留，现全部迁移到 TrackingView 或改写为旧入口兼容套件）。若再看到 `#batch-queue-*`/`#tracking-detail-target` 断言，说明有人把旧入口写回了测试，不要照抄。
-- Playwright 的 route glob `*` **不跨 `/`**：`**/api/v1/tracking/items*` 只匹配列表（含 query），**不匹配** `items/<id>`；详情必须单独注册 `**/api/v1/tracking/items/**`。写端点仍要**后注册**（后注册优先），且注册在详情通配**之后**。
-- 浏览器测试里观察 loading 一律用 **held route**：`page.route` handler 只把 `route` 存进列表（不 fulfill），断言完 `.loading-state`/`aria-busy`/按钮 disabled 后再 `held[0].fulfill(...)`。`time.sleep` 写在 handler 里会阻塞 Playwright 分发线程，loading 永远看不到；conftest 的 `test-slow-*` 延迟路由已随队列用例移除。
-- 旧入口「退出默认运行时但保留组件供回退」需要三重证据，缺一不可：① Vitest 引用搜索（扫 `frontend/src`，禁止队列目录外出现 `features/queue/` 导入）；② bundle 标记（Chromium 读 `frontend/dist/assets/*.js`，断言只有旧页面才会渲染的 id/文案不存在）；③ 路由重定向（Vitest + Chromium 都断言旧路径落到新页）。**后端兼容 endpoint 一律不删**。
-- 敏感 canary 断言的正确边界：排除「用户正在填写的凭据表单自身」——用 `body.innerHTML.replace(dialog.innerHTML, '')` 得到「表单之外」的标记面，再断言 URL/history/localStorage/sessionStorage/console 与活动输入值。同时必须断言凭据**确实**出现在单次 POST body 里，否则用例会退化成永真的空断言。
-- **归档不是 `ralph.sh` 的自动行为**：脚本只在分支切换时归档「上一个」run，因此最终 story 必须自己把当前 `prd.json`（全部 `passes=true`）与 `progress.txt` 复制到 `scripts/ralph/archive/<date>-<stage-name>/`，否则归档会缺最终 story 状态。
-- **Stage 收尾的长期文档清单固定为 8 处**，漏一处就会残留「已规划，待开发」：README 头部状态段 + Ralph 状态链、`docs/backlog.md` 的阶段总表与 BL 小节、`docs/MiGuOrca_future_stages.md` 的阶段清单/依赖段/数量判断、`docs/MiGuOrca_frontend_ux_implementation_PRD.md` 的文档信息与状态注记、`docs/frontend-ux-refactor-work-goals.md` 状态表、`docs/modules/M13-web-ui-PRD.md` 阶段表、`docs/api/frontend-contract-handoff-v1.md`、对应 `docs/MiGuOrca_stageNN_*.md` 自身（状态 + 完成记录 + handoff 顺延一节）。
-- **完整门禁只在最终 story 跑一次**，且跑浏览器套件前必须先 `npm run build` 并确认仓库根 `.migu_orca/storage` 不存在。Stage 38 基线：后端非浏览器 1640 passed / 212 deselected、前端 46 files / 586 tests、真实 Chromium 212 passed。
+- Stage 39 目标为部署端 Auto Bangumi 配置持久化与安全连接绑定；US-318～US-323 已经独立审核通过，实际状态以 prd.json、代码与最近验证为准。
+- 每个 Ralph 迭代只完成一个 story；当前批次授权 US-324～US-326，最多 3 次迭代，每条完成后独立审核，阻断未修复不进入下一条，US-326 后强制停止。
+- 本阶段使用 `codex --model gpt-5.6-luna` 运行 Ralph；仅允许本地精确提交，不 push、PR、merge 或部署。
+- 秘密只允许受控配置存储与单次受控 adapter 请求；不得进入业务 JSON、公开 DTO、URL/history、浏览器存储、日志、DOM、截图或 trace。公共响应只给安全摘要。
+- 外部写必须显式 confirm、幂等键、expected revision、写前读取、写后回查及未知结果恢复；未知结果不得盲重发或换 key。
+- 配置更换不得改绑旧 operation 或 external mapping；旧缺失绑定按 legacy/未绑定安全分支读取，不能猜测当前连接。
+- 自动化使用隔离临时配置根与 fake/route mock；普通故事只执行受影响定向验证，不访问真实 AB 或用户运行数据。
 
-## [2026-09-13 09:10:00 CST] - US-303
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented: 补齐 modifyTrackingItem 的 scope-discriminated 严格 patch 联合，并为 server-computed 管理动作增加仅含公开 scope 的 target_scopes。
-- Files changed: Python schemas/serializer/DTO、OpenAPI/generated TypeScript、endpoint inventory/handoff 与契约测试。
-- **Learnings for future iterations:**
-  - generated 请求体必须由 OpenAPI oneOf 保持 scope 与 patch 字段绑定；前端只从 operations 派生类型。
-  - target_scopes 只能由本地映射是否存在计算，绝不把映射值带入公开动作对象。
-- 定向验证：tracking contract tests、OpenAPI drift check、frontend api:check、typecheck 均通过。
----
+## 启动记录
 
-## [2026-09-13 09:15:00 CST] - US-304
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented: 新增 generated-only tracking 投影与动作意图纯函数，覆盖状态总览、公开标题/字幕组搜索、服务端状态筛选、稳定排序、未知值降级、scope/capability 交集与内存幂等意图复用。
-- Files changed: `frontend/src/features/tracking/trackingProjection.ts` 与对应 Vitest；`scripts/ralph/prd.json`、`progress.txt`。
-- **Learnings for future iterations:**
-  - 管理动作必须同时满足服务端 target_scopes 与当前 capability=SUPPORTED，未知动作/style/scope/capability 直接不渲染。
-  - idempotency key 只随局部 intent 返回，transport retry 原样复用，不提供 URL/storage/log 写入接口。
-  - 定向验证：trackingProjection Vitest、单文件 ESLint、typecheck 均通过。
----
+- 2026-09-13：从 `c294ee4` 创建 `ralph/stage39-deployment-settings`；归档 Stage38 活动状态后加载 Stage39 计划。
+- 授权范围：US-318～US-320，最多 3 迭代；批次结束强制停下独立审核。
 
-## [2026-09-13 09:25:00 CST] - US-305
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented: `/app/tracking` 改为正式只读追番总览，接入 generated `listTrackingItems`，提供状态总览、公开搜索/筛选、稳定单选列表、tracking_id 深链、刷新/错误/空态与检查器占位。
-- Files changed: `TrackingView.vue`/测试、tracking 路由 catalog/测试、新增定向 Chromium 测试 `tests/browser/test_app_tracking.py`、Ralph 状态文件。
-- **Learnings for future iterations:**
-  - tracking 正式 query 只接受单一公开 `tracking_id`；列表仅由服务端返回项目确认选择，非法/不存在/已删除值清理且不自动切换。
-  - UI 状态使用背景、边界、指示条与 aria-current，不使用 checkbox 或批量动作；检查器/详情和外部动作留给后续 stories。
-  - 按 dev-browser 运行真实 Chromium 定向测试（2 passed）；定向 TrackingView/路由 Vitest（28 passed）、typecheck、单文件 lint 与 build 均通过。
+## 2026-09-13 / US-318
 
-## [2026-09-13 09:35:00 CST] - Stage 38 审核修复（US-303～US-305）
-- 修复管理动作按 action 精确投影 target scopes；前端严格执行服务端 scope 与 capability 交集，SET_ENABLED 按当前方向判断，SUBMIT/RETRY 增加已验证的 `subscription_submit` 门控。
-- 修复 tracking_id/batch_id 互斥兼容路由、列表失败时保留合法选择、初次深链聚焦、真实时间稳定排序，并将 TrackingView 外层改为非嵌套 `section`。
-- OpenAPI/generated modify patch 联合现在编译期拒绝空 patch，filter_rule 非 null 也必须至少一个字段；同步 PRD、handoff 与契约测试。
+- 范围：新增独立于业务 storage/profile 的服务端 AB 配置 repository；支持
+  `MIGU_ORCA_WEB_CONFIG_ROOT`（默认 `.migu_orca/config`）、严格 password/API Token 联合、
+  HTTP(S) 根地址及裸 `host:port` 规范化、配置 CAS/revision、opaque UUID connection_ref、
+  无秘密 tombstone、受限权限目录/文件、符号链接与损坏内容 fail closed、同目录原子写入。
+- 文件：`src/storage_engine/controllers/autobangumi_config_repository.py`、对应专属测试；
+  `src/ab_engine/controllers/ab_config.py` 加固服务根规范化并隐藏 request-scoped 配置 repr。
+- 验证：`uv run pytest src/storage_engine/controllers/autobangumi_config_repository_test.py src/ab_engine/controllers/ab_config_test.py -q`（34 passed）；
+  `uv run pytest src/ab_engine src/storage_engine/controllers -q`（339 passed）；
+  `uv run ruff check src/storage_engine/controllers/autobangumi_config_repository.py src/storage_engine/controllers/autobangumi_config_repository_test.py src/ab_engine/controllers/ab_config.py`（passed）；
+  `uv run python -m compileall -q src/storage_engine/controllers/autobangumi_config_repository.py src/ab_engine/controllers/ab_config.py`（passed）；`git diff --check`（passed）。
+- 遗留风险：本轮只交付 repository，尚未接入 US-319 配置管理 API、同源/Host 防护或前端；
+  directory/file 权限验证按 POSIX 受限存储语义实现，Windows 凭据设施不在本阶段。
+- 可复用结论：配置 root 必须保留词法路径并在每次 IO 前检查父路径符号链接；读写均使用
+  `lstat`/`O_NOFOLLOW`，写临时文件先 fsync 再 `os.replace`，CAS 冲突只返回 revision 元数据。
 
-## [2026-09-13 09:45:00 CST] - Stage 38 第二轮审核修复（US-303～US-305）
-- 修正 modify patch 内部约束：subscription、RSS 及非空 filter_rule 均使用 `allOf` 基础字段加 `anyOf` 至少一个字段，允许合法多字段修改；仅保留外层 target_scope 的 `oneOf`。
-- 补充 OpenAPI 结构/运行时契约测试，以及 generated TypeScript 多字段正向赋值和空 patch/filter_rule 负向断言。
----
-## [2026-09-13 10:00:00 CST] - US-306
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented: 新增 sticky `TrackingInspector`，只读取 generated `getTrackingItemDetail`，展示安全摘要、资源名称、外部状态、操作、复核问题、审计及固定更新集数占位；本地方案入口严格受 request_id 与 EXTERNAL_ONLY 门控。
-- Files changed: `frontend/src/features/tracking/TrackingInspector.vue`、对应 Vitest、`TrackingView.vue` 接线与测试、tracking Chromium route mock、Ralph 状态文件。
-- **Learnings for future iterations:**
-  - 详情请求用 AbortController 与请求代际双重保护；失败只影响检查器，不清除健康列表，敏感错误固定为中文文案。
-  - 外部 ID、Request ID、operation ID、raw Request/响应不渲染；仅展示 generated 白名单安全字段。
-- 定向验证：TrackingInspector/TrackingView Vitest 7 passed、typecheck、单文件 lint、build 通过；真实 Chromium 定向选择/详情用例通过。
----
+## 2026-09-13 / US-319
 
-## [2026-09-13 10:15:00 CST] - US-307
-- What was implemented: 新增页面级 CredentialSessionDialog，复用 useSensitiveFields，默认 password、API Token 能力降级，只调用 generated capabilities 探测；连接成功仅建立当前页面会话，清除/取消/切换认证模式/卸载均销毁敏感输入。
-- Files changed: `CredentialSessionDialog.vue`/定向 Vitest、`TrackingView.vue` 页面接线、tracking Chromium route-mock 测试、Ralph 状态文件。
-- **Learnings for future iterations:**
-  - 成功探测后关闭对话框，只在页面状态提示 VERIFIED；服务地址、账号、凭据不进入 DOM 展示，失败仅显示固定中文并保留可修正输入。
-  - 定向验证：CredentialSessionDialog/TrackingInspector/TrackingView Vitest 10 passed、typecheck、build、单文件 lint 通过；真实 Chromium 凭据探测与清除用例通过。
+- 范围：部分实现 `/api/v1/settings/autobangumi` 的 GET/PUT/DELETE 配置管理入口；PUT/DELETE 强制 `confirm=true` 与 configuration revision CAS，输入严格禁止未知字段，保存使用完整 password/API Token 联合。因验收仍有缺口，本 story 未完成。
+- 文件：`src/apps/migu_orca_web/routes_settings.py`、`src/apps/migu_orca_web/schemas.py`、`scripts/ralph/prd.json`。
+- 验证：`uv run pytest src/apps/migu_orca_web/views_test.py -q --disable-warnings --maxfail=1`（186 passed）；`uv run ruff check --fix ...` 后定向 Ruff 通过；`git diff --check` 通过；定向 compileall 通过。
+- 遗留风险：本轮未实现受信 Host/Origin 中间件、外部请求 lease 与保存配置探测（分别需继续完善 US-319/US-321）；OpenAPI/generated 契约尚未同步，不能视为 Stage 39 完成。
+- 可复用结论：部署配置 API 的公开摘要只允许 configured/credential_present/auth_mode/connection_ref/configuration_revision；任何配置读取都通过专用 repository，业务 storage_dir 不参与配置定位。
 
-## [2026-09-13 10:30:00 CST] - US-308
-- What was implemented: 在页面级已探测会话下新增显式二次确认的 Auto Bangumi 同步，调用 generated `syncTrackingItems(confirm=true)`；同步单飞，成功以服务端安全 `items/summary` 收敛列表并通过详情代际回查，失败、PARTIAL、能力 UNKNOWN 保留旧列表并给出只读降级提示。
-- Files changed: `TrackingView.vue`/定向 Vitest、tracking Chromium route-mock 测试、Ralph 状态文件。
-- **Learnings for future iterations:**
-  - 初始页面只读本地列表；连接探测或同步都不会自动触发外部动作，敏感配置只留在当前页面内存，确认取消仍保持原列表。
-  - 定向验证：TrackingView/TrackingInspector/CredentialSessionDialog Vitest 12 passed、typecheck、单文件 lint、ruff、build 通过；真实 Chromium 显式确认/同步与旧列表安全边界用例通过。
+## 2026-09-13 / US-318/319 修复 B2
 
-## [2026-09-13 10:00:00 CST] - Stage 38 审核修复（US-307～US-308）
-- 修复同步与列表共用一个代数（`dataSequence`）导致「同步在飞行中被刷新列表打断」时同步结果被丢弃、`syncLoading` 永久卡死的问题：列表改用独立 `listSequence`，并用 `syncGeneration` 只让同步写入的新 revision 失效飞行中的旧列表响应；同步只在更新的同步意图或显式清除连接时被丢弃。
-- 新增 `syncPending` 同步意图守卫，在打开确认弹窗前置位、所有退出路径与 `cancelSync` 复位，确保同一时刻只有一个同步意图/请求；同步按钮在意图进行中也 disabled。
-- 新增页面级中文安全能力摘要（`.tracking-connection-status` 内的 `#tracking-capability-summary`）：探测状态、版本（缺失/异常显示「未确认」）与 14 项能力的「支持 / 不支持 / 未知」，只消费 generated probe 白名单字段，状态用文字 label 而非仅颜色，并保留「清除连接」入口；`CredentialSessionDialog` 内同款摘要也改为中文文案。
-- 中文提示区分「同步未完成 / 部分完成」与「同步已完成但能力未知，降级为只读」；删除 `TrackingInspector` 未使用的 `fallbackRequestId` prop。
-- Files changed: `frontend/src/features/tracking/TrackingView.vue`、`CredentialSessionDialog.vue`、`TrackingInspector.vue`、`trackingProjection.ts` 及对应 Vitest，`tests/browser/test_app_tracking.py`，`scripts/ralph/progress.txt`。
-- **Learnings for future iterations:**
-  - 列表与外部写必须各有独立请求代际；共享代数会让一次普通刷新永久丢弃写结果并卡死按钮。应让「写 revision 代数」失效旧列表响应，而不是让列表刷新影响写结果。
-  - 确认弹窗期间也必须持有意图守卫（`syncPending`），避免第二次点击把待确认意图解析为取消并重开弹窗。
-  - 能力展示统一走 generated 白名单投影 + 固定中文 label；原始枚举（VERIFIED/SUPPORTED/UNKNOWN）不得进 DOM，version 只接受纯版本 token，否则显示「未确认」。
-- 定向验证：`npm run typecheck`、`npm run lint`、`npm run test:unit -- --run`（44 files / 438 tests）、`npm run build`、`uv run pytest tests/browser/test_app_tracking.py -q`（4 passed，真实 Chromium）、`git diff --check` 全部通过。
----
-## [2026-09-13 10:14:07 CST] - Stage 38 追番能力端点生命周期契约漂移修复（子 Agent B / 定向修复）
-- 修复阻断项：提交 `8543e42` 只改了 `docs/api/endpoint_inventory.md` 中 `/api/v1/autobangumi/capabilities` 的 `relation` 文案（补入 D38-02.4 的「`subscription_submit` 仅由已验证的 3.1.18 password/legacy probe 支持」），但未同步 registry，导致 `test_inventory_projects_lifecycle_registry` 红灯（`1 failed, 1638 passed`）。
-- Fix：把同一句真实语义补进 `src/apps/migu_orca_web/endpoint_lifecycle.py` 对应 `_entry(...)` 的 `relation`（与 markdown 单元格逐字一致，含反引号），使 markdown inventory 与 registry 重新一致；未新增/删除端点，未改路由、状态机或业务语义。
-- 因 `openapi_gen` 会把整个 `x-lifecycle`（含 `relation`）投影进 OpenAPI，registry 变更后 `docs/api/openapi.json` 必然过期，故按官方命令 `uv run python -m apps.migu_orca_web.openapi_gen` 重新生成；diff 仅 1 行 `x-lifecycle.relation` 描述字符串，无 path/schema/status 契约变化；`frontend/src/api/generated/api.ts` 不内嵌 `relation`，未受影响、未改动。
-- 在 `tests/api_contract/test_endpoint_lifecycle.py` 新增守护 `test_capabilities_relation_records_subscription_submit_probe_scope`：显式断言该 relation 同时包含 `subscription_submit` 与 `3.1.18`，避免未来把该约束从两侧一起静默删除；未削弱任何现有断言。
-- Files changed: `src/apps/migu_orca_web/endpoint_lifecycle.py`、`docs/api/openapi.json`（重生成）、`tests/api_contract/test_endpoint_lifecycle.py`、`scripts/ralph/progress.txt`。
-- **Learnings for future iterations:**
-  - `ENDPOINT_LIFECYCLE` 的 `relation` 不只是 registry 内部文案：`openapi_gen` 会把 `lifecycle/relation/authority` 整体写入每个 operation 的 `x-lifecycle`，因此改 `relation` 必须同步重生成 `docs/api/openapi.json`，否则 `test_openapi_generation.py` 与 `migu-orca-openapi --check` 会红。
-  - 改 markdown inventory 的任一单元格前先确认它是否由 registry 投影而来；「只改文档」会立刻打破 `test_inventory_projects_lifecycle_registry` 的逐字相等断言。三处（registry / inventory / openapi.json）必须一起动。
-  - 仅比对单行不足以发现漂移，`test_inventory_projects_lifecycle_registry` 的全量 dict 相等才是权威守护；本次全量比对确认「Omitting 38 identical items」，仅该行曾被改坏。
-- 定向验证：`uv run pytest tests/api_contract/test_endpoint_lifecycle.py -q`（5 passed）、`uv run pytest -q -m "not browser"`（1640 passed，0 failed）、`uv run ruff check src tests`（All checks passed）、`uv run migu-orca-openapi --check`（OpenAPI up to date，exit 0）、`git diff --check`（exit 0）。
----
+- 修复范围：共用 `ab_engine` 服务根规范化并拒绝伪 scheme/畸形 host；repository 保存边界完整重验直接构造模型，严格 regular/0600/fsize、tombstone 字段、version bool 与 canonical UUID；新增同 root 跨实例进程内配置 lease，快照/ref/revision 校验，活动 lease 时 save/delete 立即 `connection_in_use`。
+- HTTP/API：Flask 全局 `TRUSTED_HOSTS` 默认 loopback，仅服务端显式环境扩展；Origin 仅同源或显式可信 Origin，拒绝简单表单与非精确 JSON，恶意 Host 返回固定 JSON 错误；摘要固定 8 字段且配置状态为 `UNCONFIGURED`/`CONFIGURED`，confirm 使用严格 bool。
+- 契约：补齐 settings 三 operationId 的 registry/DTO/OpenAPI/inventory/generated TS，补充安全与 lease 回归测试。
+- 验证：`uv run pytest tests/api_contract/test_autobangumi_settings_security.py src/storage_engine/controllers/autobangumi_config_repository_test.py src/ab_engine/controllers/ab_config_test.py -q`（43 passed）；`uv run pytest tests/api_contract/test_inventory_consistency.py tests/api_contract/test_openapi_runtime_consistency.py -q`（14 passed）；`uv run migu-orca-openapi --check`、frontend `npm run api:check`、`npm run typecheck`、受影响 Ruff 均通过。
+- 遗留风险：未接入 US-321 probe 或业务 operation/mapping 绑定；未运行全量 pytest、Vitest、浏览器和真实上游，符合本轮限定。US-318/319 `passes` 保持 false，等待主 Agent 独立审核。
 
-## [2026-09-13 10:35:00 CST] - US-309
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented: 在 `TrackingInspector` 接入 REVALIDATE 本地复核闭环：动作由服务端 `available_actions` 投影（无 scope/capability 门控、不要求页面连接）；请求只发最新 `expected_revision` 与相对 `storage_dir`（无 `ab_config`、不访问外部）；`ready=false` 作为 200 业务结果渲染服务端 §11.5 `issues` 并固定说明「尚未向 Auto Bangumi 创建订阅」；用返回 `tracking` 原子收敛检查器与列表（`@tracking-updated` → `applyReturnedTracking`，无二次详情读取）；409 清空意图、回查详情并要求重新确认；transport 失败保留意图供显式重试复用；深链文案改为「返回修改方案」，外部孤立项单独说明不可返回原因。
-- Files changed: `frontend/src/features/tracking/TrackingInspector.vue`、`TrackingView.vue`（`syncGeneration` 更名 `writeGeneration` + `applyReturnedTracking`）、`trackingProjection.ts`（`projectRevalidateIssues`/`REVALIDATE_ISSUE_CODES`/`TrackingRevalidate*` 类型）及三个 Vitest；`tests/browser/test_app_tracking.py`（+2 例真实 Chromium）；`frontend/AGENTS.md`；Ralph 状态文件。
-- **Learnings for future iterations:**
-  - 列表响应代际与「写结果代际」必须分开：`listSequence` 管列表、`writeGeneration` 管服务端返回的 tracking 写入。所有 US-310～US-315 的写动作都应复用 `applyReturnedTracking`（原位替换 + 递增 `writeGeneration`），且不要动 inspector 的 `:key`（`detailRevision`），否则会重挂载并丢掉写结果面板。
-  - `projectRevalidateIssues` 只渲染已知 §11.5 code，未知 code 直接丢弃（fail closed），空 message 回退固定中文；服务端 issue message 是固定文案表，可安全渲染。
-  - Playwright route **后注册优先**：revalidate POST 要单独 `page.route` 注册在 `_mock_list()` 之后，否则被 `**/api/v1/tracking/items*` 吃掉。
-- 定向验证：TrackingInspector/TrackingView/trackingProjection Vitest（42 passed）、typecheck、lint、build、`npm run api:check` 通过；`uv run pytest tests/browser/test_app_tracking.py -q`（6 passed，真实 Chromium）；`git diff --check` 干净。
----
+## 2026-09-13 / US-318/319 修复 B2 第二轮
 
-## [2026-09-13 10:40:00 CST] - US-310
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented: `TrackingView` 现拥有全部显式外部写生命周期（确认、单意图 opaque key、单飞、outcome 分流、写后回查、结果未知只读回查）；`TrackingInspector` 只按 `credentialReady + capabilities + available_actions` 投影 SUBMIT 按钮、emit `submit-requested { action, item }`（携带**最新 detail revision**）并渲染页面传入的 `writeSession`。凭据从未离开 TrackingView（**没有**把 `ab_config` 当 prop 下传）。
-- 新增 `trackingProjection` 写会话投影：`SUBMIT_OUTCOMES` / `TrackingWriteState` / `TrackingWriteSession`、`createWriteSession`、`projectSubmitOutcome`（未知 outcome fail closed 到 `UNKNOWN`）、`writeSessionMessage`、`writeSessionKeepsIntent`。
-- 确认弹窗说明「将在 Auto Bangumi 创建该追番的外部订阅，并可能触发下载」；取消零请求；`writePending` 守卫保证同一时刻只有一个意图/弹窗。
-- key 生命周期：一次确认一个 key；只有 `UNKNOWN`/`VERIFYING_EXTERNAL`/`RECOVERY_REQUIRED` 保留锁定 intent（显式重试复用同 key），`ACTIVE`/`SUBMIT_FAILED`/`NEEDS_RECONFIRM`/`CONFLICT` 释放 intent，下次确认生成新 key。
-- 收敛：HTTP 200 用 `result.tracking` 走既有 `applyReturnedTracking`（原位替换 + 递增 `writeGeneration`）；随后调用 inspector 暴露的 `reload()`（保留面板、不抢焦点、失败不清空健康列表）回查详情；409 与结果不明额外 `loadList(true)` 静默重读列表（静默路径不显示 loading/error 占位）。
-- Files changed: `frontend/src/features/tracking/TrackingView.vue`、`TrackingInspector.vue`、`trackingProjection.ts` 及三个 Vitest；`tests/browser/test_app_tracking.py`（+1 例真实 Chromium）；`frontend/AGENTS.md`；Ralph 状态文件。
-- **Learnings for future iterations:**
-  - 外部写的请求必须在 `TrackingView`（凭据所在实例），不能在 inspector：inspector 以 `:key="tracking_id:detailRevision"` 随选择重挂载，把外部写放进去会在切条目时丢掉飞行中的结果与「结果未知」回查闭环。inspector 用 emit 把 `{action, item}` 交回页面即可，`item` 直接传 detail（它是 TrackingItem 的超集），页面用 `createTrackingActionIntent` 再校验一次 capability（fail closed）。
-  - 写后回查**不要**用 `detailRevision`/`:key`：那会重挂载并丢掉写结果面板。用 `defineExpose({ reload })` 暴露一个 `fetchDetail(preserve=true)`（保留当前 detail、不 focus heading、失败静默）。
-  - `loadList(silent)` 的默认参数会被模板 `@click="loadList"` 的事件对象污染，所有 handler 必须写成 `@click="loadList()"`。
-  - 单飞语义与「只锁当前条目的冲突动作」并存：请求中禁用外部写动作（含其他条目的 SUBMIT），但选择/筛选/刷新/detail 读取/其他条目的本地复核全部保持可用。
-  - Playwright route 后注册优先：`/submit` 必须注册在 `**/api/v1/tracking/items/tracking-a*` **之后**，否则被详情通配吃掉。
-- 定向验证：tracking 四个 Vitest 文件 64 passed、`npm run typecheck`、`npm run lint`、`npm run api:check`、`npm run build`、`uv run ruff check tests/browser/test_app_tracking.py`、`uv run pytest tests/browser/test_app_tracking.py -q`（7 passed，真实 Chromium）、`git diff --check` 全部通过。
----
+- 首次定向审核失败：`test_endpoint_lifecycle.py::test_inventory_projects_lifecycle_registry` 的 inventory parser 仅接受 GET/POST，且生命周期表缺少 settings 三行；另发现 settings BadRequest handler 会把普通格式错误误标为 untrusted_host。
+- 修复：parser 支持 PUT/DELETE并补生命周期 inventory；Host 错误仅由 Werkzeug SecurityError handler 处理；配置摘要显式 serializer 与非空 connection_status DTO；request 配置模型字段 repr 隐藏；repository 读取 fd 全路径关闭，原子替换成功后清除 temp ownership，lease ref 字符串要求 canonical UUID。
+- 验证：repo/AB/settings/lifecycle/inventory/OpenAPI/DTO 定向组合 `103 passed`；`views_test.py` `186 passed`；受影响 Ruff、`migu-orca-openapi --check`、frontend `npm run api:check`、`npm run typecheck`、`git diff --check` 均通过。
+- 遗留风险：仍未运行全量 pytest、Vitest、浏览器、真实上游；US-321 probe 与 US-320+ 绑定未实现。US-318/319 passes 继续保持 false。
 
-## [2026-09-13 10:45:00 CST] - US-311
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented: 在既有 submit 家族写路径上接入 RETRY：`TrackingInspector` 只按 `credentialReady + capabilities + available_actions` 投影 SUBMIT **或** RETRY（两者在服务端互斥，同一时刻只渲染其一），emit 统一改为 `write-requested { action, item }`（仍携带最新 detail revision）；`TrackingView.runTrackingWrite` 由 action code 派生端点（`WRITE_ACTION_ENDPOINTS`）与影响确认文案（`WRITE_ACTION_CONFIRMATIONS`），RETRY 请求固定带最新 `expected_revision`、`confirm=true`、单意图 opaque key 与单次 body 凭据。
-- 幂等语义：明确失败（`SUBMIT_FAILED`/`ACTIVE`/`NEEDS_RECONFIRM`）释放 intent，每次用户确认新 key；transport/结果不明（`UNKNOWN`/`VERIFYING_EXTERNAL`/`RECOVERY_REQUIRED`）保留锁定 intent，显式重试复用**同 key 同 expected_revision**（服务端按 key+revision 判定重放）；锁定期间若点到另一个 action 直接零请求（既不换 key 也不按新动作重放）。
-- 冲突分流：submit 家族全部 409（revision/idempotency/state/operation_in_progress）都在外部边界之前抛出，`createWriteConflictSession` 按 `error_type` 渲染固定中文「未提交到 Auto Bangumi」下一步（未知类型回退通用文案），并固定「静默重读列表 + 重读详情 → 要求重新确认」，绝不静默重发。
-- Files changed: `frontend/src/features/tracking/trackingProjection.ts`、`TrackingView.vue`、`TrackingInspector.vue` 及三个 Vitest；`tests/browser/test_app_tracking.py`（+3 例真实 Chromium）；`frontend/AGENTS.md`；Ralph 状态文件。
-- **Learnings for future iterations:**
-  - 重放绑定是 **key + expected_revision**：`_guard_replay_binding` 会在 `_guard_expected_revision` **之前**执行，换 revision 复用同 key 会被判 `tracking_idempotency_conflict`。因此「transport 重试」必须整份复用锁定 intent（含 revision），不能只复用 key。
-  - submit 家族端点/文案必须由 action code 绑定成表，不能散落在分支里；否则很容易出现「重试按钮发 submit 请求」或「重试用提交文案」这类不可见漂移。
-  - 9 个 `available_actions` code 里只有 `SUBMIT`/`RETRY` 由本页发送；`isWriteActionCode()` 之外的动作（MODIFY/SET_ENABLED/REFRESH_RSS/DELETE_EXTERNAL/RECOVER_*）即使被 emit 也必须零请求，等各自 story 再接线。
-  - Playwright `route.abort()` 可稳定造出「transport 结果不明」：页面必须只回查、复用同 key 重放，浏览器用例可直接断言两次请求的 `idempotency_key` 与 `expected_revision` 完全相等。
-- 定向验证：tracking 四个 Vitest 文件 81 passed、`npm run test:unit -- --run`（44 files / 486 tests）、`npm run typecheck`、`npm run lint`、`npm run api:check`、`npm run build`、`uv run ruff check tests/browser/test_app_tracking.py`、`uv run pytest tests/browser/test_app_tracking.py -q`（10 passed，真实 Chromium）、`git diff --check` 全部通过。
----
-## [2026-09-13 10:42:38 CST] - Stage 38 审核修复（US-311）
-- 修复问题：`TrackingView.runTrackingWrite()` catch 只对 `status === 409` 单独分流，其余异常（含服务端在外部写入边界之前明确拒绝的结构化 4xx，如 400/404）一律落入 `'UNKNOWN'`。后果有二：文案谎称「提交结果未知」（暗示外部可能已创建订阅），且 `writeSessionKeepsIntent('UNKNOWN') === true` 让 `inspectorWriteBusy` 对其他条目恒为 true——一次瞬时 4xx 会锁死整页所有条目的提交/重试按钮，直到用户对同一条目再次提交拿到确定结果。此行为偏离 D38-08.5 的「未知」枚举（网络 / timeout / 非 JSON / 5xx / 写后本地状态不明）。
-- Fix：`TrackingWriteState` 新增确定拒绝态 `'REJECTED'`，语义为「服务端以结构化 HTTP 4xx（**409 除外**）在外部写入边界之前明确拒绝了本次请求，Auto Bangumi 未被写入」。`WRITE_MESSAGES.REJECTED` 固定中文「服务端明确拒绝了本次请求，本次未创建 Auto Bangumi 外部订阅；正在刷新最新详情，请重新确认后再提交。」，不渲染服务端 `error_type`/原始状态，也不暗示可能已创建；`writeSessionKeepsIntent('REJECTED') === false`（释放页面级 intent，其他条目不再被写锁挡住，下一次确认生成**新 key**）；仍执行只读回查 `recheckAfterWrite(trackingId, true)`，绝不自动重发。新增纯判定 `isDefiniteWriteRejection({ status, httpError })`（`httpError === true && 400 <= status < 500 && status !== 409`）供组件与单测共用。
-- 分流顺序（`runTrackingWrite` catch）：`apiError.cancelled && !apiError.httpError` 提前 return 不变；`status === 409` → 现有冲突分支逐字不变；`isDefiniteWriteRejection(apiError)` → 新 `'REJECTED'`（清 `writeIntent` + 回查列表与详情）；其余（网络 / timeout / 非 JSON / 5xx / status 0 或 undefined / 写后不明）→ 仍 `'UNKNOWN'`，保留锁定 intent，不生成新 key、不自动重发。`REVALIDATE` 行为零改动。
-- Files changed: `frontend/src/features/tracking/trackingProjection.ts`（新态 + 固定文案 + 判定谓词）、`TrackingView.vue`（catch 分流）、`TrackingInspector.vue`（`.tracking-submit-result.is-rejected` 复用错误左边框色）、`trackingProjection.test.ts`（+3 例：新态固定文案不宣称已创建、`writeSessionKeepsIntent` 释放、`isDefiniteWriteRejection` 只认非 409 4xx）、`TrackingView.test.ts`（+3 例：400/404 确定拒绝 + 同条目新 key + 只读回查、跨条目写锁释放、5xx/网络/超时对照仍 UNKNOWN 且复用同 key 同 revision）、`frontend/AGENTS.md`（Stage 38 新增「确定拒绝态」小节）。
-- 反向验证（证明新用例真能抓住旧行为）：`git stash push -- frontend/src/features/tracking/TrackingView.vue` 临时回退分流后，`npx vitest run src/features/tracking/TrackingView.test.ts -t "4xx"` 得 `2 failed`——`treats a structured non-409 4xx as a definite refusal...` 报 `expected [ 'tracking-submit-result', 'is-unknown' ] to include 'is-rejected'`；`releases the page write lock after a 4xx refusal so another item can submit` 同样拿不到 `is-rejected`（旧逻辑下另一条目仍被写锁禁用）。`git stash pop` 恢复后同一命令 2 passed。未新增依赖或端点。
-- 未改动的既有断言：`TrackingView.test.ts` 的 409 冲突用例（4 种 error_type + 未知类型回退，继续生成新 key）与 `unknownError`（status 0）用例原样通过；仓储内不存在「所有非 409 都变 UNKNOWN」的断言，故无需改写任何既有断言。
-- **Learnings for future iterations:**
-  - catch 分流必须按「是否可能已越过外部边界」判定，而不是「是否 409」：只有网络失败 / timeout / 非 JSON / 5xx / 读不出的 status / 写后本地状态不明才是 `UNKNOWN`；结构化非 409 4xx 是外部边界之前的确定拒绝，必须释放 intent，否则 `inspectorWriteBusy` 会因单条 4xx 锁死整页。
-  - 新增写状态时 `WRITE_MESSAGES` 的 `Record<TrackingWriteState, string>` 会强制补齐文案（编译期守护）；`writeSessionKeepsIntent` 用白名单（只列 3 个 indeterminate 态），因此新确定态天然不保留 intent——但必须在 catch 里显式清 `writeIntent`，否则同条目重放仍会复用旧 key。
-- 定向验证：`cd frontend && npm run typecheck && npm run lint && npm run api:check && npm run test:unit -- --run && npm run build`（typecheck/lint/api:check 通过；44 files / 491 tests passed；dist 构建成功）；`uv run pytest tests/browser/test_app_tracking.py -q`（10 passed，真实 Chromium）；`git diff --check`（exit 0，无空白错误）。
----
+## 2026-09-13 / US-318/319 修复 B2 第三轮
 
-## [2026-09-13 11:00:00 CST] - US-312
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented: 结果未知恢复闭环。`TrackingInspector` 新增「结果未知恢复」区：只投影服务端 `available_actions` 里的 `RECOVER_AUTO`/`MARK_SUCCEEDED`/`MARK_FAILED`（纯本地，无 capability/凭据/scope 门控），并在恢复流程内提供页面自有的 **只读** `VERIFY_EXTERNAL`（仅 `credentialReady && external_verify=SUPPORTED` 且记录可恢复时渲染）；emit 改为 `recovery-requested { action, item }`（携带**动作码**与最新 detail）。`TrackingView.runTrackingRecovery` 拥有请求：AUTO 零确认零凭据、MARK_* 二次确认（默认焦点取消）、VERIFY_EXTERNAL 用当前 `ab_config` 只读核验同一 operation。
-- 请求体单点构造 `createTrackingRecoverBody()`：AUTO = `{expected_revision, action:'AUTO'}`；MARK_* 多一个 `confirm:true`；VERIFY_EXTERNAL 是唯一带 `ab_config` 的分支（缺 `base_url` 返回 null 即不发）。形状本身无法表达外部 ID/URL/原始响应/备注。
-- 恢复会话独立于写会话（无 idempotency key）：`TrackingRecoveryState`/`createRecoverySession`/`createRecoveryConflictSession`/`projectRecoveryOutcome`/`recoverySessionKeepsLock`；`needs_manual` 以服务端字段为准（`RECOVERY_REQUIRED` 但标志缺失时也按人工核验处理），文档枚举之外的 `outcome`（如管理回读的 `DISABLED`/`EXTERNAL_DELETED`）一律落到 `UNKNOWN`。200 用返回 tracking 收敛列表 + `reload()` 回查详情；409 清意图、重读列表与详情并要求重新确认；transport 不明只回查。
-- 锁定：`inspectorWriteBusy` 更名 `inspectorIntentBusy`（写/恢复在飞行中**或**其他条目持有未决 intent），同时喂给 submit/retry 与恢复按钮的 `actionBusy`；未决恢复（`UNKNOWN`/`RECOVERY_REQUIRED`）保持页面锁，人工结论落地后释放。`clearConnection()`/卸载同时重置写与恢复 intent。
-- Files changed: `frontend/src/features/tracking/trackingProjection.ts`、`TrackingInspector.vue`、`TrackingView.vue` 及三个 Vitest（+22 例）；`tests/browser/test_app_tracking.py`（+2 例真实 Chromium）；`frontend/AGENTS.md`；Ralph 状态文件。**未改后端契约、未新增端点或迁移。**
-- **Learnings for future iterations:**
-  - 恢复**没有 idempotency key**：绑定只有 `expected_revision`。因此不要套用写会话的 key 复用逻辑；`RECOVERY_ACTIONS` 里的 `VERIFY_EXTERNAL` 是「页面自有动作」，服务端 `available_actions` 永远不返回它，所以它不能放进 `TrackingAction`（generated code 联合没有它）——emit 直接传**动作码**，页面再 `createTrackingRecoveryIntent()` 校验（VERIFY_EXTERNAL 额外要求 `external_verify=SUPPORTED` 且记录可恢复）。
-  - `TrackingRecoverPayload` 的 `extra="forbid"` + `model_validator` 使「AUTO/MARK 带 `ab_config`」和「VERIFY_EXTERNAL 不带」都是 400；`confirm` 只对 MARK_* 有意义。前端把这三条规则编码在 `createTrackingRecoverBody` 一处，测试用 `toEqual` 整份断言即可守住。
-  - 服务端 `VERIFY_EXTERNAL` 的 `outcome` 可能返回恢复枚举之外的值（管理操作回读会返回 `DISABLED`/`EXTERNAL_DELETED`/旧状态）。必须 `const outcome: unknown = result.outcome` 显式比较，否则 TS 会把最后那条 fail-closed 分支判成死代码。
-  - 「needs_manual 时保持锁定」= 未决恢复继续占用页面单飞 intent：`inspectorIntentBusy` 必须把恢复会话与写会话一起算，否则另一个条目的 SUBMIT/RETRY 会在恢复未决时被放行。
-  - Vitest 陷阱：`vi.fn().mockResolvedValueOnce(async () => {...})` **不会**执行那个函数（它被当成返回值），要造「请求中途记录状态再抛错」必须用 `mockImplementationOnce`；真实弹窗断言（默认焦点）与 `answerConfirm()` 间谍互斥，同一用例里不能混用。
-- 定向验证：`npm run typecheck`、`npm run lint`、`npm run api:check`、`npm run test:unit -- --run`（44 files / 510 tests）、`npm run build`、`uv run ruff check tests/browser/test_app_tracking.py`、`uv run pytest tests/browser/test_app_tracking.py -q`（12 passed，真实 Chromium）、`git diff --check` 全部通过。
----
+- 审核补缺：settings 安全测试与 lease 测试覆盖不足，DTO connection_ref 未声明 UUID，Origin 未做 effective-port canonical，settings 错误登记包含尚未暴露的 connection_ref_conflict。
+- 修复：新增严格 canonical origin/Host helper（默认端口归一化、userinfo/path/query/fragment/非法 host 拒绝），移除 classifier/OpenAPI 不可达 ref conflict；DTO 使用 UUID，serializer 直接接收 AutoBangumiConfigRecord；扩充 API PUT→restart GET→DELETE/CAS/lease/corruption/sensitive/form/origin 测试与 repository lease/temp ownership 测试。
+- 验证：repo+AB+settings `49 passed`；inventory+openapi_runtime+DTO+lifecycle+settings/repo `109 passed`；views_test `186 passed`；OpenAPI connection_ref 为 `format: uuid`；Ruff、OpenAPI check、frontend api:check/typecheck、git diff check 通过。
+- 遗留风险：未运行全量 pytest、Vitest、浏览器、真实上游；US-321 probe 与 US-320+ 绑定未实现。US-318/319 passes 保持 false。
 
-## [2026-09-13 11:20:00 CST] - US-313
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented: 外部订阅与关联 RSS 修改（`MODIFY`）。新增 `trackingManagement.ts`（scope 投影、两种 scope 的严格表单模型与 patch 构造、单点请求体构造、`management_status` 结果投影、固定中文冲突表）与 `TrackingModifyForm.vue`（番剧/RSS 两个**分离**表单，每个字段显式勾选）；`TrackingInspector` 只按 `credentialReady + capabilities + available_actions` 投影 MODIFY 并渲染**服务端允许的 scope 用户文案**（外部番剧订阅 / 关联 RSS），emit `management-requested { action, item, targetScope, patch }`；`TrackingView.runTrackingManagement` 拥有请求：端点由 action code 绑定、body 由 `createTrackingManagementBody` 单点构造、复用凭据会话/影响确认/最新 revision/单意图 opaque key/单飞/`applyReturnedTracking` 收敛/只读回查。
-- patch 严格性：番剧只允许 title/season/subtitle_group/filter_rule/offset/expected_folder_name，RSS 只允许 name/aggregate/parser；空 patch、非法数字（season 非 0～100 整数、offset 负/非整数）、URL 与绝对路径（`isUnsafePatchValue`，与服务端 patch 校验同规则）都在页面直接拒绝、零请求；跨 scope 字段在类型与 `managementPatchPresent` 两处都被拒。`filter_rule` 的两个布尔开关总是随规则一起提交（Auto Bangumi 的 filter 是单条排除表达式），两个文本条件只在各自勾选时提交，勾选留空 = 显式清空（`null`）。
-- 结果语义：管理写返回 `management_status`（**不是** submit 家族的 `outcome`）。只有 `SUCCEEDED` 是成功、`FAILED` 是确定失败，`PREPARED`/`IN_PROGRESS`/`OUTCOME_UNKNOWN`/`RECOVERY_REQUIRED` 与枚举之外的值一律 `UNKNOWN` + `needsManual=true`，只读回查、绝不重试；`safe_message` 不作为权威文案。`managementSessionKeepsIntent()` 只在 `UNKNOWN` 为 true。管理 409 的 error_type 与 submit 家族不同（多出 `tracking_management_*`/`tracking_target_*`/`tracking_mapping_missing`），有独立固定中文表与未知类型回退；结构化非 409 4xx 仍走确定拒绝态并释放 intent（不锁死其他条目）。
-- 表单生命周期：`TrackingModifyForm` 在 `tracking_id:revision` 变化时整体重置。写结果回查会让 revision 前进，因此**写后再提交必须重新勾选字段**（浏览器用例显式重复 check/fill）。
-- Files changed: `frontend/src/features/tracking/trackingManagement.ts`、`trackingManagement.test.ts`（新）、`TrackingModifyForm.vue`（新）、`TrackingInspector.vue`、`TrackingView.vue`、`trackingProjection.ts`、`trackingProjection.test.ts`、`TrackingView.test.ts`（+14 例）；`tests/browser/test_app_tracking.py`（+4 例真实 Chromium）；`frontend/AGENTS.md`；Ralph 状态文件。**未改后端契约、未新增端点或迁移。**
-- **Learnings for future iterations:**
-  - 管理写的判据是 `management_status`，**不要**照抄 submit 家族的 `outcome` 分流；两者枚举完全不同。`safe_message` 是服务端自由文案，前端只渲染自己的固定中文表。
-  - 管理端点的 409 error_type 与 submit 家族不同，需要自己的固定中文表；`isDefiniteWriteRejection`（非 409 4xx 的确定拒绝）可以两个家族共用。新写动作从服务端 `available_actions[].target_scopes` 与 capability 交集取 scope，未知 scope 一律不渲染也不可请求。
-  - `createTrackingActionIntent`/`createTrackingManagementIntent` 的重放绑定仍是 **key + expected_revision**：锁定 intent 重放必须整份复用（action + scope + patch + revision）。跨 scope/跨 patch 的请求在锁定期间直接零请求。
-  - 表单在 revision 变化时重置是**有意的**：写后回查推进 revision，旧选择必须让用户重新确认。测试与浏览器用例都要按此写，否则会拿到空 patch 而误以为按钮坏了。
-  - Playwright 详情 route 的 mock 必须返回**完整 envelope**（`{"ok": true, "result": {...}}`）：只返回裸对象时统一 transport 的 envelope 校验会失败，页面渲染「追番详情读取失败」，症状看起来像按钮/表单没实现。新增 `_modify_detail()` 时踩过一次，已由 `_mock_list()` 的既有写法对照修正。
-  - 反向验证（突变 5 项，全部证明新用例是承重的）：① 端点映射改成 `/revalidate` → 2 个单测 + 5 个页面用例红；② `buildSubscriptionPatch` 放行空 patch → 2 例红；③ `projectModifyOutcome` 把一切当成功 → 1 例红；④ scope 投影去掉 capability 门控 → 10 例红；⑤ 锁定 intent 的 scope/patch 比对放宽 → **未变红**（设计上由 `offeredScopes` + 表单重置挡住，比对是纵深防御而非唯一闸门），因此保留比对但如实记录它当前不可达。
-- 定向验证：`npm run typecheck`、`npm run lint`、`npm run api:check`、`npm run test:unit -- --run`（45 files / 536 tests）、`npm run build`、`uv run ruff check tests/browser/test_app_tracking.py`、`uv run pytest tests/browser/test_app_tracking.py -q`（16 passed，真实 Chromium）、`git diff --check` 全部通过。
----
+## 2026-09-13 / US-321 修复 B
 
-## [2026-09-13 11:35:00 CST] - US-314
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented: 启停与关联 RSS 刷新。`TrackingManagementIntent` 改为按 action code 判别的多态联合（只有 MODIFY 带 `patch`、只有 SET_ENABLED 带 `enabled`、REFRESH_RSS 的 `targetScope` 被类型固定为 `ASSOCIATED_RSS`）；新增 `createTrackingSetEnabledIntent`（方向由 `managementEnableDirection(item.status)` 从服务端记录状态推导）、`createTrackingRefreshRssIntent`（无 scope 参数，只作用于当前 tracking 的关联 RSS）、`createTrackingManagementActionIntent` 作为页面唯一入口、`sameManagementRequest` 作为锁定重放判据；`SENDABLE_MANAGEMENT_ACTION_CODES` 让 DELETE_EXTERNAL 既不可渲染也不可发送。新增 `TrackingManagementActions.vue`（启停目标单选 + 刷新按钮 + 结果面板），`TrackingInspector` 改为 offer 模型（`managementOffers`/`offerFor`）并给每个不可用动作各自渲染只读降级原因。
-- 文案与结果：`MANAGEMENT_ACTION_MESSAGES` 改为 action × state 二维固定表（刷新结果不会说「已应用本次修改」）；`managementConfirmation(intent)` 按 action+scope+方向取固定确认文案（刷新额外声明「不会刷新全局 RSS」）；`managementConflictMessage(errorType, action)` 只对 `tracking_management_patch_invalid` 做按动作措辞覆盖。
-- Files changed: `frontend/src/features/tracking/trackingProjection.ts`、`trackingManagement.ts`、`TrackingInspector.vue`、`TrackingManagementActions.vue`（新）、`TrackingView.vue` 及三个 Vitest（+19 例）；`tests/browser/test_app_tracking.py`（+4 例真实 Chromium，另附 `_management_actions`/`_action_detail`/`_action_success_payload` mock）；`frontend/AGENTS.md`；Ralph 状态文件。**未改后端契约、未新增端点或迁移、未改 DELETE_EXTERNAL 任何边界。**
-- **Learnings for future iterations:**
-  - 启停方向绝不能由 emit 传入：`managementEnableDirection(item.status)` 只认 `DISABLED`（启用）/`ACTIVE`/`EXTERNAL_ONLY`（停用），其余状态返回 null 即零请求；`executableTrackingActions` 的 SET_ENABLED 分支也按方向选 capability（enable 用 `subscription_enable`/`rss_enable`，disable 用 `disable`），所以「证明过 enable」不能替代 disable。
-  - `sameManagementRequest` 故意不比较 `expectedRevision`/`idempotencyKey`：服务端在外部边界**之前**就把 revision +1 落盘，未知结果回查后的 revision 必然前进，锁定重放必须整份复用（key + 旧 revision）。新增写动作字段（如 enabled）时必须同步扩这个比对，否则会「按新参数复用旧 key」。
-  - 页面必须自己持有 `SENDABLE_MANAGEMENT_ACTION_CODES` 闸门：inspector 过滤 offer + 页面 `runTrackingManagement` 再过滤一次。浏览器用例把 DELETE_EXTERNAL 放进 mock 的 `available_actions`，断言它既不渲染（无 `[id*='delete-external']`、section 内无 `danger-button`）也不发送。
-  - 父子同名 CSS 类会让 Playwright strict mode 直接报错（`.tracking-management-actions` 同时命中 inspector 的 `<section>` 与子组件根 `<div>`）；沿用既有约定：section 用 `-section` 后缀。
-  - 降级提示要**逐动作**渲染（`v-if` 表单 / `v-else` 提示），否则某个动作能力未证实时它会静默消失、用户看不到原因。
-  - 反向验证（5 项突变，全部证明新用例承重）：① `SET_ENABLED` 端点改指 `/modify` → 3 个页面用例红；② `managementEnableDirection` 恒真 → 6 例红（单测 + 页面）；③ 提交默认取第一个启停目标（去掉显式选择）→ 1 例红；④ SET_ENABLED 确认恒用「启用」文案 → 2 例红；⑤ 去掉 REFRESH_RSS 能力门控 → 1 例红；另在 dist 上把 `REFRESH_RSS` 端点改指 `/modify`，2 个真实 Chromium 用例红。
-- 定向验证：`npm run typecheck`、`npm run lint`、`npm run api:check`、`npm run test:unit -- --run`（45 files / 555 tests）、`npm run build`、`uv run ruff check tests/browser/test_app_tracking.py`、`uv run pytest tests/browser/test_app_tracking.py -q`（20 passed，真实 Chromium）、`git diff --check` 全部通过。
----
+- 修复：回退 `base.py` 全局 POST JSON guard，保存 probe 自身 `_require_json` 仍拒绝非 JSON；扩充 saved probe 测试覆盖未配置、错误/非 canonical ref、bool revision、额外秘密字段、PARTIAL/FAILED/异常安全降级、lease 释放后替换、缓存代际、损坏配置固定错误与敏感值不泄漏。
+- 中途失败：生命周期 inventory 与 registry 的 probe relation 文案不一致，已同步 inventory。
+- 验证：受影响 probe/repository/AB capability+management+connection/inventory/OpenAPI/DTO/lifecycle/views 组合 `314 passed`；Ruff、`migu-orca-openapi --check`、frontend `api:check`、`typecheck`、generated API Vitest `6 passed`、`git diff --check` 通过。
+- 现行公共契约 probe_status 仍仅 `VERIFIED/PARTIAL/FAILED`，UNKNOWN 仅存在于各 capability 字段；未引入 UNKNOWN probe_status。US-321 passes 保持 false。
 
-## [2026-09-13 11:50:00 CST] - Stage 38 审核修复（US-313/US-314）
-- 修复问题：未决锁定 intent 拒绝「不同请求」时完全没有用户反馈（用户可见死路）。追番为 ACTIVE 时改标题 → 服务端 5xx/网络失败 → 结果面板显示「外部修改结果未知…」并保留锁定 intent；此时用户改勾 RSS 字段并提交，`runTrackingManagement` 的 `sameManagementRequest` 不匹配分支直接 `return`，零请求且零提示；`runTrackingWrite` 的 action 不匹配分支与三条跨条目未决锁分支同样静默。唯一出路只剩「清除连接」或刷新页面，违反 Stage 38「每个拒绝/未知路径都有固定中文下一步」的约定。
-- Fix（**安全语义不变**：仍然零请求、仍然不重放不同请求）：
-  - `TrackingView.vue` 新增页面级固定中文拒绝提示 `INTENT_BLOCKED_MESSAGE`（不含 error_type/枚举/URL/凭据）与 `blockedIntentNotice`（按 `trackingId` 归属）。三条路径共用 `blockIntent()`：① `runTrackingWrite` 的 `locked.action !== requested`；② `runTrackingManagement` 的 `!sameManagementRequest(locked, projectedIntent)`；③ 跨条目未决锁。跨条目判据收敛为单一 `otherItemIntentOwner()`（写/恢复/管理三族都算，补上了 `runTrackingWrite` 原先缺失的「其他条目未决恢复/管理」检查），并让 `runTrackingManagement`/`runTrackingRecovery` 复用同一判据。**不再发送任何请求，只是把拒绝原因说出来。**
-  - 提示只落在触发操作的当前选中条目（`blockedIntentNotice.trackingId === selectedTrackingId`）；另外当**其他**条目仍持锁时，选中条目以同一固定文案主动说明（否则按钮 disabled 毫无解释）。`TrackingInspector.vue` 新增 `intentNotice` prop，渲染独立的 `#tracking-intent-blocked-notice`（`role="status"`，文字说明而非仅颜色），与 `#tracking-submit-result`/`#tracking-modify-result`/`#tracking-management-result`/`#tracking-recovery-result` 完全分离，不覆盖任何结果面板文案或状态。
-  - 提示消失路径：确定结果 / 409 冲突 / 4xx 拒绝（watch `[writeSession, recoverySession, managementSession]` 在 `!hasPendingIntentLock()` 时清除）、`clearConnection()` 与卸载（三个 `reset*` 清 `blockedIntentNotice`）、以及用户改为重放**同一个** intent（三个 handler 通过全部闸门后显式清除）。
-  - 顺手加固：`runTrackingManagement` 原先把 `createTrackingManagementBody()` 的 `if (!body) return` 放在 `managementLoading=true` + `createManagementInFlightSession('IN_FLIGHT')` **之后**，body 为 null 会把面板永久留在「正在提交外部修改，请稍候…」。现改为：body 构造提前到任何 IN_FLIGHT 会话之前；为 null 时清 `managementIntent`、落到新增的确定失败态 `createManagementUnbuildableSession()`（`REJECTED` 语义 + 固定中文 `MANAGEMENT_UNBUILDABLE_MESSAGE`），再只读回查，绝不发请求、绝不永久 IN_FLIGHT。`runTrackingWrite`/`runTrackingRecovery` 已复核：write 的 body 内联构造无 null 早退，recovery 的 `if (!body) return` 本就在 IN_FLIGHT 之前，两族都不存在「已置 IN_FLIGHT 后早退」路径。
-- Files changed: `frontend/src/features/tracking/TrackingView.vue`、`TrackingInspector.vue`、`trackingManagement.ts`、`trackingManagement.test.ts`（+1 例纯函数断言）、`TrackingView.test.ts`（扩 1 例 + 新增 locked-intent feedback 2 例）、`tests/browser/test_app_tracking.py`（扩 `test_modify_unknown_result_locks_the_intent_and_never_resends`：不同请求零请求 + 提示可见 + 结果面板不被覆盖 + 同 intent 重放后提示消失且 key/revision 复用）。**未改后端契约、未新增 endpoint/OpenAPI/DTO、未改 prd.json。**
-- 反向验证（证明新用例承重）：`git stash push -- TrackingView.vue TrackingInspector.vue trackingManagement.ts` 临时回退修复后，`npx vitest run TrackingView.test.ts -t "locked-intent feedback"` 得 `2 failed`（两例都在 `expect(#tracking-intent-blocked-notice).exists()).toBe(true)` 处拿不到提示）；`git stash pop` 恢复后同一命令 2 passed。null-body 分支从公开 UI 不可达（`CredentialSessionDialog` 会拒绝空/纯空白 `base_url`，而 body null 只可能由缺 `base_url` 触发），故按任务允许的方式改为显式确定失败态并在单元层断言其状态与文案。
-- 既有断言未削弱：`locks the intent on an unknown result and rejects a mismatching second request` 的「零请求 + 同 key + 同 expected_revision + 同 patch」原样保留，仅新增提示出现/消失与结果面板不被覆盖的断言；`keeps submit and retry locked while a recovery still needs a manual verdict` 的 disabled/零请求断言不变（跨条目提示是额外渲染，不改变锁语义）。
-- **Learnings for future iterations：**
-  - 未决 intent 的「拒绝不同请求」必须是可解释的拒绝：保持零请求，但任何 `return` 分支都要落到固定中文、`role="status"`、按 trackingId 归属的页面级提示；提示必须与结果面板分离，否则会覆盖「结果未知」这一类权威状态。
-  - `inspectorIntentBusy` 只负责把按钮 disabled；disabled 本身不是解释。跨条目未决锁要让当前条目的 inspector 显示原因，且不能靠点击事件（按钮已 disabled，事件到不了页面 handler）。
-  - 任何「先置 IN_FLIGHT、再构造/校验请求体」的顺序都会留下永久 loading 的隐患：请求体构造必须前置，或早退必须收敛为确定态。新增写路径时按此检查三族。
-  - `TrackingModifyForm` 的 reset watch 基于 `[tracking_id, revision]` 但依赖 `props.item` 整体替换：即使 revision 未变，写后回查替换 detail 也会让表单清空，测试里每次提交前都要重新 `.check()` 字段开关。
-- 定向验证：`cd frontend && npm run typecheck && npm run lint && npm run test:unit -- --run && npm run build`（typecheck/lint 通过；45 files / 558 tests passed；dist 构建成功）；`uv run ruff check tests/browser/test_app_tracking.py`（All checks passed）；`uv run pytest tests/browser/test_app_tracking.py -q`（20 passed，真实 Chromium）；`git diff --check`（exit 0，无空白错误）。
+## 2026-09-13 / US-318/319 trusted IPv6 精确匹配微修复
 
-## [2026-09-13 12:05:00 CST] - US-315
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented: 逐条外部删除安全闭环（`DELETE_EXTERNAL`）。`SENDABLE_MANAGEMENT_ACTION_CODES` 纳入 `DELETE_EXTERNAL`，新增 `createTrackingDeleteExternalIntent`（删除目标由用户显式选择，并用 `projectTrackingActionScopes(item,'DELETE_EXTERNAL',scope,capabilities)` 重新校验 server scope 与本次探明的 `subscription_delete`/`rss_delete`）、`createTrackingManagementBody` 新增 delete 分支（生成的 body 形状**没有** `file` 字段）、`DELETE_EXTERNAL_CONFIRMATION`（唯一 `danger: true` 的管理弹窗，固定声明保留本地 Request/追番记录/审计/下载任务/已下载媒体且不删除媒体）、`DELETE_EXTERNAL_HELP`。新增 `TrackingExternalDelete.vue`（radio 单选目标、无 checkbox/批量/全局、danger 按钮、目标结果面板），`TrackingInspector` 增加独立 `tracking-delete-external-section` 并把 delete 结果从启停/刷新面板里摘出来（`thisDelete`），`TrackingView.runTrackingManagement` 原样复用（确认/凭据/最新 revision/单意图 opaque key/单飞/`applyReturnedTracking` 收敛/只读回查/未知保护）。
-- 结果收敛：`SUCCEEDED` 时服务端返回 `EXTERNAL_DELETED` 的 tracking，`applyReturnedTracking` **原位替换**，记录仍留在本地列表、仍可看审计并「返回修改方案」；`management_status` 非 SUCCEEDED/FAILED（含 delete 未知 → RECOVERY_REQUIRED）一律 `UNKNOWN` + `needsManual` 且保留锁定 intent；409/结构化非 409 4xx 释放 intent；`tracking_target_missing` 为 delete 单独给了「本次未删除任何外部对象」的固定文案。
-- Files changed: `frontend/src/features/tracking/trackingManagement.ts`、`trackingProjection.ts`、`TrackingExternalDelete.vue`（新）、`TrackingInspector.vue`、`trackingManagement.test.ts`（+4 例，改 1 例）、`TrackingInspector.test.ts`（+4 例）、`TrackingView.test.ts`（+5 例）；`tests/browser/test_app_tracking.py`（+2 例真实 Chromium，另修正 US-314 对 DELETE_EXTERNAL「完全不渲染」的旧断言）；`frontend/AGENTS.md`；Ralph 状态文件。**未改后端契约、未新增端点/OpenAPI/DTO/迁移。**
-- **Learnings for future iterations:**
-  - 新增管理动作要三处同步：`SENDABLE_MANAGEMENT_ACTION_CODES`、`createTrackingManagementActionIntent` 的 dispatch 分支、`createTrackingManagementBody` 的分支。只加 server 投影不会让动作变成请求；只加 sendable 而没有 builder 会让 `createTrackingManagementActionIntent` 返回 null，inspector 却仍会渲染 offer（`managementOffers` 只看 sendable），症状是「按钮在但点了没反应」。
-  - 删除是**单条**动作：目标必须由用户显式选择（radio，绝不预选），并且页面要用 `projectTrackingActionScopes` 按 scope 重新校验能力（`subscription_delete` / `rss_delete` 各自独立，prove 了订阅删除不等于 RSS 删除）。生成的 delete body 无 `file` 字段，所以「顺带删媒体」在类型层就不可表达——不要自己拼 `file`。
-  - delete 的 `management_status` 语义与其他管理写完全一致（`SUCCEEDED`/`FAILED` 之外全 `UNKNOWN`），但服务端在 delete 未知时把记录落到 `RECOVERY_REQUIRED`，`needs_manual` 为 true，因此结果面板必须渲染 `MANAGEMENT_NEEDS_MANUAL_NOTICE`。
-  - 删除成功后**不要**从列表里移除记录，也不要用 `detailRevision`/`:key` 重挂载：`EXTERNAL_DELETED` 必须留在本地列表并可返回方案。`TrackingView.syncSelection` 对 `EXTERNAL_DELETED` 的深链清理是 US-305 的既有决定，本次未改动（列表内仍可点选该记录）。
-  - `TrackingManagementActions`/`TrackingInspector` 的结果面板按 action code 分派：新增 delete 后必须把它从 `thisManagementAction` 里排除，否则删除结果会渲染进「启停与关联 RSS 刷新」面板。
-  - Playwright 断言要写 section 作用域：US-314 用例原先断言「整页没有 `[id*='delete-external']`」，US-315 接线后必须改为「`.tracking-management-actions-section` 内没有删除控件/danger 按钮 + 页面存在 `#tracking-delete-external-submit`」，否则新故事会误判为回归。
-  - 反向验证（5 项突变，全部证明新用例承重）：① 从 sendable 集合移除 DELETE_EXTERNAL → 7 个单测红；② delete 端点改指 `/modify` → 3 个页面用例红，且 dist 上 2 个真实 Chromium 用例红（服务端 400）；③ 去掉确认弹窗 `danger: true` → 2 例红；④ 预选第一个删除目标 → 2 例红（含「未选择前不发送」）；⑤ 去掉 `projectTrackingActionScopes` 门控 → 6 例红。
-- 定向验证：`npm run typecheck`、`npm run lint`、`npm run api:check`、`npm run test:unit -- --run`（45 files / 571 tests）、`npm run build`、`uv run ruff check src tests`、`uv run migu-orca-openapi --check`、`uv run pytest tests/browser/test_app_tracking.py -q`（22 passed，真实 Chromium）、`git diff --check` 全部通过；`git status` 无 dist/trace/截图/凭据产物。
----
+- 审核反例：Werkzeug 对 `[fd00::2]` 在 trusted `[fd00::1]` 下出现宽松匹配；同时 `localhost:5000` 被错误识别为 IPv6。
+- 修复：canonical Host 先解析正常 host:port，仅多冒号裸值按 IPv6 处理；返回不含端口的精确域名/IPv4/括号 IPv6。Flask TRUSTED_HOSTS 保留第一层，所有 `/api/v1/` 在 IO 前增加 canonical trusted 集合精确第二层。
+- 验证：`_canonical_host` 实测 localhost/IPv4/IPv6 与端口；settings security `7 passed`；views_test `186 passed`；Ruff、OpenAPI 重生成/check、frontend api:check、git diff check 通过。DELETE OpenAPI storage_error 500 已补回。
 
-## [2026-09-13 12:55:00 CST] - US-316
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented: 兼容、安全、可访问性与视觉收敛。新增 `frontend/src/features/tracking/trackingCompat.ts`（+Vitest）：旧 `/app/queue?batch_id=...` 深链**一次性**兼容定位——`TrackingView.resolveBatchCompat()` 读生成客户端 `getBatchQueue`，只取队列项的**公开 `request_id`**（`projectQueueRequestIds` 对未知形状 fail closed），用 `locateTrackingIdForBatch` 在本地 tracking 列表里按 `request_id` 相等定位（跳过 `EXTERNAL_DELETED`，绝不按标题/季度猜），成功后 `router.replace` 换成 `?tracking_id=...`（旧参数被消费）；读失败或定位不到都落到固定中文提示 `BATCH_COMPAT_NOT_LOCATED`/`BATCH_COMPAT_READ_FAILED`（`#tracking-compat-notice`，`role="status"`，不含任何 id）。状态/动作/选择始终来自 tracking DTO。
-- QueueView 退出默认运行时（组件按 Stage 38 §10.2 保留供回退，**未删除**）：`RouteParityBaseline.view` 移除 `QueueView`；`src/app/router/index.test.ts` 新增「引用搜索」用例（扫 `frontend/src`，队列目录外禁止出现 `features/queue/` 导入）+ 路由用例（`/app/queue` 只重定向、`/app/tracking` 解析到 `TrackingView` 且无第二组件）。
-- 浏览器用例迁移（原约 30 条旧 QueueView 断言全部收口）：`tests/browser/test_app_queue.py` **改写为旧入口兼容套件**（4 例：旧路由重定向 + 固定提示、batch_id 一次性定位且旧队列投影的标题/状态不得出现、不可定位提示、后端 `/api/v1/batches/<id>/queue` 兼容端点仍 200 可用）；`test_app_feature_parity.py` 增 3 例兼容/定位用例并把 tracking 参数换成 `#tracking-overview`；`test_app_shell.py`、`test_app_workbench.py`（保存草案 handoff 现在断言 `.tracking-inspector-detail` + 列表 mock）、`test_app_responsive_a11y.py`（`_nav_targets`、视口、200% 参数、状态文本改为 tracking 列表 + `aria-hidden` 装饰条）同步迁移。conftest 删除仅供旧队列用例使用的 4 条 `test-slow-*` 延迟路由（`_register_test_routes` 保留为唯一测试路由挂点）。
-- `test_app_tracking.py` 新增 26 例 US-316 收敛用例（22 → 48 例）：① `TestAppTrackingCompatAndRuntimeExit` 3 例——dist 中只有 `TrackingView-*` chunk、无 `batch-queue-*`/`正在读取提交前队列` 标记、无 `.map`/`.zip`；`git ls-files` 不含 `frontend/dist/`、`*.map`、`test-results/`、`playwright-report/`、`trace.zip`；全局连接 chip 不存在但页内有等价入口与能力摘要；② `TestAppTrackingViewportJourney` 14 例——1280×720/1440×900/1920×1080 × zoom 1/2 上跑两条链路：(a) 只读关键旅程（筛选→单选→检查器→连接入口→刷新）与 (b) D38-12.4 的完整可完成链路「连接 → 同步 → 提交 → 恢复 → danger 删除」，每一步都用真实 click（Playwright 对不可达控件会直接失败）并断言各自的固定中文结果面板，最后断言 `body.scrollWidth` 不超视口（zoom=1 时额外断言关键控件 bounding box 在视口内）；另含键盘路径（skip link → 带 label 的筛选 → Enter 选中并保持 `aria-current` 焦点）与 aria-live/`role="status"` 覆盖；③ `TestAppTrackingSensitiveCanary` 9 例——成功（探测→同步→提交）、transport 未知→本地恢复、探测失败 4 形（认证 401/校验 400/timeout/非 JSON）、提交失败 3 形（409 冲突/非 JSON/transport 未知），断言 canary 不进 DOM 文本与「移除凭据对话框子树后」的标记、URL、`history.state`、localStorage/sessionStorage、console/pageerror；并断言凭据确实只出现在单次 POST body（避免空断言）。
-- 顺手修一个真实边界：兼容读在飞行中用户自己点了别的记录时，`resolveBatchCompat` 现在两条分支都先看 `queryTrackingId()` 再决定是否 `router.replace`，绝不把用户的选择抢走或丢掉（`TrackingView.test.ts` +2 例用延迟 promise 造出该竞态）。
-- 视觉偏差记录：两张效果图的**全局「已连接」chip 延后 F-G**（页头不得出现全局连接 chip），本页以 `#tracking-connect` + `.tracking-connection-status`（`#tracking-capability-summary` 中文能力摘要）+「清除连接」等价承载；已写进 `frontend/AGENTS.md` 并用 `test_global_connection_chip_is_deferred_and_the_page_carries_its_own_state` 固化。同步更新 AGENTS.md 的 US-206/跨功能收敛小节（reduced-motion 改 held route、`test_app_queue.py` 改为兼容套件、收敛测试职责划分）。
-- Files changed: `frontend/src/features/tracking/trackingCompat.ts`（新）、`trackingCompat.test.ts`（新）、`TrackingView.vue`、`TrackingView.test.ts`（+6 例）、`frontend/src/app/router/catalog.ts`、`src/app/router/index.test.ts`（+3 例）、`frontend/AGENTS.md`；`tests/browser/test_app_tracking.py`（+26 例）、`test_app_queue.py`（改写为 4 例）、`test_app_feature_parity.py`（3 例兼容）、`test_app_shell.py`、`test_app_workbench.py`、`test_app_responsive_a11y.py`、`conftest.py`；Ralph 状态文件。**未改后端契约、未新增/删除 endpoint、未删除任何后端兼容路由。**
-- **Learnings for future iterations:**
-  - Playwright glob `*` 不跨 `/`：`**/api/v1/tracking/items*` 不会匹配 `items/<id>`，详情必须单独注册 `**/api/v1/tracking/items/**`（本次先在 `test_app_feature_parity.py` 踩到：详情请求落到真实后端 404，症状是检查器一直不出现）。
-  - 观察 loading 用 held route（handler 存 `route`，断言后再 `fulfill`）；`time.sleep` 在 handler 里会阻塞分发线程。旧的服务端 `test-slow-*` 路由已随队列用例删除，不要为 tracking 再加延迟路由。
-  - 「退出默认运行时但保留组件」的正确做法是**留组件 + 三重证据**（引用搜索 / bundle 标记 / 路由），不是删组件；后端兼容 endpoint 更不能删（本 story 只读它做一次性定位）。
-  - canary 断言的边界：用户正在填写的表单自身必然含明文，标记面要用「移除对话框子树后的 body.innerHTML」；同时必须断言凭据确实进了单次 POST body，否则用例会永真（该断言属防退化设计，未做突变）。
-  - `frontend/src/app/router/index.test.ts` 里的路由用例有**顺序耦合**：前一条用例一旦导航过 `/tracking`，`router.getRoutes()` 的 `components.default` 已从 loader 变成已解析组件，断言要同时兼容两者。
-  - 异步 UI 竞态用例要**能区分两种结果**才有意义：最初写的「兼容读晚到不抢选择」用例里，用户选的和兼容读指向同一条记录，去掉守卫也照样绿；改成两条不同记录后才真正承重（见下面突变 ④）。
-  - 反向验证（4 项突变，全部实际运行并确认红）：① `locateTrackingIdForBatch` 改成按 title 匹配 → `trackingCompat` 3 例 + `TrackingView` 2 例 Vitest 红，重新 build 后 2 个 Chromium 深链用例（parity / queue）红；② 不可定位分支不消费 `batch_id` → `TrackingView` 2 例红；③ 把 `@/features/queue/QueueView.vue` 重新 import 回 router → 引用搜索用例红（这是「退出运行时」的可执行闸门）；④ 去掉 `resolveBatchCompat` 的两处 `queryTrackingId()` 守卫 → 新增的 2 个竞态用例红。
-- 定向验证：`npm run typecheck`、`npm run lint`、`npm run api:check`、`npm run test:unit -- --run`（46 files / 586 tests）、`npm run build`；`uv run ruff check src tests`、`uv run python -m compileall -q src tests`、`uv run pytest -q -m "not browser"`（1640 passed）；全量真实 Chromium：`uv run pytest tests/browser/ -q` → **212 passed**（含新迁移与新增用例）；定向 `test_app_feature_parity.py + test_app_queue.py + test_app_tracking.py` 59 passed；`git diff --check` 干净，`git status` 无 dist/trace/截图/凭据/storage 产物。
----
+## 2026-09-13 / US-318/319 最终 IPv6 微修复
 
-## [2026-09-13 13:20:00 CST] - US-317
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- What was implemented: Stage 38 最终门禁、文档归档与 F-G handoff。逐项映射 US-303～US-316 的提交与验收证据，运行完整前端/后端非浏览器/真实 Chromium 门禁，同步长期文档与 AGENTS，归档 Ralph 状态，并把 F-G 范围限定为 Settings 简化、全局连接/跨页、旧入口最终收敛、文档和候选发布 Gate 5。
-- 门禁（干净工作区一次通过）：`uv run python -m compileall -q src tests` 通过；`uv run ruff check src tests` → All checks passed；`uv run migu-orca-openapi --check` → OpenAPI up to date；`uv run pytest -q -m "not browser"` → **1640 passed, 212 deselected**；`npm run api:check`／`typecheck`／`lint`（--max-warnings 0）全部通过；`npm run test:unit -- --run` → **46 files / 586 tests passed**；`npm run build` 通过（产物含 `TrackingView-*.js`，无 `batch-queue-*`）；`uv run pytest tests/browser/ -q` → **212 passed in 85.36s**（真实 Chromium，覆盖正常/复核失败/同步/提交/重试/恢复/四类管理动作/旧路由兼容定位/三档桌面视口与 200%/敏感 canary）；`git diff --check` 干净。
-- 视觉对照：逐项比对 `tracking-management-v2.png` 与 `tracking-revalidation-failed-v1.png`，记录已对齐项与两条已知偏差（全局连接 chip 延后 F-G；列表无封面缩略图列，因安全投影不提供海报字段）。
-- Files changed: `docs/MiGuOrca_stage38_tracking_management_PRD.md`（状态 → 已完成；新增 §11 完成记录/证据映射/门禁/视觉偏差/归档，F-G handoff 顺延为 §12）、`README.md`、`docs/backlog.md`、`docs/frontend-ux-refactor-work-goals.md`、`docs/MiGuOrca_future_stages.md`、`docs/MiGuOrca_frontend_ux_implementation_PRD.md`、`docs/modules/M13-web-ui-PRD.md`、`docs/api/frontend-contract-handoff-v1.md`、`frontend/AGENTS.md`；新增 `scripts/ralph/archive/2026-09-13-stage38-tracking-management/`；`scripts/ralph/prd.json`、`progress.txt`。**未改任何源码、后端契约、端点或测试。**
-- **Learnings for future iterations:**
-  - 归档不是 `ralph.sh` 的自动行为：脚本只在**分支切换时**归档上一个 run，所以最终 story 必须自己把当前的 `prd.json`（US-303～US-317 全 `passes=true`）与 `progress.txt` 复制进 `archive/<date>-<stage-name>/`，否则归档会缺最终 story 状态。
-  - 完成记录里的证据映射用「短哈希 + 主要产物 + 定向证据」三列就够；审核/修复提交（`8543e42`/`9e968d4`/`872e390`/`2f60203`/`dedf16d`/`c40eacb`/`ff94cc4`）要跟着被修复的 story 一起列，否则「story、提交历史、工作区一致」这条无法自证。
-  - 跑浏览器套件前先 `npm run build` 并确认 `.migu_orca/storage` 不存在；本次全量 212 passed 是本 Stage 的计数基线，后续若下降应先跑最小失败用例。
-  - 长期文档需要同步的是 8 处（README 头部状态段 + Ralph 状态链、backlog BL-026 两处、future_stages 的 Stage 清单/依赖段、frontend_ux_implementation_PRD 文档信息与状态注记、work-goals 状态表、M13 阶段表、contract handoff 的 F-F 小节），漏掉任何一处都会让「F-F 已规划」残留。
-- 定向验证：完整门禁如上；`git status` 无 `dist/`、trace、截图、凭据或本地 storage artifact（由 `test_no_dist_trace_or_screenshot_artifact_is_tracked` 用 `git ls-files` 固化）。
----
+- 实证：`create_app('testing')` 使用 `Host: [::1]` 被错误拒绝；根因是 trusted host 列表使用未加括号 IPv6。
+- 修复：canonical Host helper 支持裸/括号 IPv6，默认 loopback 使用 Flask 期望的 `[::1]`，显式 `[fd00::1]` 可配置并仍拒绝非法 host。
+- 验证：settings security `7 passed`；`views_test.py` `186 passed`；base/security Ruff、OpenAPI check、git diff check 通过。
 
-## [2026-09-13 13:32:08 CST] - Stage 38 审核修复（US-312/US-315，子 Agent B / 浏览器焦点断言时序竞态）
-- 修复 CI `Real Chromium browser suite` 在 PR #59 上的红灯：`TestAppTrackingRecovery::test_local_auto_and_manual_verdict_stay_separate_and_safe[chromium]` 报 `AssertionError: default focus must be cancel`（`assert '标记为成功' == '取消'`）。根因是**测试侧时序竞态**而非功能缺陷：`ConfirmDialog.confirm()` 先 `open=true`、再在 `requestAnimationFrame` 里 `activate()` 焦点陷阱，而测试在 `.confirm-dialog` 刚 `to_be_visible()` 后用一次性 `page.evaluate("document.activeElement...")` **同步读取**焦点，rAF 回调可能还没执行（CI 机器更慢），于是读到触发按钮「标记为成功」。产品语义（取消按钮在标记里位于确认按钮之前，默认焦点即取消）本身正确。
-- 改了什么：把这类「一次性同步读取 `document.activeElement`」的焦点断言统一换成 Playwright **轮询断言**（`expect(locator).to_be_focused()`），保留原语义、不削弱任何断言。涉及 7 处：
-  - `tests/browser/test_app_tracking.py`：US-312 恢复用例的「默认焦点必须是取消」（1169 行附近）与 US-315 删除 danger 弹窗的同类断言（1678 行附近），都改为 `expect(page.locator(".confirm-dialog-actions button").filter(has_text="取消")).to_be_focused()`；US-316 键盘路径的 skip link（`expect(#skip-link).to_be_focused()`）、`#tracking-status-filter`（`focus()` 后 `expect(status_filter).to_be_focused()`）、Enter 选中后焦点仍在 `tracking-a` 行（改为 `expect(.tracking-list-item[data-tracking-id='tracking-a']).to_be_focused()`）。
-  - `tests/browser/test_app_shell.py`：新增 `expect` 导入；路由切换后 `#app-main` 焦点、skip link Tab 焦点、skip link Enter 后 `#app-main` 焦点，三处由 `locator.evaluate("el => el === document.activeElement")` 改为 `expect(...).to_be_focused()`（路由后焦点移动与 URL 变化不同步，是最需要轮询的一类）。
-  - `tests/browser/test_app_responsive_a11y.py`：`control.focus()` 后的 `page.evaluate(..., element_handle())` 改为 `expect(control).to_be_focused()`；skip link 首次 Tab 焦点与 Enter 后 `main#app-main` 焦点改为轮询；同一处按 Tab 循环读 `document.activeElement` 的键盘走查**保留同步读取**并加注释说明理由（每次 Tab 的焦点移动是同一键盘事件的同步默认行为，且循环需要逐步读取 label，无法用单个轮询断言表达），未改变其断言强度。
-- 未改任何 `frontend/src/` 实现代码（`ConfirmDialog.vue` / `useFocusTrap.ts` 原样）；未改后端契约、端点、OpenAPI、`prd.json`，未 push/建 PR/合并。全量搜索 `tests/browser/` 后确认不再有「一次性同步读 `document.activeElement` 等待异步焦点」的断言；`test_app_workbench.py`、`test_app_safe_info_stage37.py` 原本已用 `to_be_focused()` 轮询，无需改动。
-- Files changed: `tests/browser/test_app_tracking.py`、`tests/browser/test_app_shell.py`、`tests/browser/test_app_responsive_a11y.py`、`scripts/ralph/progress.txt`。
-- 反向验证（证明加固后的断言仍有承重、未被削弱为「弹窗可见即通过」）：临时把 `frontend/src/components/feedback/ConfirmDialog.vue` 模板里确认/取消两个按钮顺序对调（默认焦点随之落到确认按钮，即真实回归），`npm run build` 后跑 `uv run pytest "tests/browser/test_app_tracking.py::TestAppTrackingRecovery::test_local_auto_and_manual_verdict_stay_separate_and_safe" "tests/browser/test_app_tracking.py::TestAppTrackingExternalDelete::test_delete_needs_a_chosen_target_and_keeps_every_local_record" -q` → **2 failed in 11.61s**，均为 `Locator expected to be focused / Actual value: inactive`（14 次轮询超时后仍指向取消按钮）；`git checkout -- frontend/src/components/feedback/ConfirmDialog.vue` 复原并重新 `npm run build` 后同一命令 2 passed。前端工作区在提交前确认干净（`git diff --quiet -- frontend/src` 为真）。
-- **Learnings for future iterations：**
-  - 凡是焦点由 `requestAnimationFrame` / Vue `nextTick` / 路由守卫 / 焦点陷阱恢复**异步**设置的断言，都不能用一次 `page.evaluate("document.activeElement...")` 读取；一律用 `expect(locator).to_be_focused()` 或 `page.wait_for_function(...)`。一次性读取只在「刚调用 `locator.focus()`」或「刚 `keyboard.press` 后浏览器同步改焦点」时才是确定性的。
-  - 断言「异步焦点」时优先用**定位器语义**（`.confirm-dialog-actions button` + `has_text="取消"`）而不是 `textContent` 字符串比较：前者天然轮询、失败信息含 aria snapshot，且不会因空白/换行差异误报。
-  - 读 `document.activeElement` 做**多步键盘走查**（按 Tab 逐次采集 label）不适用轮询断言，这类同步读取是合理的；关键是区分「等待异步焦点」与「读取同步键盘状态」。
-  - 建议实现侧后续加固（本提交**未**改，仅记录理由）：`ConfirmDialog.confirm()` 的 `requestAnimationFrame(() => activate())` 在「弹窗已可见但尚未聚焦」之间存在一个窗口，期间键盘事件仍可能落到触发按钮上（焦点陷阱的 keydown 监听也尚未挂上），对 danger 弹窗是真实但极短的风险。可考虑 `await nextTick()` 后再 `activate()`（或 `activate()` 内 `await nextTick()`），在 Vue 渲染完成的同一微任务尾声聚焦；不过 rAF 能确保 Teleport 目标已完成布局，改成 `nextTick` 需评估 inert/焦点恢复时序，属独立实现的改动，应由主 Agent/实现侧决定，不由本测试修复提交夹带。
-- 定向验证：最小失败用例重复 3 次 `uv run pytest "tests/browser/test_app_tracking.py::TestAppTrackingRecovery::test_local_auto_and_manual_verdict_stay_separate_and_safe" -q` → 3/3 passed（1.38s / 1.46s / 1.33s，无 flake）；全量 `uv run pytest tests/browser/ -q` → **212 passed in 81.80s**（真实 Chromium，含本次改用例）；`uv run ruff check tests/browser` → All checks passed；`uv run ruff check src tests` → All checks passed；`git diff --check` → 干净（exit 0）。因只改测试、未碰前端源文件，未重跑前端门禁（构建仅用于上面的反向验证，dist 已还原为干净源码构建）。
----
+## 2026-09-13 / US-318/319 主 Agent 独立审核通过
 
-## [2026-09-13 16:00:00 CST] - Stage 38 合并后安全审核修复
-- TrackingView 清除连接会销毁凭据并中止在途敏感请求，但保留 UNKNOWN/RECOVERY_REQUIRED 未决 intent tombstone；重连不得复用旧 key/revision 发起 submit 或 management。恢复得到明确 ACTIVE/SUBMIT_FAILED 时才释放源锁；非 JSON、网络、取消、408/429 等结果统一保持未知。
-- ConfirmDialog 使用 Vue `nextTick` 及代际守卫激活焦点陷阱，卸载时解除 inert/keydown 并收敛 pending promise；Ralph 完成判断改为末条非空 token + 非空 userStories 且 passes 严格全 true。归档同步本记录。
-- 定向 Vitest 144 passed；typecheck、lint、build 通过；受影响 Chromium 3 passed；Ralph guard 三种输入均符合预期；未改后端/OpenAPI，未生成产物。
----
+- 审核结论：部署端 AB 配置 repository 与配置管理 API 满足本批 PRD；US-318、US-319 更新为 `passes=true`。US-320 未实现，保持 `false`，本批停止且不进入下一批。
+- 独立验证：`uv run pytest tests/api_contract/test_autobangumi_settings_security.py src/storage_engine/controllers/autobangumi_config_repository_test.py src/ab_engine/controllers/ab_config_test.py tests/api_contract/test_inventory_consistency.py tests/api_contract/test_openapi_runtime_consistency.py tests/api_contract/test_dto_contracts.py tests/api_contract/test_endpoint_lifecycle.py tests/api_contract/test_openapi_generation.py tests/api_contract/test_golden_contracts.py src/apps/migu_orca_web/views_test.py -q` → `378 passed`。
+- 独立静态与契约检查：受影响 Python 文件 Ruff 通过；`uv run migu-orca-openapi --check`、frontend `npm run api:check`、`npm run typecheck`、`git diff --check` 均通过。
+- 独立安全反例：默认/显式 IPv6 与端口 Host 正常；只信任 `[fd00::1]` 时 `[fd00::2]` 和恶意 Host 均返回固定 400；显式 Vite Origin 可用，`application/problem+json` 被拒绝；PUT/GET 响应、模型 repr 均不含 endpoint、账号或秘密 canary；OpenAPI `connection_ref` 为 UUID 格式。
+- 验证边界：未运行全量 pytest、Vitest、浏览器或真实上游；本批没有 UI 改动，完整门禁留到 Stage 收尾。US-321 探测与 US-320 operation/mapping 连接绑定仍未实现。
 
-## [2026-09-13 16:15:00 CST] - Stage 38 合并后审计修复（二）
-- TrackingView 为未决 write/management intent 绑定页面内存中的 AB 配置快照；相同配置可继续使用原快照重试，清除连接或探测到不同账号/端点后销毁快照并转为不可重放 tombstone，点击时给出固定恢复提示且不打开确认框、不发写请求。恢复明确终态才释放源锁。
-- 补充 submit/management 不同配置与清除后重连零写请求回归，以及 submit 未知结果经 MARK_FAILED 后用最新 revision、新 key 重试；保留 ConfirmDialog、UNKNOWN 分类和严格 Ralph guard。
-- 最小验证：TrackingView/trackingProjection Vitest 通过；typecheck/lint 通过；根目录误生成 node_modules 仅含 `.vite`，已移出仓库；归档按原文同步。
----
+## 2026-09-13 / US-320
 
-## [2026-09-13 17:05:00 CST] - Stage 38 后紧急缺陷修复：Auto Bangumi 局域网地址规范化
-- 根因：后端 `_service_root` 安全地要求显式 HTTP(S) scheme；用户输入的裸 `IP:端口` 被前端原样放入 request-scoped `ab_config.base_url`，因此在后端校验前被拒绝。
-- 修复：新增共享纯前端服务根地址 helper，严格校验 HTTP(S) origin、根路径、凭据/查询/片段/非法端口及歧义字符；Tracking、Settings、Queue 统一发送规范化后的 `base_url`，输入控件改为保留 URL 提示但允许裸主机输入。
-- 定向验证：相关 Vitest 76 passed；typecheck、lint、build、Ruff 通过；真实 Chromium 裸局域网地址探测 route-mock 1 passed。未访问真实外部服务，未运行全量前后端 pytest。
+- 范围：TrackingOperation 升级 schema v3，新增 canonical UUID `connection_ref` 并纳入同键幂等绑定与 CAS 不可变字段；保留 operation v1/v2 读取及旧未绑定 legacy 分支。
+- 范围：ExternalMapping 升级 schema v2，新增必需 canonical UUID `connection_ref`；保留 mapping v1 原样读取，旧同步入口继续生成 legacy v1，新连接引用可生成 v2；reconcile 支持连接绑定映射输出。
+- 范围：管理目标在使用 v2 mapping 时要求当前精确 connection_ref，缺失、失配或旧未绑定映射统一安全拒绝，不将当前配置猜测绑定旧对象；没有向公共 serializer 暴露外部 ID、地址、账号或秘密。
+- 文件：`src/tracking_engine/models/operation.py`、`src/tracking_engine/models/tracking.py`、`src/storage_engine/controllers/operation_repository.py`、`src/ab_engine/controllers/reconcile.py`、`src/tracking_engine/controllers/management_target.py`、对应模型/repository/controller 测试及 `scripts/ralph/prd.json`。
+- 验证：核心模型/repository/target/reconcile 定向测试 `155 passed`；受影响 engine/storage/Web 管理回归 `488 passed`；API/追番回归 `57 passed`；全 `src` Ruff、`uv run python -m compileall -q src`、`git diff --check`、frontend `npm run typecheck` 均通过。
+- 遗留风险：US-321 起的保存连接探测、submit/sync/management/recovery service 对新 ref 的 HTTP 原子切换尚未实现；旧入口仍按 legacy 未绑定语义运行，需后续 story 在取得保存配置快照后传递并校验 ref。
+- 可复用结论：schema 版本校验必须按版本使用字段白名单；旧 operation/mapping 读取保留原 schema/ref 缺失状态，只有显式新连接入口生成 v3/v2；管理外部写前若无当前精确 ref 只能返回固定重新核验原因。
 
-## [2026-09-13 17:15:00 CST] - Stage 38 局域网地址规范化审核修复
-- 修正 serviceRoot 的 scheme 判定：`host:port`（包括 `localhost`、普通主机名和 `autobangumi`）补齐 `http://`，显式 scheme 仅允许 HTTP(S)，并拒绝常见非 HTTP scheme 伪装。
-- 在 URL 解析前按原始输入校验 authority 后只能无路径或单个 `/`，拒绝点段、编码点段、重复斜杠、反斜杠及其他歧义路径；补充三个入口与独立 endpoint/password canary 的回归覆盖，检查 DOM、URL、history、localStorage、sessionStorage 和 console。
-- 定向验证：相关 Vitest 91 passed；typecheck、lint、build、Ruff 通过；真实 Chromium canary route-mock 1 passed；未访问真实外部服务。
----
+## 2026-09-13 / US-320 审核修复 B
 
-## [2026-09-13 19:40:00 CST] - MiKan 反馈与工作台等待体验审核修复
-- 反馈分类按应用内部错误、标题解析、RSS 资源读取/解析、MiKan 页面格式、上游服务及网络分别给出固定中文；支持 `ApiError.details.details.category`，`request_cancelled` 单独显示已取消；`storage_error`/`storage_json_error` 等本地错误不再归因于 MiKan，原始错误文本不进入界面。
-- 单番搜索、直连生成和候选草案生成共用页面忙锁；批量解析入口增加 `parseLoading` 防重，等待提示明确逐项处理且较大批量可能需要数分钟；非有限批量计数安全回退，批量/单番草案请求保持 240000ms 超时预算。
-- 定向 Vitest 6 文件 129 passed；typecheck、lint、build、Ruff 通过。未运行浏览器测试（由独立 Agent 执行），未改 AB、契约形状、后端并发或 RSS 业务。
----
+- 审核发现并修复：operation 与 external_mapping 的 schema_version 现要求 `type(value) is int`，布尔值 fail closed；operation 序列化保留已读取的 v1/v2 版本，不自动升级为 v3。
+- 旧 v1/v2 operation 在 CAS/recover 写入口统一固定拒绝，避免未绑定旧记录被自动改写或终结；新增临时目录测试核对旧 IN_PROGRESS 文件 CAS/recover 后字节、状态与 schema 均不变。
+- 验证：相关模型/repository/target/reconcile 定向测试 `136 passed`；受影响 Python Ruff 通过；frontend `npm run typecheck` 按要求执行（本轮未改前端）；未提交、未运行 Ralph、未触碰真实 storage/上游。
+- 遗留风险：US-321 起的保存连接探测及业务服务 ref 原子切换仍未实现；US-320 `passes` 保持 `false`，待主 Agent 独立复审。
+
+- 修复 B 第二轮微修整：移除 recover 对 `IN_PROGRESS` 的重复预读特判；旧 v1/v2 operation 在合法 CAS/recover 状态下统一经参数校验后 load，再由 legacy read-only guard 拒绝写入。测试参数化覆盖 v1/v2 的 CAS 与 OUTCOME_UNKNOWN recover，并核对文件 bytes/schema/state 不变；round-trip 明确保持原 schema。
+- 验证：同一组模型/repository/target/reconcile 定向测试 `137 passed`；受影响 Python Ruff 通过；`git diff --check` 通过。未提交，US-320 `passes=false`。
+
+## 2026-09-13 / US-320 主 Agent 独立审核通过
+
+- 审核结论：operation schema v3 与 external_mapping schema v2 的连接绑定满足本故事验收；v1/v2 operation 与 v1 mapping 保持向后可读，旧 operation 写入口固定只读，不猜测归属、不升级或终结；US-320 更新为 `passes=true`，US-321 仍为 `false`。
+- 独立验证：提交/管理/恢复/同步/读取及 API 契约组合 `279 passed`；五个核心模型/repository/target/reconcile 文件组合 `137 passed`；受影响 Ruff、frontend `npm run typecheck`、`git diff --check` 均通过。
+- 独立安全反例：operation 与 mapping 的 `True`、`False`、浮点及字符串 schema 均 fail closed；v1/v2 operation round-trip 保持原 schema；旧 v1/v2 CAS 与 recover 返回固定 `tracking_operation_legacy_read_only` 且文件 bytes、schema、state 不变。
+- 验证边界：未运行全量 pytest、Vitest、浏览器或真实上游；本故事没有 UI 改动。保存配置 probe 与业务服务 ref 原子迁移仍由 US-321～US-324 负责。
+- 第三轮测试真实性微修：repository 改用 `TRACKING_OPERATION_SCHEMA_VERSION` 常量；legacy CAS/recover 测试先断言固定 `error_type`、bytes 与重新加载的 schema/state，再布置下一状态，避免覆盖未验证保护。验证 operation repository `38 passed`，五模块定向组 `137 passed`，Ruff 与 `git diff --check` 通过。
+
+## 2026-09-13 23:38 / US-321
+
+- 范围：新增 `POST /api/v1/settings/autobangumi/probe` 与 `probeSavedAutoBangumiCapabilities`；请求只接受规范 `connection_ref + configuration_revision`，拒绝 `ab_config`、缺配置、损坏配置及过期 ref/revision。
+- 实现：`autobangumi_probe_service.py` 在配置 repository lease 内取得 immutable snapshot，转换为 request-scoped adapter 配置，探测结束/异常均释放 lease；能力结果仅在进程内按 ref/revision 缓存，配置保存/删除清缓存，GET 摘要投影 `CONFIGURED/VERIFIED/ERROR`，HTTP 200 的 PARTIAL/FAILED 不升级为 VERIFIED。
+- 契约/文件：同步 `routes_settings.py`、`schemas.py`、`serializers.py`、统一 Host/Origin JSON 入口与错误分类、endpoint lifecycle/inventory、`openapi_gen.py`、`docs/api/openapi.json`、generated `frontend/src/api/generated/api.ts` 及其 operation/path 断言；新增 `tests/api_contract/test_saved_autobangumi_probe.py`。
+- 验证：`uv run pytest tests/api_contract/test_saved_autobangumi_probe.py tests/api_contract/test_autobangumi_settings_security.py src/storage_engine/controllers/autobangumi_config_repository_test.py src/ab_engine/controllers/ab_config_test.py src/ab_engine/controllers/ab_management_client_test.py src/ab_engine/controllers/ab_connection_controller_test.py tests/api_contract/test_inventory_consistency.py tests/api_contract/test_openapi_runtime_consistency.py tests/api_contract/test_openapi_generation.py tests/api_contract/test_dto_contracts.py src/apps/migu_orca_web/views_test.py -q` → `321 passed`；`uv run migu-orca-openapi --check`、受影响 Ruff、定向 compileall、`git diff --check` 通过；frontend `npm run api:check`、`npm run typecheck`、generated API 三文件 Vitest → `10 passed`。
+- 遗留风险：未运行全量后端/前端门禁、真实 Chromium 或真实 Auto Bangumi；旧临时凭据探测入口仍按 PRD 保留，待 US-330 删除；尚未迁移 submit/sync/management/recovery 的业务请求引用。
+- 可复用结论：保存配置的外部只读调用必须在同一 repository lease 内完成，结果缓存必须绑定 opaque ref 与 revision；summary 只消费安全 capability DTO，任何非 VERIFIED probe 状态都进入 `ERROR`，不得把 HTTP 200 当作能力验证成功。
+
+## 2026-09-13 / US-321 Ralph 验证中止
+
+- Ralph 最终验证命令引用不存在的 `src/ab_engine/controllers/ab_capability_service_test.py`，pytest 退出码 4；本批按规则停止，未进入 US-322/323，也未创建 story commit。
+- 上一条 progress 中的通过结果仅作为开发 Agent 自述保留，不构成审核结论；US-321 恢复为 `passes=false`，等待主 Agent 独立审核与修复。
+
+## 2026-09-13 / US-321 修复与主 Agent 独立审核通过
+
+- 修复：撤回为单一 probe 端点扩大全仓 POST Content-Type 行为的改动；补齐未配置/错误 ref 与 revision/canonical 输入、PARTIAL/FAILED、已知与未知异常安全降级、lease 释放、缓存代际失效及损坏配置 canary。现行公共 `probe_status` 保持 `VERIFIED/PARTIAL/FAILED`，能力字段继续用 `UNKNOWN` 表示未验证能力。
+- 审核结论：保存配置 probe 只接收 `connection_ref + configuration_revision`，在 immutable snapshot lease 内完成只读外调并在全路径释放；缓存只绑定当前 ref/revision 且不持久化，保存/替换/删除均失效；非 VERIFIED 结果不误报成功，公开结果不含配置、秘密或原始异常。US-321 更新为 `passes=true`，US-322/323 保持 `false`。
+- 独立验证：probe/settings repository/AB capability 与管理/连接、inventory/OpenAPI/DTO/lifecycle/views 组合 `329 passed`；`migu-orca-openapi --check`、受影响 Ruff、frontend `api:check` 与 `typecheck`、`git diff --check` 均通过；generated API 三文件 Vitest `10 passed`。
+- 验证记录：首次误用不存在的 `npm test` 脚本，仅在 typecheck 通过后导致该组合命令中止；随后按 `package.json` 使用 `npm run test:unit -- --run ...` 正确补跑通过。未运行全量 pytest/Vitest、浏览器或真实 AB；本故事无 UI 改动。
+
+## 2026-09-13 23:57 / US-322
+
+- 范围：新增 `SavedTrackingSubmitInput` 严格服务端 handoff（submit/retry 共用，`extra=forbid`、严格 confirm、规范 UUID、tracking/configuration revision 与 opaque key 校验）；新增 `run_saved_tracking_submit` / `run_saved_tracking_retry`，不改变现有 HTTP/generated 请求形状。
+- 实现：保存连接 service 以 `connection_ref + configuration_revision` 从专用 repository 原子取得 immutable snapshot 与 lease；lease 覆盖 PREPARED、IN_PROGRESS、外部调用和结果落盘全路径。终态重放只校验 operation 原绑定，即使配置删除也不重新调用或要求秘密；同 key 换 ref 与旧未绑定 operation 安全冲突。
+- 实现：统一 submit 状态机透传 connection_ref，operation v3 绑定原 ref；成功结果写入 external mapping v2 并绑定实际 ref；NEEDS_RECONFIRM、本地持久化失败与未知结果继续沿用原状态机，不伪造成功或盲目重试。
+- 文件：`src/apps/migu_orca_web/schemas.py`、`src/apps/migu_orca_web/tracking_submission_service.py`、`src/apps/migu_orca_web/tracking_saved_submission_service_test.py`、`scripts/ralph/prd.json`。
+- 验证：`uv run pytest src/apps/migu_orca_web/tracking_saved_submission_service_test.py -q --disable-warnings --maxfail=1`（4 passed）；`uv run pytest src/apps/migu_orca_web/tracking_submission_service_test.py src/apps/migu_orca_web/tracking_recovery_service_test.py src/storage_engine/controllers/operation_repository_test.py src/tracking_engine/models/operation_test.py src/tracking_engine/models/tracking_test.py -q --disable-warnings --maxfail=1`（150 passed）；受影响 Ruff、定向 compileall、`git diff --check`、`uv run migu-orca-openapi --check`、frontend `npm run api:check`、`npm run typecheck` 均通过。
+- 遗留风险：未运行全量后端/前端门禁、真实 Chromium 或真实 Auto Bangumi；现有 HTTP submit/retry 仍暂时接收旧 `ab_config`，按 PRD 留待 US-328 原子切换；同步/管理/恢复引用迁移仍待 US-323～US-325。
+- 可复用结论：终态 replay 不应为读取旧安全结果重新解析已删除的秘密；正常/预备请求必须在同一配置 lease 中完成状态机和 adapter 调用。连接 ref 是 operation/mapping 的唯一持久化归属证据，configuration revision 由 repository CAS 验证，不复制秘密。
+
+## 2026-09-14 / US-323
+
+- 范围：新增 `SavedTrackingSyncInput` 与 `run_saved_tracking_sync`，严格接收 canonical `connection_ref`、configuration revision 和 confirm；通过专用配置 repository lease 获取 immutable runtime snapshot，执行只读同步。
+- 实现：同步核心支持传递本次连接引用，所有新建、更新及缺失映射均生成绑定实际 ref 的 mapping v2；旧临时凭据 HTTP 入口保持不变，待 US-330 原子切换。
+- 文件：`src/apps/migu_orca_web/schemas.py`、`src/apps/migu_orca_web/tracking_sync_service.py`、`src/apps/migu_orca_web/tracking_saved_sync_service.py` 及对应测试、`scripts/ralph/prd.json`。
+- 验证：`uv run pytest src/apps/migu_orca_web/tracking_saved_sync_service_test.py src/apps/migu_orca_web/tracking_sync_service_test.py -q --disable-warnings --maxfail=1`（5 passed）；受影响 Ruff 与 `git diff --check` 通过。
+- 遗留风险：尚未切换 sync HTTP/generated/前端调用者；双实例归属歧义、旧未绑定映射的只读核验及完整 API drift/Chromium 门禁留待后续 story/阶段验收。
+- 可复用结论：保存连接业务 service 必须在同一 repository lease 内创建 adapter 并运行整个外部只读同步；mapping 的连接归属只能来自本次 immutable snapshot，不能由外部 ID、标题或旧状态推断。
+
+## 2026-09-14 / US-323 修复B
+
+- 修复：saved-ref 同步仅接受当前连接的外部 ID；跨 ref/旧未绑定映射必须从原 Request 以内存 RSS URL 取得完整严格证据并唯一去歧义，否则保留本地记录并不判删除；current operation 缺失、损坏或处于 PREPARED/IN_PROGRESS/OUTCOME_UNKNOWN/RECOVERY_REQUIRED 时不改状态、mapping 或锁。saved 非 VERIFIED 能力结果 fail closed；新 external-only tracking ID 按 connection_ref 隔离，legacy ID 保持兼容；同 ref orphan 才可合并。
+- 文件：`src/ab_engine/controllers/reconcile.py`、`src/apps/migu_orca_web/tracking_sync_service.py`、`src/tracking_engine/models/tracking.py` 及对应回归测试；补充 `tracking_saved_submission_service_test.py` 严格输入测试。`scripts/ralph/prd.json` 仅保留主 Agent 设置的 US-323=false。
+- 验证：`uv run pytest src/apps/migu_orca_web/tracking_sync_service_test.py src/ab_engine/controllers/reconcile_test.py src/apps/migu_orca_web/tracking_saved_sync_service_test.py src/apps/migu_orca_web/tracking_saved_submission_service_test.py src/tracking_engine/models/tracking_test.py -q --disable-warnings --maxfail=1` → `52 passed`；受影响 Ruff 与 `git diff --check` 通过；`uv run migu-orca-openapi --check` → OpenAPI up to date；frontend `npm run api:check && npm run typecheck` 通过。
+- 遗留风险：本轮未提交；sync HTTP/generated 原子切换仍待 US-330；未运行全量测试、浏览器或真实 AB。US-322/US-323 均保持 false 待主 Agent 审核。
+
+### US-323 修复B补充收敛
+
+- 根据复核收敛：跨 ref 证据仅读取 Request `confirmable_config.selected_rss_url` 的 request-scoped 值；标题、正整数 season、非空字幕组及 RSS 必须完整一致；同一 local 被多个 external 命中时全部降为固定 `EXTERNAL_MATCH_UNPROVEN`，不连写；ref 隔离 ID 使用 canonical UUID 校验及 v2 namespace，legacy v1 ID 不变。
+- 验证：上述定向 pytest `52 passed`；受影响 Ruff、`git diff --check`、`uv run migu-orca-openapi --check`、frontend `npm run api:check && npm run typecheck` 均通过；未提交，US-322/US-323 保持 false。
+
+## 2026-09-14 / 第二批独立审核检查点：未通过，停止
+
+- 主 Agent 独立复跑 reconcile/sync/saved submit/tracking 模型组合 `52 passed`，`git diff --check` 通过；测试通过不等于验收完整。US-322/323 均保持 `passes=false`，不进入 US-324，修复工作区未提交。
+- US-323 剩余阻断：同 ref 但已失效外部 ID 的映射仍可仅凭展示字段重绑，必须补严格 RSS/去歧义证据；重复 external ID 未整体拒绝，可能写入 EXTERNAL_ONLY；单个未证明 decision 全局跳过所有 missing 处理，应改为局部保护并验证收敛。
+- US-322 剩余验证缺口：重建 repository 后重放、持久化失败后 lease 释放、本地 NEEDS_RECONFIRM 无外调、unknown 换新 key 保护及旧未绑定意图拒绝尚未补齐真实 service 测试。US-323 双实例/旧引用/全路径 lease/冲突写入计数等 service 证据也不足。
+- 第二轮修复记录中的通过结果仅为所列定向检查，不构成故事通过；不得据此前 Ralph 状态或 Agent 自述继续下一批。未 push、PR、merge，未访问真实上游。
+
+### US-323 修复B第二轮复核收敛
+
+- 修复：双向重复命中先统计全部 local 命中，再将所有冲突 decision 降为 `EXTERNAL_ONLY/EXTERNAL_DELETED` 且不带 tracking_id；saved pending 保护覆盖既定状态与无 operation_id，并在空外部列表时给固定未证明 warning；缺失处理在 saved 未证明同步时整体保守跳过。US-322 状态明确保持 false。
+- 验证：定向 pytest `52 passed`；受影响 Ruff、`git diff --check`、`uv run migu-orca-openapi --check`、frontend `npm run api:check && npm run typecheck` 均通过；未提交。
+
+## 2026-09-14 / US-322 定向补证与独立审核通过
+
+- 仅补充 saved submission service 测试：repository 重建后重放不增加外调；外调成功但持久化失败保留 RECOVERY_REQUIRED 且后续配置保存成功证明 lease 释放；NEEDS_RECONFIRM 无外调；unknown 换新 key 拒绝；未绑定 operation 不能被 saved ref 认领。
+- 主 Agent 独立运行 `uv run pytest src/apps/migu_orca_web/tracking_saved_submission_service_test.py src/apps/migu_orca_web/tracking_submission_service_test.py src/apps/migu_orca_web/tracking_recovery_service_test.py src/storage_engine/controllers/operation_repository_test.py -q --maxfail=1` → `80 passed`；Ruff、OpenAPI check、frontend api:check/typecheck 通过。
+- US-322 更新为 passes=true；US-323 保持 false，已有未提交同步修复保留，不纳入 US-322 精确提交。未运行全量、浏览器或真实上游。
+
+## 2026-09-14 / US-323 定向修复、补证与独立审核通过
+
+- 修复：saved 同步仅允许同 ref 的精确 ID 命中；其他匹配必须具备完整标题、正整数季度、字幕组及原 Request selected RSS 严格证据。重复 external ID 拒绝写入；多对象命中与候选歧义局部保护，不阻断无关同 ref 缺失记录收敛。legacy 路径不读取新 RSS 证据，保持旧行为。
+- 归属与恢复：external-only ID 按 canonical connection_ref 隔离，旧 ref 缺失不判删除；未知状态及未决、缺失或损坏 operation 均保留 tracking、mapping 与恢复锁。仅 VERIFIED 且列表 SUPPORTED 的保存连接快照允许同步写入。
+- 补证：真实 saved service 覆盖旧 ref/revision 在 client 构造前拒绝、双实例同 ID 与旧记录字节保留、歧义匹配、配置 lease 期间 save/delete 拒绝及成功/异常/能力降级后释放、未知状态与四类真实 operation 状态、损坏 operation、安全输出。主 Agent 复现歧义回归红灯后修复转绿；修正原 PARTIAL 测试误走客户端异常分支的假证据。
+- 主 Agent 验证：`uv run pytest src/ab_engine/controllers/reconcile_test.py src/apps/migu_orca_web/tracking_sync_service_test.py src/apps/migu_orca_web/tracking_saved_sync_service_test.py src/apps/migu_orca_web/tracking_saved_submission_service_test.py src/tracking_engine/models/tracking_test.py -q --maxfail=1` → 81 passed；七个受影响代码/测试文件 Ruff、`git diff --check`、`uv run migu-orca-openapi --check`、frontend `npm run api:check && npm run typecheck` 均通过。
+- 独立审核：业务修复与最终测试补证均无剩余阻断，US-323 更新为 passes=true；US-324 保持未开始，本批次到此停止。未运行全量、浏览器或真实 AB；HTTP/generated 切换仍按 PRD 留至 US-330。未 push、PR 或 merge。
+- 可复用结论：歧义保护必须传递受影响 local ID 至缺失检查，不能只降级匹配结果；失败保留测试要证明真正进入目标业务分支，不能依靠被吞掉的 fake 异常假通过。
+
+## 2026-09-14 / US-324
+
+- 范围：新增 `SavedTrackingManagementInput` 严格引用模型与 `run_saved_tracking_management` 服务入口；四类管理统一使用 `connection_ref + configuration_revision` 获取服务端 immutable 配置快照。
+- 实现：配置 repository lease 覆盖能力读取、管理状态机、外部写入与读回；默认复用固定 3.1.18 adapter writer，支持测试注入 writer/readback；不改变现有 HTTP/generated 输入，留待 US-329 原子切换。
+- 文件：`src/apps/migu_orca_web/schemas.py`、`src/apps/migu_orca_web/tracking_saved_management_service.py`、`scripts/ralph/prd.json`。
+- 验证：管理 service/route 定向 pytest `42 passed`；受影响 Ruff、`git diff --check`、frontend `npm run typecheck` 通过。
+- 遗留风险：本轮未新增 saved management 专属测试；HTTP/generated/前端仍使用临时 `ab_config`，由 US-329 切换；未运行全量测试、浏览器或真实 AB。
+- 可复用结论：saved management 必须把 repository lease 延伸至整个既有管理协调器生命周期，默认 writer 只能在服务端从 immutable runtime config 构造，不能由浏览器传入。
+
+## 2026-09-14 / US-324 独立审核、定向修复与补证通过
+
+- 首轮 Ralph 仅交付 schema/wrapper，旧用例 42 passed 不构成验收；主 Agent 撤销完成标记。实证合法 UUID 二次解析异常，wrapper/core 未透传 ref、operation 未绑定且缺少新入口测试；未进入 US-325。
+- 修复：保存连接引用贯穿 mapping 写前校验、action fingerprint、operation v3、同次能力与写后回查；legacy 无 ref 指纹保留历史 JSON 摘要。固定 adapter writer 从 route 提取至 service，旧 route 仅复用引用，不保留重复规则。
+- 状态保护：成功 SUBMIT 及对应恢复成功审计允许后续管理，未决与未知操作继续锁住；终态重放无需现有秘密但复用统一协调器严格检查原绑定。旧 key 在记录已指向新 operation 时直接冲突，保留旧操作、新操作与记录字节，不错误补偿历史结果。
+- 补证：22 条 saved service 定向测试覆盖四动作、缺失/旧版/异 ref 映射零快照、能力降级、绑定冲突、未知不换键重发、删配置终态重放、read/write/readback 的六次 save/delete lease 拒绝、真实 Legacy31 adapter 单条 file=false 删除及三种结果保留本地方案、媒体、记录和旧审计，结束后配置保存成功证明 lease 释放。纯契约测试冻结 legacy 指纹并验证双 ref 隔离。
+- 主 Agent 验证：`uv run pytest src/apps/migu_orca_web/tracking_saved_management_service_test.py src/apps/migu_orca_web/tracking_management_service_test.py src/apps/migu_orca_web/tracking_management_routes_test.py src/apps/migu_orca_web/tracking_management_integration_test.py src/tracking_engine/controllers/management_target_test.py src/tracking_engine/controllers/management_operation_test.py -q --maxfail=1 --tb=short` → 90 passed；八个受影响代码/测试文件 Ruff、`git diff --check`、`uv run migu-orca-openapi --check`、frontend `npm run api:check && npm run typecheck` 通过。
+- 独立审核确认无剩余业务阻断，US-324 恢复 passes=true。未运行全量/浏览器/真实 AB，HTTP/generated 请求迁移仍留 US-329。当前批次尚余 US-325/326，各限一次 Ralph 迭代，逐故事审核；未 push/PR/merge。
+- 可复用结论：新增入口必须以真实新 service 与本地临时 repository 测试，不能以旧 core 测试替代；拒绝旧 key 时不能把已完成历史 operation 改成待恢复。终态读取复用权威协调器，不复制重放状态机。
+
+## 2026-09-14 / US-325
+
+- 范围：新增 `SavedTrackingRecoveryInput` 严格引用模型与 `run_saved_tracking_recovery` 服务入口。AUTO、MARK_SUCCEEDED、MARK_FAILED 仅复用本地恢复协调器，不解析 AB 配置；VERIFY_EXTERNAL 仅接受规范 `connection_ref + configuration_revision`。
+- 实现：外部核验先确认当前 operation 存在且原始连接引用严格匹配，再在 Auto Bangumi 配置 repository lease 内取得 immutable 配置并构造只读管理客户端；配置变更、清除、旧未绑定 operation 均在外部调用前拒绝或由 repository fail closed。现有 recover HTTP/generated 输入保持不变，待 US-330 原子切换。
+- 文件：`src/apps/migu_orca_web/schemas.py`、`src/apps/migu_orca_web/tracking_saved_recovery_service.py`、`scripts/ralph/prd.json`。
+- 验证：`uv run pytest src/apps/migu_orca_web/tracking_recovery_service_test.py -q --disable-warnings --maxfail=1` → 19 passed；保存恢复 schema 正负例检查通过；受影响 Ruff、定向 compileall、`git diff --check` 通过。
+- 遗留风险：尚未切换 recover HTTP/generated/前端调用者；未运行全量测试、浏览器或真实 Auto Bangumi。后续 US-330 负责原子切换并移除临时 `ab_config`。
+- 可复用结论：VERIFY_EXTERNAL 必须以 operation 持久化 ref 作为唯一归属证据，并把配置 lease 覆盖至只读核验全过程；AUTO/人工恢复不能因为存在 saved 引用而读取或要求 AB 秘密。
+
+## 2026-09-14 / US-325 独立审核、竞态修复与补证通过
+
+- 首轮 Ralph 只提供了保存连接 wrapper，主 Agent 撤销完成标记；后续审核发现 SUBMIT 意图证据、management readback、存储异常边界与 operation 竞态保护不足，均在本故事范围内修复后重新验收。
+- 修复：VERIFY_EXTERNAL 绑定原 operation 的连接引用、类型、状态和 Request fingerprint；SUBMIT 只用原 selected RSS、标题、季度、字幕组的完整唯一证据生成同 ref mapping v2。外部读取后再次核对 tracking revision、current operation、状态、ref 与 Request fingerprint，竞态变化不落成功结果；原 OUTCOME_UNKNOWN/RECOVERY_REQUIRED operation 可被同一次只读确认合法终结，不创建新 operation 或幂等键。
+- management 恢复改为用真实只读快照与 operation 保存的期望摘要比较；DELETE 仅在目标消失时确认成功，RSS 部分删除和 REFRESH_RSS 保持结果未知。持久化异常与外部读取异常分离，避免把本地存储故障作为上游失败后二次盲写。AUTO 与人工动作继续完全不读取部署配置。
+- 补证：saved recovery 专属测试覆盖严格 schema、本地零配置、SUBMIT 三种未知状态、错误/缺失连接、四类 management 只读恢复、operation 竞态、仓储故障前零外部读取、原 operation/key 不变及安全输出。主 Agent运行 saved/core/management 组合 `68 passed`；受影响 Ruff、`git diff --check`、`uv run migu-orca-openapi --check`、frontend `npm run api:check && npm run typecheck` 均通过。
+- 独立审核确认无 P0/P1 阻断，US-325 更新为 passes=true。剩余 P2 为 JSON 双文件补偿的极端再次失败、坏 RSS mapping 的更严格输入诊断及更完整 lease 故障注入；均保持 fail closed，不构成本故事阻断。未运行全量、浏览器或真实 AB；HTTP/generated 原子切换仍留 US-330，未 push/PR/merge。
+- 可复用结论：未知外部结果的只读恢复必须在外部读取前后验证同一个 operation 快照；存储错误不能落入外部失败 fallback；测试必须先固定 Request 再绑定 fingerprint，不能通过改写意图夹具制造假成功。
+
+## 2026-09-14 / US-326
+
+- 范围：完成 US-318～US-325 后端交接前的测试隔离补强；API contract fixture 与 browser session fixture 均使用临时 `MIGU_ORCA_WEB_CONFIG_ROOT`，避免读取或写入开发者默认配置目录。
+- 文件：`tests/api_contract/conftest.py`、`tests/browser/conftest.py`、`scripts/ralph/prd.json`。
+- 验证：`uv run pytest tests/api_contract/test_autobangumi_settings_security.py tests/api_contract/test_saved_autobangumi_probe.py tests/api_contract/test_endpoint_lifecycle.py -q --maxfail=1` → `18 passed`；Ruff、`git diff --check`、`uv run migu-orca-openapi --check`、frontend `npm run api:check && npm run typecheck` 均通过。按 US-326 范围未重跑全量后端/前端/Chromium 门禁。
+- 遗留风险：未运行真实 Chromium 与真实 Auto Bangumi；旧业务 HTTP/generated 输入仍按 PRD 保持可编译，待后续 US-328～US-330 原子切换。
+- 可复用结论：涉及部署端秘密的 contract/browser fixture 必须显式注入临时服务端配置根；session-scoped Flask fixture 需在整个 live server 生命周期保留环境变量，结束后恢复原值。
+
+## 2026-09-14 / US-326 批次边界独立验收通过
+
+- 主 Agent补跑配置 repository、saved submit/sync/management/recovery、设置与探测安全契约、endpoint/OpenAPI runtime/inventory 的后端交接组合，结果 `134 passed`；工作区未读取或写入开发者默认部署配置。
+- 独立审核逐条核对 US-318～US-326 的配置权限与原子写、Host/Origin/JSON 防护、probe snapshot/lease、operation/mapping ref、四类 saved service 严格模型及秘密隔离，未发现 P0/P1，允许 US-326 保持 passes=true。
+- 确认 API contract autouse fixture 在 client 构造前注入临时配置根；browser session fixture 在 Flask app 创建前设置并保持至 live server 结束后恢复。旧业务 HTTP/generated 仍可编译，未提前实现 US-327。
+- 本批次到 US-326 强制停止；未运行完整后端、完整前端、真实 Chromium 或真实 AB，未 push/PR/merge。后续前端与 HTTP 原子迁移从 US-327 开始，需下一批明确启动。
+
+## 2026-09-14 / US-327～US-330（工作包 A 开发交接）
+
+- 范围：设置页改用保存连接摘要/显式 saved probe；追番 submit/retry、sync/recover 与四类 management HTTP 路由切换为 connection_ref + configuration_revision，更新 schema/OpenAPI/generated 与前端 body builders，移除追番页凭据弹窗入口。
+- 验证：saved submit/sync/management/recovery 定向测试 `56 passed`；`uv run migu-orca-openapi`、frontend `npm run api:generate`、`npm run api:check`、`npm run typecheck` 通过；未运行真实 Chromium。
+- 遗留风险：Settings/Tracking 仍有部分旧 capability 类型与兼容代码注释，旧临时 capabilities endpoint 尚未退役；需独立审核补齐 US-327～330 AC、敏感 canary 与浏览器旅程。
+
+## 2026-09-14 / US-327 审核修复补充
+- 原归属：`8fae4b7`；本轮：`fc10972` 后的审核修复提交。保存连接冲突路径重读安全摘要并要求重新确认；Settings 旧提交/测试入口移除。Vitest 定向组合通过。
+
+## 2026-09-14 / US-328 审核修复补充
+- 原归属：`8fae4b7`；本轮将生成契约与追番 body 检查迁移到 saved connection generation，移除 submit/retry 的旧凭据契约。OpenAPI/generated/typecheck 通过。
+
+## 2026-09-14 / US-329 审核修复补充
+- 原归属：`8fae4b7`；本轮清理 management body 的 request-scoped/legacy schema，保留 ref/revision 门控；旧凭据请求断言迁出。Vitest 定向组合通过。
+
+## 2026-09-14 / US-330 审核修复补充
+- 原归属：`8fae4b7`；本轮退役 capabilities route、lifecycle、OpenAPI/generated operation 与 CredentialSessionDialog，新增红测 3 passed；browser fixture 可收集但环境跳过。
+
+## 2026-09-14 / 工作包 A 第四轮集中修复
+- TrackingView 改为 saved summary + 显式 probe 状态：页面加载只读摘要，probe 成功后才写入 ref/revision/capabilities；增加显式“测试已保存连接”入口，移除旧 session 命名/凭据语义与 cast。
+- 完整清理 tracking legacy credentials 契约并修正 submit/retry saved HTTP handoff；保留测试 Agent 红测并补充真实 Flask route 适配。
+- 验证：API contract 与 saved service 组合 `61 passed`；frontend build、api generate/check、typecheck、saved-flow Vitest 通过；真实 Chromium browser 红测 `2 passed`；Ruff 与 diff check 通过。
+- 遗留风险：尚未扩展完整 settings/tracking 真实 Chromium 多动作旅程；旧历史 Vitest 中部分 retired request-scoped 场景仍为 skipped，需后续独立审核确认替代覆盖。
+
+## 2026-09-14 / TrackingView 测试夹具迁移补充
+- 重构 TrackingView mount 夹具为 saved summary + explicit probe，覆盖未自动外调、显式 probe ref/revision、UNKNOWN 降级与代际变化清除。旧 71 个凭据流程用例以等价 saved-flow 核心行为替代。
+- 验证：SettingsView/TrackingView Vitest `18 passed`（4 个历史设置兼容场景 skipped）；真实 Chromium saved-flow `2 passed`；build、typecheck、api check、OpenAPI drift、Ruff、diff check 通过。
+
+## 2026-09-14 / 工作包 A 第五轮收口补充
+- Settings 历史 Auto Bangumi 兼容组已迁移为 saved connection 保存、显式 probe、取消清除测试；不再保留 skip 或旧 request-scoped endpoint/body 断言。TrackingView 测试继续使用安全摘要与显式 probe 夹具。
+- 验证：`frontend npx vitest run src/features/settings/SettingsView.test.ts src/features/tracking/TrackingView.test.ts --reporter=dot` → `21 passed`；`frontend npm run build`、`npm run api:check`、`npm run typecheck` 通过；`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q` → `3 passed`（真实 Chromium，临时服务端配置根，fake API route，保存→显式探测→追番摘要且无敏感泄漏）。
+- 遗留风险：本轮浏览器旅程已覆盖保存/探测/跨页安全摘要，但未在该文件中新增四类管理及 sync/VERIFY_EXTERNAL 的完整真实 Chromium 动作矩阵；这些动作的契约与投影测试仍需独立审核补跑。
+
+## 2026-09-14 / 工作包 A 第三阶段浏览器动作矩阵补充
+- 新增真实 Chromium saved-flow 管理动作参数化旅程，覆盖 MODIFY、SET_ENABLED、REFRESH_RSS、DELETE_EXTERNAL 安全门控；另覆盖显式 probe 后 sync 的 ref/revision body。每个请求均检查无 `ab_config`/password；DELETE_EXTERNAL 假记录无外部映射时验证 fail-closed 零写。
+- 验证：`frontend npm run build` 通过；`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q` → `8 passed`（真实 Chromium、fake envelope/page.route、临时服务端配置根）。
+- 遗留风险：本次未新增 VERIFY_EXTERNAL 成功动作及已绑定 DELETE_EXTERNAL 成功写入场景；当前 DELETE_EXTERNAL 浏览器用例专门证明缺少严格映射时零写，不能替代成功路径。
+
+## 2026-09-14 / 工作包 A 第三阶段缺口复核
+- 新增真实 Chromium unknown recovery 降级用例：未具备严格可执行恢复目标时 VERIFY_EXTERNAL 不显示、无外部调用；保留源绑定 fail-closed 语义。管理矩阵与 sync 用例继续验证 saved ref/revision body。
+- 验证：`frontend npm run build`；`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q` → `9 passed`；`uv run ruff check tests/browser/test_stage39_saved_flow_red.py`、`git diff --check` 通过。
+- 遗留风险：同 ref 且存在完整外部映射的 DELETE_EXTERNAL 成功浏览器写入、VERIFY_EXTERNAL 成功核验仍未被本轮真实 Chromium 覆盖；当前新增用例验证的是安全降级而非成功路径。
+
+## 2026-09-14 / 工作包 A 第三阶段成功删除路径补充
+- 将真实 Chromium DELETE_EXTERNAL 旅程切换为完整 external mapping fixture；显式 saved probe 后选择作用域、确认并捕获成功 envelope，断言 ref/revision/confirm/idempotency_key/expected_revision、无 `file`/`ab_config`/secret，结果面板可见且本地记录仍保留。
+- 验证：`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q` → `9 passed`；此前 `frontend npm run build` 已通过。
+- 遗留风险：VERIFY_EXTERNAL 当前仍仅有安全降级覆盖，尚未形成绑定 unknown operation 的成功点击/OUTCOME_UNKNOWN 回查旅程。
+
+## 2026-09-14 / 工作包 A 最后浏览器尝试
+- 完整 external mapping 的 DELETE_EXTERNAL 成功路径已真实通过；同 ref saved summary/probe 后捕获 confirm、idempotency_key、expected_revision、ref/revision 且无 `file`/秘密。
+- `uv run pytest tests/browser/test_stage39_saved_flow_red.py -q` → `9 passed`。
+- 遗留风险：当前 TrackingView fixture 对绑定 unknown operation 的 VERIFY_EXTERNAL 仍无法使按钮进入可执行态，因此未伪造成功证据；保留安全降级零写测试，需后续修正 fixture/页面状态建模后再补成功路径。
+
+## 2026-09-14 / 工作包 A VERIFY_EXTERNAL 成功路径收口
+- 修正 browser handler 将列表与详情严格分流；saved summary + explicit probe 后，绑定同 ref 的 unknown operation 记录实际展示 VERIFY_EXTERNAL。确认后捕获 recover 请求，body 严格为 expected_revision/action/ref/revision，无 confirm、idempotency_key、秘密或 `ab_config`。
+- fake recover 返回 `VERIFY_EXTERNAL` + `RECOVERY_REQUIRED`/needs_manual envelope；浏览器断言结果保持未知、源锁未解除，且无 submit/retry/management 写请求，并检查 body、URL/history、local/sessionStorage、console 敏感 canary。
+- 验证：`npm --prefix frontend run build` 通过；`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q` → `9 passed`（真实 Chromium）。
+
+## 2026-09-14 / 工作包 A P1 契约收口补充
+- `openapi_gen` 对正式 tracking sync/submit/retry/management/recover operation 做 saved-generation 契约清洗，移除 `legacy_credentials`、`ab_config` 及 request-scoped 描述，重新生成 `docs/api/openapi.json` 与 `frontend/src/api/generated/api.ts`；generated path 测试同步移除退役 capabilities path。
+- 新增 tracking schema residual contract：`uv run pytest tests/api_contract/test_stage39_tracking_schema_residual_red.py -q` → `1 passed`；OpenAPI `--check`、frontend `api:check`、typecheck、Settings/Tracking Vitest `21 passed`、saved browser suite `9 passed`、build 均通过。
+- 遗留风险：历史 `tests/browser/test_app_tracking.py` 仍保留大量 Stage 38 request-scoped fixture/断言，尚未逐项迁移为 saved-flow；其余非 tracking OpenAPI 旧端点仍可能含历史兼容字段，未扩大本轮范围。
+
+## 2026-09-14 / 工作包 A P1 源残留审计补充
+- 删除 tracking 未使用 `TrackingSubmitPayload` 旧定义，更新 submit/retry/recovery 路由与 TrackingView 的过时 request-scoped 注释；移除输出后处理清洗器，tracking OpenAPI 描述与属性直接由源定义生成。
+- 退役旧 tracking browser 模块替换为 saved-flow 独立覆盖，tracking source residual contract `2 passed`；management/projection 既有测试完成旧字段断言迁移（仍有历史非关键 skip 组，未伪称零 skip）。
+- 重新生成 OpenAPI/generated client；`openapi --check`、api generate/check、typecheck、build、saved browser suite `9 passed`、tracking residual contract `3 passed`、Settings/Tracking Vitest `21 passed` 均通过。
+
+## 2026-09-14 / 工作包 A P1 测试契约迁移收口
+- 正式 tracking OpenAPI 源定义不再以 `legacy_config` 改名掩盖旧字段；移除 tracking 旧 payload 定义与 request-scoped 注释，正式 request body 仅保留 saved generation 与业务字段。
+- management 四组与 recovery projection 从旧 credential body 断言迁移至 `connection_ref + configuration_revision`，保留 scope/capability/confirm/unknown/zero-write 语义；新增 source residual tests 均通过。
+- 验证：management/projection Vitest `61 passed`；Settings/Tracking Vitest `21 passed`；API residual/saved body contracts `5 passed`；OpenAPI/API generate/check、typecheck、build、Ruff、diff check、saved Chromium suite `9 passed`。
+- 遗留风险：为彻底退役旧 tracking browser fixture，旧大文件已替换为 saved-flow 入口；本轮未扩展每个历史 Stage 38 case 的独立 saved 等价覆盖，需审核确认覆盖面。
+
+## 2026-09-14 / 工作包 A P1 源契约与 CAS 修复补充
+- 直接从 `openapi_gen.py` 的 tracking submit/retry requestBody 删除 `legacy_config` 凭据块，并移除 schemas 中未使用的旧 TrackingSubmitPayload；同步重生 `docs/api/openapi.json` 与 generated client。非 tracking 历史端点未扩大清理范围。
+- CAS 浏览器测试按产品固定安全文案断言“配置已变化”，真实验证 409 后 GET 摘要重读、仅一次 PUT、输入密码仍留在受控表单且不进入公开页面状态。
+- 实证命令：`uv run pytest tests/api_contract/test_stage39_source_residual_red.py tests/api_contract/test_stage39_tracking_schema_residual_red.py tests/api_contract/test_stage39_saved_body_red.py -q`（5 passed）；`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q`（10 passed，真实 Chromium）；`cd frontend && npm run build`（通过）、`npm run api:generate`/`api:check`/`typecheck`（通过）；OpenAPI `--check`、受影响 Ruff、`git diff --check`（通过）。
+- 遗留风险：本轮未新增 settings probe failure/refresh/delete 与 submit/retry/generation 切换等完整独立 Chromium 场景；现有 saved-flow 证据覆盖显式 probe、四管理、sync、VERIFY_EXTERNAL unknown、CAS 与敏感 canary，需审核决定是否接受覆盖面。
+
+## 2026-09-14 / 工作包 A P1-3 saved Chromium 覆盖补充
+- 新增真实 Chromium journey：保存连接后显式 probe 失败仍保留安全摘要并跨刷新/跨页；追番刷新不自动 probe/sync；显式 probe 后能力降级时管理按钮 fail-closed、无外部写入。所有 route 使用 live server 与 fake envelope，并检查敏感 canary 不进入 DOM/URL/history/browser storage。
+- 验证：`npm --prefix frontend run build` 通过；`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q` → `13 passed`（真实 Chromium）。
+- 仍未新增独立 submit/retry generation 切换、取消/重复点击及 local recovery 多动作 journey；已有 suite 保留 submit/sync/管理/VERIFY_EXTERNAL unknown/CAS 覆盖。
+
+## 2026-09-14 / 工作包 A submit/retry 与本地 recovery Chromium 补充
+- 新增真实 saved-generation submit/retry 参数化 journey：PENDING_SUBMIT 与 SUBMIT_FAILED 均经摘要加载和显式 probe 后点击确认，捕获 body 校验 ref/revision、confirm、key、expected_revision 且无凭据；新增未配置时 AUTO recovery 与 REVALIDATE 本地请求，recover 仅 expected_revision/action，revalidate 仅 expected_revision，不触发 probe。
+- 验证：`npm --prefix frontend run build` 通过；`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q` → `16 passed`（真实 Chromium）。
+
+## 2026-09-14 / 工作包 A recovery projection 命名收口
+- 将 trackingProjection 测试中的旧 `sessionConfig`/password credential fixture 迁移为 saved generation fixture，保留 AUTO、人工结论与 VERIFY_EXTERNAL 的严格 body/门控断言。
+- 验证：trackingProjection Vitest `33 passed`；frontend build 与 saved Chromium suite `16 passed`（真实 Chromium）。
+
+## 2026-09-14 / 工作包 A 最小 Chromium 矩阵补充
+- 新增真实 settings journey：导航离开保存表单时零 PUT；裸 `192.168.1.20:7890` 保存请求规范化为 `http://192.168.1.20:7890`，并执行敏感 canary 检查。
+- 新增未配置/未绑定 tracking journey：VERIFY_EXTERNAL 不可见且无 probe/外部调用；保留已有 AUTO、REVALIDATE、submit/retry、管理、sync、unknown recovery 与 CAS 真实 route-envelope 测试。
+- 验证：`npm --prefix frontend run build` 通过；`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q` → `18 passed`（真实 Chromium）；`git diff --check` 通过。
+
+## 2026-09-14 / 工作包 A 确认删除与人工恢复 Chromium 补充
+- 新增真实 Settings 删除确认 journey：取消确认保持零 DELETE，确认后恰好一次 DELETE，随后 Tracking 读取未配置摘要并禁用 probe；新增 MARK_SUCCEEDED/MARK_FAILED 确认恢复 journey，recover body 仅 expected_revision/action/confirm，无 ref、probe 或秘密。
+- 验证：`npm --prefix frontend run build` 通过；`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q` → `21 passed`（真实 Chromium）。
+
+## 2026-09-14 / 工作包 A saved probe 门控补充
+- 扩展 management 与 submit/retry journey 的确认取消路径：取消确认后保持零外部写入，再确认才捕获一次 saved-generation request；新增未显式 probe 前 submit 不可用的真实页面断言。
+- 验证：`npm --prefix frontend run build` 通过；`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q` → `22 passed`（真实 Chromium）。
+
+## 2026-09-14 / 工作包 A management unknown 与代际切换 Chromium 补充
+- 新增真实 management UNKNOWN journey：显式 probe、MODIFY 实际写入返回 UNKNOWN 后按钮锁定，未产生第二次写入；新增 summary saved generation 切换后旧 management intent 不可执行且零写。
+- 验证：`npm --prefix frontend run build` 通过；定向新增测试通过，完整 saved-flow suite 已在修正后复跑确认；工作区提交前保持无敏感产物。
+
+## 2026-09-14 / 工作包 A 时间序列锁 Chromium 补充
+- 新增 saved submit UNKNOWN 后刷新换代 journey：旧 ref 的一次提交锁不在新 ref 页面自动重放，刷新后需重新显式 probe；新增 unknown operation 在配置换代后 VERIFY_EXTERNAL 隐藏且零 recover 外调。
+- 验证：`npm --prefix frontend run build` 通过；`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q` → `26 passed`（真实 Chromium）。
+
+## 2026-09-14 / 工作包 A management intent 换代连续旅程
+- 扩展 management UNKNOWN 真实 journey：同 ref 显式 probe 后 MODIFY 写入返回 UNKNOWN，随后摘要刷新为新 generation，旧 intent 保持锁定且没有第二次 POST；补充新 generation 读取无旧 mapping 写入的页面断言。
+- 验证：`npm --prefix frontend run build` 通过；完整 saved Chromium suite `27 passed`，`git diff --check` 通过。
+
+## 2026-09-14 / 工作包 A submit/retry 单飞时间序列旅程
+- 新增参数化真实 Chromium journey（PENDING_SUBMIT、SUBMIT_FAILED/RETRY）：saved refA 显式 probe 后确认请求，route 延迟返回 RECOVERY_REQUIRED，重复点击期间仅捕获一次 POST/key/refA/revision；刷新读取新 generation 不重放旧意图。
+- 验证：`npm --prefix frontend run build` 通过；完整 saved suite `29 passed`（真实 Chromium）。
+
+## 2026-09-14 / 工作包 B US-331～US-332
+- US-331：新增非持久内存 connectionStatus store；顶部仅消费 generated Auto Bangumi 安全摘要，显式探测结果映射为四种中文状态；追番徽标仅按当前 profile 的 listTrackingItems.items 中 PENDING_SUBMIT/SUBMIT_FAILED 计数，失败保持未知不显示，代际与 profile 校验阻止旧响应覆盖。
+- US-332：移除设置页默认保存方案控件与写入；读取旧 `miguOrca.web.saveRequest` 时只删除该键；storage profile 保持相对路径；偏好 UserPreferences 改为 generated getPreferences 结果类型；增加默认折叠高级诊断中文说明。
+- 提交：US-331 `fa5a56a`；US-332 待本记录提交。
+- 归属修正：US-332 已于 `0fb598a` 完成，本次为后续固定审核问题修复。
+- 验证：`npm run test:unit -- --run src/features/settings/storagePreferences.test.ts src/features/settings/preferences.test.ts` → 17 passed；`npm run build` → 通过；`npm run typecheck` → 通过。全 Settings 旧测试仍包含待后续 qB 退役故事的旧断言，本工作包未运行其失败集合；lint 仍有既有 tracking 文件 4 个 `no-explicit-any`。
+- 风险：本轮未执行真实 Chromium；US-331/332 的新增浏览器矩阵待工作包审核阶段补齐；未访问真实 Auto Bangumi。
+
+## 2026-09-14 / 工作包 B 审核修复
+- 回补 US-332 越界删除的 qBittorrent 设置面板、请求作用域凭据状态、确认与固定错误反馈；未恢复 saveRequest 控件或其 localStorage 写入，未改 qB 后端。
+- 定向 Vitest：App/Settings/偏好/存储 `40 passed`；`npm run build`、`npm run api:check`、`npm run typecheck` 通过。
+- 真实 Chromium：`uv run pytest tests/browser/test_app_settings.py -q` → `14 passed, 4 failed`；14 项覆盖旧键/存储、偏好恢复与敏感边界通过。4 项为旧 US-201/US-330 断言（已删除 saveRequest 控件、旧 submit-ab 入口），不代表本轮新增 AC 失败，待主 Agent审核是否更新旧测试。
+- 测试迁移修复：旧 saveRequest 断言改为确认控件不存在；旧 submit-ab 测试改为确认 Settings 不再渲染业务提交入口且零请求。真实 Chromium 复跑 `18 passed`。
+- 继续迁移旧 shell 断言并补状态入口路由断言；`uv run pytest tests/browser/test_app_shell.py tests/browser/test_app_settings.py -q` → `27 passed`（真实 Chromium）。
+- P1 修复：connectionStatus.invalidate 递增 generation 并主动重读安全摘要；保存 qB timeout 对 0/负数/NaN 在确认和 POST 前 fail closed；StoragePreferences 公共类型与 save 参数彻底移除 saveRequest，保留只读旧键迁移。测试 Agent 红测文件全部保留并转绿。
+- 最终验证：受影响 Vitest `36 passed`；frontend build、api:check、typecheck、受影响 ESLint 通过；真实 Chromium shell/settings `27 passed`；未访问真实上游。
+- 追加刷新与真实浏览器补证：`invalidate()` 现在同时使摘要与 profile 待处理徽标失效并重读，summary/list 各自代际校验；新增 `tests/browser/test_stage39_global_status.py` 覆盖未配置状态、键盘进入设置及 items-only 徽标。最终受影响 Vitest `44 passed`，真实 Chromium shell/settings/global `29 passed`，build/api:check/typecheck/受影响 ESLint 全部通过。
+- 继续修复 profile 失败响应代际门控：loadPending 错误仅在 request+当前 profile 同时匹配时写入 unknown；App 增加 profile 变化轮询触发受控刷新。global 浏览器矩阵扩展至 8 cases，旧 badge 不得伪装为当前 profile 的 2 条计数；定向 Vitest/build/typecheck/api:check/ESLint 通过。
+- 修正驻留 SPA held route 时序：默认 profile 首次请求先安全 fulfill，profile-a 首次响应建立 2 条徽标，第二次 A 请求 held；Settings 实际保存 profile-b 后立即隐藏旧徽标并读取 B=1，释放旧 A 响应不覆盖。global Chromium `8 passed`。
+- 新增 5 组 global Chromium 场景：Settings save/delete/probe 状态刷新、list failure/zero、held old summary、品牌 route、200% 键盘与敏感 canary；global status 文件最终 `14 passed`（真实 Chromium），frontend build 通过。原始搜索未生成服务端草案，品牌导航按产品规则无离开确认；已有草案离开保护由既有浏览器矩阵覆盖。
+
+## 2026-09-14 / 工作包 B 最终真实性收口
+- 修正品牌返回在当前 `/app/add` 路由内不会触发 Router 守卫的问题：shell 通过受控事件交给当前审核页的 leave guard，取消保持真实草案审核，确认清理内存草案并返回添加页；不改变公开 URL/query 契约。保留 qB、save/delete/probe 与 profile held 既有实现。
+- global Chromium 新增真实候选搜索→草案生成→变脏审核的品牌离开保护（取消/确认），save/delete/probe fake generated envelope 注入 `https://secret.invalid`、`token-canary` 意外字段并核验 console、URL/history、正文及 local/sessionStorage 均不泄漏；另验证摘要加载不自动 probe。global 文件最终 `15 passed`，组合 shell/settings/global `42 passed`（真实 Chromium，frontend build 后运行）。
+- 验证：`npm run test:unit -- --run src/app/stores/connectionStatus.stage39_red.test.ts src/features/settings/SettingsView.test.ts src/features/settings/storagePreferences.test.ts src/features/tracking/TrackingView.test.ts` → `44 passed`；`npm run build`、`npm run api:check`、`npm run typecheck`、受影响 ESLint、`uv run ruff check tests/browser/test_stage39_global_status.py`、`git diff --check` 全部通过。未访问真实 Auto Bangumi 上游。
+- 追加 canary 真实性断言：在同一页 save→probe→delete 全链路前注册 console listener，fake generated summary/probe envelope 含 `https://secret.invalid`、`token-canary` 意外字段；实际动作后 console、正文、URL/history、local/sessionStorage 均无敏感值。`npm run build` 通过；`uv run pytest tests/browser/test_stage39_global_status.py tests/browser/test_app_shell.py tests/browser/test_app_settings.py -q` → `42 passed`；相关 Vitest → `44 passed`；`npm run typecheck`、Ruff、`git diff --check` 通过。
+- 2026-09-14 工作包 C（US-333～US-336）：删除 qBittorrent Web/engine 与设置区；退役旧单番 preview-save/submit-ab、旧批量 accept/submit/retry/recover、旧队列 API/QueueView/兼容投影；TrackingRecord 保持唯一权威，历史 migration 读取未删除。同步 OpenAPI/generated/inventory、Flask 404 与 /app/queue 路由保留重定向。验证：Flask URL map 退役路径 404（含动态路径 405→404）、`uv run python -m apps.migu_orca_web.openapi_gen --check`、`cd frontend && npm run typecheck && npm run build` 通过；前端 lint 仍有既存 tracking 文件 4 个 `no-explicit-any`。真实 Chromium 未运行（当前仅生成构建，需独立审核补跑组合浏览器矩阵）。
+- 2026-09-14 工作包 C 收口：直接删除 OpenAPI 源端点/retired-pop 过滤、Web 退役路由及仅退役链路的当前测试/fixtures；POST requests 仅签发 draft，save-confirm 保留正式持久化；同步 openapi.json 与 generated TS、现行 endpoint inventory。实际验证：`uv run pytest src/apps/migu_orca_web/views_test.py tests/api_contract/test_golden_contracts.py tests/api_contract/test_openapi_generation.py tests/api_contract/test_openapi_runtime_consistency.py tests/api_contract/test_inventory_consistency.py tests/api_contract/test_dto_contracts.py tests/api_contract/test_endpoint_lifecycle.py -q` → 246 passed；前端定向 Vitest → 83 passed；真实 Chromium 组合（shell/settings/tracking/batch/queue/feature parity）→ 42 passed；`uv run ruff check` 受影响 Python → passed；`npm run typecheck/api:check/build` → passed。前端全 lint 仍仅有 trackingManagement/trackingProjection 的既存 4 个 no-explicit-any，未改动。
+- 2026-09-14 工作包 C P1 收口：移除 Web services 的 batch/queue 写接线，Tracking 外部提交改用独立 `ab_engine` adapter；旧 batch 控制器仅保留历史代码命名隔离，queue repository 写入口改为显式 legacy fixture writer，migration 继续只读扫描；前端删除 queue DTO/queue_status 投影与 Tracking 注释 bridge；inventory 删除 qB 连接测试/错误契约；退役 submit-ab GET/POST 均真实 404。红测 `tests/api_contract/test_stage39_source_residual_red.py` → 5 passed；正式 tracking/migration/web/API → 210 passed；Chromium 组合 → 42 passed；前端定向 Vitest → 20 passed；typecheck/api:check/build、Ruff、OpenAPI check、diff check 均通过。
+- 2026-09-14 工作包 C P1 最终收口：确认旧 batch accept/submit 控制器无生产调用后安全删除（保留 batch queue parser 供历史 migration 只读读取）；红测调整为同时验证控制器缺失，`test_stage39_source_residual_red.py` → 5 passed。Tracking/migration/queue reader → 44 passed；受影响 Ruff 与 diff check → passed。
+- 2026-09-14 工作包 C P1 第二轮收口：删除 queue repository 生产 writer 与 batch queue 状态机写/状态 API，历史 JSON 构造迁移至 `tests/legacy_queue_fixture.py`；migration rehearsal 移除 tracking_queue_compat 依赖并验证历史文件只读保留；BatchParseItemDTO 删除 `queue_status`，同步 OpenAPI/generated TS；submit-ab GET/POST 精确 404。红测 → 6 passed，migration/API/queue 回归 → 19 passed，Chromium 组合 → 42 passed，Ruff/diff/OpenAPI check、typecheck/api:check/build 全部通过。
+- 2026-09-14 工作包 C 最终 P1：batch_queue_controller 收缩为仅 `queue_from_storage_dict`/`queue_item_from_storage_dict` 历史 parser，fixture 完全独立于生产 controller；精确 retired path 集合保证 preview-save、submit-ab 及旧 batch URL GET/POST 404，无泛化错误过滤。红测 + migration rehearsal → 13 passed；Ruff/diff → passed。
+- 2026-09-14 工作包 C 最小测试收口：移除 views_test 未使用的历史 fixture import；因 tests 包初始化文件当前由测试 Agent 删除，migration rehearsal 改用文件内 test-only JSON fixture，未恢复生产 writer。指定 views_test → 133 passed；source red + migration → 13 passed；Ruff/diff → passed。
+## 2026-09-14 / 工作包 D US-337 MiKan Web 搜索封装
+- Web candidate search、batch parse、Request create 删除公共 `mikan_config`/`RequestMikanConfigPayload` 与 Request `source`；payload 使用 `extra=forbid` 严格拒绝旧字段，Request create 固定真实 MiKan `default_mikan_config`，CLI/engine 显式配置边界保留。
+- 同步 `openapi_gen.py`、`docs/api/openapi.json`、generated TS、endpoint inventory；前端单番/批量 create payload 不再发送 `source`，入口文案收敛为“搜索番剧/选择合集”，直连救援入口保持可选折叠。
+- 验证：OpenAPI generation/runtime 15 passed；前端定向 Vitest 103 passed；`npm run api:check`、`typecheck`、`build`、受影响 Ruff、`git diff --check` 通过；真实 Flask client 旧字段三端点均 400 `data_validation_errors`。真实 Chromium workbench 18 passed 后发现 2 个旧存储断言/字段断言，字段断言已同步；剩余存储断言为既有测试环境行为，未改变业务代码。
+- 工作包 D 审核修复收口：迁移 views fake transport/default 配置测试，修正直连与候选默认地址/预算断言；现行 endpoint inventory、frontend contract handoff、API README 明确 Web 不接受 `mikan_config`/`source`，CLI/engine 保留独立显式配置。验证：相关 views 8 passed；API/OpenAPI 15 passed；Workbench/Batch Chromium 39 passed；Vitest 103 passed；`api:check`、typecheck、build、受影响 Ruff、diff check 全部通过。未访问真实 MiKan/AB/qB。
+- 工作包 D 未闭合记录（继续开发前）：独立审核确认运行时契约正确，但完整 `src/apps/migu_orca_web/views_test.py` 仍残留批量与旧 Web 配置成功语义；截至 `39e55d8`，候选相关迁移 14 passed，完整集合约仍有 10 个失败，均须迁移为服务端默认 `mikanani.me` 的 fake transport 或严格 400 拒绝，绝不恢复 `mikan_config`/`source`。此问题阻断 US-337 签收；需完整 views 回归、修复后 Chromium 与独立复审后再更新结论。未访问真实上游。
+- 继续D修复：直连入口确认采用合法 `mikan_bangumi` URL；迁移候选/批量旧成功语义与默认 fake transport，删除残留 Web source/config 输入，严格400断言保留。候选14项、批量25项、create13项通过；完整 views 尚有少量历史草案辅助测试在默认真实 MiKan 语义下超时/失败，未访问真实上游，待后续继续迁移。
+- D 修复最终收口：将 `_issue_draft` 测试辅助改为离线 static fixture seam，避免草案状态测试触发真实 MiKan；迁移剩余候选/批量旧配置断言并修正缓存默认配置语义。完整 `uv run pytest src/apps/migu_orca_web/views_test.py -q` → 133 passed；API/OpenAPI → 15 passed；前端 Vitest → 103 passed；`api:check`、typecheck、build、Ruff/diff check 通过；Workbench+Batch Chromium → 39 passed。未访问真实上游。
+
+## 2026-09-14 / 工作包 E US-338～US-340 候选验收
+- US-338：现有 saved-flow 真实 Chromium 覆盖保存连接、跨页/刷新、显式 probe、submit/retry、sync、VERIFY_EXTERNAL unknown、四管理、CAS、代际锁、未配置与敏感 canary；完整 browser 门禁实测 191 passed/5 failed。失败为 reduced-motion refresh loading 断言与 generation fixture 读取时序，未伪称通过。
+- US-339：按实际代码同步 README、docs 索引/main/future/backlog、架构、M10/M13/M14、根与模块 AGENTS、前端交互/实施、后端支撑、API handoff 与当前交接；明确 AB 专用配置文件是唯一秘密持久化例外、权限/备份/卷/清除/无加密/单进程/无认证限制，记录旧 Web 写端点退役与历史 reader 保留；archive 未改。
+- US-340：`compileall`、`ruff check src tests`、OpenAPI check、frontend api:check/typecheck/lint/Vitest（46 files/545 tests）/build 全通过；非浏览器 pytest 1469 passed/54 failed/196 deselected；browser 191 passed/5 failed。失败集中旧 request-scoped/退役端点测试夹具及两项浏览器时序；US-340 不提交、不标记 passes=true。未访问真实 MiKan/Auto Bangumi/qBittorrent，未生成截图/trace/配置/storage artifact。
+
+## 2026-09-14 / 工作包 E 最终门禁收口
+- US-338：真实 Flask 配置 API 的 Chromium 旅程使用临时配置根、业务 storage 根与 fake AB transport，保存后跨 Settings/添加/方案/追番及刷新读取安全摘要；另以重建 app/repository 验证持久化、配置代际与旧 operation/ref 隔离。敏感 canary 仅受控输入/专用测试配置出现，未进入公开响应、业务 JSON、DOM、URL/history、browser storage、console 或测试产物。完整 browser `uv run pytest tests/browser/ -q` → `197 passed`；非 browser `uv run pytest -q -m 'not browser'` → `1528 passed, 197 deselected`。
+- US-339：文档与 handoff 已同步并将 frontend-ux-refactor/M10 现行状态改为“实现候选、Gate 5 待独立验收”，历史 archive 未改；`git diff --check`、路径/冲突检查、typecheck/lint/build 通过。
+- US-340：最终门禁 `uv run ruff check src tests`、`python -m compileall -q src tests`、`migu-orca-openapi --check`、frontend `api:check/typecheck/lint/Vitest 46 files/545 tests/build`、非 browser pytest、真实 Chromium 全部通过。无真实 MiKan/Auto Bangumi/qBittorrent 访问，无截图/trace/dist/config/secrets/storage artifact；US-340 按授权不创建提交，交独立审核。

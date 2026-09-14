@@ -46,15 +46,20 @@ HTTP/认证细节留在 adapter，持久化留在 repository，纯规则不混�
 
 - 真实 MiKan 合集必须由用户最终选择；AI/规则提示不等于真实季数证据。
   不绕过 Auto Bangumi 创建 qBittorrent 下载，不顺带实现下一 Stage 或移动端。
-- 凭据、Cookie、endpoint、原始响应、完整 RSS URL、magnet、本地绝对路径不进入
-  持久化、URL/history、日志、DOM 展示、截图或 trace；只在受控临时输入和单次请求中使用。
-  输入凭据的必要表单不是允许把它们复制到结果、属性或其他页面的理由。
+- Auto Bangumi 凭据的产品目标是保存在部署端专用私有配置，跨页、刷新和重启保留；
+  实现与唯一持久化例外见 [Stage 39 PRD](docs/MiGuOrca_stage39_deployment_settings_PRD.md)。
+  当前实现仅允许 AB 秘密进入服务端专用配置文件，不把新目标误用于其他外部系统。秘密不进入业务 JSON、公开 DTO、
+  URL/history、浏览器存储、日志、其余 DOM/属性、截图或 trace；必要编辑表单不是复制许可。
+  Cookie、原始响应、完整 RSS URL、magnet、本地绝对路径仍不得公开或额外持久化。
+- 首期仅保存 AB 连接；MiKan 搜索配置由服务端封装，不要求用户配置。qB 独立连接测试及
+  已有正式替代的旧 Web 编排按 Stage 39 核对后退役；不接管 qB 下载，不删除历史运行数据。
 - 草案权威在服务端：前端只用 `draft_id + revision`，不回传完整 Request 当权威；
   保存复用预留 → 持久化 → 提交/释放。方案确认与外部提交是两次不同确认。
 - 追番状态以服务端 TrackingRecord/TrackingOperation 为准；动作取服务端允许值与 capability，
   未知值 fail closed。外部管理写只允许 password + 精确 Auto Bangumi 3.1.18 已验证能力。
 - 外部写保留 confirm、幂等键、expected revision、写前读取、写后回查与结果未知恢复。
   未知结果不等于确定失败；未决意图不得换键、换绑定或盲目重发。纯本地复核不要求 AB 凭据。
+  部署配置更换不能改绑旧 operation 或复用另一 AB 实例的外部映射；新绑定必须经后端验证。
 - 外部删除固定 `file=false`，保留本地方案、追番记录、审计、任务和已下载媒体。
   “已更新集数”仍是待开发占位，绝不从 RSS/种子数猜测。
 - Web `storage_dir` 只允许服务端根下的相对 profile；空值落服务端根，不能回退 CLI 默认。
@@ -64,13 +69,16 @@ HTTP/认证细节留在 adapter，持久化留在 repository，纯规则不混�
 
 - 主 Agent 默认负责规划、审核与协调；直接开发限于文档、轻量修复或用户明确要求。
   未启用团队时不自行创建子 Agent；用户启用后再按开发 A → 独立审核 → 修复 B → 提交 C 分工。
-  子 Agent 模型默认使用 gpt-5.6-luna 或 deepseek-flash，根据主 Agent 的模型选择子agent模型。
-  如主agent模型是GPT，则子agent模型就用 gpt-5.6-luna
-  开发 A 主要负责运行监控ralph.sh进行stage用户故事开发。
-  当主agent是gpt时使用codex gpt-5.6-luna运行ralph。
-  当主agent是deepseek时使用claude fable模型(实际对应deepseek-flash)运行ralph。
-- Stage 实现使用项目 Ralph skill；每迭代只做一个 story。批次和最大迭代数启动前明确，
-  已授权的三故事批次完成后停下审核，未通过不进入下一批。
+  GPT 团队的开发 Agent 默认用 gpt-5.6-luna；无特殊依赖严禁复制主 Agent 全量上下文，必须以
+  `fork_turns="none"` 创建干净子 Agent，由主 Agent 提供自包含的范围、边界、验证与停止条件。
+- 同一工作包优先复用一个开发 Agent，通过 follow-up 连续推进；每批结束声明实际协作/模型模式，
+  并分别用一句话概括给开发、测试、审核、修复 Agent 的提示词。详细规则见
+  [Stage 39 过渡开发流程](docs/development/stage39-transition-workflow.md)。
+- Stage 39 后续保留 Ralph 的 PRD、逐 story 验收/提交与 progress，不再用 `ralph.sh` 逐 story
+  启动新进程，也不固定三个 story 一批；按 PRD 定义的原子工作包完成后统一独立审核。
+- 已启动的工作包必须跑完其约定的开发、定向验证、独立审核、红测、集中修复与复审闭环；
+  任一 AC、固定问题清单或验证矩阵单元未覆盖/未通过时，不得以部分结果、后续风险或
+  Agent 自述在中途交回，继续复用同一修复 Agent 收口至工作包边界。
 - 修复指令指定仓库/分支、文件或问题、不能改的范围、最小验证与停止条件。
   同一共享工作区只允许一个写入 Agent；审核/提交前确认写入者已结束。
 - 用户只要求诊断/静态审核时不擅自实现；禁止的 pytest/浏览器检查严格不运行。
@@ -87,6 +95,11 @@ HTTP/认证细节留在 adapter，持久化留在 repository，纯规则不混�
   移到唯一备份目录，不删除未知数据，不覆盖已有备份。临时服务由启动者管理和收尾。
 - 按 PRD acceptance criteria 独立审核：优先业务、安全、状态一致性、并发/幂等、契约漂移、
   敏感泄漏与测试真实性。报告按严重度给文件/行号；无阻断也说明剩余风险。
+- 审核应一次性形成完整问题清单；先由测试 Agent 固化最小红测，再交同一个修复 Agent 集中收口。
+  复审仍有阻断时继续复用该 Agent 和剩余清单，不重启整套流程、不因预算阈值遗留半成品。
+- API/契约迁移同时核对源 schema/route/OpenAPI 生成源、生成产物与全部调用者；不得以生成后
+  字符串过滤、字段改名、兼容别名或仅类型通过来掩盖旧秘密/旧请求语义。源—产物—调用三层
+  都清零后，才可认定契约迁移完成。
 - Ralph 的 COMPLETE 文本、`passes=true`、progress 都需核对代码和证据；不能当作审核结论。
   达到迭代上限即停；修复重复无进展时报告，不无界循环或靠全量重跑碰运气。
 - progress 记录可复用结论、实际验证命令/结果和遗留风险；阶段历史放 PRD/归档，

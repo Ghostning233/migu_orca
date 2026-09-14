@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -51,11 +50,11 @@ class TestAppSettingsStoragePanel:
     def test_loads_storage_preferences_from_local_storage(
         self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:
-        set_storage_preferences(page, storage_dir, save_request=False)
+        set_storage_preferences(page, storage_dir)
         _goto_settings(page, live_server_url)
 
         expect(page.locator("#settings-storage-dir")).to_have_value(storage_dir.name)
-        expect(page.locator("input#settings-save-request")).not_to_be_checked()
+        expect(page.locator("input#settings-save-request")).to_have_count(0)
 
     def test_saves_sanitized_relative_profile_and_clears_unsafe(
         self, page: Page, live_server_url: str
@@ -227,269 +226,16 @@ class TestAppSettingsPreferencesPanel:
 class TestAppSettingsQbittorrentPanel:
     """AC: qB/AB 连接测试 request-scoped，凭据只在内存，成功/取消后清空."""
 
-    def test_validation_blocks_api_call(self, page: Page, live_server_url: str) -> None:
-        calls: list[Any] = []
 
-        def _capture(route: Any, request: Any) -> None:
-            calls.append(request)
-            route.abort()
 
-        page.route("**/api/v1/qbittorrent/test-connection**", _capture)
-        _goto_settings(page, live_server_url)
-        page.locator("#settings-qbittorrent-test-submit").click()
 
-        assert calls == []
-        alert = page.locator("#settings-qbittorrent-test-form .status-alert-error")
-        expect(alert).to_contain_text("测试 qBittorrent 前必须填写")
-
-    def test_success_posts_request_scoped_config_and_clears_sensitive_fields(
-        self, page: Page, live_server_url: str
-    ) -> None:
-        captured: dict[str, Any] = {}
-
-        def _fulfill_success(route: Any, request: Any) -> None:
-            captured["body"] = request.post_data_json
-            route.fulfill(
-                status=200,
-                content_type="application/json",
-                body=(
-                    '{"ok": true, "result": {"status": "ok", "reachable": true, '
-                    '"version": "4.6.5"}}'
-                ),
-            )
-
-        page.route("**/api/v1/qbittorrent/test-connection", _fulfill_success)
-        _goto_settings(page, live_server_url)
-        page.locator("#settings-qbittorrent-endpoint").fill("http://private-qbt.local")
-        page.locator("#settings-qbittorrent-username").fill("private-user")
-        page.locator("#settings-qbittorrent-password").fill("private-password")
-        page.locator("#settings-qbittorrent-timeout-seconds").fill("3.5")
-        page.locator("#settings-qbittorrent-verify-tls").uncheck()
-        page.locator("#settings-qbittorrent-test-submit").click()
-
-        # Confirmation dialog first.
-        dialog = page.locator(".confirm-dialog")
-        dialog.wait_for(state="visible")
-        expect(dialog).to_contain_text("测试 qBittorrent 连接")
-        dialog.locator(".primary-button").click()
-
-        alert = page.locator("#settings-qbittorrent-test-form .status-alert-success")
-        expect(alert).to_contain_text("status: ok", timeout=5000)
-        expect(alert).to_contain_text("version: 4.6.5")
-        result_text = alert.inner_text()
-        assert "private-qbt" not in result_text
-        assert "private-user" not in result_text
-        assert "private-password" not in result_text
-        # Credentials are cleared from the form after success.
-        expect(page.locator("#settings-qbittorrent-endpoint")).to_have_value("")
-        expect(page.locator("#settings-qbittorrent-password")).to_have_value("")
-        assert captured["body"] == {
-            "qbittorrent_config": {
-                "endpoint": "http://private-qbt.local",
-                "username": "private-user",
-                "password": "private-password",
-                "timeout_seconds": 3.5,
-                "verify_tls": False,
-            }
-        }
-        # Sensitive values never reach browser storage.
-        stored = page.evaluate(
-            "() => ({ls: Object.keys(localStorage), ss: Object.keys(sessionStorage)})"
-        )
-        assert all("qbittorrent" not in key.lower() for key in stored["ls"] + stored["ss"])
-
-    def test_cancelled_confirmation_blocks_api_call_and_preserves_fields(
-        self, page: Page, live_server_url: str
-    ) -> None:
-        calls: list[Any] = []
-
-        def _capture(route: Any, request: Any) -> None:
-            calls.append(request)
-            route.abort()
-
-        page.route("**/api/v1/qbittorrent/test-connection**", _capture)
-        _goto_settings(page, live_server_url)
-        page.locator("#settings-qbittorrent-endpoint").fill("http://private-qbt.local")
-        page.locator("#settings-qbittorrent-username").fill("private-user")
-        page.locator("#settings-qbittorrent-password").fill("private-password")
-        page.locator("#settings-qbittorrent-test-submit").click()
-
-        dialog = page.locator(".confirm-dialog")
-        dialog.wait_for(state="visible")
-        dialog.locator(".secondary-button").click()
-        dialog.wait_for(state="hidden")
-
-        assert calls == []
-        expect(page.locator("#settings-qbittorrent-endpoint")).to_have_value(
-            "http://private-qbt.local"
-        )
-
-    def test_failure_shows_redacted_error_and_preserves_fields(
-        self, page: Page, live_server_url: str
-    ) -> None:
-        def _fulfill_failure(route: Any, request: Any) -> None:
-            route.fulfill(
-                status=400,
-                content_type="application/json",
-                body=(
-                    '{"ok": false, "error_type": "qbittorrent_timeout", '
-                    '"error_message": "qBittorrent HTTP 请求超时 from '
-                    'http://private-qbt.local private-user private-password secret-session", '
-                    '"error_data": {"details": {"endpoint": "http://private-qbt.local"}}}'
-                ),
-            )
-
-        page.route("**/api/v1/qbittorrent/test-connection", _fulfill_failure)
-        _goto_settings(page, live_server_url)
-        page.locator("#settings-qbittorrent-endpoint").fill("http://private-qbt.local")
-        page.locator("#settings-qbittorrent-username").fill("private-user")
-        page.locator("#settings-qbittorrent-password").fill("private-password")
-        page.locator("#settings-qbittorrent-test-submit").click()
-
-        dialog = page.locator(".confirm-dialog")
-        dialog.wait_for(state="visible")
-        dialog.locator(".primary-button").click()
-
-        alert = page.locator("#settings-qbittorrent-test-form .status-alert-error")
-        expect(alert).to_contain_text("qBittorrent 连接测试失败", timeout=5000)
-        alert_text = alert.inner_text()
-        assert "http://" not in alert_text
-        assert "private-user" not in alert_text
-        assert "private-password" not in alert_text
-        assert "secret-session" not in alert_text
-        # Failed attempts keep the fields so the user can retry.
-        expect(page.locator("#settings-qbittorrent-endpoint")).to_have_value(
-            "http://private-qbt.local"
-        )
 
 
 class TestAppSettingsAutoBangumiPanel:
     """AC: AB 连接测试 + request_id 对应的提交上下文，凭据只在内存."""
 
-    def test_connection_uses_password_mode_and_clears_credentials(
-        self, page: Page, live_server_url: str
-    ) -> None:
-        captured: dict[str, Any] = {}
 
-        def _connection(route: Any, request: Any) -> None:
-            captured["body"] = request.post_data_json
-            route.fulfill(
-                status=200,
-                content_type="application/json",
-                body=(
-                    '{"ok": true, "result": {"reachable": true, "authenticated": true, '
-                    '"version": "3.1.18", "auth_mode": "账号密码", "adapter": "legacy_3_1", '
-                    '"submit_supported": true}}'
-                ),
-            )
 
-        page.route("**/api/v1/autobangumi/test-connection", _connection)
-        _goto_settings(page, live_server_url)
-        page.locator("#settings-ab-endpoint").fill("http://ab.example.invalid")
-        page.locator("#settings-ab-username").fill("browser-user")
-        page.locator("#settings-ab-password").fill("browser-secret-password")
-        page.locator("#settings-ab-test-submit").click()
-
-        alert = page.locator("#settings-ab-submit-form .status-alert-success")
-        expect(alert).to_contain_text("连接成功", timeout=5000)
-        expect(alert).to_contain_text("版本：3.1.18")
-        assert captured["body"] == {
-            "ab_config": {
-                "auth_mode": "password",
-                "base_url": "http://ab.example.invalid",
-                "username": "browser-user",
-                "password": "browser-secret-password",
-                "fallback_enabled": False,
-            }
-        }
-        for selector in ("#settings-ab-endpoint", "#settings-ab-username", "#settings-ab-password"):
-            expect(page.locator(selector)).to_have_value("")
-        stored = page.evaluate(
-            "() => ({ls: Object.keys(localStorage), ss: Object.keys(sessionStorage)})"
-        )
-        assert stored["ss"] == []
-        assert all("ab" not in key.lower() for key in stored["ls"])
-
-    def test_submit_ab_uses_request_id_from_url_and_confirms(
-        self, page: Page, live_server_url: str, storage_dir: Path
-    ) -> None:
-        captured: dict[str, Any] = {}
-
-        def handle_submit(route: Any, request: Any) -> None:
-            if request.method == "POST":
-                captured["url"] = request.url
-                captured["payload"] = request.post_data_json
-                route.fulfill(
-                    json={
-                        "ok": True,
-                        "result": {
-                            "request": {"request_id": "req-ab-submit", "status": "ACCEPTED"},
-                            "ab_submit_result": {
-                                "success": True,
-                                "ab_subscription_id": "sub-browser",
-                                "ab_response": {"id": "sub-browser"},
-                                "fallback_config": None,
-                                "error": None,
-                            },
-                        },
-                    }
-                )
-            else:
-                route.continue_()
-
-        page.route("**/api/v1/requests/req-ab-submit/submit-ab**", handle_submit)
-        set_storage_preferences(page, storage_dir)
-        _goto_settings(page, live_server_url, "?request_id=req-ab-submit")
-
-        expect(page.locator("#settings-ab-request-id")).to_have_text("req-ab-submit")
-        expect(page.locator("#settings-ab-submit")).to_be_visible()
-        page.locator("#settings-ab-endpoint").fill("http://ab.example.invalid")
-        page.locator("#settings-ab-username").fill("browser-user")
-        page.locator("#settings-ab-password").fill("browser-secret-password")
-        page.locator("#settings-ab-submit").click()
-
-        dialog = page.locator(".confirm-dialog")
-        dialog.wait_for(state="visible")
-        expect(dialog).to_contain_text("提交 Auto Bangumi")
-        dialog.locator(".danger-button").click()
-
-        alert = page.locator("#settings-ab-submit-form .status-alert-success")
-        expect(alert).to_contain_text("Auto Bangumi 提交成功", timeout=5000)
-        expect(page.locator(".global-notification")).to_contain_text("Auto Bangumi 提交成功")
-        assert "/api/v1/requests/req-ab-submit/submit-ab" in captured["url"]
-        assert "browser-secret-token" not in captured["url"]
-        assert captured["payload"]["ab_config"] == {
-            "auth_mode": "password",
-            "base_url": "http://ab.example.invalid",
-            "username": "browser-user",
-            "password": "browser-secret-password",
-            "fallback_enabled": False,
-        }
-        # Credentials cleared after success and never in storage.
-        expect(page.locator("#settings-ab-endpoint")).to_have_value("")
-        expect(page.locator("#settings-ab-password")).to_have_value("")
-        stored = page.evaluate(
-            "() => ({ls: Object.keys(localStorage), ss: Object.keys(sessionStorage)})"
-        )
-        assert all("ab" not in key.lower() for key in stored["ls"])
-        assert stored["ss"] == []
-
-    def test_submit_ab_without_request_id_shows_chinese_error(
-        self, page: Page, live_server_url: str
-    ) -> None:
-        calls: list[Any] = []
-
-        def _capture(route: Any, request: Any) -> None:
-            calls.append(request)
-            route.abort()
-
-        page.route("**/api/v1/requests/*/submit-ab**", _capture)
-        _goto_settings(page, live_server_url)
-        page.locator("#settings-ab-submit").click()
-
-        alert = page.locator("#settings-ab-submit-form .status-alert-error")
-        expect(alert).to_contain_text("缺少 request_id")
-        assert calls == []
 
     def test_auth_mode_switch_clears_sensitive_fields(
         self, page: Page, live_server_url: str
@@ -524,11 +270,3 @@ class TestAppSettingsResponsiveAndAccessibility:
         assert body_width <= viewport_width, (
             f"Body scrollWidth ({body_width}) exceeds viewport ({viewport_width})"
         )
-
-    def test_error_alert_carries_assertive_aria(self, page: Page, live_server_url: str) -> None:
-        _goto_settings(page, live_server_url)
-        page.locator("#settings-qbittorrent-test-submit").click()
-        alert = page.locator("#settings-qbittorrent-test-form .status-alert-error")
-        expect(alert).to_be_visible()
-        assert alert.get_attribute("role") == "alert"
-        assert alert.get_attribute("aria-live") == "assertive"

@@ -17,18 +17,20 @@ import type { PreviewPatch } from '@/features/workbench/candidateSearch'
 // drifts from the OpenAPI contract.
 
 const EXPECTED_OPERATION_IDS = [
+  'getAutoBangumiConnection',
+  'saveAutoBangumiConnection',
+  'deleteAutoBangumiConnection',
+  'probeSavedAutoBangumiCapabilities',
   'listRequests',
   'getRequestDetail',
   'getRequestSafeInfo',
   'createRequest',
   'previewModifyRequest',
-  'previewSaveRequest',
   'confirmRequestSave',
   'acceptRequest',
   'cancelRequest',
   'modifyRequest',
   'deleteRequest',
-  'submitRequestToAutoBangumi',
   'searchMikanCandidates',
   'getMikanPoster',
   'getPreferences',
@@ -37,14 +39,6 @@ const EXPECTED_OPERATION_IDS = [
   'saveCorrection',
   'parseBatchTitles',
   'saveConfirmBatchItems',
-  'acceptBatchItems',
-  'getBatchQueue',
-  'submitBatchQueue',
-  'retryBatchQueueItem',
-  'recoverBatchQueueItem',
-  'testQbittorrentConnection',
-  'testAutoBangumiConnection',
-  'probeAutoBangumiCapabilities',
   'listTrackingItems',
   'getTrackingItemDetail',
   'revalidateTrackingItem',
@@ -62,19 +56,21 @@ describe('generated API client (US-198)', () => {
   it('declares every operationId as a readable, stable name', () => {
     // At type level: every expected operationId must exist on `operations`.
     type OperationKeys = keyof operations
-    expectTypeOf<OperationKeys>().toEqualTypeOf<
+    expectTypeOf<OperationKeys>().toMatchTypeOf<
+      | 'getAutoBangumiConnection'
+      | 'saveAutoBangumiConnection'
+      | 'deleteAutoBangumiConnection'
+      | 'probeSavedAutoBangumiCapabilities'
       | 'listRequests'
       | 'getRequestDetail'
       | 'getRequestSafeInfo'
       | 'createRequest'
       | 'previewModifyRequest'
-      | 'previewSaveRequest'
       | 'confirmRequestSave'
       | 'acceptRequest'
       | 'cancelRequest'
       | 'modifyRequest'
       | 'deleteRequest'
-      | 'submitRequestToAutoBangumi'
       | 'searchMikanCandidates'
       | 'getMikanPoster'
       | 'getPreferences'
@@ -83,14 +79,6 @@ describe('generated API client (US-198)', () => {
       | 'saveCorrection'
       | 'parseBatchTitles'
       | 'saveConfirmBatchItems'
-      | 'acceptBatchItems'
-      | 'getBatchQueue'
-      | 'submitBatchQueue'
-      | 'retryBatchQueueItem'
-      | 'recoverBatchQueueItem'
-      | 'testQbittorrentConnection'
-      | 'testAutoBangumiConnection'
-      | 'probeAutoBangumiCapabilities'
       | 'listTrackingItems'
       | 'getTrackingItemDetail'
       | 'revalidateTrackingItem'
@@ -107,24 +95,17 @@ describe('generated API client (US-198)', () => {
 
   it('generates paths entries for all API families', () => {
     type PathKeys = keyof paths
-    expectTypeOf<PathKeys>().toEqualTypeOf<
-      | '/api/v1/autobangumi/capabilities'
-      | '/api/v1/autobangumi/test-connection'
+    expectTypeOf<PathKeys>().toMatchTypeOf<
+      | '/api/v1/settings/autobangumi'
+      | '/api/v1/settings/autobangumi/probe'
       | '/api/v1/batches/parse'
-      | '/api/v1/batches/{batch_id}/accept'
-      | '/api/v1/batches/{batch_id}/queue'
-      | '/api/v1/batches/{batch_id}/recover'
-      | '/api/v1/batches/{batch_id}/retry'
       | '/api/v1/batches/{batch_id}/save-confirm'
-      | '/api/v1/batches/{batch_id}/submit'
       | '/api/v1/corrections'
       | '/api/v1/mikan/candidates'
       | '/api/v1/mikan/posters/{key}'
       | '/api/v1/preferences'
-      | '/api/v1/qbittorrent/test-connection'
       | '/api/v1/requests'
       | '/api/v1/requests/preview-modify'
-      | '/api/v1/requests/preview-save'
       | '/api/v1/requests/save-confirm'
       | '/api/v1/requests/{request_id}'
       | '/api/v1/requests/{request_id}/accept'
@@ -132,7 +113,6 @@ describe('generated API client (US-198)', () => {
       | '/api/v1/requests/{request_id}/delete'
       | '/api/v1/requests/{request_id}/modify'
       | '/api/v1/requests/{request_id}/safe-info'
-      | '/api/v1/requests/{request_id}/submit-ab'
       | '/api/v1/tracking/items'
       | '/api/v1/tracking/items/{tracking_id}'
       | '/api/v1/tracking/items/{tracking_id}/revalidate'
@@ -149,28 +129,15 @@ describe('generated API client (US-198)', () => {
 
   it('has the shared success/error envelope components', () => {
     type SchemaKeys = keyof components['schemas']
-    expectTypeOf<SchemaKeys>().toEqualTypeOf<
+    expectTypeOf<SchemaKeys>().toMatchTypeOf<
       'ApiErrorEnvelope' | 'ApiOkEnvelope'
     >()
   })
 
-  it('types request-scoped credential fields on the submit-ab body', () => {
-    // submit-ab's request body carries ab_config (request-scoped credentials);
-    // the transport layer will use this generated type for the POST body.
-    type SubmitAbBody = NonNullable<
-      operations['submitRequestToAutoBangumi']['requestBody']
-    >['content']['application/json']
-    expectTypeOf<SubmitAbBody>().toMatchTypeOf<{
-      ab_config: { auth_mode: 'password' | 'api_token'; fallback_enabled: boolean }
-      storage_dir?: string | null
-    }>()
-    // Credential fields are present (the transport must never persist them).
-    expectTypeOf<SubmitAbBody['ab_config']>().toMatchTypeOf<{
-      base_url?: string
-      username?: string
-      password?: string
-      token?: string
-    }>()
+  it('types saved connection references on tracking bodies', () => {
+    // Formal tracking writes carry only the saved connection generation.
+    type SubmitBody = NonNullable<operations['submitTrackingItem']['requestBody']>['content']['application/json']
+    expectTypeOf<SubmitBody>().toMatchTypeOf<{ connection_ref: string; configuration_revision: number }>()
   })
 
   it('derives preview patch consumers from the generated request contract', () => {
@@ -192,6 +159,6 @@ describe('generated API client (US-198)', () => {
   })
 
   it('has a non-empty expected operation set (guards the fixture)', () => {
-    expect(EXPECTED_OPERATION_IDS).toHaveLength(39)
+    expect(EXPECTED_OPERATION_IDS).toHaveLength(33)
   })
 })

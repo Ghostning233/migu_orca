@@ -149,10 +149,17 @@ def pytest_collection_modifyitems(
 
 
 @pytest.fixture(scope="session")
-def app() -> Any:
+def app(tmp_path_factory: pytest.TempPathFactory) -> Any:
+    config_root = tmp_path_factory.mktemp("web-config")
+    previous_config_root = os.environ.get("MIGU_ORCA_WEB_CONFIG_ROOT")
+    os.environ["MIGU_ORCA_WEB_CONFIG_ROOT"] = str(config_root)
     app = create_app("testing")
     _register_test_routes(app)
-    return app
+    yield app
+    if previous_config_root is None:
+        os.environ.pop("MIGU_ORCA_WEB_CONFIG_ROOT", None)
+    else:
+        os.environ["MIGU_ORCA_WEB_CONFIG_ROOT"] = previous_config_root
 
 
 def _register_test_routes(app: Any) -> None:
@@ -232,7 +239,7 @@ def _web_storage_root(tmp_path: Path) -> None:
 def create_saved_request(storage_root: Path, title: str, request_id: str) -> dict[str, Any]:
     """Generate and save a Request to temporary storage for browser tests.
 
-    Uses static-fixture data source (no real MiKan, Auto Bangumi, or qBittorrent access).
+    Uses static-fixture data source (no real upstream access).
     Returns the full Request dict as stored on disk.
     """
     request = {
@@ -253,7 +260,7 @@ def preview_result_json(
 
     US-194: an unsaved generation returns an opaque ``draft_id`` and the server
     holds the authoritative draft. To let browser tests exercise the real
-    preview-modify/preview-save backend, the draft is issued into the in-process
+    preview-modify/save-confirm backend, the draft is issued into the in-process
     ``draft_store`` singleton (cleared per test by the ``_web_storage_root``
     fixture), and the response carries the same id the real backend would.
     """
@@ -285,88 +292,12 @@ def issue_draft_id(request: dict[str, Any]) -> str:
     return draft_store.issue(request).draft_id
 
 
-def save_preview_handler(calls: list[dict[str, Any]] | None = None):
-    """Build a ``POST /api/v1/requests/preview-save`` route handler.
-
-    Mirrors the real US-194/US-212 backend contract for browser tests:
-    reserves the ``draft_id`` from the in-process draft store against the
-    ``base_revision`` in the payload, returns the saved request, and consumes
-    the draft (a second save of the same id is a 409). Never persists to disk
-    (the original mocks did not either) and never returns sensitive draft
-    content. ``calls`` (optional) records every preview-save payload for
-    assertions.
-    """
-    from apps.migu_orca_web.drafts import draft_store
-    from request_engine.controllers.request_controller import summarize_request
-
-    def _handler(route: Any, request: Any) -> None:
-        payload = json.loads(request.post_data or "{}")
-        if calls is not None:
-            calls.append(payload)
-        draft_id = payload.get("draft_id")
-        base_revision = payload.get("base_revision")
-        if not isinstance(base_revision, int) or base_revision < 1:
-            route.fulfill(
-                status=400,
-                content_type="application/json",
-                body=json.dumps(
-                    {
-                        "ok": False,
-                        "error_type": "data_validation_errors",
-                        "error_message": "Data has validation errors",
-                        "error_data": {
-                            "errors": [
-                                {
-                                    "error_type": "validation_error",
-                                    "field": "base_revision",
-                                    "message": "Field required",
-                                }
-                            ]
-                        },
-                    },
-                    ensure_ascii=False,
-                ),
-            )
-            return
-        draft, reason = draft_store.reserve_for_save(draft_id, base_revision)
-        if draft is None:
-            draft_store.release_save(draft_id)
-            route.fulfill(
-                status=409,
-                content_type="application/json",
-                body=json.dumps(
-                    {
-                        "ok": False,
-                        "error_type": "draft_expired",
-                        "error_message": "订阅草案已过期或不存在，请重新生成",
-                        "error_data": {"failed_step": "reserve_preview_draft", "details": {"field": "draft_id"}},
-                    },
-                    ensure_ascii=False,
-                ),
-            )
-            return
-        draft_store.commit_save(draft_id)
-        route.fulfill(
-            status=200,
-            content_type="application/json",
-            body=json.dumps(
-                {
-                    "ok": True,
-                    "result": {
-                        "request": draft,
-                        "summary": summarize_request(draft),
-                    },
-                },
-                ensure_ascii=False,
-            ),
-        )
-
-    return _handler
 
 
-def set_storage_preferences(
-    page: Any, storage_root: Path | str, *, save_request: bool = False
-) -> None:
+
+
+
+def set_storage_preferences(page: Any, storage_root: Path | str) -> None:
     """Seed non-sensitive Settings preferences before loading Web UI pages.
 
     US-193: localStorage holds a *relative profile* under the server storage
@@ -375,10 +306,8 @@ def set_storage_preferences(
     """
     profile = storage_root.name if isinstance(storage_root, Path) else str(storage_root)
     storage_dir_json = json.dumps(profile)
-    save_request_json = json.dumps(save_request)
     page.add_init_script(
         f"""
         window.localStorage.setItem("miguOrca.web.storageDir", {storage_dir_json});
-        window.localStorage.setItem("miguOrca.web.saveRequest", String({save_request_json}));
         """
     )

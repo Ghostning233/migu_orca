@@ -5,7 +5,12 @@ from pydantic import ValidationError
 
 from apps.migu_orca_web.api_contract import TrackingAvailableActionDTO, TrackingManagementResultDTO
 from apps.migu_orca_web.openapi_gen import generate_openapi
-from apps.migu_orca_web.schemas import TrackingModifyPayload, TrackingRefreshRssPayload, TrackingSetEnabledPayload
+from apps.migu_orca_web.schemas import (
+    TrackingDeleteExternalPayload,
+    TrackingModifyPayload,
+    TrackingRefreshRssPayload,
+    TrackingSetEnabledPayload,
+)
 from apps.migu_orca_web.tracking_contract import MANAGEMENT_ACTION_CONTRACTS, MANAGEMENT_ERROR_SEMANTICS
 from extensions.flask_api.api import _error_http_status
 
@@ -38,8 +43,7 @@ def test_management_payloads_are_strict_and_revision_is_not_coerced() -> None:
     base = {
         "tracking_id": "trk_1", "target_scope": "SUBSCRIPTION", "expected_revision": 1,
         "idempotency_key": "key-1", "confirm": True,
-        "ab_config": {"auth_mode": "password", "base_url": "https://ab.invalid",
-                      "username": "u", "password": "p", "fallback_enabled": False},
+        "connection_ref": "11111111-1111-4111-1111-111111111111", "configuration_revision": 1,
     }
     assert TrackingSetEnabledPayload.model_validate({**base, "enabled": False})
     with pytest.raises(ValidationError):
@@ -48,6 +52,29 @@ def test_management_payloads_are_strict_and_revision_is_not_coerced() -> None:
         TrackingModifyPayload.model_validate({**base, "patch": {"title": "x"}, "unexpected": 1})
     with pytest.raises(ValidationError):
         TrackingRefreshRssPayload.model_validate({**base, "target_scope": "SUBSCRIPTION"})
+
+
+@pytest.mark.parametrize("payload_model, extra", [
+    (TrackingModifyPayload, {"target_scope": "SUBSCRIPTION", "patch": {"title": "x"}}),
+    (TrackingSetEnabledPayload, {"target_scope": "SUBSCRIPTION", "enabled": False}),
+    (TrackingDeleteExternalPayload, {"target_scope": "SUBSCRIPTION"}),
+    (TrackingRefreshRssPayload, {"target_scope": "ASSOCIATED_RSS"}),
+])
+def test_management_success_requests_use_saved_connection_reference(monkeypatch, payload_model, extra) -> None:
+    """Stage 39 migration red test: successful writes carry only saved binding."""
+    payload = {
+        "tracking_id": "trk_1", "expected_revision": 1,
+        "idempotency_key": "key-1", "confirm": True,
+        "connection_ref": "11111111-1111-1111-1111-111111111111",
+        "configuration_revision": 3,
+        **extra,
+    }
+    # This must be accepted once the request-scoped credential contract is retired.
+    parsed = payload_model.model_validate(payload)
+    dumped = parsed.model_dump(exclude_none=True)
+    assert str(dumped["connection_ref"]) == payload["connection_ref"]
+    assert dumped["configuration_revision"] == 3
+    assert "ab_config" not in dumped
 
 
 def test_public_action_and_management_status_are_enumerated() -> None:
@@ -65,8 +92,7 @@ def test_public_action_and_management_status_are_enumerated() -> None:
 def test_modify_patch_is_strictly_discriminated_by_scope() -> None:
     base = {
         "expected_revision": 1, "idempotency_key": "key-1", "confirm": True,
-        "ab_config": {"auth_mode": "password", "base_url": "https://ab.invalid",
-                      "username": "u", "password": "p", "fallback_enabled": False},
+        "connection_ref": "11111111-1111-4111-1111-111111111111", "configuration_revision": 1,
     }
     subscription = TrackingModifyPayload.model_validate({
         **base, "tracking_id": "trk_1", "target_scope": "SUBSCRIPTION",
@@ -123,8 +149,7 @@ def test_openapi_modify_patch_allows_multiple_fields_but_requires_one() -> None:
     base = {
         "tracking_id": "trk_1", "expected_revision": 1,
         "idempotency_key": "key-1", "confirm": True,
-        "ab_config": {"auth_mode": "password", "base_url": "https://ab.invalid",
-                      "username": "u", "password": "p", "fallback_enabled": False},
+        "connection_ref": "11111111-1111-1111-1111-111111111111", "configuration_revision": 1,
     }
     assert TrackingModifyPayload.model_validate({
         **base, "target_scope": "SUBSCRIPTION",

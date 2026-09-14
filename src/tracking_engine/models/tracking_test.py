@@ -93,6 +93,19 @@ def test_external_tracking_id_uses_frozen_versioned_namespace() -> None:
     assert first == "trk_" + __import__("hashlib").sha256(
         b"migu-orca/tracking/external/v1\x00legacy_3_1\x00subscription\x00sub-123"
     ).hexdigest()[:32]
+
+
+def test_saved_external_tracking_ids_are_connection_isolated() -> None:
+    first = tracking_id_for_external(
+        "legacy_3_1", "subscription", "sub-123",
+        "11111111-1111-4111-8111-111111111111",
+    )
+    second = tracking_id_for_external(
+        "legacy_3_1", "subscription", "sub-123",
+        "22222222-2222-4222-8222-222222222222",
+    )
+    legacy = tracking_id_for_external("legacy_3_1", "subscription", "sub-123")
+    assert len({first, second, legacy}) == 3
     assert "sub-123" not in first
     with pytest.raises(ValueError):
         tracking_id_for_external("legacy_3_1", "subscription", "https://bad")
@@ -116,6 +129,60 @@ def test_external_record_has_no_request_and_round_trips_strict_mapping() -> None
     assert record.request_id is None
     assert record.external_mapping["rss_ids"] == ["rss-a", "rss-b"]
     assert restored == record
+
+
+def test_external_mapping_v2_round_trip_binds_connection_ref() -> None:
+    connection_ref = "11111111-1111-4111-8111-111111111111"
+    record = create_external_tracking_record(
+        adapter="legacy_3_1",
+        object_kind="subscription",
+        external_id="sub-123",
+        subscription_id="sub-123",
+        connection_ref=connection_ref,
+        now="2026-09-09T00:00:00+00:00",
+    )
+
+    assert record.external_mapping["schema_version"] == 2
+    assert record.external_mapping["connection_ref"] == connection_ref
+    assert tracking_from_storage_dict(tracking_to_storage_dict(record)) == record
+
+
+@pytest.mark.parametrize(
+    "mapping_update",
+    [
+        {"connection_ref": None},
+        {"connection_ref": "11111111-1111-4111-8111-11111111111"},
+        {"connection_ref": "abcdefab-cdef-4abc-8def-abcdefabcdef".upper()},
+        {"connection_ref": "https://secret.invalid"},
+        {"unexpected": "value"},
+    ],
+)
+def test_external_mapping_v2_rejects_missing_invalid_or_unknown_binding(
+    mapping_update: dict[str, object],
+) -> None:
+    storage = tracking_to_storage_dict(_record())
+    storage["external_mapping"] = {
+        "schema_version": 2,
+        "adapter": "legacy_3_1",
+        "subscription_id": "sub-123",
+        "rss_ids": [],
+        "match_reason": "EXTERNAL_ID",
+        "external_deleted": False,
+        "enabled": True,
+        "missing_sync_count": 0,
+        "last_verified_at": None,
+        "connection_ref": "11111111-1111-4111-8111-111111111111",
+        **mapping_update,
+    }
+    with pytest.raises(ValueError):
+        tracking_from_storage_dict(storage)
+
+
+def test_external_mapping_rejects_boolean_schema_version() -> None:
+    storage = tracking_to_storage_dict(_record())
+    storage["external_mapping"] = {"schema_version": True}
+    with pytest.raises(ValueError, match="schema_version must be an integer"):
+        tracking_from_storage_dict(storage)
 
 
 def test_external_mapping_v1_rejects_unknown_fields_but_legacy_is_preserved() -> None:

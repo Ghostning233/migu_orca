@@ -40,21 +40,25 @@ from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import replace
 from typing import Any
+from uuid import UUID
 
+from ab_engine.controllers.tracking_submit_adapter import compose_tracking_submit_one
 from apps.migu_orca_web.save_confirm_service import compute_request_fingerprint
+from apps.migu_orca_web.schemas import SavedTrackingSubmitInput
 from apps.migu_orca_web.serializers import (
     _sanitize_ab_submit_result,
     serialize_request_safe_info,
 )
 from apps.migu_orca_web.tracking_migration_service import run_tracking_migration
-from apps.migu_orca_web.tracking_queue_compat import sync_queue_projection_for_tracking
 from apps.migu_orca_web.tracking_serializers import (
     tracking_available_actions,
     tracking_summary_fields,
 )
-from batch_engine.controllers.batch_submit_controller import compose_ab_submit_one
 from shared.errors import Stage1Error
 from storage_engine.controllers.ab_result_repository import save_ab_submit_result
+from storage_engine.controllers.autobangumi_config_repository import (
+    AutoBangumiConfigRepository,
+)
 from storage_engine.controllers.operation_repository import (
     bind_tracking_operation,
     compare_and_swap_tracking_operation,
@@ -150,6 +154,7 @@ def run_tracking_submit(
     idempotency_key: str,
     confirm: bool,
     ab_config: Any,
+    connection_ref: str | UUID | None = None,
     start_statuses: frozenset[str] | None = None,
     submit_one: SubmitOne | None = None,
     persist_ab_result: PersistAbResult | None = None,
@@ -190,6 +195,7 @@ def run_tracking_submit(
             record=record,
             expected_revision=expected_revision,
             fingerprint=fingerprint,
+            connection_ref=connection_ref,
         )
         return _resolve_existing_operation(
             config,
@@ -200,6 +206,7 @@ def run_tracking_submit(
             idempotency_key=idempotency_key,
             fingerprint=fingerprint,
             ab_config=ab_config,
+            connection_ref=connection_ref,
             submit_one=submit_one,
             persist_ab_result=persist_ab_result,
             timestamp=timestamp,
@@ -244,6 +251,7 @@ def run_tracking_submit(
         expected_revision=expected_revision,
         idempotency_key=idempotency_key,
         ab_config=ab_config,
+        connection_ref=connection_ref,
         operation=None,
         submit_one=submit_one,
         persist_ab_result=persist_ab_result,
@@ -259,6 +267,7 @@ def run_tracking_retry(
     idempotency_key: str,
     confirm: bool,
     ab_config: Any,
+    connection_ref: str | UUID | None = None,
     submit_one: SubmitOne | None = None,
     persist_ab_result: PersistAbResult | None = None,
     now: str | None = None,
@@ -280,11 +289,158 @@ def run_tracking_retry(
         idempotency_key=idempotency_key,
         confirm=confirm,
         ab_config=ab_config,
+        connection_ref=connection_ref,
         start_statuses=frozenset({TRACKING_STATUS_SUBMIT_FAILED}),
         submit_one=submit_one,
         persist_ab_result=persist_ab_result,
         now=now,
     )
+
+
+def run_saved_tracking_submit(
+    config: StorageConfig,
+    *,
+    payload: SavedTrackingSubmitInput | None = None,
+    repository: AutoBangumiConfigRepository | None = None,
+    tracking_id: str | None = None,
+    expected_revision: int | None = None,
+    idempotency_key: str | None = None,
+    confirm: bool | None = None,
+    connection_ref: str | UUID | None = None,
+    configuration_revision: int | None = None,
+    submit_one: SubmitOne | None = None,
+    persist_ab_result: PersistAbResult | None = None,
+    now: str | None = None,
+) -> dict[str, Any]:
+    """Submit through one exact, server-owned saved AB configuration.
+
+    The public HTTP shape still belongs to the legacy route until US-328.  This
+    seam deliberately accepts only an immutable configuration reference and
+    revision; credentials are loaded from the deployment repository and remain
+    inside the adapter call.  Terminal replays do not need the old credentials,
+    but still validate the operation's persisted connection binding.
+    """
+    return _run_saved_tracking_submission(
+        config,
+        payload=_coerce_saved_submit_input(
+            payload,
+            tracking_id=tracking_id,
+            expected_revision=expected_revision,
+            idempotency_key=idempotency_key,
+            confirm=confirm,
+            connection_ref=connection_ref,
+            configuration_revision=configuration_revision,
+        ),
+        repository=repository,
+        start_statuses=None,
+        submit_one=submit_one,
+        persist_ab_result=persist_ab_result,
+        now=now,
+    )
+
+
+def run_saved_tracking_retry(
+    config: StorageConfig,
+    *,
+    payload: SavedTrackingSubmitInput | None = None,
+    repository: AutoBangumiConfigRepository | None = None,
+    tracking_id: str | None = None,
+    expected_revision: int | None = None,
+    idempotency_key: str | None = None,
+    confirm: bool | None = None,
+    connection_ref: str | UUID | None = None,
+    configuration_revision: int | None = None,
+    submit_one: SubmitOne | None = None,
+    persist_ab_result: PersistAbResult | None = None,
+    now: str | None = None,
+) -> dict[str, Any]:
+    """Retry only a definitely failed submit using the saved AB connection."""
+    return _run_saved_tracking_submission(
+        config,
+        payload=_coerce_saved_submit_input(
+            payload,
+            tracking_id=tracking_id,
+            expected_revision=expected_revision,
+            idempotency_key=idempotency_key,
+            confirm=confirm,
+            connection_ref=connection_ref,
+            configuration_revision=configuration_revision,
+        ),
+        repository=repository,
+        start_statuses=frozenset({TRACKING_STATUS_SUBMIT_FAILED}),
+        submit_one=submit_one,
+        persist_ab_result=persist_ab_result,
+        now=now,
+    )
+
+
+def _run_saved_tracking_submission(
+    config: StorageConfig,
+    *,
+    payload: SavedTrackingSubmitInput,
+    repository: AutoBangumiConfigRepository | None,
+    start_statuses: frozenset[str] | None,
+    submit_one: SubmitOne | None,
+    persist_ab_result: PersistAbResult | None,
+    now: str | None,
+) -> dict[str, Any]:
+    repository = repository or AutoBangumiConfigRepository()
+    existing = _find_operation(config, payload.idempotency_key)
+    # A terminal replay is already a safe local result.  An in-progress replay
+    # must not call out either.  Avoid requiring a now-deleted credential for
+    # these paths, while the normal/prepared path obtains an exact lease below.
+    if existing is not None and existing.state in {
+        *TRACKING_OPERATION_TERMINAL_STATES,
+        TRACKING_OPERATION_STATE_IN_PROGRESS,
+    }:
+        return run_tracking_submit(
+            config,
+            tracking_id=payload.tracking_id,
+            expected_revision=payload.expected_revision,
+            idempotency_key=payload.idempotency_key,
+            confirm=payload.confirm,
+            ab_config=None,
+            connection_ref=payload.connection_ref,
+            start_statuses=start_statuses,
+            submit_one=submit_one,
+            persist_ab_result=persist_ab_result,
+            now=now,
+        )
+
+    with repository.acquire_lease(
+        connection_ref=payload.connection_ref,
+        configuration_revision=payload.configuration_revision,
+    ) as lease:
+        if lease.record.config is None:
+            raise Stage1Error(
+                "config_error",
+                "Auto Bangumi 配置未配置",
+                "tracking_saved_submit",
+            )
+        return run_tracking_submit(
+            config,
+            tracking_id=payload.tracking_id,
+            expected_revision=payload.expected_revision,
+            idempotency_key=payload.idempotency_key,
+            confirm=payload.confirm,
+            ab_config=lease.record.config.to_runtime_config(),
+            connection_ref=payload.connection_ref,
+            start_statuses=start_statuses,
+            submit_one=submit_one,
+            persist_ab_result=persist_ab_result,
+            now=now,
+        )
+
+
+def _coerce_saved_submit_input(
+    payload: SavedTrackingSubmitInput | None,
+    **values: Any,
+) -> SavedTrackingSubmitInput:
+    if payload is not None:
+        if any(value is not None for value in values.values()):
+            raise ValueError("payload cannot be combined with submit input fields")
+        return payload
+    return SavedTrackingSubmitInput.model_validate(values)
 
 
 # ---------------------------------------------------------------------------
@@ -302,6 +458,7 @@ def _resolve_existing_operation(
     idempotency_key: str,
     fingerprint: str | None,
     ab_config: Any,
+    connection_ref: str | UUID | None,
     submit_one: SubmitOne | None,
     persist_ab_result: PersistAbResult | None,
     timestamp: str,
@@ -337,6 +494,7 @@ def _resolve_existing_operation(
             expected_revision=expected_revision,
             idempotency_key=idempotency_key,
             ab_config=ab_config,
+            connection_ref=connection_ref,
             operation=operation,
             submit_one=submit_one,
             persist_ab_result=persist_ab_result,
@@ -353,6 +511,7 @@ def _resolve_existing_operation(
             expected_revision=expected_revision,
             idempotency_key=idempotency_key,
             ab_config=ab_config,
+            connection_ref=connection_ref,
             operation=operation,
             submit_one=submit_one,
             persist_ab_result=persist_ab_result,
@@ -480,6 +639,7 @@ def _submit_through_external(
     expected_revision: int,
     idempotency_key: str,
     ab_config: Any,
+    connection_ref: str | UUID | None,
     operation: TrackingOperation | None,
     submit_one: SubmitOne | None,
     persist_ab_result: PersistAbResult | None,
@@ -494,6 +654,7 @@ def _submit_through_external(
             idempotency_key=idempotency_key,
             expected_revision=expected_revision,
             request_fingerprint=fingerprint or "",
+            connection_ref=connection_ref,
             now=timestamp,
         )
         if not created:
@@ -507,6 +668,7 @@ def _submit_through_external(
                 idempotency_key=idempotency_key,
                 fingerprint=fingerprint,
                 ab_config=ab_config,
+                connection_ref=connection_ref,
                 submit_one=submit_one,
                 persist_ab_result=persist_ab_result,
                 timestamp=timestamp,
@@ -598,6 +760,7 @@ def _submit_through_external(
         operation=operation,
         classification=classification,
         ab_result=ab_result,
+        connection_ref=connection_ref,
         expected_revision=expected_revision,
         request=request,
         timestamp=timestamp,
@@ -611,6 +774,7 @@ def _finalize_external_outcome(
     operation: TrackingOperation,
     classification: str,
     ab_result: dict[str, Any],
+    connection_ref: str | UUID | None,
     expected_revision: int,
     request: dict[str, Any] | None,
     timestamp: str,
@@ -651,6 +815,15 @@ def _finalize_external_outcome(
         safe_message=safe_message,
         now=timestamp,
     )
+    if classification == TRACKING_OPERATION_STATE_SUCCEEDED and connection_ref is not None:
+        next_record = replace(
+            next_record,
+            external_mapping=_submit_external_mapping(
+                external_id=external_id,
+                connection_ref=connection_ref,
+                timestamp=timestamp,
+            ),
+        )
     if reason_code is not None:
         next_record = replace(
             next_record,
@@ -853,12 +1026,14 @@ def _guard_replay_binding(
     record: TrackingRecord,
     expected_revision: int,
     fingerprint: str | None,
+    connection_ref: str | UUID | None,
 ) -> None:
     """Raise ``tracking_idempotency_conflict`` when a same-key binding differs."""
     if (
         operation.tracking_id != record.tracking_id
         or operation.operation != TRACKING_OPERATION_KIND_SUBMIT
         or operation.expected_revision != expected_revision
+        or operation.connection_ref != _canonical_connection_ref(connection_ref)
     ):
         raise Stage1Error(
             "tracking_idempotency_conflict",
@@ -961,13 +1136,8 @@ def _sync_queue_projection(
     the old batch queue stays a faithful compat projection of the authoritative
     TrackingRecord.  Never raises and never overwrites a durable queue success.
     """
-    if not record.request_id:
-        return
-    sync_queue_projection_for_tracking(
-        config,
-        request_id=record.request_id,
-        tracking_status=tracking_status,
-    )
+    # Retired US-336: TrackingRecord is the sole authority; no queue projection.
+    return
 
 
 def _run_submit_one(
@@ -976,7 +1146,7 @@ def _run_submit_one(
     ab_config: Any,
 ) -> dict[str, Any]:
     """Invoke the AB create seam, folding a raised error into a result dict."""
-    seam = submit_one or compose_ab_submit_one()
+    seam = submit_one or compose_tracking_submit_one()
     try:
         result = seam(request, ab_config)
         return result if isinstance(result, dict) else {"success": False, "error": None}
@@ -1049,4 +1219,42 @@ def _submit_result_payload(
     }
 
 
-__all__ = ["PersistAbResult", "SubmitOne", "run_tracking_retry", "run_tracking_submit"]
+def _canonical_connection_ref(value: str | UUID | None) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, str):
+        return value
+    return None
+
+
+def _submit_external_mapping(
+    *,
+    external_id: str | None,
+    connection_ref: str | UUID,
+    timestamp: str,
+) -> dict[str, Any]:
+    """Build the v2 mapping for the connection that actually submitted."""
+    return {
+        "schema_version": 2,
+        "adapter": "legacy_3_1",
+        "subscription_id": external_id,
+        "rss_ids": [],
+        "match_reason": "EXTERNAL_ID",
+        "external_deleted": False,
+        "enabled": True,
+        "missing_sync_count": 0,
+        "last_verified_at": timestamp,
+        "connection_ref": _canonical_connection_ref(connection_ref),
+    }
+
+
+__all__ = [
+    "PersistAbResult",
+    "SubmitOne",
+    "run_saved_tracking_retry",
+    "run_saved_tracking_submit",
+    "run_tracking_retry",
+    "run_tracking_submit",
+]

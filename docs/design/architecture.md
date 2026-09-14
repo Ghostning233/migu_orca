@@ -39,7 +39,7 @@ CLI                     Vue SPA (frontend/, Flask 同源 /app/)
 | `request_engine` | Request 契约、确认、取消、受限修改和摘要 |
 | `tracking_engine` | 统一追番记录/operation、外部映射、复核/提交/管理写与恢复规则 |
 | `ab_engine` | AutoBangumi 配置、认证 adapter、payload 与提交结果 |
-| `qbittorrent_engine` | qBittorrent 配置和显式只读连接测试 |
+| `qbittorrent_engine` | 历史 qB 适配；Web 连接测试已退役，不进入默认运行时 |
 | `storage_engine` | Request、history、AB result、queue、偏好、幂等、tracking/operation/迁移的本地 JSON 存储 |
 | `shared` | 跨模块模型、错误、安全日志、标题季数与候选季数证据 |
 
@@ -118,7 +118,8 @@ Web 业务操作统一通过 `/api/v1/*` JSON API 完成，页面是 Stage 27 �
 - 当前导航/页面落点由 `frontend/src/app/router/catalog.ts` 和 `index.ts` 统一定义：
   `/app/add` → WorkbenchView，`/app/plans` → RequestsView，`/app/tracking` → TrackingView，
   `/app/settings` → SettingsView。`/app/workbench|requests|queue` 只保留安全兼容重定向；
-  QueueView/queueWorkbench 留作回退，不进入默认构建，后端旧 batch 端点仍保留。
+  QueueView/queueWorkbench 与旧 batch 写端点已退役；`/app/queue` 仅安全重定向，历史 queue reader
+  仅供迁移读取。
 - 当前前端审核使用共享候选、AnimeDraftEditor、useDraftSession 和旅程 composable；
   tracking 页面统一拥有凭据/写意图/恢复，检查器只消费安全详情和页面会话。具体状态处理见代码/契约。
 - 普通前端 API 仍有短超时；MiKan 多步骤搜索/草案/批量读取使用单独有界预算和固定错误映射，
@@ -141,7 +142,8 @@ safe-info 新契约，handoff 见 `docs/MiGuOrca_stage28_draft_consistency_PRD.m
   见 `idempotency_repository.py`/`tracking_repository.py`/`operation_repository.py`/
   `migration_repository.py`）。
 - 候选缓存、候选选择 context 等短期状态当前位于单进程内存，不能假定天然支持多 worker。
-- AutoBangumi 与 qBittorrent 凭据保持 request-scoped，不进入持久化、URL、浏览器 storage、日志或测试产物。
+- AutoBangumi 凭据唯一持久化例外是服务端专用配置 repository 的 `autobangumi.json`；其余业务
+  JSON、URL、浏览器 storage、日志和测试产物均不得含秘密。qB Web 配置与连接测试已退役。
 - Web 与 CLI 使用不同 storage 信任边界（US-193）：CLI 继续接受显式 `--storage-dir`；
   Web API 的 `storage_dir` 只能选择服务端根目录下的相对 profile（默认 `.migu_orca/storage`，
   可用 `MIGU_ORCA_WEB_STORAGE_ROOT` 服务端覆盖），绝对路径/穿越/符号链接逃逸返回 400

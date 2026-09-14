@@ -13,6 +13,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
+from uuid import UUID
 
 from ab_engine.controllers.subscription_payload import _legacy_31_filter
 from ab_engine.models.management import ExternalRss, ExternalSubscription
@@ -59,6 +60,7 @@ def resolve_management_target(
     rss_items: Sequence[ExternalRss],
     *,
     include_deleted_subscription: bool = False,
+    connection_ref: str | UUID | None = None,
 ) -> ResolvedManagementTarget:
     """Resolve a public scope through the record's current mapping exactly once."""
     if scope not in {"SUBSCRIPTION", "ASSOCIATED_RSS"}:
@@ -66,6 +68,10 @@ def resolve_management_target(
     mapping = record.external_mapping
     if not isinstance(mapping, Mapping):
         raise _invalid("tracking_mapping_missing")
+    if mapping.get("schema_version") == 2 and connection_ref is None:
+        raise _invalid("tracking_mapping_reverification_required")
+    if connection_ref is not None:
+        _require_current_mapping_connection(mapping, connection_ref)
 
     if scope == "SUBSCRIPTION":
         external_id = mapping.get("subscription_id")
@@ -113,6 +119,32 @@ def build_management_patch(scope: str, patch: Any) -> dict[str, Any]:
     return normalized
 
 
+def _require_current_mapping_connection(
+    mapping: Mapping[str, Any], connection_ref: str | UUID
+) -> None:
+    """Require a v2 mapping bound to the exact saved connection reference."""
+    expected = _normalize_connection_ref(connection_ref)
+    if mapping.get("schema_version") != 2:
+        raise _invalid("tracking_mapping_reverification_required")
+    actual = mapping.get("connection_ref")
+    if not isinstance(actual, str) or actual != expected:
+        raise _invalid("tracking_mapping_reverification_required")
+
+
+def _normalize_connection_ref(value: str | UUID) -> str:
+    if isinstance(value, UUID):
+        return str(value)
+    if not isinstance(value, str):
+        raise _invalid("invalid_connection_ref")
+    try:
+        parsed = UUID(value)
+    except (ValueError, AttributeError):
+        raise _invalid("invalid_connection_ref") from None
+    if str(parsed) != value:
+        raise _invalid("invalid_connection_ref")
+    return value
+
+
 def build_complete_subscription_update(
     target: ResolvedManagementTarget, patch: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -156,7 +188,8 @@ def build_complete_rss_update(
 
 
 def build_management_binding(
-    *, action: str, scope: str, patch: Mapping[str, Any] | None = None, enabled: bool | None = None
+    *, action: str, scope: str, patch: Mapping[str, Any] | None = None,
+    enabled: bool | None = None, connection_ref: str | UUID | None = None,
 ) -> ManagementBinding:
     """Return deterministic action and expected-projection SHA-256 summaries."""
     if action not in {"MODIFY", "SET_ENABLED", "DELETE_EXTERNAL", "REFRESH_RSS"}:
@@ -175,14 +208,24 @@ def build_management_binding(
         projection = {"deleted": True}
     else:
         projection = {"scope": scope}
+    normalized_ref = _normalize_connection_ref(connection_ref) if connection_ref is not None else None
     action_digest = canonical_management_fingerprint(
-        action=action, target_scope=scope, expected_projection=projection
+        action=action, target_scope=scope, expected_projection=projection,
+        connection_ref=normalized_ref,
     )
     encoded = json.dumps(projection, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     return ManagementBinding(
         action_fingerprint=action_digest,
         expected_external_fingerprint=f"sha256:{hashlib.sha256(encoded).hexdigest()}",
     )
+
+
+def validate_management_mapping(record: TrackingRecord, connection_ref: str | UUID) -> None:
+    """Validate saved-connection ownership before any external snapshot IO."""
+    mapping = record.external_mapping
+    if not isinstance(mapping, Mapping):
+        raise _invalid("tracking_mapping_missing")
+    _require_current_mapping_connection(mapping, connection_ref)
 
 
 def _validate_patch_value(field: str, value: Any) -> Any:
@@ -229,5 +272,7 @@ __all__ = [
     "build_complete_subscription_update",
     "build_management_binding",
     "build_management_patch",
+    "validate_management_mapping",
+    "_require_current_mapping_connection",
     "resolve_management_target",
 ]

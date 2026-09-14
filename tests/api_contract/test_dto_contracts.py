@@ -16,24 +16,17 @@ from pydantic import ValidationError
 
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from apps.migu_orca_web.api_contract import (
-    AutoBangumiConnectionResultDTO,
-    BatchAcceptResultDTO,
     BatchParseResultDTO,
-    BatchQueueResultDTO,
     BatchSaveConfirmResultDTO,
-    BatchSubmitResultDTO,
     CorrectionsResultDTO,
     MikanCandidateResultDTO,
     PreferenceResultDTO,
-    QbittorrentConnectionResultDTO,
-    RequestAbSubmitResultDTO,
     RequestActionResultDTO,
     RequestCreateResultDTO,
     RequestDeleteResultDTO,
     RequestDetailResultDTO,
     RequestListResultDTO,
     RequestPreviewModifyResultDTO,
-    RequestPreviewSaveResultDTO,
     RequestSafeInfoDTO,
     RequestSafeInfoResultDTO,
     RequestSaveConfirmResultDTO,
@@ -45,8 +38,6 @@ from apps.migu_orca_web.serializers import (
     serialize_request_safe_info,
 )
 from batch_engine.controllers.batch_draft_controller import create_batch_draft
-from batch_engine.controllers.batch_queue_controller import serialize_queue
-from batch_engine.models import BatchSubmissionQueue
 from request_engine.controllers.request_controller import (
     accept_request,
     summarize_request,
@@ -73,32 +64,6 @@ def _safe_detail_request(title: str = "芙莉莲") -> dict[str, Any]:
 
 def _summary(request: dict[str, Any]) -> dict[str, Any]:
     return summarize_request(request)
-
-
-def _accept_result() -> dict[str, Any]:
-    queue = BatchSubmissionQueue(
-        queue_id="queue-1",
-        batch_id="batch-1",
-        created_at="2026-08-29T00:00:00+00:00",
-        updated_at="2026-08-29T00:00:00+00:00",
-        items=[],
-    )
-    return {
-        "batch_id": "batch-1",
-        "queue": serialize_queue(queue),
-        "items": [
-            {
-                "item_id": "item-1",
-                "request_id": None,
-                "title": "示例",
-                "status": "unacceptable",
-                "reason": "卡片缺少订阅草案，无法接受",
-                "error_type": None,
-                "queued": False,
-            }
-        ],
-        "summary": {"accepted": 0, "already_accepted": 0, "unacceptable": 1, "failed": 0},
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -147,15 +112,10 @@ def test_request_create_dto_rejects_unknown_result_field() -> None:
         RequestCreateResultDTO.model_validate(payload)
 
 
-def test_request_preview_modify_save_accept_cancel_share_shape() -> None:
+def test_request_action_dto_accepts_real_payload() -> None:
     request = _generated_request()
     base = {"request": request, "summary": _summary(request)}
-    for dto in (
-        RequestPreviewModifyResultDTO,
-        RequestPreviewSaveResultDTO,
-        RequestActionResultDTO,
-    ):
-        assert dto.model_validate(base) is not None
+    assert RequestActionResultDTO.model_validate(base) is not None
 
 
 def test_request_create_dto_accepts_draft_id_for_unsaved_preview() -> None:
@@ -184,56 +144,6 @@ def test_request_preview_modify_dto_accepts_draft_id_and_revision() -> None:
     validated = RequestPreviewModifyResultDTO.model_validate(payload)
     assert validated.draft_id == "opaque-draft-token"
     assert validated.draft_revision == 2
-
-
-def test_request_preview_save_dto_rejects_draft_id() -> None:
-    """US-194: preview-save consumes the draft; the response has no draft_id.
-
-    US-211: the save response equally has no draft_revision (the draft is gone
-    after a successful save).
-    """
-    request = _generated_request()
-    base = {"request": request, "summary": _summary(request)}
-    assert RequestPreviewSaveResultDTO.model_validate(base) is not None
-    with pytest.raises(ValidationError):
-        RequestPreviewSaveResultDTO.model_validate(
-            {**base, "draft_id": "opaque-draft-token"}
-        )
-    with pytest.raises(ValidationError):
-        RequestPreviewSaveResultDTO.model_validate(
-            {**base, "draft_revision": 1}
-        )
-
-
-def test_request_ab_submit_dto_requires_top_level_ab_result() -> None:
-    """submit-ab adds a top-level ``ab_submit_result`` the base DTO lacks."""
-    request = _generated_request()
-    base = {"request": request, "summary": _summary(request)}
-    # The base create/action DTO does not declare ``ab_submit_result`` at the
-    # top level, so a submit-ab payload fails it (extra field).
-    with pytest.raises(ValidationError):
-        RequestCreateResultDTO.model_validate(
-            {**base, "ab_submit_result": {"success": True}}
-        )
-    # A partial ``ab_submit_result`` (missing the required whitelist fields)
-    # fails the strict AbSubmitResultDTO...
-    with pytest.raises(ValidationError):
-        RequestAbSubmitResultDTO.model_validate(
-            {**base, "ab_submit_result": {"success": True}}
-        )
-    # ...and the full sanitized submit-result shape validates.
-    payload = {
-        **base,
-        "ab_submit_result": {
-            "success": True,
-            "ab_subscription_id": "ab-sub-1",
-            "ab_response": {"id": "ab-sub-1"},
-            "fallback_config": None,
-            "error": None,
-        },
-    }
-    assert RequestAbSubmitResultDTO.model_validate(payload) is not None
-
 
 def test_request_save_confirm_result_dto_accepts_accepted_payload() -> None:
     """US-214/US-222: the save-confirm success result whitelists the handoff."""
@@ -907,91 +817,14 @@ def test_batch_parse_dto_rejects_sensitive_item_fields() -> None:
         BatchParseResultDTO.model_validate({**payload, "token": "x"})
 
 
-def test_batch_queue_dto_accepts_null_queue() -> None:
-    assert BatchQueueResultDTO.model_validate({"batch_id": "b1", "queue": None}) is not None
-    with pytest.raises(ValidationError):
-        BatchQueueResultDTO.model_validate({"batch_id": "b1", "queue": None, "x": 1})
 
 
-def test_batch_queue_dto_types_queue_items() -> None:
-    """US-205: queue items carry only non-sensitive public fields."""
-    queue = {
-        "queue_id": "queue-1",
-        "batch_id": "batch-1",
-        "created_at": "2026-08-19T00:00:00+00:00",
-        "updated_at": "2026-08-19T00:00:00+00:00",
-        "items": [
-            {
-                "queue_id": "queue-1",
-                "batch_id": "batch-1",
-                "item_id": "item-1",
-                "request_id": "req-1",
-                "title": "关于我转生变成史莱姆这档事 第四季",
-                "status": "READY_TO_SUBMIT",
-                "status_label": "待提交",
-                "attempts": 0,
-                "last_error": None,
-                "ab_result_summary": None,
-                "created_at": "2026-08-19T00:00:00+00:00",
-                "updated_at": "2026-08-19T00:00:00+00:00",
-            }
-        ],
-    }
-    payload = {"batch_id": "batch-1", "queue": queue}
-    validated = BatchQueueResultDTO.model_validate(payload)
-    assert validated.queue.items[0].status == "READY_TO_SUBMIT"
-    assert validated.queue.items[0].title
 
 
-def test_batch_accept_dto_validates_serialized_result() -> None:
-    result = _accept_result()
-    assert BatchAcceptResultDTO.model_validate(result) is not None
-    with pytest.raises(ValidationError):
-        BatchAcceptResultDTO.model_validate({**result, "leak": 1})
 
 
-def test_batch_accept_dto_types_result_items() -> None:
-    """US-205: accept result items carry public Chinese reasons only."""
-    queue = {
-        "queue_id": "queue-1",
-        "batch_id": "batch-1",
-        "created_at": "2026-08-19T00:00:00+00:00",
-        "updated_at": "2026-08-19T00:00:00+00:00",
-        "items": [],
-    }
-    payload = {
-        "batch_id": "batch-1",
-        "queue": queue,
-        "items": [
-            {
-                "item_id": "item-1",
-                "request_id": "req-1",
-                "title": "标题",
-                "status": "accepted",
-                "reason": None,
-                "error_type": None,
-                "queued": True,
-            },
-            {
-                "item_id": "item-2",
-                "request_id": None,
-                "title": "标题",
-                "status": "unacceptable",
-                "reason": "卡片缺少订阅草案，无法接受",
-                "error_type": None,
-                "queued": False,
-            },
-        ],
-        "summary": {"accepted": 1, "already_accepted": 0, "unacceptable": 1, "failed": 0},
-    }
-    validated = BatchAcceptResultDTO.model_validate(payload)
-    assert validated.items[0].queued is True
-    assert validated.items[1].reason == "卡片缺少订阅草案，无法接受"
 
 
-def test_batch_submit_dto_shares_accept_shape() -> None:
-    result = _accept_result()
-    assert BatchSubmitResultDTO.model_validate(result) is not None
 
 
 def test_batch_save_confirm_dto_validates_partial_success_result() -> None:
@@ -1065,32 +898,6 @@ def test_batch_save_confirm_dto_rejects_sensitive_item_fields() -> None:
 # ---------------------------------------------------------------------------
 # Connection tests (strict whitelists)
 # ---------------------------------------------------------------------------
-
-
-def test_qbittorrent_connection_dto_rejects_credentials() -> None:
-    payload = {"status": "connected", "reachable": True, "version": "v4.6.7"}
-    assert QbittorrentConnectionResultDTO.model_validate(payload) is not None
-    with pytest.raises(ValidationError):
-        QbittorrentConnectionResultDTO.model_validate(
-            {**payload, "endpoint": "http://private.example"}
-        )
-
-
-def test_ab_connection_dto_rejects_credentials() -> None:
-    payload = {
-        "reachable": True,
-        "authenticated": True,
-        "version": "3.1.18",
-        "auth_mode": "账号密码",
-        "adapter": "legacy_3_1",
-        "submit_supported": True,
-    }
-    assert AutoBangumiConnectionResultDTO.model_validate(payload) is not None
-    with pytest.raises(ValidationError):
-        AutoBangumiConnectionResultDTO.model_validate(
-            {**payload, "token": "secret-token"}
-        )
-
 
 # ---------------------------------------------------------------------------
 # Stage 28 static-review fixes: strict save-confirm request schemas

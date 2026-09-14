@@ -51,17 +51,17 @@ describe('versioned frontend contract handoff (US-255)', () => {
     expectTypeOf<JsonBody<'retryTrackingItem'>>().toHaveProperty('expected_revision')
     expectTypeOf<JsonBody<'recoverTrackingItem'>>().toHaveProperty('action')
     expectTypeOf<JsonBody<'syncTrackingItems'>>().toMatchTypeOf<{ confirm: true }>()
-    expectTypeOf<JsonResult<'probeAutoBangumiCapabilities'>['probe_status']>().toEqualTypeOf<
+    expectTypeOf<JsonResult<'probeSavedAutoBangumiCapabilities'>['probe_status']>().toEqualTypeOf<
       'VERIFIED' | 'PARTIAL' | 'FAILED'
     >()
-    expectTypeOf<JsonResult<'probeAutoBangumiCapabilities'>['subscription_submit']>().toEqualTypeOf<
+    expectTypeOf<JsonResult<'probeSavedAutoBangumiCapabilities'>['subscription_submit']>().toEqualTypeOf<
       'SUPPORTED' | 'UNSUPPORTED' | 'UNKNOWN'
     >()
     // The generated union must reject a write with no allowed patch field.
     const emptyModify: JsonBody<'modifyTrackingItem'> = {
       target_scope: 'SUBSCRIPTION', expected_revision: 1,
       idempotency_key: 'intent-test', confirm: true,
-      ab_config: { auth_mode: 'password', fallback_enabled: false },
+      connection_ref: '11111111-1111-4111-8111-111111111111', configuration_revision: 1,
       // @ts-expect-error an empty patch is not a valid modify request
       patch: {},
     }
@@ -69,7 +69,7 @@ describe('versioned frontend contract handoff (US-255)', () => {
     const emptyFilterModify: JsonBody<'modifyTrackingItem'> = {
       target_scope: 'SUBSCRIPTION', expected_revision: 1,
       idempotency_key: 'intent-test', confirm: true,
-      ab_config: { auth_mode: 'password', fallback_enabled: false },
+      connection_ref: '11111111-1111-4111-8111-111111111111', configuration_revision: 1,
       // @ts-expect-error a non-null filter_rule also needs at least one field
       patch: { filter_rule: {} },
     }
@@ -77,7 +77,7 @@ describe('versioned frontend contract handoff (US-255)', () => {
     const emptyRssModify: JsonBody<'modifyTrackingItem'> = {
       target_scope: 'ASSOCIATED_RSS', expected_revision: 1,
       idempotency_key: 'intent-test', confirm: true,
-      ab_config: { auth_mode: 'password', fallback_enabled: false },
+      connection_ref: '11111111-1111-4111-8111-111111111111', configuration_revision: 1,
       // @ts-expect-error an empty RSS patch is not a valid modify request
       patch: {},
     }
@@ -85,7 +85,7 @@ describe('versioned frontend contract handoff (US-255)', () => {
     const multiFieldModify: JsonBody<'modifyTrackingItem'> = {
       target_scope: 'SUBSCRIPTION', expected_revision: 1,
       idempotency_key: 'intent-test', confirm: true,
-      ab_config: { auth_mode: 'password', fallback_enabled: false },
+      connection_ref: '11111111-1111-4111-8111-111111111111', configuration_revision: 1,
       patch: {
         title: '更新标题', season: 2,
         filter_rule: { must_contain: '1080p', use_regex: false },

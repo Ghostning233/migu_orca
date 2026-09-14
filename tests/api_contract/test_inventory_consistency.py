@@ -39,7 +39,7 @@ def _rules_from_inventory() -> set[tuple[str, str]]:
     section = text.split("## 2. 端点总表", 1)[1].split("## 3.", 1)[0]
     rules: set[tuple[str, str]] = set()
     for line in section.splitlines():
-        match = re.match(r"\|\s*(GET|POST)\s*\|\s*(`[^`]+`|/api/v1/\S+)\s*\|", line)
+        match = re.match(r"\|\s*(GET|POST|PUT|DELETE)\s*\|\s*(`[^`]+`|/api/v1/\S+)\s*\|", line)
         if not match:
             continue
         method = match.group(1)

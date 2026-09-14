@@ -8,35 +8,10 @@
  * and never rendered here.
  */
 
-export interface SubtitleGroupPreference {
-  preferred: string[]
-  excluded: string[]
-  fallback: string
-}
+import type { operations } from '@/api/generated/api'
 
-export interface FilterDefaults {
-  must_contain: string
-  must_not_contain: string
-  use_regex: boolean
-  case_sensitive: boolean
-}
-
-export interface NamingPreference {
-  strategy: string
-  template: string
-}
-
-export interface SearchPreference {
-  reuse_explicit_corrections: boolean
-}
-
-export interface UserPreferences {
-  version: number
-  subtitle_groups: SubtitleGroupPreference
-  filter_defaults: FilterDefaults
-  naming: NamingPreference
-  search: SearchPreference
-}
+type PreferenceResult = NonNullable<operations['getPreferences']['responses']['200']['content']['application/json']['result']>
+export type UserPreferences = PreferenceResult
 
 export const DEFAULT_PREFERENCES: UserPreferences = {
   version: 1,

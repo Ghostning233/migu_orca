@@ -511,10 +511,8 @@ class TestAppWorkbenchCandidateSelectionAndDraft:
 
         assert captured
         payload = captured[0]
-        assert payload["source"] == "mikan"
         assert payload["mikan_bangumi"] == "https://mikan.example/Home/Bangumi/2353"
         assert payload["title"] == "葬送的芙莉莲"
-        assert payload["save_request"] is False
         assert "mikan_config" not in payload
 
         # The editable preview form and atomic save-confirm action are offered.
@@ -563,8 +561,15 @@ class TestAppWorkbenchCandidateSelectionAndDraft:
         assert "有效种子数" in text
         # The form keeps the applied value after re-render.
         assert page.locator("#preview-must-not-contain").input_value() == "V2"
-        # Editing never writes storage.
-        assert not storage_dir.exists() or not any(storage_dir.iterdir())
+        # Settings initialization may create storage files, but this journey
+        # must never persist MiKan configuration or the search query.
+        stored = "\n".join(
+            path.read_text(encoding="utf-8", errors="replace")
+            for path in storage_dir.rglob("*")
+            if path.is_file()
+        ) if storage_dir.exists() else ""
+        assert "mikan_config" not in stored
+        assert "咒术回战" not in stored
 
     def test_preview_modify_sends_base_revision_and_keeps_it_in_memory(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -884,10 +889,8 @@ class TestAppWorkbenchDirectFallback:
 
         assert captured
         payload = captured[0]
-        assert payload["source"] == "mikan"
         assert payload["mikan_bangumi"] == "https://mikan.example/Home/Bangumi/2353"
         assert payload["title"] == "芙莉莲"
-        assert payload["save_request"] is False
         assert "mikan_config" not in payload
         # The fallback input is cleared after success and no URL id is set.
         assert page.locator("#mikan-fallback-bangumi").input_value() == ""
@@ -932,7 +935,6 @@ class TestAppWorkbenchDirectFallback:
 
         assert captured
         assert captured[0]["mikan_bangumi"] == sensitive_values[0]
-        assert captured[0]["save_request"] is False
         assert "mikan_config" not in captured[0]
         assert page.locator("#mikan-fallback-bangumi").input_value() == ""
         assert "request_id=" not in page.url

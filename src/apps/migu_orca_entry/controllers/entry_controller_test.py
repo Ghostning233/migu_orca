@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from ab_engine.controllers.ab_client import FakeAutoBangumiClient
 from apps.migu_orca_entry.controllers.entry_controller import (
     apply_ab_submit_action,
@@ -295,23 +293,6 @@ def test_main_without_save_request_does_not_touch_storage(
     assert exit_code == 0
     assert output["request"]["status"] == "PENDING_CONFIRM"
     assert "saved_request" not in output
-
-
-def test_generate_request_does_not_implicitly_trigger_qbittorrent_connection_test(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fail_if_called(*args: object, **kwargs: object) -> None:
-        raise AssertionError("qBittorrent connection test should stay explicit")
-
-    monkeypatch.setattr(
-        "qbittorrent_engine.controllers.qbittorrent_controller.test_qbittorrent_connection",
-        fail_if_called,
-    )
-
-    result = generate_request(EntryRequest(raw_title="芙莉莲"))
-
-    assert result["success"] is True
-    assert result["request"]["status"] == "PENDING_CONFIRM"
 
 
 def test_main_can_save_generated_request_to_explicit_storage_dir(

@@ -4,46 +4,6 @@
  */
 
 export interface paths {
-    "/api/v1/autobangumi/capabilities": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 探测 Auto Bangumi 只读能力
-         * @description ab_config 仅为 request-scoped 凭据；响应严格白名单，未知能力 fail closed。
-         */
-        post: operations["probeAutoBangumiCapabilities"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/autobangumi/test-connection": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 测试 Auto Bangumi 连接
-         * @description ab_config 为 request-scoped 凭据；成功响应只回白名单字段。
-         */
-        post: operations["testAutoBangumiConnection"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/batches/parse": {
         parameters: {
             query?: never;
@@ -90,7 +50,7 @@ export interface paths {
         put?: never;
         /**
          * 搜索 MiKan 候选
-         * @description 按标题搜索 MiKan 候选，返回公开候选元数据。mikan_config 为 request-scoped。
+         * @description 按标题搜索 MiKan 候选，返回公开候选元数据。搜索配置由服务端提供。
          */
         post: operations["searchMikanCandidates"];
         delete?: never;
@@ -117,26 +77,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/qbittorrent/test-connection": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 测试 qBittorrent 连接
-         * @description qbittorrent_config 为 request-scoped 凭据；成功响应只回白名单字段。
-         */
-        post: operations["testQbittorrentConnection"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/requests": {
         parameters: {
             query?: never;
@@ -151,8 +91,8 @@ export interface paths {
         get: operations["listRequests"];
         put?: never;
         /**
-         * 生成订阅方案（可保存）
-         * @description 按标题生成 Request。save_request=false 时仅返回内存预览，并签发服务端权威 draft_id 与 draft_revision（US-194/211：preview-modify/preview-save 只接受 draft_id，不接受客户端完整 Request；US-211 起响应同时携带单调 draft_revision 供下次修改作为 base_revision）；save_request=true 时持久化为 PENDING_CONFIRM 草案。mikan_config/mikan_bangumi/candidate_context 均为 request-scoped，绝不落盘。
+         * 生成订阅草案
+         * @description 按标题生成订阅草案。Web 统一使用服务端 MiKan 配置；服务端签发权威 draft_id 与 draft_revision，持久化仅由 save-confirm 完成。
          */
         post: operations["createRequest"];
         delete?: never;
@@ -181,26 +121,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/requests/preview-save": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 保存未修改的预览草案
-         * @description US-194/US-212：以 draft_id + base_revision 预留服务端权威草案，持久化成功后才提交重放 tombstone；持久化失败会释放预留，同一 draft/revision 可安全重试，不再因写盘失败丢失草案。仅允许 PENDING_CONFIRM 草案落盘并返回保存结果。
-         */
-        post: operations["previewSaveRequest"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/requests/save-confirm": {
         parameters: {
             query?: never;
@@ -215,6 +135,45 @@ export interface paths {
          * @description US-214/US-222：一次请求完成 revision 校验、草案预留、持久化、确认与幂等结果提交。请求只接受服务端签发的 draft_id、base_revision 与 opaque idempotency_key，不接受完整 Request。成功返回 CONFIRMED、已保存的 ACCEPTED Request 与扩展 handoff（US-222 起 handoff 额外携带 tracking_id/tracking_status/tracking_ready/safe_message，确认的 Request 同步进入统一追番列表；tracking 写失败不回滚已确认 Request，tracking_ready=false + 固定 safe_message 后续访问补偿）。同一 idempotency_key 重试返回同一最终结果（终态重放不触碰草案且再次 ensure 收敛同一 tracking_id）；不同键重放已保存草案返回 409 draft_replayed；持久化成功但确认失败返回 409 save_confirm_failed，error_data.details 只含 outcome=SAVED_CONFIRM_FAILED、request_id 与 retry_action=ACCEPT_SAVED_REQUEST。idempotency_key 是 request-scoped opaque 值，只进请求体与页面内存，绝不进入 storage/URL/浏览器 storage/日志/trace。
          */
         post: operations["confirmRequestSave"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/autobangumi": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 读取 Auto Bangumi 安全连接摘要 */
+        get: operations["getAutoBangumiConnection"];
+        /** 保存 Auto Bangumi 部署连接 */
+        put: operations["saveAutoBangumiConnection"];
+        post?: never;
+        /** 清除 Auto Bangumi 部署连接 */
+        delete: operations["deleteAutoBangumiConnection"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/autobangumi/probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 探测已保存 Auto Bangumi 连接能力
+         * @description 显式只读探测当前保存配置；请求仅携带 opaque connection_ref 与 configuration_revision，服务端以不可变快照和 lease 执行，结果不持久化原始响应。
+         */
+        post: operations["probeSavedAutoBangumiCapabilities"];
         delete?: never;
         options?: never;
         head?: never;
@@ -252,77 +211,9 @@ export interface paths {
         put?: never;
         /**
          * 同步外部追番安全投影
-         * @description US-233：使用 request-scoped Auto Bangumi 配置执行一次只读同步。confirm 必须为 true；响应只返回能力、安全计数与 TrackingItemDTO，不返回上游对象、外部 ID、URL 或凭据。
+         * @description US-233：使用已保存连接 generation 执行一次只读同步。confirm 必须为 true；响应只返回能力、安全计数与 TrackingItemDTO，不返回上游对象、外部 ID、URL 或凭据。
          */
         post: operations["syncTrackingItems"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/batches/{batch_id}/accept": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 接受批量卡片进入提交前队列 */
-        post: operations["acceptBatchItems"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/batches/{batch_id}/queue": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 读取提交前队列 */
-        get: operations["getBatchQueue"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/batches/{batch_id}/recover": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 恢复卡住的队列项目 */
-        post: operations["recoverBatchQueueItem"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/batches/{batch_id}/retry": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 重试队列中单个失败项目 */
-        post: operations["retryBatchQueueItem"];
         delete?: never;
         options?: never;
         head?: never;
@@ -343,23 +234,6 @@ export interface paths {
          * @description US-216/US-222：按条执行与单番 POST /api/v1/requests/save-confirm 完全相同的用例（revision 校验、草案预留、持久化、确认与幂等结果提交）。请求每条只接受 item_id、draft_id、base_revision 与 opaque idempotency_key，不接受完整 Request。item_ids 可选：只处理选中项并保持输入顺序，省略时按 items 顺序处理全部。成功项不因其他条目失败回滚；可预期的单条业务失败（draft_expired/draft_revision_conflict/idempotency_conflict/save_confirm_failed 等）返回 HTTP 200 的逐条脱敏 failed 结果，请求级 shape/storage profile 错误仍走普通失败 envelope。同一 item + idempotency_key 幂等重试重放同一 CONFIRMED 结果，绝不创建第二个 Request。US-222 起每条 CONFIRMED 项同步进入统一追番列表并返回 tracking_id/tracking_ready，单条 tracking 写失败不回滚该已确认项或其他条目。
          */
         post: operations["saveConfirmBatchItems"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/batches/{batch_id}/submit": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 提交队列到 Auto Bangumi */
-        post: operations["submitBatchQueue"];
         delete?: never;
         options?: never;
         head?: never;
@@ -494,26 +368,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/requests/{request_id}/submit-ab": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 提交订阅方案到 Auto Bangumi
-         * @description ab_config 为 request-scoped 凭据，绝不进入 storage、URL、浏览器 storage、日志或 trace。
-         */
-        post: operations["submitRequestToAutoBangumi"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/tracking/items/{tracking_id}": {
         parameters: {
             query?: never;
@@ -579,7 +433,7 @@ export interface paths {
         put?: never;
         /**
          * 恢复统一追番记录（AUTO 纯本地或人工核验）
-         * @description US-234：解决外部结果未知（VERIFYING_EXTERNAL）、本地结果落盘失败（RECOVERY_REQUIRED）或状态未知（UNKNOWN）的追番记录。action 允许 AUTO/MARK_SUCCEEDED/MARK_FAILED/VERIFY_EXTERNAL：AUTO 纯本地；VERIFY_EXTERNAL 仅在本次请求内接收 ab_config 并调用 3.1.18 只读管理读取，能力未知、无匹配或多匹配保持 RECOVERY_REQUIRED；人工动作必须 confirm=true。绝不接收外部 ID/URL/原始结果或调用管理写操作。
+         * @description US-330：恢复追番记录；AUTO/人工动作纯本地，VERIFY_EXTERNAL 仅使用已保存连接的 connection_ref + configuration_revision 执行 3.1.18 只读核验。
          */
         post: operations["recoverTrackingItem"];
         delete?: never;
@@ -616,7 +470,7 @@ export interface paths {
         put?: never;
         /**
          * 重试明确失败的统一追番提交（可靠顺序）
-         * @description US-226：只允许从 SUBMIT_FAILED 重试；VERIFYING_EXTERNAL/RECOVERY_REQUIRED 必须先 recover 再 retry。请求 shape 与 submit 相同（confirm 严格 true、ab_config 只在单次请求内存、opaque idempotency_key）。服务复用统一提交序列：重新读取最新本地 Request 并复核、bind 新 operation=PREPARED、持久化 TrackingRecord=SUBMITTING、operation=IN_PROGRESS 作为外部边界、单次 Auto Bangumi 调用、结果分类与落盘。同 idempotency_key 网络重放复用原 operation。expected_revision 过期 → 409 tracking_revision_conflict；非 SUBMIT_FAILED → 409 tracking_state_conflict；confirm=false → 400 tracking_confirmation_required；同键不同绑定 → 409 tracking_idempotency_conflict。
+         * @description US-226：只允许从 SUBMIT_FAILED 重试；VERIFYING_EXTERNAL/RECOVERY_REQUIRED 必须先 recover 再 retry。请求使用已保存连接 generation 与 opaque idempotency_key。服务复用统一提交序列并在外部边界前持久化 operation；同键网络重放复用原 operation。expected_revision 过期、状态冲突或绑定冲突返回 409；confirm=false 返回 400。
          */
         post: operations["retryTrackingItem"];
         delete?: never;
@@ -673,7 +527,7 @@ export interface paths {
         put?: never;
         /**
          * 提交统一追番方案到 Auto Bangumi（可靠顺序）
-         * @description US-225：对单条统一追番记录执行可靠提交流程。confirm 必须严格为 true，ab_config 只在单次请求内存中存在（绝不进入 storage/URL/日志/trace）。服务端重新读取最新本地 Request 并执行完整本地复核（纯本地，不信任浏览器 fingerprint）；复核不通过时不访问 Auto Bangumi，已落盘业务结果仍返回 HTTP 200，outcome 为 NEEDS_RECONFIRM/SUBMIT_FAILED/VERIFYING_EXTERNAL/RECOVERY_REQUIRED/ACTIVE。仅 Request fingerprint 变化且其余复核通过时，confirm=true 表示采纳最新方案并继续同一次提交。外部调用前先持久化 TrackingRecord=SUBMITTING 与 operation=IN_PROGRESS 作为外部可能发生的持久化边界；同 idempotency_key 重放复用原 operation，并发同键只允许一次外部调用。expected_revision 过期 → 409 tracking_revision_conflict；confirm=false → 400 tracking_confirmation_required；同键不同绑定 → 409 tracking_idempotency_conflict；进行中的提交操作 → 409 tracking_operation_in_progress。
+         * @description US-225：对单条统一追番记录执行可靠提交流程。confirm 必须严格为 true，连接通过已保存 generation 引用。服务端重新读取最新本地 Request 并执行完整本地复核；复核不通过时不访问 Auto Bangumi，已落盘业务结果仍返回 HTTP 200。外部调用前先持久化 TrackingRecord 与 operation；同 idempotency_key 重放复用原 operation。expected_revision 过期或绑定冲突时返回 409；confirm=false 返回 400。
          */
         post: operations["submitTrackingItem"];
         delete?: never;
@@ -725,443 +579,6 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    probeAutoBangumiCapabilities: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** @description 探测 Auto Bangumi 只读能力 */
-        requestBody: {
-            content: {
-                /** @example {} */
-                "application/json": {
-                    ab_config: {
-                        /** @enum {string} */
-                        auth_mode: "password" | "api_token";
-                        base_url?: string;
-                        username?: string;
-                        password?: string;
-                        token?: string;
-                        fallback_enabled: boolean;
-                    };
-                };
-            };
-        };
-        responses: {
-            /** @description 成功 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": true,
-                     *       "result": {
-                     *         "probe_status": "示例",
-                     *         "version": "示例",
-                     *         "adapter": "示例",
-                     *         "subscription_list": "示例",
-                     *         "subscription_detail": "示例",
-                     *         "subscription_submit": "示例",
-                     *         "subscription_modify": "示例",
-                     *         "subscription_enable": "示例",
-                     *         "subscription_disable": "示例",
-                     *         "subscription_delete": "示例",
-                     *         "rss_list": "示例",
-                     *         "rss_modify": "示例",
-                     *         "rss_enable": "示例",
-                     *         "rss_disable": "示例",
-                     *         "rss_delete": "示例",
-                     *         "rss_refresh": "示例",
-                     *         "external_verify": "示例",
-                     *         "checked_at": "示例",
-                     *         "safe_message": "示例"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /** @constant */
-                        ok: true;
-                        /** AutoBangumiCapabilitiesDTO */
-                        result: {
-                            /**
-                             * Probe Status
-                             * @enum {string}
-                             */
-                            probe_status: "VERIFIED" | "PARTIAL" | "FAILED";
-                            /** Version */
-                            version: string | null;
-                            /** Adapter */
-                            adapter: ("legacy_3_1" | "api_token") | null;
-                            /**
-                             * Subscription List
-                             * @enum {string}
-                             */
-                            subscription_list: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /**
-                             * Subscription Detail
-                             * @enum {string}
-                             */
-                            subscription_detail: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /**
-                             * Subscription Submit
-                             * @enum {string}
-                             */
-                            subscription_submit: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /**
-                             * Subscription Modify
-                             * @enum {string}
-                             */
-                            subscription_modify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /**
-                             * Subscription Enable
-                             * @enum {string}
-                             */
-                            subscription_enable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /**
-                             * Subscription Disable
-                             * @enum {string}
-                             */
-                            subscription_disable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /**
-                             * Subscription Delete
-                             * @enum {string}
-                             */
-                            subscription_delete: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /**
-                             * Rss List
-                             * @enum {string}
-                             */
-                            rss_list: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /**
-                             * Rss Modify
-                             * @enum {string}
-                             */
-                            rss_modify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /**
-                             * Rss Enable
-                             * @enum {string}
-                             */
-                            rss_enable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /**
-                             * Rss Disable
-                             * @enum {string}
-                             */
-                            rss_disable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /**
-                             * Rss Delete
-                             * @enum {string}
-                             */
-                            rss_delete: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /**
-                             * Rss Refresh
-                             * @enum {string}
-                             */
-                            rss_refresh: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /**
-                             * External Verify
-                             * @enum {string}
-                             */
-                            external_verify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /** Checked At */
-                            checked_at: string | null;
-                            /** Safe Message */
-                            safe_message: string | null;
-                        };
-                    };
-                };
-            };
-            /** @description config_error: Auto Bangumi 配置无效 */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "config_error",
-                     *       "error_message": "Auto Bangumi 配置无效",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-        };
-    };
-    testAutoBangumiConnection: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** @description 测试 Auto Bangumi 连接 */
-        requestBody: {
-            content: {
-                /** @example {} */
-                "application/json": {
-                    ab_config: {
-                        /** @enum {string} */
-                        auth_mode: "password" | "api_token";
-                        base_url?: string;
-                        username?: string;
-                        password?: string;
-                        token?: string;
-                        fallback_enabled: boolean;
-                    };
-                };
-            };
-        };
-        responses: {
-            /** @description 成功 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": true,
-                     *       "result": {
-                     *         "reachable": true,
-                     *         "authenticated": true,
-                     *         "version": "示例",
-                     *         "auth_mode": "示例",
-                     *         "adapter": "示例",
-                     *         "submit_supported": true
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /** @constant */
-                        ok: true;
-                        /**
-                         * AutoBangumiConnectionResultDTO
-                         * @description Public whitelist; base_url/token/credentials never appear.
-                         */
-                        result: {
-                            /** Reachable */
-                            reachable: boolean;
-                            /** Authenticated */
-                            authenticated: boolean;
-                            /** Version */
-                            version: string;
-                            /** Auth Mode */
-                            auth_mode: string;
-                            /** Adapter */
-                            adapter: string;
-                            /** Submit Supported */
-                            submit_supported: boolean;
-                        };
-                    };
-                };
-            };
-            /** @description config_error: Auto Bangumi 配置无效 */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "config_error",
-                     *       "error_message": "Auto Bangumi 配置无效",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-            /** @description ab_auth_failed: 认证失败 */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "ab_auth_failed",
-                     *       "error_message": "认证失败",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-            /** @description ab_connection_failed: 连接失败 / ab_submit_failed: 提交失败 */
-            502: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "ab_connection_failed",
-                     *       "error_message": "连接失败",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-            /** @description ab_unsupported_version: 版本不受支持 / ab_probe_unsupported: 当前认证模式不支持此探测方式 */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "ab_unsupported_version",
-                     *       "error_message": "版本不受支持",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-            /** @description ab_timeout: 请求超时 */
-            504: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "ab_timeout",
-                     *       "error_message": "请求超时",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-        };
-    };
     parseBatchTitles: {
         parameters: {
             query?: never;
@@ -1174,18 +591,11 @@ export interface operations {
             content: {
                 /**
                  * @example {
-                 *       "raw_input": "示例",
-                 *       "mikan_config": {
-                 *         "timeout_seconds": 1
-                 *       }
+                 *       "raw_input": "示例"
                  *     }
                  */
                 "application/json": {
                     raw_input: string;
-                    mikan_config?: {
-                        search_endpoint?: string;
-                        timeout_seconds?: number;
-                    };
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
                     storage_dir?: string | null;
                 };
@@ -1209,7 +619,6 @@ export interface operations {
                      *             "item_id": null,
                      *             "raw_title": null,
                      *             "status": null,
-                     *             "queue_status": null,
                      *             "canonical_title_candidates": [],
                      *             "season_hint": null,
                      *             "search_queries": [],
@@ -1259,11 +668,6 @@ export interface operations {
                                  * @default null
                                  */
                                 status: string | null;
-                                /**
-                                 * Queue Status
-                                 * @default null
-                                 */
-                                queue_status: string | null;
                                 /**
                                  * Canonical Title Candidates
                                  * @default []
@@ -1854,18 +1258,11 @@ export interface operations {
             content: {
                 /**
                  * @example {
-                 *       "query": "示例",
-                 *       "mikan_config": {
-                 *         "timeout_seconds": 1
-                 *       }
+                 *       "query": "示例"
                  *     }
                  */
                 "application/json": {
                     query: string;
-                    mikan_config?: {
-                        search_endpoint?: string;
-                        timeout_seconds?: number;
-                    };
                 };
             };
         };
@@ -2428,209 +1825,6 @@ export interface operations {
             };
         };
     };
-    testQbittorrentConnection: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** @description 测试 qBittorrent 连接 */
-        requestBody: {
-            content: {
-                /** @example {} */
-                "application/json": {
-                    qbittorrent_config: {
-                        endpoint: string;
-                        username: string;
-                        password: string;
-                        timeout_seconds?: number;
-                        verify_tls?: boolean;
-                    };
-                };
-            };
-        };
-        responses: {
-            /** @description 成功 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": true,
-                     *       "result": {
-                     *         "status": "示例",
-                     *         "reachable": true,
-                     *         "version": "示例"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /** @constant */
-                        ok: true;
-                        /**
-                         * QbittorrentConnectionResultDTO
-                         * @description Public whitelist; endpoint/username/password/cookie never appear.
-                         */
-                        result: {
-                            /** Status */
-                            status: string;
-                            /** Reachable */
-                            reachable: boolean;
-                            /** Version */
-                            version: string;
-                        };
-                    };
-                };
-            };
-            /** @description config_error: qBittorrent 配置无效 */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "config_error",
-                     *       "error_message": "qBittorrent 配置无效",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-            /** @description qbittorrent_auth_failed: 认证失败 */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "qbittorrent_auth_failed",
-                     *       "error_message": "认证失败",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-            /** @description qbittorrent_connection_failed: 连接失败 / qbittorrent_http_failed: HTTP 请求失败 / qbittorrent_unexpected_response: 响应无法识别 */
-            502: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "qbittorrent_connection_failed",
-                     *       "error_message": "连接失败",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-            /** @description qbittorrent_timeout: 请求超时 */
-            504: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "qbittorrent_timeout",
-                     *       "error_message": "请求超时",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-        };
-    };
     listRequests: {
         parameters: {
             query?: {
@@ -2806,39 +2000,24 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        /** @description 生成订阅方案（可保存） */
+        /** @description 生成订阅草案 */
         requestBody: {
             content: {
                 /**
                  * @example {
                  *       "title": "示例",
-                 *       "source": "static-fixture",
-                 *       "save_request": false,
                  *       "season_confirmation": 1,
-                 *       "mikan_config": {
-                 *         "timeout_seconds": 1
-                 *       }
+                 *       "candidate_context": null,
+                 *       "mikan_bangumi": null
                  *     }
                  */
                 "application/json": {
                     /** @description 番剧名称（必填）。 */
                     title: string;
-                    /**
-                     * @default static-fixture
-                     * @enum {string}
-                     */
-                    source?: "static-fixture" | "mikan";
-                    /** @default false */
-                    save_request?: boolean;
                     /** @description 用户确认的季数（1-99）。 */
                     season_confirmation?: number;
                     /** @description 候选搜索签发的一次性 opaque token（request-scoped）。 */
                     candidate_context?: string;
-                    /** @description MiKan 搜索配置（request-scoped，不落盘）。 */
-                    mikan_config?: {
-                        search_endpoint?: string;
-                        timeout_seconds?: number;
-                    };
                     /** @description MiKan 详情页 URL（request-scoped）。 */
                     mikan_bangumi?: string;
                 };
@@ -3535,6 +2714,7 @@ export interface operations {
             content: {
                 /**
                  * @example {
+                 *       "draft_id": "示例",
                  *       "base_revision": 1,
                  *       "patch": {
                  *         "filter_rule": {
@@ -3940,629 +3120,6 @@ export interface operations {
                      *       "ok": false,
                      *       "error_type": "draft_expired",
                      *       "error_message": "订阅草案已过期或不存在，请重新生成",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-        };
-    };
-    previewSaveRequest: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** @description 保存未修改的预览草案 */
-        requestBody: {
-            content: {
-                /**
-                 * @example {
-                 *       "base_revision": 1
-                 *     }
-                 */
-                "application/json": {
-                    /** @description 生成/修改时服务端签发的 opaque draft_id（一次性，保存成功后失效）。 */
-                    draft_id: string;
-                    /** @description 客户端最后观察到的草案 revision（US-212，预留校验；不匹配返回 409 draft_revision_conflict）。 */
-                    base_revision: number;
-                    /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                    storage_dir?: string | null;
-                };
-            };
-        };
-        responses: {
-            /** @description 成功 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": true,
-                     *       "result": {
-                     *         "request": {
-                     *           "request_id": null,
-                     *           "status": null,
-                     *           "input": null,
-                     *           "source_info": null,
-                     *           "confirmable_config": null,
-                     *           "ab_submit_result": null,
-                     *           "created_at": null,
-                     *           "updated_at": null,
-                     *           "user_action": null
-                     *         },
-                     *         "summary": {
-                     *           "request_id": "示例",
-                     *           "status": "示例",
-                     *           "bangumi_title": "示例",
-                     *           "season": 1,
-                     *           "updated_at": "示例",
-                     *           "candidate_subtitle_groups": [
-                     *             {
-                     *               "subtitle_group": "示例",
-                     *               "total_resource_count": 1,
-                     *               "valid_resource_count": 1,
-                     *               "invalid_resource_count": 1
-                     *             }
-                     *           ],
-                     *           "selected_subtitle_group": "示例",
-                     *           "effective_seed_count": 1,
-                     *           "expected_folder_name": "示例",
-                     *           "warnings": []
-                     *         },
-                     *         "saved_request": null
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /** @constant */
-                        ok: true;
-                        /**
-                         * RequestPreviewSaveResultDTO
-                         * @description preview-save result equals the create result shape (draft consumed).
-                         */
-                        result: {
-                            /**
-                             * RequestSnapshotDTO
-                             * @description Typed view of the saved Request snapshot the detail panel renders.
-                             *
-                             *     Only the display fields are typed; the engine may add fields without
-                             *     breaking the boundary (``extra="allow"``). ``mikan_url``/``rss_url``/
-                             *     ``poster_url`` are declared for schema accuracy but the frontend must
-                             *     never render them (URLs are redacted at display time).
-                             */
-                            request: {
-                                /**
-                                 * Request Id
-                                 * @default null
-                                 */
-                                request_id: string | null;
-                                /**
-                                 * Status
-                                 * @default null
-                                 */
-                                status: string | null;
-                                /** @default null */
-                                input: ({
-                                    /**
-                                     * Raw Title
-                                     * @default null
-                                     */
-                                    raw_title: string | null;
-                                } & {
-                                    [key: string]: unknown;
-                                }) | null;
-                                /** @default null */
-                                source_info: ({
-                                    /** @default null */
-                                    matched_bangumi: ({
-                                        /**
-                                         * Title
-                                         * @default null
-                                         */
-                                        title: string | null;
-                                        /**
-                                         * Aliases
-                                         * @default []
-                                         */
-                                        aliases: string[];
-                                        /**
-                                         * Mikan Url
-                                         * @default null
-                                         */
-                                        mikan_url: string | null;
-                                        /**
-                                         * Match Score
-                                         * @default null
-                                         */
-                                        match_score: number | null;
-                                        /**
-                                         * Poster Url
-                                         * @default null
-                                         */
-                                        poster_url: string | null;
-                                    } & {
-                                        [key: string]: unknown;
-                                    }) | null;
-                                    /**
-                                     * Rss Sources
-                                     * @default []
-                                     */
-                                    rss_sources: ({
-                                        /**
-                                         * Subtitle Group
-                                         * @default null
-                                         */
-                                        subtitle_group: string | null;
-                                        /**
-                                         * Rss Url
-                                         * @default null
-                                         */
-                                        rss_url: string | null;
-                                        /**
-                                         * Source Type
-                                         * @default null
-                                         */
-                                        source_type: string | null;
-                                        /**
-                                         * Total Seed Count
-                                         * @default null
-                                         */
-                                        total_seed_count: number | null;
-                                        /**
-                                         * Seed Names
-                                         * @default []
-                                         */
-                                        seed_names: string[];
-                                        /**
-                                         * Valid Seed Count
-                                         * @default null
-                                         */
-                                        valid_seed_count: number | null;
-                                        /**
-                                         * Invalid Seed Count
-                                         * @default null
-                                         */
-                                        invalid_seed_count: number | null;
-                                        /**
-                                         * Valid Seed Names
-                                         * @default []
-                                         */
-                                        valid_seed_names: string[];
-                                        /**
-                                         * Excluded Seed Names
-                                         * @default []
-                                         */
-                                        excluded_seed_names: {
-                                            [key: string]: unknown;
-                                        }[];
-                                        /**
-                                         * Warnings
-                                         * @default []
-                                         */
-                                        warnings: string[];
-                                    } & {
-                                        [key: string]: unknown;
-                                    })[];
-                                } & {
-                                    [key: string]: unknown;
-                                }) | null;
-                                /** @default null */
-                                confirmable_config: ({
-                                    /**
-                                     * Selected Subtitle Group
-                                     * @default null
-                                     */
-                                    selected_subtitle_group: string | null;
-                                    /**
-                                     * Selected Rss Url
-                                     * @default null
-                                     */
-                                    selected_rss_url: string | null;
-                                    /** @default null */
-                                    filter_rule: ({
-                                        /**
-                                         * Must Contain
-                                         * @default null
-                                         */
-                                        must_contain: string | null;
-                                        /**
-                                         * Must Not Contain
-                                         * @default null
-                                         */
-                                        must_not_contain: string | null;
-                                        /**
-                                         * Use Regex
-                                         * @default null
-                                         */
-                                        use_regex: boolean | null;
-                                        /**
-                                         * Case Sensitive
-                                         * @default null
-                                         */
-                                        case_sensitive: boolean | null;
-                                    } & {
-                                        [key: string]: unknown;
-                                    }) | null;
-                                    /**
-                                     * Effective Seed Names
-                                     * @default []
-                                     */
-                                    effective_seed_names: string[];
-                                    /**
-                                     * Expected Folder Name
-                                     * @default null
-                                     */
-                                    expected_folder_name: string | null;
-                                    /**
-                                     * Warnings
-                                     * @default []
-                                     */
-                                    warnings: string[];
-                                } & {
-                                    [key: string]: unknown;
-                                }) | null;
-                                /**
-                                 * Ab Submit Result
-                                 * @default null
-                                 */
-                                ab_submit_result: {
-                                    [key: string]: unknown;
-                                } | null;
-                                /**
-                                 * Created At
-                                 * @default null
-                                 */
-                                created_at: string | null;
-                                /**
-                                 * Updated At
-                                 * @default null
-                                 */
-                                updated_at: string | null;
-                                /** @default null */
-                                user_action: ({
-                                    /**
-                                     * Action
-                                     * @default null
-                                     */
-                                    action: string | null;
-                                    /**
-                                     * Reason
-                                     * @default null
-                                     */
-                                    reason: string | null;
-                                    /**
-                                     * Decided At
-                                     * @default null
-                                     */
-                                    decided_at: string | null;
-                                } & {
-                                    [key: string]: unknown;
-                                }) | null;
-                            } & {
-                                [key: string]: unknown;
-                            };
-                            /**
-                             * RequestSummaryDTO
-                             * @description Public ``summary`` shape produced by ``summarize_request``.
-                             */
-                            summary: {
-                                /** Request Id */
-                                request_id: string | null;
-                                /** Status */
-                                status: string | null;
-                                /** Bangumi Title */
-                                bangumi_title: string | null;
-                                /** Season */
-                                season: number | null;
-                                /** Updated At */
-                                updated_at: string | null;
-                                /** Candidate Subtitle Groups */
-                                candidate_subtitle_groups: {
-                                    /** Subtitle Group */
-                                    subtitle_group: string | null;
-                                    /** Total Resource Count */
-                                    total_resource_count: number;
-                                    /** Valid Resource Count */
-                                    valid_resource_count: number;
-                                    /** Invalid Resource Count */
-                                    invalid_resource_count: number;
-                                }[];
-                                /** Selected Subtitle Group */
-                                selected_subtitle_group: string | null;
-                                /** Effective Seed Count */
-                                effective_seed_count: number;
-                                /** Expected Folder Name */
-                                expected_folder_name: string | null;
-                                /** Warnings */
-                                warnings: string[];
-                            };
-                            /** @default null */
-                            saved_request: ({
-                                /**
-                                 * Request Id
-                                 * @default null
-                                 */
-                                request_id: string | null;
-                                /**
-                                 * Status
-                                 * @default null
-                                 */
-                                status: string | null;
-                                /** @default null */
-                                input: ({
-                                    /**
-                                     * Raw Title
-                                     * @default null
-                                     */
-                                    raw_title: string | null;
-                                } & {
-                                    [key: string]: unknown;
-                                }) | null;
-                                /** @default null */
-                                source_info: ({
-                                    /** @default null */
-                                    matched_bangumi: ({
-                                        /**
-                                         * Title
-                                         * @default null
-                                         */
-                                        title: string | null;
-                                        /**
-                                         * Aliases
-                                         * @default []
-                                         */
-                                        aliases: string[];
-                                        /**
-                                         * Mikan Url
-                                         * @default null
-                                         */
-                                        mikan_url: string | null;
-                                        /**
-                                         * Match Score
-                                         * @default null
-                                         */
-                                        match_score: number | null;
-                                        /**
-                                         * Poster Url
-                                         * @default null
-                                         */
-                                        poster_url: string | null;
-                                    } & {
-                                        [key: string]: unknown;
-                                    }) | null;
-                                    /**
-                                     * Rss Sources
-                                     * @default []
-                                     */
-                                    rss_sources: ({
-                                        /**
-                                         * Subtitle Group
-                                         * @default null
-                                         */
-                                        subtitle_group: string | null;
-                                        /**
-                                         * Rss Url
-                                         * @default null
-                                         */
-                                        rss_url: string | null;
-                                        /**
-                                         * Source Type
-                                         * @default null
-                                         */
-                                        source_type: string | null;
-                                        /**
-                                         * Total Seed Count
-                                         * @default null
-                                         */
-                                        total_seed_count: number | null;
-                                        /**
-                                         * Seed Names
-                                         * @default []
-                                         */
-                                        seed_names: string[];
-                                        /**
-                                         * Valid Seed Count
-                                         * @default null
-                                         */
-                                        valid_seed_count: number | null;
-                                        /**
-                                         * Invalid Seed Count
-                                         * @default null
-                                         */
-                                        invalid_seed_count: number | null;
-                                        /**
-                                         * Valid Seed Names
-                                         * @default []
-                                         */
-                                        valid_seed_names: string[];
-                                        /**
-                                         * Excluded Seed Names
-                                         * @default []
-                                         */
-                                        excluded_seed_names: {
-                                            [key: string]: unknown;
-                                        }[];
-                                        /**
-                                         * Warnings
-                                         * @default []
-                                         */
-                                        warnings: string[];
-                                    } & {
-                                        [key: string]: unknown;
-                                    })[];
-                                } & {
-                                    [key: string]: unknown;
-                                }) | null;
-                                /** @default null */
-                                confirmable_config: ({
-                                    /**
-                                     * Selected Subtitle Group
-                                     * @default null
-                                     */
-                                    selected_subtitle_group: string | null;
-                                    /**
-                                     * Selected Rss Url
-                                     * @default null
-                                     */
-                                    selected_rss_url: string | null;
-                                    /** @default null */
-                                    filter_rule: ({
-                                        /**
-                                         * Must Contain
-                                         * @default null
-                                         */
-                                        must_contain: string | null;
-                                        /**
-                                         * Must Not Contain
-                                         * @default null
-                                         */
-                                        must_not_contain: string | null;
-                                        /**
-                                         * Use Regex
-                                         * @default null
-                                         */
-                                        use_regex: boolean | null;
-                                        /**
-                                         * Case Sensitive
-                                         * @default null
-                                         */
-                                        case_sensitive: boolean | null;
-                                    } & {
-                                        [key: string]: unknown;
-                                    }) | null;
-                                    /**
-                                     * Effective Seed Names
-                                     * @default []
-                                     */
-                                    effective_seed_names: string[];
-                                    /**
-                                     * Expected Folder Name
-                                     * @default null
-                                     */
-                                    expected_folder_name: string | null;
-                                    /**
-                                     * Warnings
-                                     * @default []
-                                     */
-                                    warnings: string[];
-                                } & {
-                                    [key: string]: unknown;
-                                }) | null;
-                                /**
-                                 * Ab Submit Result
-                                 * @default null
-                                 */
-                                ab_submit_result: {
-                                    [key: string]: unknown;
-                                } | null;
-                                /**
-                                 * Created At
-                                 * @default null
-                                 */
-                                created_at: string | null;
-                                /**
-                                 * Updated At
-                                 * @default null
-                                 */
-                                updated_at: string | null;
-                                /** @default null */
-                                user_action: ({
-                                    /**
-                                     * Action
-                                     * @default null
-                                     */
-                                    action: string | null;
-                                    /**
-                                     * Reason
-                                     * @default null
-                                     */
-                                    reason: string | null;
-                                    /**
-                                     * Decided At
-                                     * @default null
-                                     */
-                                    decided_at: string | null;
-                                } & {
-                                    [key: string]: unknown;
-                                }) | null;
-                            } & {
-                                [key: string]: unknown;
-                            }) | null;
-                        };
-                    };
-                };
-            };
-            /** @description invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "invalid_storage_dir",
-                     *       "error_message": "storage_dir 必须是服务器允许根目录下的相对目录",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-            /** @description invalid_request_status: 只有待确认的订阅草案可以保存 / draft_expired: 订阅草案已过期或不存在，请重新生成 / draft_evicted: 订阅草案已失效（服务器容量已满），请重新生成 / draft_replayed: 订阅草案已被保存，请勿重复保存 / draft_revision_conflict: 草案已被更新，请基于最新版本重试 / draft_reserved: 订阅草案正在保存中，请稍后重试 */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "invalid_request_status",
-                     *       "error_message": "只有待确认的订阅草案可以保存",
                      *       "error_data": {
                      *         "failed_step": "示例步骤"
                      *       }
@@ -5048,6 +3605,1000 @@ export interface operations {
             };
         };
     };
+    getAutoBangumiConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "configured": true,
+                     *         "configuration_revision": 1,
+                     *         "connection_ref": "示例",
+                     *         "auth_mode": "示例",
+                     *         "credential_present": true,
+                     *         "connection_status": "示例",
+                     *         "checked_at": "示例",
+                     *         "capabilities": null
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /**
+                         * AutoBangumiConnectionSummaryDTO
+                         * @description Safe deployment configuration summary; never contains its address.
+                         */
+                        result: {
+                            /** Configured */
+                            configured: boolean;
+                            /** Configuration Revision */
+                            configuration_revision: number;
+                            /** Connection Ref */
+                            connection_ref: string | null;
+                            /** Auth Mode */
+                            auth_mode: ("password" | "api_token") | null;
+                            /** Credential Present */
+                            credential_present: boolean;
+                            /**
+                             * Connection Status
+                             * @enum {string}
+                             */
+                            connection_status: "UNCONFIGURED" | "CONFIGURED" | "VERIFIED" | "ERROR";
+                            /** Checked At */
+                            checked_at: string | null;
+                            /** @default null */
+                            capabilities: {
+                                /**
+                                 * Probe Status
+                                 * @enum {string}
+                                 */
+                                probe_status: "VERIFIED" | "PARTIAL" | "FAILED";
+                                /** Version */
+                                version: string | null;
+                                /** Adapter */
+                                adapter: ("legacy_3_1" | "api_token") | null;
+                                /**
+                                 * Subscription List
+                                 * @enum {string}
+                                 */
+                                subscription_list: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Detail
+                                 * @enum {string}
+                                 */
+                                subscription_detail: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Submit
+                                 * @enum {string}
+                                 */
+                                subscription_submit: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Modify
+                                 * @enum {string}
+                                 */
+                                subscription_modify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Enable
+                                 * @enum {string}
+                                 */
+                                subscription_enable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Disable
+                                 * @enum {string}
+                                 */
+                                subscription_disable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Delete
+                                 * @enum {string}
+                                 */
+                                subscription_delete: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss List
+                                 * @enum {string}
+                                 */
+                                rss_list: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Modify
+                                 * @enum {string}
+                                 */
+                                rss_modify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Enable
+                                 * @enum {string}
+                                 */
+                                rss_enable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Disable
+                                 * @enum {string}
+                                 */
+                                rss_disable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Delete
+                                 * @enum {string}
+                                 */
+                                rss_delete: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Refresh
+                                 * @enum {string}
+                                 */
+                                rss_refresh: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * External Verify
+                                 * @enum {string}
+                                 */
+                                external_verify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /** Checked At */
+                                checked_at: string | null;
+                                /** Safe Message */
+                                safe_message: string | null;
+                            } | null;
+                        };
+                    };
+                };
+            };
+            /** @description storage_error: Auto Bangumi 配置存储不可用 / storage_json_error: Auto Bangumi 配置内容无效 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "storage_error",
+                     *       "error_message": "Auto Bangumi 配置存储不可用",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
+    saveAutoBangumiConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 保存 Auto Bangumi 部署连接 */
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "confirm": true,
+                 *       "expected_configuration_revision": 1,
+                 *       "config": "示例"
+                 *     }
+                 */
+                "application/json": {
+                    /** @constant */
+                    confirm: true;
+                    expected_configuration_revision: number;
+                    config: {
+                        /** @constant */
+                        auth_mode: "password";
+                        base_url: string;
+                        username: string;
+                        password: string;
+                    } | {
+                        /** @constant */
+                        auth_mode: "api_token";
+                        base_url: string;
+                        token: string;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "configured": true,
+                     *         "configuration_revision": 1,
+                     *         "connection_ref": "示例",
+                     *         "auth_mode": "示例",
+                     *         "credential_present": true,
+                     *         "connection_status": "示例",
+                     *         "checked_at": "示例",
+                     *         "capabilities": null
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /**
+                         * AutoBangumiConnectionSummaryDTO
+                         * @description Safe deployment configuration summary; never contains its address.
+                         */
+                        result: {
+                            /** Configured */
+                            configured: boolean;
+                            /** Configuration Revision */
+                            configuration_revision: number;
+                            /** Connection Ref */
+                            connection_ref: string | null;
+                            /** Auth Mode */
+                            auth_mode: ("password" | "api_token") | null;
+                            /** Credential Present */
+                            credential_present: boolean;
+                            /**
+                             * Connection Status
+                             * @enum {string}
+                             */
+                            connection_status: "UNCONFIGURED" | "CONFIGURED" | "VERIFIED" | "ERROR";
+                            /** Checked At */
+                            checked_at: string | null;
+                            /** @default null */
+                            capabilities: {
+                                /**
+                                 * Probe Status
+                                 * @enum {string}
+                                 */
+                                probe_status: "VERIFIED" | "PARTIAL" | "FAILED";
+                                /** Version */
+                                version: string | null;
+                                /** Adapter */
+                                adapter: ("legacy_3_1" | "api_token") | null;
+                                /**
+                                 * Subscription List
+                                 * @enum {string}
+                                 */
+                                subscription_list: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Detail
+                                 * @enum {string}
+                                 */
+                                subscription_detail: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Submit
+                                 * @enum {string}
+                                 */
+                                subscription_submit: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Modify
+                                 * @enum {string}
+                                 */
+                                subscription_modify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Enable
+                                 * @enum {string}
+                                 */
+                                subscription_enable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Disable
+                                 * @enum {string}
+                                 */
+                                subscription_disable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Delete
+                                 * @enum {string}
+                                 */
+                                subscription_delete: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss List
+                                 * @enum {string}
+                                 */
+                                rss_list: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Modify
+                                 * @enum {string}
+                                 */
+                                rss_modify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Enable
+                                 * @enum {string}
+                                 */
+                                rss_enable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Disable
+                                 * @enum {string}
+                                 */
+                                rss_disable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Delete
+                                 * @enum {string}
+                                 */
+                                rss_delete: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Refresh
+                                 * @enum {string}
+                                 */
+                                rss_refresh: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * External Verify
+                                 * @enum {string}
+                                 */
+                                external_verify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /** Checked At */
+                                checked_at: string | null;
+                                /** Safe Message */
+                                safe_message: string | null;
+                            } | null;
+                        };
+                    };
+                };
+            };
+            /** @description validation_error: 请求参数校验失败 / config_error: Auto Bangumi 配置无效 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "validation_error",
+                     *       "error_message": "请求参数校验失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description configuration_revision_conflict: Auto Bangumi 配置已变化，请重新读取后重试 / connection_in_use: Auto Bangumi 连接正在使用中 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "configuration_revision_conflict",
+                     *       "error_message": "Auto Bangumi 配置已变化，请重新读取后重试",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description storage_error: Auto Bangumi 配置存储不可用 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "storage_error",
+                     *       "error_message": "Auto Bangumi 配置存储不可用",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
+    deleteAutoBangumiConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 清除 Auto Bangumi 部署连接 */
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "confirm": true,
+                 *       "expected_configuration_revision": 1
+                 *     }
+                 */
+                "application/json": {
+                    /** @constant */
+                    confirm: true;
+                    expected_configuration_revision: number;
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "configured": true,
+                     *         "configuration_revision": 1,
+                     *         "connection_ref": "示例",
+                     *         "auth_mode": "示例",
+                     *         "credential_present": true,
+                     *         "connection_status": "示例",
+                     *         "checked_at": "示例",
+                     *         "capabilities": null
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /**
+                         * AutoBangumiConnectionSummaryDTO
+                         * @description Safe deployment configuration summary; never contains its address.
+                         */
+                        result: {
+                            /** Configured */
+                            configured: boolean;
+                            /** Configuration Revision */
+                            configuration_revision: number;
+                            /** Connection Ref */
+                            connection_ref: string | null;
+                            /** Auth Mode */
+                            auth_mode: ("password" | "api_token") | null;
+                            /** Credential Present */
+                            credential_present: boolean;
+                            /**
+                             * Connection Status
+                             * @enum {string}
+                             */
+                            connection_status: "UNCONFIGURED" | "CONFIGURED" | "VERIFIED" | "ERROR";
+                            /** Checked At */
+                            checked_at: string | null;
+                            /** @default null */
+                            capabilities: {
+                                /**
+                                 * Probe Status
+                                 * @enum {string}
+                                 */
+                                probe_status: "VERIFIED" | "PARTIAL" | "FAILED";
+                                /** Version */
+                                version: string | null;
+                                /** Adapter */
+                                adapter: ("legacy_3_1" | "api_token") | null;
+                                /**
+                                 * Subscription List
+                                 * @enum {string}
+                                 */
+                                subscription_list: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Detail
+                                 * @enum {string}
+                                 */
+                                subscription_detail: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Submit
+                                 * @enum {string}
+                                 */
+                                subscription_submit: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Modify
+                                 * @enum {string}
+                                 */
+                                subscription_modify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Enable
+                                 * @enum {string}
+                                 */
+                                subscription_enable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Disable
+                                 * @enum {string}
+                                 */
+                                subscription_disable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Delete
+                                 * @enum {string}
+                                 */
+                                subscription_delete: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss List
+                                 * @enum {string}
+                                 */
+                                rss_list: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Modify
+                                 * @enum {string}
+                                 */
+                                rss_modify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Enable
+                                 * @enum {string}
+                                 */
+                                rss_enable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Disable
+                                 * @enum {string}
+                                 */
+                                rss_disable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Delete
+                                 * @enum {string}
+                                 */
+                                rss_delete: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Refresh
+                                 * @enum {string}
+                                 */
+                                rss_refresh: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * External Verify
+                                 * @enum {string}
+                                 */
+                                external_verify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /** Checked At */
+                                checked_at: string | null;
+                                /** Safe Message */
+                                safe_message: string | null;
+                            } | null;
+                        };
+                    };
+                };
+            };
+            /** @description validation_error: 请求参数校验失败 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "validation_error",
+                     *       "error_message": "请求参数校验失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description configuration_revision_conflict: Auto Bangumi 配置已变化，请重新读取后重试 / connection_in_use: Auto Bangumi 连接正在使用中 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "configuration_revision_conflict",
+                     *       "error_message": "Auto Bangumi 配置已变化，请重新读取后重试",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description storage_error: Auto Bangumi 配置存储不可用 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "storage_error",
+                     *       "error_message": "Auto Bangumi 配置存储不可用",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
+    probeSavedAutoBangumiCapabilities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 探测已保存 Auto Bangumi 连接能力 */
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "connection_ref": "示例",
+                 *       "configuration_revision": 1
+                 *     }
+                 */
+                "application/json": {
+                    /** Format: uuid */
+                    connection_ref: string;
+                    configuration_revision: number;
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "probe_status": "示例",
+                     *         "version": "示例",
+                     *         "adapter": "示例",
+                     *         "subscription_list": "示例",
+                     *         "subscription_detail": "示例",
+                     *         "subscription_submit": "示例",
+                     *         "subscription_modify": "示例",
+                     *         "subscription_enable": "示例",
+                     *         "subscription_disable": "示例",
+                     *         "subscription_delete": "示例",
+                     *         "rss_list": "示例",
+                     *         "rss_modify": "示例",
+                     *         "rss_enable": "示例",
+                     *         "rss_disable": "示例",
+                     *         "rss_delete": "示例",
+                     *         "rss_refresh": "示例",
+                     *         "external_verify": "示例",
+                     *         "checked_at": "示例",
+                     *         "safe_message": "示例"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /** AutoBangumiCapabilitiesDTO */
+                        result: {
+                            /**
+                             * Probe Status
+                             * @enum {string}
+                             */
+                            probe_status: "VERIFIED" | "PARTIAL" | "FAILED";
+                            /** Version */
+                            version: string | null;
+                            /** Adapter */
+                            adapter: ("legacy_3_1" | "api_token") | null;
+                            /**
+                             * Subscription List
+                             * @enum {string}
+                             */
+                            subscription_list: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Subscription Detail
+                             * @enum {string}
+                             */
+                            subscription_detail: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Subscription Submit
+                             * @enum {string}
+                             */
+                            subscription_submit: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Subscription Modify
+                             * @enum {string}
+                             */
+                            subscription_modify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Subscription Enable
+                             * @enum {string}
+                             */
+                            subscription_enable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Subscription Disable
+                             * @enum {string}
+                             */
+                            subscription_disable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Subscription Delete
+                             * @enum {string}
+                             */
+                            subscription_delete: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Rss List
+                             * @enum {string}
+                             */
+                            rss_list: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Rss Modify
+                             * @enum {string}
+                             */
+                            rss_modify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Rss Enable
+                             * @enum {string}
+                             */
+                            rss_enable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Rss Disable
+                             * @enum {string}
+                             */
+                            rss_disable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Rss Delete
+                             * @enum {string}
+                             */
+                            rss_delete: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Rss Refresh
+                             * @enum {string}
+                             */
+                            rss_refresh: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * External Verify
+                             * @enum {string}
+                             */
+                            external_verify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /** Checked At */
+                            checked_at: string | null;
+                            /** Safe Message */
+                            safe_message: string | null;
+                        };
+                    };
+                };
+            };
+            /** @description data_validation_errors: 请求参数校验失败 / config_error: Auto Bangumi 配置未配置或引用无效 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "data_validation_errors",
+                     *       "error_message": "请求参数校验失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description configuration_revision_conflict: Auto Bangumi 配置已变化，请重新读取后重试 / connection_ref_conflict: Auto Bangumi 配置引用已变化 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "configuration_revision_conflict",
+                     *       "error_message": "Auto Bangumi 配置已变化，请重新读取后重试",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description storage_error: Auto Bangumi 配置存储不可用 / storage_json_error: Auto Bangumi 配置内容无效 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "storage_error",
+                     *       "error_message": "Auto Bangumi 配置存储不可用",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
     listTrackingItems: {
         parameters: {
             query?: {
@@ -5273,6 +4824,42 @@ export interface operations {
                     };
                 };
             };
+            /** @description ab_auth_failed: Auto Bangumi 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "ab_auth_failed",
+                     *       "error_message": "Auto Bangumi 认证失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
             /** @description storage_error: 读取追番记录失败 / storage_json_error: 追番记录 JSON 损坏 / tracking_storage_error: 追番记录存储失败 / tracking_migration_error: 历史数据迁移失败 */
             500: {
                 headers: {
@@ -5284,6 +4871,114 @@ export interface operations {
                      *       "ok": false,
                      *       "error_type": "storage_error",
                      *       "error_message": "读取追番记录失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description ab_connection_failed: Auto Bangumi 连接失败 / ab_submit_failed: Auto Bangumi 提交失败 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "ab_connection_failed",
+                     *       "error_message": "Auto Bangumi 连接失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description ab_submit_unsupported: Auto Bangumi 提交能力不可用 / ab_unsupported_version: Auto Bangumi 版本不受支持 / ab_probe_unsupported: Auto Bangumi 探测能力不可用 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "ab_submit_unsupported",
+                     *       "error_message": "Auto Bangumi 提交能力不可用",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description ab_timeout: Auto Bangumi 请求超时 */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "ab_timeout",
+                     *       "error_message": "Auto Bangumi 请求超时",
                      *       "error_data": {
                      *         "failed_step": "示例步骤"
                      *       }
@@ -5323,19 +5018,15 @@ export interface operations {
             content: {
                 /**
                  * @example {
+                 *       "connection_ref": "示例",
+                 *       "configuration_revision": 1,
                  *       "confirm": true
                  *     }
                  */
                 "application/json": {
-                    ab_config: {
-                        /** @enum {string} */
-                        auth_mode: "password" | "api_token";
-                        base_url?: string;
-                        username?: string;
-                        password?: string;
-                        token?: string;
-                        fallback_enabled: boolean;
-                    };
+                    /** Format: uuid */
+                    connection_ref: string;
+                    configuration_revision: number;
                     storage_dir?: string | null;
                     /** @constant */
                     confirm: true;
@@ -5701,1145 +5392,6 @@ export interface operations {
             };
         };
     };
-    acceptBatchItems: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** @description 接受批量卡片进入提交前队列 */
-        requestBody: {
-            content: {
-                /**
-                 * @example {
-                 *       "items": [
-                 *         {
-                 *           "item_id": "示例",
-                 *           "request_id": null,
-                 *           "title": null
-                 *         }
-                 *       ],
-                 *       "item_ids": []
-                 *     }
-                 */
-                "application/json": {
-                    items: {
-                        item_id: string;
-                        request_id?: string;
-                        title?: string;
-                    }[];
-                    /** @description 可选：只接受指定卡片（缺省接受全部）。 */
-                    item_ids?: string[];
-                    /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                    storage_dir?: string | null;
-                };
-            };
-        };
-        responses: {
-            /** @description 成功 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": true,
-                     *       "result": {
-                     *         "batch_id": "示例",
-                     *         "queue": {
-                     *           "queue_id": null,
-                     *           "batch_id": null,
-                     *           "created_at": null,
-                     *           "updated_at": null,
-                     *           "items": []
-                     *         },
-                     *         "items": [
-                     *           {
-                     *             "item_id": null,
-                     *             "request_id": null,
-                     *             "title": null,
-                     *             "status": null,
-                     *             "reason": null,
-                     *             "error_type": null,
-                     *             "queued": null,
-                     *             "attempts": null
-                     *           }
-                     *         ],
-                     *         "summary": {}
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /** @constant */
-                        ok: true;
-                        /** BatchAcceptResultDTO */
-                        result: {
-                            /** Batch Id */
-                            batch_id: string;
-                            /**
-                             * BatchQueueDTO
-                             * @description The public pre-submission queue (idempotent, sanitized summaries).
-                             */
-                            queue: {
-                                /**
-                                 * Queue Id
-                                 * @default null
-                                 */
-                                queue_id: string | null;
-                                /**
-                                 * Batch Id
-                                 * @default null
-                                 */
-                                batch_id: string | null;
-                                /**
-                                 * Created At
-                                 * @default null
-                                 */
-                                created_at: string | null;
-                                /**
-                                 * Updated At
-                                 * @default null
-                                 */
-                                updated_at: string | null;
-                                /**
-                                 * Items
-                                 * @default []
-                                 */
-                                items: ({
-                                    /**
-                                     * Queue Id
-                                     * @default null
-                                     */
-                                    queue_id: string | null;
-                                    /**
-                                     * Batch Id
-                                     * @default null
-                                     */
-                                    batch_id: string | null;
-                                    /**
-                                     * Item Id
-                                     * @default null
-                                     */
-                                    item_id: string | null;
-                                    /**
-                                     * Request Id
-                                     * @default null
-                                     */
-                                    request_id: string | null;
-                                    /**
-                                     * Title
-                                     * @default null
-                                     */
-                                    title: string | null;
-                                    /**
-                                     * Status
-                                     * @default null
-                                     */
-                                    status: string | null;
-                                    /**
-                                     * Status Label
-                                     * @default null
-                                     */
-                                    status_label: string | null;
-                                    /**
-                                     * Attempts
-                                     * @default null
-                                     */
-                                    attempts: number | null;
-                                    /**
-                                     * Last Error
-                                     * @default null
-                                     */
-                                    last_error: string | null;
-                                    /**
-                                     * Ab Result Summary
-                                     * @default null
-                                     */
-                                    ab_result_summary: string | null;
-                                    /**
-                                     * Created At
-                                     * @default null
-                                     */
-                                    created_at: string | null;
-                                    /**
-                                     * Updated At
-                                     * @default null
-                                     */
-                                    updated_at: string | null;
-                                } & {
-                                    [key: string]: unknown;
-                                })[];
-                            } & {
-                                [key: string]: unknown;
-                            };
-                            /** Items */
-                            items: ({
-                                /**
-                                 * Item Id
-                                 * @default null
-                                 */
-                                item_id: string | null;
-                                /**
-                                 * Request Id
-                                 * @default null
-                                 */
-                                request_id: string | null;
-                                /**
-                                 * Title
-                                 * @default null
-                                 */
-                                title: string | null;
-                                /**
-                                 * Status
-                                 * @default null
-                                 */
-                                status: string | null;
-                                /**
-                                 * Reason
-                                 * @default null
-                                 */
-                                reason: string | null;
-                                /**
-                                 * Error Type
-                                 * @default null
-                                 */
-                                error_type: string | null;
-                                /**
-                                 * Queued
-                                 * @default null
-                                 */
-                                queued: boolean | null;
-                                /**
-                                 * Attempts
-                                 * @default null
-                                 */
-                                attempts: number | null;
-                            } & {
-                                [key: string]: unknown;
-                            })[];
-                            /** Summary */
-                            summary: {
-                                [key: string]: number;
-                            };
-                        };
-                    };
-                };
-            };
-            /** @description invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / invalid_batch_id: batch_id 不能包含路径片段 */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "invalid_storage_dir",
-                     *       "error_message": "storage_dir 必须是服务器允许根目录下的相对目录",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-        };
-    };
-    getBatchQueue: {
-        parameters: {
-            query?: {
-                /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                storage_dir?: string;
-            };
-            header?: never;
-            path: {
-                batch_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 成功 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": true,
-                     *       "result": {
-                     *         "batch_id": "示例",
-                     *         "queue": null
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /** @constant */
-                        ok: true;
-                        /** BatchQueueResultDTO */
-                        result: {
-                            /** Batch Id */
-                            batch_id: string;
-                            /** @default null */
-                            queue: ({
-                                /**
-                                 * Queue Id
-                                 * @default null
-                                 */
-                                queue_id: string | null;
-                                /**
-                                 * Batch Id
-                                 * @default null
-                                 */
-                                batch_id: string | null;
-                                /**
-                                 * Created At
-                                 * @default null
-                                 */
-                                created_at: string | null;
-                                /**
-                                 * Updated At
-                                 * @default null
-                                 */
-                                updated_at: string | null;
-                                /**
-                                 * Items
-                                 * @default []
-                                 */
-                                items: ({
-                                    /**
-                                     * Queue Id
-                                     * @default null
-                                     */
-                                    queue_id: string | null;
-                                    /**
-                                     * Batch Id
-                                     * @default null
-                                     */
-                                    batch_id: string | null;
-                                    /**
-                                     * Item Id
-                                     * @default null
-                                     */
-                                    item_id: string | null;
-                                    /**
-                                     * Request Id
-                                     * @default null
-                                     */
-                                    request_id: string | null;
-                                    /**
-                                     * Title
-                                     * @default null
-                                     */
-                                    title: string | null;
-                                    /**
-                                     * Status
-                                     * @default null
-                                     */
-                                    status: string | null;
-                                    /**
-                                     * Status Label
-                                     * @default null
-                                     */
-                                    status_label: string | null;
-                                    /**
-                                     * Attempts
-                                     * @default null
-                                     */
-                                    attempts: number | null;
-                                    /**
-                                     * Last Error
-                                     * @default null
-                                     */
-                                    last_error: string | null;
-                                    /**
-                                     * Ab Result Summary
-                                     * @default null
-                                     */
-                                    ab_result_summary: string | null;
-                                    /**
-                                     * Created At
-                                     * @default null
-                                     */
-                                    created_at: string | null;
-                                    /**
-                                     * Updated At
-                                     * @default null
-                                     */
-                                    updated_at: string | null;
-                                } & {
-                                    [key: string]: unknown;
-                                })[];
-                            } & {
-                                [key: string]: unknown;
-                            }) | null;
-                        };
-                    };
-                };
-            };
-            /** @description invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / invalid_batch_id: batch_id 不能包含路径片段 */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "invalid_storage_dir",
-                     *       "error_message": "storage_dir 必须是服务器允许根目录下的相对目录",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-        };
-    };
-    recoverBatchQueueItem: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** @description 恢复卡住的队列项目 */
-        requestBody: {
-            content: {
-                /**
-                 * @example {
-                 *       "request_id": "示例",
-                 *       "action": "示例",
-                 *       "confirm": false
-                 *     }
-                 */
-                "application/json": {
-                    request_id: string;
-                    /** @enum {string} */
-                    action: "auto" | "succeeded" | "failed";
-                    confirm?: boolean;
-                    /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                    storage_dir?: string | null;
-                };
-            };
-        };
-        responses: {
-            /** @description 成功 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": true,
-                     *       "result": {
-                     *         "batch_id": "示例",
-                     *         "queue": {
-                     *           "queue_id": null,
-                     *           "batch_id": null,
-                     *           "created_at": null,
-                     *           "updated_at": null,
-                     *           "items": []
-                     *         },
-                     *         "items": [
-                     *           {
-                     *             "item_id": null,
-                     *             "request_id": null,
-                     *             "title": null,
-                     *             "status": null,
-                     *             "reason": null,
-                     *             "error_type": null,
-                     *             "queued": null,
-                     *             "attempts": null
-                     *           }
-                     *         ],
-                     *         "summary": {}
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /** @constant */
-                        ok: true;
-                        /**
-                         * BatchSubmitResultDTO
-                         * @description submit/retry/recover results equal the accept result shape.
-                         */
-                        result: {
-                            /** Batch Id */
-                            batch_id: string;
-                            /**
-                             * BatchQueueDTO
-                             * @description The public pre-submission queue (idempotent, sanitized summaries).
-                             */
-                            queue: {
-                                /**
-                                 * Queue Id
-                                 * @default null
-                                 */
-                                queue_id: string | null;
-                                /**
-                                 * Batch Id
-                                 * @default null
-                                 */
-                                batch_id: string | null;
-                                /**
-                                 * Created At
-                                 * @default null
-                                 */
-                                created_at: string | null;
-                                /**
-                                 * Updated At
-                                 * @default null
-                                 */
-                                updated_at: string | null;
-                                /**
-                                 * Items
-                                 * @default []
-                                 */
-                                items: ({
-                                    /**
-                                     * Queue Id
-                                     * @default null
-                                     */
-                                    queue_id: string | null;
-                                    /**
-                                     * Batch Id
-                                     * @default null
-                                     */
-                                    batch_id: string | null;
-                                    /**
-                                     * Item Id
-                                     * @default null
-                                     */
-                                    item_id: string | null;
-                                    /**
-                                     * Request Id
-                                     * @default null
-                                     */
-                                    request_id: string | null;
-                                    /**
-                                     * Title
-                                     * @default null
-                                     */
-                                    title: string | null;
-                                    /**
-                                     * Status
-                                     * @default null
-                                     */
-                                    status: string | null;
-                                    /**
-                                     * Status Label
-                                     * @default null
-                                     */
-                                    status_label: string | null;
-                                    /**
-                                     * Attempts
-                                     * @default null
-                                     */
-                                    attempts: number | null;
-                                    /**
-                                     * Last Error
-                                     * @default null
-                                     */
-                                    last_error: string | null;
-                                    /**
-                                     * Ab Result Summary
-                                     * @default null
-                                     */
-                                    ab_result_summary: string | null;
-                                    /**
-                                     * Created At
-                                     * @default null
-                                     */
-                                    created_at: string | null;
-                                    /**
-                                     * Updated At
-                                     * @default null
-                                     */
-                                    updated_at: string | null;
-                                } & {
-                                    [key: string]: unknown;
-                                })[];
-                            } & {
-                                [key: string]: unknown;
-                            };
-                            /** Items */
-                            items: ({
-                                /**
-                                 * Item Id
-                                 * @default null
-                                 */
-                                item_id: string | null;
-                                /**
-                                 * Request Id
-                                 * @default null
-                                 */
-                                request_id: string | null;
-                                /**
-                                 * Title
-                                 * @default null
-                                 */
-                                title: string | null;
-                                /**
-                                 * Status
-                                 * @default null
-                                 */
-                                status: string | null;
-                                /**
-                                 * Reason
-                                 * @default null
-                                 */
-                                reason: string | null;
-                                /**
-                                 * Error Type
-                                 * @default null
-                                 */
-                                error_type: string | null;
-                                /**
-                                 * Queued
-                                 * @default null
-                                 */
-                                queued: boolean | null;
-                                /**
-                                 * Attempts
-                                 * @default null
-                                 */
-                                attempts: number | null;
-                            } & {
-                                [key: string]: unknown;
-                            })[];
-                            /** Summary */
-                            summary: {
-                                [key: string]: number;
-                            };
-                        };
-                    };
-                };
-            };
-            /** @description validation_error: action 非法或缺少确认 / invalid_batch_id: batch_id 不能包含路径片段 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "validation_error",
-                     *       "error_message": "action 非法或缺少确认",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-            /** @description queue_item_not_found: 队列中不存在该 request_id */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "queue_item_not_found",
-                     *       "error_message": "队列中不存在该 request_id",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-        };
-    };
-    retryBatchQueueItem: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** @description 重试队列中单个失败项目 */
-        requestBody: {
-            content: {
-                /**
-                 * @example {
-                 *       "request_id": "示例",
-                 *       "confirm": true
-                 *     }
-                 */
-                "application/json": {
-                    request_id: string;
-                    ab_config?: {
-                        /** @enum {string} */
-                        auth_mode: "password" | "api_token";
-                        base_url?: string;
-                        username?: string;
-                        password?: string;
-                        token?: string;
-                        fallback_enabled: boolean;
-                    };
-                    confirm: boolean;
-                    /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                    storage_dir?: string | null;
-                };
-            };
-        };
-        responses: {
-            /** @description 成功 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": true,
-                     *       "result": {
-                     *         "batch_id": "示例",
-                     *         "queue": {
-                     *           "queue_id": null,
-                     *           "batch_id": null,
-                     *           "created_at": null,
-                     *           "updated_at": null,
-                     *           "items": []
-                     *         },
-                     *         "items": [
-                     *           {
-                     *             "item_id": null,
-                     *             "request_id": null,
-                     *             "title": null,
-                     *             "status": null,
-                     *             "reason": null,
-                     *             "error_type": null,
-                     *             "queued": null,
-                     *             "attempts": null
-                     *           }
-                     *         ],
-                     *         "summary": {}
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /** @constant */
-                        ok: true;
-                        /**
-                         * BatchSubmitResultDTO
-                         * @description submit/retry/recover results equal the accept result shape.
-                         */
-                        result: {
-                            /** Batch Id */
-                            batch_id: string;
-                            /**
-                             * BatchQueueDTO
-                             * @description The public pre-submission queue (idempotent, sanitized summaries).
-                             */
-                            queue: {
-                                /**
-                                 * Queue Id
-                                 * @default null
-                                 */
-                                queue_id: string | null;
-                                /**
-                                 * Batch Id
-                                 * @default null
-                                 */
-                                batch_id: string | null;
-                                /**
-                                 * Created At
-                                 * @default null
-                                 */
-                                created_at: string | null;
-                                /**
-                                 * Updated At
-                                 * @default null
-                                 */
-                                updated_at: string | null;
-                                /**
-                                 * Items
-                                 * @default []
-                                 */
-                                items: ({
-                                    /**
-                                     * Queue Id
-                                     * @default null
-                                     */
-                                    queue_id: string | null;
-                                    /**
-                                     * Batch Id
-                                     * @default null
-                                     */
-                                    batch_id: string | null;
-                                    /**
-                                     * Item Id
-                                     * @default null
-                                     */
-                                    item_id: string | null;
-                                    /**
-                                     * Request Id
-                                     * @default null
-                                     */
-                                    request_id: string | null;
-                                    /**
-                                     * Title
-                                     * @default null
-                                     */
-                                    title: string | null;
-                                    /**
-                                     * Status
-                                     * @default null
-                                     */
-                                    status: string | null;
-                                    /**
-                                     * Status Label
-                                     * @default null
-                                     */
-                                    status_label: string | null;
-                                    /**
-                                     * Attempts
-                                     * @default null
-                                     */
-                                    attempts: number | null;
-                                    /**
-                                     * Last Error
-                                     * @default null
-                                     */
-                                    last_error: string | null;
-                                    /**
-                                     * Ab Result Summary
-                                     * @default null
-                                     */
-                                    ab_result_summary: string | null;
-                                    /**
-                                     * Created At
-                                     * @default null
-                                     */
-                                    created_at: string | null;
-                                    /**
-                                     * Updated At
-                                     * @default null
-                                     */
-                                    updated_at: string | null;
-                                } & {
-                                    [key: string]: unknown;
-                                })[];
-                            } & {
-                                [key: string]: unknown;
-                            };
-                            /** Items */
-                            items: ({
-                                /**
-                                 * Item Id
-                                 * @default null
-                                 */
-                                item_id: string | null;
-                                /**
-                                 * Request Id
-                                 * @default null
-                                 */
-                                request_id: string | null;
-                                /**
-                                 * Title
-                                 * @default null
-                                 */
-                                title: string | null;
-                                /**
-                                 * Status
-                                 * @default null
-                                 */
-                                status: string | null;
-                                /**
-                                 * Reason
-                                 * @default null
-                                 */
-                                reason: string | null;
-                                /**
-                                 * Error Type
-                                 * @default null
-                                 */
-                                error_type: string | null;
-                                /**
-                                 * Queued
-                                 * @default null
-                                 */
-                                queued: boolean | null;
-                                /**
-                                 * Attempts
-                                 * @default null
-                                 */
-                                attempts: number | null;
-                            } & {
-                                [key: string]: unknown;
-                            })[];
-                            /** Summary */
-                            summary: {
-                                [key: string]: number;
-                            };
-                        };
-                    };
-                };
-            };
-            /** @description validation_error: 缺少 ab_config/confirm/request_id / queue_not_found: 队列不存在 / invalid_batch_id: batch_id 不能包含路径片段 / config_error: Auto Bangumi 配置无效 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "validation_error",
-                     *       "error_message": "缺少 ab_config/confirm/request_id",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-            /** @description queue_item_not_found: 队列中不存在该 request_id */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "queue_item_not_found",
-                     *       "error_message": "队列中不存在该 request_id",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-            /** @description ab_connection_failed: Auto Bangumi HTTP 连接失败 / ab_submit_failed: Auto Bangumi HTTP 提交失败 */
-            502: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "ab_connection_failed",
-                     *       "error_message": "Auto Bangumi HTTP 连接失败",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-            /** @description ab_submit_unsupported: 当前 Auto Bangumi 版本或认证模式暂不支持提交 */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "ab_submit_unsupported",
-                     *       "error_message": "当前 Auto Bangumi 版本或认证模式暂不支持提交",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-            /** @description ab_timeout: Auto Bangumi HTTP 请求超时 */
-            504: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "ab_timeout",
-                     *       "error_message": "Auto Bangumi HTTP 请求超时",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-        };
-    };
     saveConfirmBatchItems: {
         parameters: {
             query?: never;
@@ -6980,379 +5532,6 @@ export interface operations {
                      *       "ok": false,
                      *       "error_type": "data_validation_errors",
                      *       "error_message": "请求参数校验失败（缺失/非法 item 字段或 idempotency_key）",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-        };
-    };
-    submitBatchQueue: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** @description 提交队列到 Auto Bangumi */
-        requestBody: {
-            content: {
-                /**
-                 * @example {
-                 *       "confirm": true
-                 *     }
-                 */
-                "application/json": {
-                    /** @description Auto Bangumi 凭据（request-scoped，绝不落盘）。 */
-                    ab_config?: {
-                        /** @enum {string} */
-                        auth_mode: "password" | "api_token";
-                        base_url?: string;
-                        username?: string;
-                        password?: string;
-                        token?: string;
-                        fallback_enabled: boolean;
-                    };
-                    /** @description 显式用户确认。 */
-                    confirm: boolean;
-                    /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                    storage_dir?: string | null;
-                };
-            };
-        };
-        responses: {
-            /** @description 成功 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": true,
-                     *       "result": {
-                     *         "batch_id": "示例",
-                     *         "queue": {
-                     *           "queue_id": null,
-                     *           "batch_id": null,
-                     *           "created_at": null,
-                     *           "updated_at": null,
-                     *           "items": []
-                     *         },
-                     *         "items": [
-                     *           {
-                     *             "item_id": null,
-                     *             "request_id": null,
-                     *             "title": null,
-                     *             "status": null,
-                     *             "reason": null,
-                     *             "error_type": null,
-                     *             "queued": null,
-                     *             "attempts": null
-                     *           }
-                     *         ],
-                     *         "summary": {}
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /** @constant */
-                        ok: true;
-                        /**
-                         * BatchSubmitResultDTO
-                         * @description submit/retry/recover results equal the accept result shape.
-                         */
-                        result: {
-                            /** Batch Id */
-                            batch_id: string;
-                            /**
-                             * BatchQueueDTO
-                             * @description The public pre-submission queue (idempotent, sanitized summaries).
-                             */
-                            queue: {
-                                /**
-                                 * Queue Id
-                                 * @default null
-                                 */
-                                queue_id: string | null;
-                                /**
-                                 * Batch Id
-                                 * @default null
-                                 */
-                                batch_id: string | null;
-                                /**
-                                 * Created At
-                                 * @default null
-                                 */
-                                created_at: string | null;
-                                /**
-                                 * Updated At
-                                 * @default null
-                                 */
-                                updated_at: string | null;
-                                /**
-                                 * Items
-                                 * @default []
-                                 */
-                                items: ({
-                                    /**
-                                     * Queue Id
-                                     * @default null
-                                     */
-                                    queue_id: string | null;
-                                    /**
-                                     * Batch Id
-                                     * @default null
-                                     */
-                                    batch_id: string | null;
-                                    /**
-                                     * Item Id
-                                     * @default null
-                                     */
-                                    item_id: string | null;
-                                    /**
-                                     * Request Id
-                                     * @default null
-                                     */
-                                    request_id: string | null;
-                                    /**
-                                     * Title
-                                     * @default null
-                                     */
-                                    title: string | null;
-                                    /**
-                                     * Status
-                                     * @default null
-                                     */
-                                    status: string | null;
-                                    /**
-                                     * Status Label
-                                     * @default null
-                                     */
-                                    status_label: string | null;
-                                    /**
-                                     * Attempts
-                                     * @default null
-                                     */
-                                    attempts: number | null;
-                                    /**
-                                     * Last Error
-                                     * @default null
-                                     */
-                                    last_error: string | null;
-                                    /**
-                                     * Ab Result Summary
-                                     * @default null
-                                     */
-                                    ab_result_summary: string | null;
-                                    /**
-                                     * Created At
-                                     * @default null
-                                     */
-                                    created_at: string | null;
-                                    /**
-                                     * Updated At
-                                     * @default null
-                                     */
-                                    updated_at: string | null;
-                                } & {
-                                    [key: string]: unknown;
-                                })[];
-                            } & {
-                                [key: string]: unknown;
-                            };
-                            /** Items */
-                            items: ({
-                                /**
-                                 * Item Id
-                                 * @default null
-                                 */
-                                item_id: string | null;
-                                /**
-                                 * Request Id
-                                 * @default null
-                                 */
-                                request_id: string | null;
-                                /**
-                                 * Title
-                                 * @default null
-                                 */
-                                title: string | null;
-                                /**
-                                 * Status
-                                 * @default null
-                                 */
-                                status: string | null;
-                                /**
-                                 * Reason
-                                 * @default null
-                                 */
-                                reason: string | null;
-                                /**
-                                 * Error Type
-                                 * @default null
-                                 */
-                                error_type: string | null;
-                                /**
-                                 * Queued
-                                 * @default null
-                                 */
-                                queued: boolean | null;
-                                /**
-                                 * Attempts
-                                 * @default null
-                                 */
-                                attempts: number | null;
-                            } & {
-                                [key: string]: unknown;
-                            })[];
-                            /** Summary */
-                            summary: {
-                                [key: string]: number;
-                            };
-                        };
-                    };
-                };
-            };
-            /** @description validation_error: 缺少 ab_config 或 confirm / queue_not_found: 队列不存在 / invalid_batch_id: batch_id 不能包含路径片段 / config_error: Auto Bangumi 配置无效 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "validation_error",
-                     *       "error_message": "缺少 ab_config 或 confirm",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-            /** @description ab_connection_failed: Auto Bangumi HTTP 连接失败 / ab_submit_failed: Auto Bangumi HTTP 提交失败 */
-            502: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "ab_connection_failed",
-                     *       "error_message": "Auto Bangumi HTTP 连接失败",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-            /** @description ab_submit_unsupported: 当前 Auto Bangumi 版本或认证模式暂不支持提交 */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "ab_submit_unsupported",
-                     *       "error_message": "当前 Auto Bangumi 版本或认证模式暂不支持提交",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-            /** @description ab_timeout: Auto Bangumi HTTP 请求超时 */
-            504: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "ab_timeout",
-                     *       "error_message": "Auto Bangumi HTTP 请求超时",
                      *       "error_data": {
                      *         "failed_step": "示例步骤"
                      *       }
@@ -10506,830 +8685,6 @@ export interface operations {
             };
         };
     };
-    submitRequestToAutoBangumi: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** @description 提交订阅方案到 Auto Bangumi */
-        requestBody: {
-            content: {
-                /** @example {} */
-                "application/json": {
-                    ab_config: {
-                        /** @enum {string} */
-                        auth_mode: "password" | "api_token";
-                        base_url?: string;
-                        username?: string;
-                        password?: string;
-                        token?: string;
-                        fallback_enabled: boolean;
-                    };
-                    /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                    storage_dir?: string | null;
-                };
-            };
-        };
-        responses: {
-            /** @description 成功 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": true,
-                     *       "result": {
-                     *         "request": {
-                     *           "request_id": null,
-                     *           "status": null,
-                     *           "input": null,
-                     *           "source_info": null,
-                     *           "confirmable_config": null,
-                     *           "ab_submit_result": null,
-                     *           "created_at": null,
-                     *           "updated_at": null,
-                     *           "user_action": null
-                     *         },
-                     *         "summary": {
-                     *           "request_id": "示例",
-                     *           "status": "示例",
-                     *           "bangumi_title": "示例",
-                     *           "season": 1,
-                     *           "updated_at": "示例",
-                     *           "candidate_subtitle_groups": [
-                     *             {
-                     *               "subtitle_group": "示例",
-                     *               "total_resource_count": 1,
-                     *               "valid_resource_count": 1,
-                     *               "invalid_resource_count": 1
-                     *             }
-                     *           ],
-                     *           "selected_subtitle_group": "示例",
-                     *           "effective_seed_count": 1,
-                     *           "expected_folder_name": "示例",
-                     *           "warnings": []
-                     *         },
-                     *         "saved_request": null,
-                     *         "draft_id": null,
-                     *         "draft_revision": null,
-                     *         "ab_submit_result": {
-                     *           "success": true,
-                     *           "ab_subscription_id": "示例",
-                     *           "ab_response": {},
-                     *           "fallback_config": null,
-                     *           "error": null
-                     *         },
-                     *         "saved_ab_result": null
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /** @constant */
-                        ok: true;
-                        /** RequestAbSubmitResultDTO */
-                        result: {
-                            /**
-                             * RequestSnapshotDTO
-                             * @description Typed view of the saved Request snapshot the detail panel renders.
-                             *
-                             *     Only the display fields are typed; the engine may add fields without
-                             *     breaking the boundary (``extra="allow"``). ``mikan_url``/``rss_url``/
-                             *     ``poster_url`` are declared for schema accuracy but the frontend must
-                             *     never render them (URLs are redacted at display time).
-                             */
-                            request: {
-                                /**
-                                 * Request Id
-                                 * @default null
-                                 */
-                                request_id: string | null;
-                                /**
-                                 * Status
-                                 * @default null
-                                 */
-                                status: string | null;
-                                /** @default null */
-                                input: ({
-                                    /**
-                                     * Raw Title
-                                     * @default null
-                                     */
-                                    raw_title: string | null;
-                                } & {
-                                    [key: string]: unknown;
-                                }) | null;
-                                /** @default null */
-                                source_info: ({
-                                    /** @default null */
-                                    matched_bangumi: ({
-                                        /**
-                                         * Title
-                                         * @default null
-                                         */
-                                        title: string | null;
-                                        /**
-                                         * Aliases
-                                         * @default []
-                                         */
-                                        aliases: string[];
-                                        /**
-                                         * Mikan Url
-                                         * @default null
-                                         */
-                                        mikan_url: string | null;
-                                        /**
-                                         * Match Score
-                                         * @default null
-                                         */
-                                        match_score: number | null;
-                                        /**
-                                         * Poster Url
-                                         * @default null
-                                         */
-                                        poster_url: string | null;
-                                    } & {
-                                        [key: string]: unknown;
-                                    }) | null;
-                                    /**
-                                     * Rss Sources
-                                     * @default []
-                                     */
-                                    rss_sources: ({
-                                        /**
-                                         * Subtitle Group
-                                         * @default null
-                                         */
-                                        subtitle_group: string | null;
-                                        /**
-                                         * Rss Url
-                                         * @default null
-                                         */
-                                        rss_url: string | null;
-                                        /**
-                                         * Source Type
-                                         * @default null
-                                         */
-                                        source_type: string | null;
-                                        /**
-                                         * Total Seed Count
-                                         * @default null
-                                         */
-                                        total_seed_count: number | null;
-                                        /**
-                                         * Seed Names
-                                         * @default []
-                                         */
-                                        seed_names: string[];
-                                        /**
-                                         * Valid Seed Count
-                                         * @default null
-                                         */
-                                        valid_seed_count: number | null;
-                                        /**
-                                         * Invalid Seed Count
-                                         * @default null
-                                         */
-                                        invalid_seed_count: number | null;
-                                        /**
-                                         * Valid Seed Names
-                                         * @default []
-                                         */
-                                        valid_seed_names: string[];
-                                        /**
-                                         * Excluded Seed Names
-                                         * @default []
-                                         */
-                                        excluded_seed_names: {
-                                            [key: string]: unknown;
-                                        }[];
-                                        /**
-                                         * Warnings
-                                         * @default []
-                                         */
-                                        warnings: string[];
-                                    } & {
-                                        [key: string]: unknown;
-                                    })[];
-                                } & {
-                                    [key: string]: unknown;
-                                }) | null;
-                                /** @default null */
-                                confirmable_config: ({
-                                    /**
-                                     * Selected Subtitle Group
-                                     * @default null
-                                     */
-                                    selected_subtitle_group: string | null;
-                                    /**
-                                     * Selected Rss Url
-                                     * @default null
-                                     */
-                                    selected_rss_url: string | null;
-                                    /** @default null */
-                                    filter_rule: ({
-                                        /**
-                                         * Must Contain
-                                         * @default null
-                                         */
-                                        must_contain: string | null;
-                                        /**
-                                         * Must Not Contain
-                                         * @default null
-                                         */
-                                        must_not_contain: string | null;
-                                        /**
-                                         * Use Regex
-                                         * @default null
-                                         */
-                                        use_regex: boolean | null;
-                                        /**
-                                         * Case Sensitive
-                                         * @default null
-                                         */
-                                        case_sensitive: boolean | null;
-                                    } & {
-                                        [key: string]: unknown;
-                                    }) | null;
-                                    /**
-                                     * Effective Seed Names
-                                     * @default []
-                                     */
-                                    effective_seed_names: string[];
-                                    /**
-                                     * Expected Folder Name
-                                     * @default null
-                                     */
-                                    expected_folder_name: string | null;
-                                    /**
-                                     * Warnings
-                                     * @default []
-                                     */
-                                    warnings: string[];
-                                } & {
-                                    [key: string]: unknown;
-                                }) | null;
-                                /**
-                                 * Ab Submit Result
-                                 * @default null
-                                 */
-                                ab_submit_result: {
-                                    [key: string]: unknown;
-                                } | null;
-                                /**
-                                 * Created At
-                                 * @default null
-                                 */
-                                created_at: string | null;
-                                /**
-                                 * Updated At
-                                 * @default null
-                                 */
-                                updated_at: string | null;
-                                /** @default null */
-                                user_action: ({
-                                    /**
-                                     * Action
-                                     * @default null
-                                     */
-                                    action: string | null;
-                                    /**
-                                     * Reason
-                                     * @default null
-                                     */
-                                    reason: string | null;
-                                    /**
-                                     * Decided At
-                                     * @default null
-                                     */
-                                    decided_at: string | null;
-                                } & {
-                                    [key: string]: unknown;
-                                }) | null;
-                            } & {
-                                [key: string]: unknown;
-                            };
-                            /**
-                             * RequestSummaryDTO
-                             * @description Public ``summary`` shape produced by ``summarize_request``.
-                             */
-                            summary: {
-                                /** Request Id */
-                                request_id: string | null;
-                                /** Status */
-                                status: string | null;
-                                /** Bangumi Title */
-                                bangumi_title: string | null;
-                                /** Season */
-                                season: number | null;
-                                /** Updated At */
-                                updated_at: string | null;
-                                /** Candidate Subtitle Groups */
-                                candidate_subtitle_groups: {
-                                    /** Subtitle Group */
-                                    subtitle_group: string | null;
-                                    /** Total Resource Count */
-                                    total_resource_count: number;
-                                    /** Valid Resource Count */
-                                    valid_resource_count: number;
-                                    /** Invalid Resource Count */
-                                    invalid_resource_count: number;
-                                }[];
-                                /** Selected Subtitle Group */
-                                selected_subtitle_group: string | null;
-                                /** Effective Seed Count */
-                                effective_seed_count: number;
-                                /** Expected Folder Name */
-                                expected_folder_name: string | null;
-                                /** Warnings */
-                                warnings: string[];
-                            };
-                            /** @default null */
-                            saved_request: ({
-                                /**
-                                 * Request Id
-                                 * @default null
-                                 */
-                                request_id: string | null;
-                                /**
-                                 * Status
-                                 * @default null
-                                 */
-                                status: string | null;
-                                /** @default null */
-                                input: ({
-                                    /**
-                                     * Raw Title
-                                     * @default null
-                                     */
-                                    raw_title: string | null;
-                                } & {
-                                    [key: string]: unknown;
-                                }) | null;
-                                /** @default null */
-                                source_info: ({
-                                    /** @default null */
-                                    matched_bangumi: ({
-                                        /**
-                                         * Title
-                                         * @default null
-                                         */
-                                        title: string | null;
-                                        /**
-                                         * Aliases
-                                         * @default []
-                                         */
-                                        aliases: string[];
-                                        /**
-                                         * Mikan Url
-                                         * @default null
-                                         */
-                                        mikan_url: string | null;
-                                        /**
-                                         * Match Score
-                                         * @default null
-                                         */
-                                        match_score: number | null;
-                                        /**
-                                         * Poster Url
-                                         * @default null
-                                         */
-                                        poster_url: string | null;
-                                    } & {
-                                        [key: string]: unknown;
-                                    }) | null;
-                                    /**
-                                     * Rss Sources
-                                     * @default []
-                                     */
-                                    rss_sources: ({
-                                        /**
-                                         * Subtitle Group
-                                         * @default null
-                                         */
-                                        subtitle_group: string | null;
-                                        /**
-                                         * Rss Url
-                                         * @default null
-                                         */
-                                        rss_url: string | null;
-                                        /**
-                                         * Source Type
-                                         * @default null
-                                         */
-                                        source_type: string | null;
-                                        /**
-                                         * Total Seed Count
-                                         * @default null
-                                         */
-                                        total_seed_count: number | null;
-                                        /**
-                                         * Seed Names
-                                         * @default []
-                                         */
-                                        seed_names: string[];
-                                        /**
-                                         * Valid Seed Count
-                                         * @default null
-                                         */
-                                        valid_seed_count: number | null;
-                                        /**
-                                         * Invalid Seed Count
-                                         * @default null
-                                         */
-                                        invalid_seed_count: number | null;
-                                        /**
-                                         * Valid Seed Names
-                                         * @default []
-                                         */
-                                        valid_seed_names: string[];
-                                        /**
-                                         * Excluded Seed Names
-                                         * @default []
-                                         */
-                                        excluded_seed_names: {
-                                            [key: string]: unknown;
-                                        }[];
-                                        /**
-                                         * Warnings
-                                         * @default []
-                                         */
-                                        warnings: string[];
-                                    } & {
-                                        [key: string]: unknown;
-                                    })[];
-                                } & {
-                                    [key: string]: unknown;
-                                }) | null;
-                                /** @default null */
-                                confirmable_config: ({
-                                    /**
-                                     * Selected Subtitle Group
-                                     * @default null
-                                     */
-                                    selected_subtitle_group: string | null;
-                                    /**
-                                     * Selected Rss Url
-                                     * @default null
-                                     */
-                                    selected_rss_url: string | null;
-                                    /** @default null */
-                                    filter_rule: ({
-                                        /**
-                                         * Must Contain
-                                         * @default null
-                                         */
-                                        must_contain: string | null;
-                                        /**
-                                         * Must Not Contain
-                                         * @default null
-                                         */
-                                        must_not_contain: string | null;
-                                        /**
-                                         * Use Regex
-                                         * @default null
-                                         */
-                                        use_regex: boolean | null;
-                                        /**
-                                         * Case Sensitive
-                                         * @default null
-                                         */
-                                        case_sensitive: boolean | null;
-                                    } & {
-                                        [key: string]: unknown;
-                                    }) | null;
-                                    /**
-                                     * Effective Seed Names
-                                     * @default []
-                                     */
-                                    effective_seed_names: string[];
-                                    /**
-                                     * Expected Folder Name
-                                     * @default null
-                                     */
-                                    expected_folder_name: string | null;
-                                    /**
-                                     * Warnings
-                                     * @default []
-                                     */
-                                    warnings: string[];
-                                } & {
-                                    [key: string]: unknown;
-                                }) | null;
-                                /**
-                                 * Ab Submit Result
-                                 * @default null
-                                 */
-                                ab_submit_result: {
-                                    [key: string]: unknown;
-                                } | null;
-                                /**
-                                 * Created At
-                                 * @default null
-                                 */
-                                created_at: string | null;
-                                /**
-                                 * Updated At
-                                 * @default null
-                                 */
-                                updated_at: string | null;
-                                /** @default null */
-                                user_action: ({
-                                    /**
-                                     * Action
-                                     * @default null
-                                     */
-                                    action: string | null;
-                                    /**
-                                     * Reason
-                                     * @default null
-                                     */
-                                    reason: string | null;
-                                    /**
-                                     * Decided At
-                                     * @default null
-                                     */
-                                    decided_at: string | null;
-                                } & {
-                                    [key: string]: unknown;
-                                }) | null;
-                            } & {
-                                [key: string]: unknown;
-                            }) | null;
-                            /**
-                             * Draft Id
-                             * @default null
-                             */
-                            draft_id: string | null;
-                            /**
-                             * Draft Revision
-                             * @default null
-                             */
-                            draft_revision: number | null;
-                            /**
-                             * AbSubmitResultDTO
-                             * @description Public Auto Bangumi submit-result whitelist.
-                             *
-                             *     ``ab_response`` is sanitized by ``_sanitize_ab_submit_result`` (never
-                             *     carries tokens/cookies/URLs); ``fallback_config`` is an opaque
-                             *     non-sensitive fallback payload when enabled.
-                             */
-                            ab_submit_result: {
-                                /** Success */
-                                success: boolean;
-                                /** Ab Subscription Id */
-                                ab_subscription_id: string | null;
-                                /** Ab Response */
-                                ab_response: {
-                                    [key: string]: unknown;
-                                };
-                                /**
-                                 * Fallback Config
-                                 * @default null
-                                 */
-                                fallback_config: {
-                                    [key: string]: unknown;
-                                } | null;
-                                /**
-                                 * Error
-                                 * @default null
-                                 */
-                                error: {
-                                    [key: string]: unknown;
-                                } | null;
-                            };
-                            /**
-                             * Saved Ab Result
-                             * @default null
-                             */
-                            saved_ab_result: {
-                                [key: string]: unknown;
-                            } | null;
-                        };
-                    };
-                };
-            };
-            /** @description invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / config_error: Auto Bangumi 配置无效 */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "invalid_storage_dir",
-                     *       "error_message": "storage_dir 必须是服务器允许根目录下的相对目录",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-            /** @description request_not_found: 订阅方案不存在 */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "request_not_found",
-                     *       "error_message": "订阅方案不存在",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-            /** @description invalid_request_status: 只有已确认订阅方案可以提交 */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "invalid_request_status",
-                     *       "error_message": "只有已确认订阅方案可以提交",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-            /** @description ab_connection_failed: Auto Bangumi HTTP 连接失败 / ab_submit_failed: Auto Bangumi HTTP 提交失败 */
-            502: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "ab_connection_failed",
-                     *       "error_message": "Auto Bangumi HTTP 连接失败",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-            /** @description ab_submit_unsupported: 当前 Auto Bangumi 版本或认证模式暂不支持提交 */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "ab_submit_unsupported",
-                     *       "error_message": "当前 Auto Bangumi 版本或认证模式暂不支持提交",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-            /** @description ab_timeout: Auto Bangumi HTTP 请求超时 */
-            504: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "ab_timeout",
-                     *       "error_message": "Auto Bangumi HTTP 请求超时",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-        };
-    };
     getTrackingItemDetail: {
         parameters: {
             query?: {
@@ -12004,7 +9359,10 @@ export interface operations {
                  * @example {
                  *       "target_scope": "示例",
                  *       "expected_revision": 1,
-                 *       "confirm": true
+                 *       "idempotency_key": "示例",
+                 *       "confirm": true,
+                 *       "connection_ref": "示例",
+                 *       "configuration_revision": 1
                  *     }
                  */
                 "application/json": {
@@ -12014,15 +9372,9 @@ export interface operations {
                     idempotency_key: string;
                     /** @constant */
                     confirm: true;
-                    ab_config: {
-                        /** @enum {string} */
-                        auth_mode: "password" | "api_token";
-                        base_url?: string;
-                        username?: string;
-                        password?: string;
-                        token?: string;
-                        fallback_enabled: boolean;
-                    };
+                    /** Format: uuid */
+                    connection_ref: string;
+                    configuration_revision: number;
                     storage_dir?: string | null;
                 };
             };
@@ -12366,15 +9718,9 @@ export interface operations {
                     idempotency_key: string;
                     /** @constant */
                     confirm: true;
-                    ab_config: {
-                        /** @enum {string} */
-                        auth_mode: "password" | "api_token";
-                        base_url?: string;
-                        username?: string;
-                        password?: string;
-                        token?: string;
-                        fallback_enabled: boolean;
-                    };
+                    /** Format: uuid */
+                    connection_ref: string;
+                    configuration_revision: number;
                     storage_dir?: string | null;
                     patch: {
                         title?: string | null;
@@ -12608,15 +9954,9 @@ export interface operations {
                     idempotency_key: string;
                     /** @constant */
                     confirm: true;
-                    ab_config: {
-                        /** @enum {string} */
-                        auth_mode: "password" | "api_token";
-                        base_url?: string;
-                        username?: string;
-                        password?: string;
-                        token?: string;
-                        fallback_enabled: boolean;
-                    };
+                    /** Format: uuid */
+                    connection_ref: string;
+                    configuration_revision: number;
                     storage_dir?: string | null;
                     patch: {
                         name?: string | null;
@@ -12971,31 +10311,26 @@ export interface operations {
                  * @example {
                  *       "expected_revision": 1,
                  *       "action": "示例",
-                 *       "confirm": false
+                 *       "confirm": false,
+                 *       "connection_ref": null,
+                 *       "configuration_revision": null
                  *     }
                  */
                 "application/json": {
                     /** @description 客户端最后观察到的追番记录 revision（revision-aware 恢复）。 */
                     expected_revision: number;
                     /**
-                     * @description 恢复动作：AUTO=纯本地；VERIFY_EXTERNAL=只读外部核验（需 request-scoped ab_config）；MARK_SUCCEEDED/MARK_FAILED=人工核验（需 confirm=true）。
+                     * @description 恢复动作：AUTO=纯本地；VERIFY_EXTERNAL=只读外部核验（需 saved connection generation）；MARK_SUCCEEDED/MARK_FAILED=人工核验（需 confirm=true）。
                      * @enum {string}
                      */
                     action: "AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "VERIFY_EXTERNAL";
                     /** @description 人工动作必须为 true；AUTO 忽略该字段。 */
                     confirm?: boolean;
+                    /** Format: uuid */
+                    connection_ref?: string | null;
+                    configuration_revision?: number | null;
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
                     storage_dir?: string | null;
-                    /** @description 仅 VERIFY_EXTERNAL 使用；连接配置只在本次请求内存中存在。 */
-                    ab_config?: {
-                        /** @enum {string} */
-                        auth_mode: "password" | "api_token";
-                        base_url: string;
-                        username?: string;
-                        password?: string;
-                        token?: string;
-                        fallback_enabled: boolean;
-                    };
                 };
             };
         };
@@ -13357,7 +10692,10 @@ export interface operations {
                  * @example {
                  *       "target_scope": "示例",
                  *       "expected_revision": 1,
-                 *       "confirm": true
+                 *       "idempotency_key": "示例",
+                 *       "confirm": true,
+                 *       "connection_ref": "示例",
+                 *       "configuration_revision": 1
                  *     }
                  */
                 "application/json": {
@@ -13367,15 +10705,9 @@ export interface operations {
                     idempotency_key: string;
                     /** @constant */
                     confirm: true;
-                    ab_config: {
-                        /** @enum {string} */
-                        auth_mode: "password" | "api_token";
-                        base_url?: string;
-                        username?: string;
-                        password?: string;
-                        token?: string;
-                        fallback_enabled: boolean;
-                    };
+                    /** Format: uuid */
+                    connection_ref: string;
+                    configuration_revision: number;
                     storage_dir?: string | null;
                 };
             };
@@ -13726,15 +11058,6 @@ export interface operations {
                      * @enum {boolean}
                      */
                     confirm: true;
-                    ab_config: {
-                        /** @enum {string} */
-                        auth_mode: "password" | "api_token";
-                        base_url?: string;
-                        username?: string;
-                        password?: string;
-                        token?: string;
-                        fallback_enabled: boolean;
-                    };
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
                     storage_dir?: string | null;
                 };
@@ -14489,7 +11812,10 @@ export interface operations {
                  * @example {
                  *       "target_scope": "示例",
                  *       "expected_revision": 1,
+                 *       "idempotency_key": "示例",
                  *       "confirm": true,
+                 *       "connection_ref": "示例",
+                 *       "configuration_revision": 1,
                  *       "enabled": true
                  *     }
                  */
@@ -14500,15 +11826,9 @@ export interface operations {
                     idempotency_key: string;
                     /** @constant */
                     confirm: true;
-                    ab_config: {
-                        /** @enum {string} */
-                        auth_mode: "password" | "api_token";
-                        base_url?: string;
-                        username?: string;
-                        password?: string;
-                        token?: string;
-                        fallback_enabled: boolean;
-                    };
+                    /** Format: uuid */
+                    connection_ref: string;
+                    configuration_revision: number;
                     storage_dir?: string | null;
                     enabled: boolean;
                 };
@@ -14847,7 +12167,9 @@ export interface operations {
                  * @example {
                  *       "expected_revision": 1,
                  *       "idempotency_key": "示例",
-                 *       "confirm": true
+                 *       "confirm": true,
+                 *       "connection_ref": "示例",
+                 *       "configuration_revision": 1
                  *     }
                  */
                 "application/json": {
@@ -14860,15 +12182,9 @@ export interface operations {
                      * @enum {boolean}
                      */
                     confirm: true;
-                    ab_config: {
-                        /** @enum {string} */
-                        auth_mode: "password" | "api_token";
-                        base_url?: string;
-                        username?: string;
-                        password?: string;
-                        token?: string;
-                        fallback_enabled: boolean;
-                    };
+                    /** Format: uuid */
+                    connection_ref: string;
+                    configuration_revision: number;
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
                     storage_dir?: string | null;
                 };

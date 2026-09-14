@@ -8,13 +8,20 @@
 import ErrorBoundary from '@/components/feedback/ErrorBoundary.vue'
 import GlobalLoadingBar from '@/components/feedback/GlobalLoadingBar.vue'
 import GlobalNotification from '@/components/feedback/GlobalNotification.vue'
-import { nextTick, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { routeLocation, type AppRouteKey } from '@/app/router/catalog'
+import { useConnectionStatus } from '@/app/stores/connectionStatus'
+import { currentStorageDir } from '@/features/requests/requestStorage'
 
 const route = useRoute()
 const mainContent = ref<HTMLElement | null>(null)
+const connection = useConnectionStatus()
+const connectionState = connection.state
+const pendingCount = connection.pendingCount
+let profilePoll: ReturnType<typeof setInterval> | undefined
+let observedProfile = ''
 
 const navigation = [
   { route: 'add', label: '添加番剧' },
@@ -27,6 +34,22 @@ function isCurrent(routeKey: AppRouteKey): boolean {
   return route.name === routeKey
 }
 
+onMounted(() => {
+  observedProfile = currentStorageDir()
+  void connection.loadSummary()
+  void connection.loadPending()
+  profilePoll = setInterval(() => {
+    const profile = currentStorageDir()
+    if (profile === observedProfile) return
+    observedProfile = profile
+    connection.invalidate()
+  }, 100)
+})
+
+onBeforeUnmount(() => {
+  if (profilePoll) clearInterval(profilePoll)
+})
+
 // Focus only when the page route changes. Query-only updates select content
 // inside the current feature and must not steal focus from the user's action.
 watch(
@@ -38,6 +61,11 @@ watch(
   },
   { flush: 'post' },
 )
+
+function requestBrandReturn(event: MouseEvent): void {
+  event.preventDefault()
+  window.dispatchEvent(new Event('migu-orca:brand-return'))
+}
 </script>
 
 <template>
@@ -48,13 +76,13 @@ watch(
     <GlobalLoadingBar />
     <header class="app-header">
       <div class="app-header-inner">
-        <div class="brand-block">
+        <RouterLink :to="routeLocation('add')" class="brand-block" aria-label="返回添加番剧" @click="requestBrandReturn">
           <span class="brand-mark" aria-hidden="true">M</span>
           <div class="header-copy">
             <p class="brand-eyebrow">桌面番剧工作台</p>
             <h1 class="app-title">MiGuOrca</h1>
           </div>
-        </div>
+        </RouterLink>
 
         <nav class="top-nav" aria-label="主导航">
           <ul class="top-nav-list">
@@ -73,10 +101,18 @@ watch(
           </ul>
         </nav>
 
-        <p class="workspace-status" role="status" aria-label="当前运行环境">
+        <RouterLink
+          :to="routeLocation('settings')"
+          class="workspace-status"
+          role="status"
+          aria-label="Auto Bangumi 连接状态，进入设置"
+        >
           <span class="workspace-status-dot" aria-hidden="true"></span>
-          本地桌面工作区
-        </p>
+          <span>Auto Bangumi：{{ connectionState.label }}（本地桌面工作区）</span>
+          <span v-if="pendingCount" class="pending-badge" aria-label="待处理追番数量">
+            {{ pendingCount }}
+          </span>
+        </RouterLink>
       </div>
     </header>
 

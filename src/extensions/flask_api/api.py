@@ -55,7 +55,6 @@ _HTTP_BAD_REQUEST_ERROR_TYPES = {
     "invalid_ab_response",
     "invalid_ab_payload",
     "invalid_ab_submit_result",
-    "invalid_batch_id",
     "invalid_confirmation_action",
     "invalid_input",
     "invalid_request_id",
@@ -64,7 +63,6 @@ _HTTP_BAD_REQUEST_ERROR_TYPES = {
     "invalid_poster_key",
     "invalid_cancel_reason",
     "invalid_storage_dir",
-    "queue_not_found",
     "config_error",
     # US-215: a single batch parse accepts 1..36 non-empty lines; 37+ is a
     # client-input error rejected before any title parse/MiKan/persist seam.
@@ -77,7 +75,6 @@ _HTTP_BAD_REQUEST_ERROR_TYPES = {
 _HTTP_NOT_FOUND_ERROR_TYPES = {
     "request_not_found",
     "poster_not_found",
-    "queue_item_not_found",
     "tracking_not_found",
 }
 # 409 — the request conflicts with the current server state (replay/expired/
@@ -113,6 +110,9 @@ _HTTP_CONFLICT_ERROR_TYPES = {
     "tracking_operation_in_progress",
     # US-245: a management operation already owns the record or key.
     "tracking_management_state_conflict",
+    "configuration_revision_conflict",
+    "connection_in_use",
+    "connection_ref_conflict",
 }
 _HTTP_CONFLICT_ERROR_TYPES.update(
     name
@@ -122,7 +122,6 @@ _HTTP_CONFLICT_ERROR_TYPES.update(
 # 401 — authentication against the external service failed.
 _HTTP_UNAUTHORIZED_ERROR_TYPES = {
     "ab_auth_failed",
-    "qbittorrent_auth_failed",
 }
 # 502 — the upstream (MiKan/AutoBangumi/qBittorrent) is reachable but
 #       unhealthy (connection refused, HTTP 5xx, bad gateway).
@@ -135,9 +134,6 @@ _HTTP_BAD_GATEWAY_ERROR_TYPES = {
     "ab_connection_failed",
     "ab_http_failed",
     "ab_submit_failed",
-    "qbittorrent_connection_failed",
-    "qbittorrent_http_failed",
-    "qbittorrent_unexpected_response",
 }
 # 503 — the upstream is unavailable or the client version is unsupported.
 _HTTP_SERVICE_UNAVAILABLE_ERROR_TYPES = {
@@ -149,7 +145,6 @@ _HTTP_SERVICE_UNAVAILABLE_ERROR_TYPES = {
 _HTTP_GATEWAY_TIMEOUT_ERROR_TYPES = {
     "mikan_timeout",
     "ab_timeout",
-    "qbittorrent_timeout",
 }
 # 500 — internal/local-storage failures that are never the client's fault.
 _HTTP_INTERNAL_SERVER_ERROR_TYPES = {

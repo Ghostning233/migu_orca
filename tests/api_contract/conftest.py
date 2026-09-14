@@ -29,6 +29,12 @@ def client() -> FlaskClient:
 
 
 @pytest.fixture(autouse=True)
+def _web_config_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Keep deployment credentials isolated from the developer workspace."""
+    monkeypatch.setenv("MIGU_ORCA_WEB_CONFIG_ROOT", str(tmp_path / "config"))
+
+
+@pytest.fixture(autouse=True)
 def _web_storage_root(tmp_path: Path) -> None:
     """US-193: point the Web storage root at the test tmp dir.
 
@@ -58,6 +64,26 @@ def _reset_shared_state() -> None:
     candidate_selection_contexts.clear()
     draft_store.clear()
     yield
+
+
+@pytest.fixture(autouse=True)
+def _offline_request_generation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep request-contract tests offline while exercising the real Flask route.
+
+    Web production deliberately uses the server's real MiKan default.  Contract
+    tests use the entry controller's deterministic static fixture seam instead
+    of allowing a golden test to reach the network.
+    """
+    import apps.migu_orca_web.routes_requests as routes_requests
+
+    original = routes_requests.generate_request
+
+    def offline_generate(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        kwargs["source_mode"] = "static_fixture"
+        kwargs.pop("mikan_config", None)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(routes_requests, "generate_request", offline_generate)
 
 
 def saved_request(tmp_path: Path, title: str = "芙莉莲", request_id: str = "request-1") -> dict[str, Any]:

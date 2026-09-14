@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from flask import request
+
 """Tracking-items family API routes (US-223).
 
 Provides the read-only unified tracking list and detail endpoints:
@@ -14,11 +16,12 @@ converges migrated records onto the same deterministic tracking list.  Only
 local storage is read — no external system is ever contacted.
 """
 
-from ab_engine.controllers.ab_config import build_ab_config
-from ab_engine.controllers.ab_http_client import UrlopenAutoBangumiHttpTransport
-from ab_engine.controllers.ab_management_client import AutoBangumiManagementClient, create_legacy_31_management_client
 from apps.migu_orca_web.blueprints import api_blueprint
 from apps.migu_orca_web.schemas import (
+    SavedTrackingManagementInput,
+    SavedTrackingRecoveryInput,
+    SavedTrackingSubmitInput,
+    SavedTrackingSyncInput,
     TrackingDeleteExternalPayload,
     TrackingDetailQuery,
     TrackingListQuery,
@@ -27,29 +30,28 @@ from apps.migu_orca_web.schemas import (
     TrackingRefreshRssPayload,
     TrackingRevalidatePayload,
     TrackingSetEnabledPayload,
-    TrackingSubmitPayload,
     TrackingSyncPayload,
 )
 from apps.migu_orca_web.services import _storage_dir
-from apps.migu_orca_web.tracking_management_service import run_tracking_management
+from apps.migu_orca_web.tracking_management_service import management_writer
 from apps.migu_orca_web.tracking_read_service import (
     build_tracking_detail,
     list_tracking_items,
 )
-from apps.migu_orca_web.tracking_recovery_service import run_tracking_recover
 from apps.migu_orca_web.tracking_revalidate_service import run_tracking_revalidate
+from apps.migu_orca_web.tracking_saved_management_service import run_saved_tracking_management
+from apps.migu_orca_web.tracking_saved_recovery_service import run_saved_tracking_recovery
+from apps.migu_orca_web.tracking_saved_sync_service import run_saved_tracking_sync
 from apps.migu_orca_web.tracking_serializers import serialize_tracking_operation_summary, tracking_summary_fields
 from apps.migu_orca_web.tracking_submission_service import (
-    run_tracking_retry,
-    run_tracking_submit,
+    run_saved_tracking_retry,
+    run_saved_tracking_submit,
 )
-from apps.migu_orca_web.tracking_sync_service import run_tracking_sync
 from extensions.flask_api import class_route
 from extensions.flask_api.views import GetView, PostView
 from storage_engine.controllers.operation_repository import load_tracking_operation
 from storage_engine.controllers.storage_config import load_storage_config
 from storage_engine.controllers.tracking_repository import load_tracking_record
-from tracking_engine.controllers.management_target import ResolvedManagementTarget
 from tracking_engine.models.operation import TRACKING_OPERATION_STATE_SUCCEEDED
 
 
@@ -73,7 +75,7 @@ class TrackingItemListView(GetView):
 
 @class_route(api_blueprint, "/api/v1/tracking/sync", methods=["POST"])
 class TrackingSyncView(PostView):
-    """Run one request-scoped, read-only Auto Bangumi tracking sync."""
+    """Run a read-only sync through the saved connection generation."""
 
     request_validator_model = TrackingSyncPayload
 
@@ -81,8 +83,12 @@ class TrackingSyncView(PostView):
         assert isinstance(self.request_validator_model, TrackingSyncPayload)
         payload = self.request_validator_model
         config = load_storage_config(_storage_dir(payload.storage_dir))
-        ab_config = build_ab_config(payload.ab_config.model_dump(exclude_none=True))
-        result = run_tracking_sync(config=config, ab_config=ab_config)
+        result = run_saved_tracking_sync(SavedTrackingSyncInput.model_validate({
+            "connection_ref": str(payload.connection_ref),
+            "configuration_revision": payload.configuration_revision,
+            "confirm": payload.confirm,
+            "storage_dir": payload.storage_dir,
+        }))
         listing = list_tracking_items(config)
         warnings = list(result.warnings)
         for warning in listing["warnings"]:
@@ -124,7 +130,7 @@ class TrackingItemRevalidateView(PostView):
     """Run the pure-local pre-submit revalidation for one tracking item (US-224).
 
     The request carries only ``expected_revision`` (plus an optional storage
-    profile) — never ``ab_config`` or connection/capability settings.  A
+    profile) — never accepts client credentials or connection settings.  A
     business revalidation failure is still HTTP 200 (``ready=false`` +
     ``next_status=NEEDS_RECONFIRM`` + the fixed §11.5 issue list); only a stale
     revision (409) or a non-revalidatable tracking state (409) raise.
@@ -151,8 +157,8 @@ class TrackingItemRevalidateView(PostView):
 class TrackingItemSubmitView(PostView):
     """Run the unified reliable submit for one tracking item (US-225).
 
-    ``confirm`` must be strictly true and ``ab_config`` lives only in this
-    request's memory.  The service re-reads the latest local Request and runs
+    ``confirm`` must be strictly true; the saved connection lease and immutable
+    snapshot are resolved for the submitted generation. The service re-reads the latest local Request and runs
     the complete local revalidation before any Auto Bangumi call; a persisted
     business outcome (``NEEDS_RECONFIRM``/``SUBMIT_FAILED``/
     ``VERIFYING_EXTERNAL``/``RECOVERY_REQUIRED``/``ACTIVE``) is HTTP 200.  Only
@@ -160,21 +166,12 @@ class TrackingItemSubmitView(PostView):
     idempotency conflict, in-flight operation) raise.
     """
 
-    request_validator_model = TrackingSubmitPayload
+    request_validator_model = None
 
     def save(self) -> dict[str, object]:
-        assert isinstance(self.request_validator_model, TrackingSubmitPayload)
-        payload = self.request_validator_model
-        config = load_storage_config(_storage_dir(payload.storage_dir))
-        ab_config = build_ab_config(payload.ab_config.model_dump(exclude_none=True))
-        return run_tracking_submit(
-            config,
-            tracking_id=payload.tracking_id,
-            expected_revision=payload.expected_revision,
-            idempotency_key=payload.idempotency_key,
-            confirm=payload.confirm,
-            ab_config=ab_config,
-        )
+        body = request.get_json(silent=True) or {}
+        payload = SavedTrackingSubmitInput.model_validate({**body, "tracking_id": request.view_args["tracking_id"]})
+        return run_saved_tracking_submit(load_storage_config(_storage_dir(payload.storage_dir)), payload=payload)
 
 
 @class_route(
@@ -188,28 +185,19 @@ class TrackingItemRetryView(PostView):
     Only ``SUBMIT_FAILED`` records are retryable — an unknown/incomplete outcome
     (``VERIFYING_EXTERNAL``/``RECOVERY_REQUIRED``) must be recovered first.  The
     request shape is identical to ``submit`` (``confirm`` strictly true,
-    request-scoped ``ab_config``, an opaque idempotency key); the unified
+    saved connection generation and opaque idempotency key); the unified
     service re-reads the latest Request and revalidates before creating a fresh
     operation and calling Auto Bangumi once.  A persisted business outcome is
     HTTP 200; only preconditions (missing record, stale revision,
     non-retryable state, idempotency conflict, in-flight operation) raise.
     """
 
-    request_validator_model = TrackingSubmitPayload
+    request_validator_model = None
 
     def save(self) -> dict[str, object]:
-        assert isinstance(self.request_validator_model, TrackingSubmitPayload)
-        payload = self.request_validator_model
-        config = load_storage_config(_storage_dir(payload.storage_dir))
-        ab_config = build_ab_config(payload.ab_config.model_dump(exclude_none=True))
-        return run_tracking_retry(
-            config,
-            tracking_id=payload.tracking_id,
-            expected_revision=payload.expected_revision,
-            idempotency_key=payload.idempotency_key,
-            confirm=payload.confirm,
-            ab_config=ab_config,
-        )
+        body = request.get_json(silent=True) or {}
+        payload = SavedTrackingSubmitInput.model_validate({**body, "tracking_id": request.view_args["tracking_id"]})
+        return run_saved_tracking_retry(load_storage_config(_storage_dir(payload.storage_dir)), payload=payload)
 
 
 @class_route(
@@ -234,64 +222,12 @@ class TrackingItemRecoverView(PostView):
     def save(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, TrackingRecoverPayload)
         payload = self.request_validator_model
-        config = load_storage_config(_storage_dir(payload.storage_dir))
-        ab_config = None
-        if payload.action == "VERIFY_EXTERNAL":
-            assert payload.ab_config is not None
-            ab_config = build_ab_config(payload.ab_config.model_dump(exclude_none=True))
-        return run_tracking_recover(
-            config,
-            tracking_id=payload.tracking_id,
-            expected_revision=payload.expected_revision,
-            action=payload.action,
-            confirm=payload.confirm,
-            ab_config=ab_config,
-        )
+        return run_saved_tracking_recovery(SavedTrackingRecoveryInput.model_validate({
+            **payload.model_dump(mode="json", exclude_none=True), "tracking_id": payload.tracking_id,
+        }))
 
 
-def _management_writer(client: AutoBangumiManagementClient, action: str):
-    """Build the fixed-route adapter closure for one request-scoped action."""
-    def write(target: ResolvedManagementTarget, payload: object) -> dict[str, object]:
-        calls: list[dict[str, object]] = []
-        if target.scope == "SUBSCRIPTION":
-            item = target.subscription
-            assert item is not None
-            if action == "MODIFY":
-                calls.append(client.update_subscription(item.external_id, payload))
-            elif action == "SET_ENABLED":
-                calls.append(client.set_subscription_enabled(item.external_id, payload["enabled"]))
-            elif action == "DELETE_EXTERNAL":
-                calls.append(client.delete_subscription(item.external_id))
-            else:
-                raise ValueError("invalid management action")
-        else:
-            rss_payloads = payload.get("items", []) if isinstance(payload, dict) else []
-            for index, item in enumerate(target.rss):
-                if action == "MODIFY":
-                    body = rss_payloads[index] if index < len(rss_payloads) else payload
-                    calls.append(client.update_rss(item.external_id, body, item.url))
-                elif action == "SET_ENABLED":
-                    calls.append(client.enable_rss([rss.external_id for rss in target.rss]) if payload["enabled"] else client.disable_rss(item.external_id))
-                    if payload["enabled"]:
-                        break
-                elif action == "DELETE_EXTERNAL":
-                    calls.append(client.delete_rss(item.external_id))
-                elif action == "REFRESH_RSS":
-                    calls.append(client.refresh_rss(item.external_id))
-        statuses = [
-            (200 if result.get("status") is True else 400 if result.get("status") is False else result.get("status_code"))
-            for result in calls if isinstance(result, dict)
-        ]
-        if statuses and all(isinstance(status, int) and 200 <= status < 300 for status in statuses):
-            return {"status_code": 200}
-        # A batch with both accepted and rejected RSS writes has an externally
-        # indeterminate aggregate outcome.  It must not inherit the first
-        # rejected status as a definite failure.
-        if (any(isinstance(status, int) and 200 <= status < 300 for status in statuses)
-                and any(not isinstance(status, int) or not 200 <= status < 300 for status in statuses)):
-            return {"transport_error": "unknown"}
-        return {"status_code": next((status for status in statuses if isinstance(status, int)), 502)}
-    return write
+_management_writer = management_writer
 
 
 def _management_result(config, *, tracking_id: str, action: str, result: dict[str, object]) -> dict[str, object]:
@@ -320,15 +256,11 @@ def _management_result(config, *, tracking_id: str, action: str, result: dict[st
 
 
 def _run_management_route(payload, action: str, patch: dict[str, object] | None = None, enabled: bool | None = None) -> dict[str, object]:
+    saved = SavedTrackingManagementInput.model_validate({
+        **payload.model_dump(mode="json"), "operation": action, "patch": patch, "enabled": enabled,
+    })
     config = load_storage_config(_storage_dir(payload.storage_dir))
-    ab_config = build_ab_config(payload.ab_config.model_dump(exclude_none=True))
-    client = create_legacy_31_management_client(ab_config, transport=UrlopenAutoBangumiHttpTransport())
-    result = run_tracking_management(
-        config, tracking_id=payload.tracking_id, expected_revision=payload.expected_revision,
-        idempotency_key=payload.idempotency_key, confirm=payload.confirm, operation=action,
-        target_scope=payload.target_scope, ab_config=ab_config, management_client=client,
-        patch=patch, enabled=enabled, write=_management_writer(client, action),
-    )
+    result = run_saved_tracking_management(saved)
     return _management_result(config, tracking_id=payload.tracking_id, action=action, result=result)
 
 

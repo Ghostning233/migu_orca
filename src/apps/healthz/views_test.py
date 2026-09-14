@@ -74,12 +74,6 @@ def test_readiness_never_constructs_external_clients(
         "ab_engine.controllers.ab_http_client.create_auto_bangumi_submit_client",
         _forbidden,
     )
-    monkeypatch.setattr(
-        "qbittorrent_engine.controllers.qbittorrent_controller"
-        ".test_qbittorrent_connection",
-        _forbidden,
-    )
-
     client = _client_with_storage_root(tmp_path)
     try:
         response = client.get("/readiness")

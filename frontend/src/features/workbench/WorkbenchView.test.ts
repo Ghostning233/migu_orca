@@ -415,10 +415,8 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     expect(apiPost).toHaveBeenLastCalledWith('/api/v1/requests', {
       body: {
         title: '葬送的芙莉莲',
-        source: 'mikan',
         mikan_bangumi: 'https://mikan.example/Home/Bangumi/2353',
         storage_dir: null,
-        save_request: false,
       },
       timeoutMs: 240000,
     })
@@ -821,10 +819,8 @@ describe('WorkbenchView direct fallback (US-204)', () => {
     expect(apiPost).toHaveBeenCalledWith('/api/v1/requests', {
       body: {
         title: '芙莉莲',
-        source: 'mikan',
         mikan_bangumi: '2353',
         storage_dir: null,
-        save_request: false,
       },
       timeoutMs: 240000,
     })

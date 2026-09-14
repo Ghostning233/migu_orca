@@ -35,7 +35,7 @@ def _inventory_lifecycle() -> dict[tuple[str, str], tuple[str, str, str]]:
     section = text.split("## 2.1 端点生命周期", 1)[1].split("## 3.", 1)[0]
     result: dict[tuple[str, str], tuple[str, str, str]] = {}
     for line in section.splitlines():
-        match = re.match(r"\|\s*(GET|POST)\s*\|\s*`([^`]+)`\s*\|\s*(PRIMARY|RECOVERY|COMPATIBILITY)\s*\|\s*([^|]+)\|\s*([^|]+)\|", line)
+        match = re.match(r"\|\s*(GET|POST|PUT|DELETE)\s*\|\s*`([^`]+)`\s*\|\s*(PRIMARY|RECOVERY|COMPATIBILITY)\s*\|\s*([^|]+)\|\s*([^|]+)\|", line)
         if match:
             result[(match.group(1), _normalized(match.group(2)))] = (
                 match.group(3), match.group(4).strip(), match.group(5).strip()
@@ -72,30 +72,3 @@ def test_openapi_projects_lifecycle_registry() -> None:
         for (method, path), entry in ENDPOINT_LIFECYCLE.items()
     }
     assert projected == expected
-
-
-def test_capabilities_relation_records_subscription_submit_probe_scope() -> None:
-    """D38-02.4: subscription_submit 只由已验证的 3.1.18 password/legacy probe 支持。"""
-    relation = ENDPOINT_LIFECYCLE[("POST", "/api/v1/autobangumi/capabilities")]["relation"]
-    assert "subscription_submit" in relation
-    assert "3.1.18" in relation
-
-
-def test_legacy_routes_are_explicit_compatibility_and_tracking_is_authority() -> None:
-    legacy = {
-        ("POST", "/api/v1/requests/preview-save"),
-        ("POST", "/api/v1/requests/<request_id>/submit-ab"),
-        ("POST", "/api/v1/batches/<batch_id>/accept"),
-        ("GET", "/api/v1/batches/<batch_id>/queue"),
-        ("POST", "/api/v1/batches/<batch_id>/submit"),
-        ("POST", "/api/v1/batches/<batch_id>/retry"),
-        ("POST", "/api/v1/batches/<batch_id>/recover"),
-    }
-    for key in legacy:
-        matching = [entry for (method, path), entry in ENDPOINT_LIFECYCLE.items() if (method, _normalized(path)) == key]
-        assert matching and matching[0]["lifecycle"] == "COMPATIBILITY"
-    assert all(
-        "TrackingRecord" in entry["authority"]
-        for (method, path), entry in ENDPOINT_LIFECYCLE.items()
-        if (method, _normalized(path)) in legacy
-    )

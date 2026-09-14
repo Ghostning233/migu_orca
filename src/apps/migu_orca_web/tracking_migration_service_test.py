@@ -25,7 +25,6 @@ from batch_engine.models.queue import (
 )
 from request_engine.controllers.request_controller import ACCEPTED, PENDING_CONFIRM
 from storage_engine.controllers.ab_result_repository import save_ab_submit_result
-from storage_engine.controllers.queue_repository import save_submission_queue
 from storage_engine.controllers.request_repository import save_request_snapshot
 from storage_engine.controllers.storage_config import (
     StorageConfig,
@@ -50,6 +49,15 @@ from tracking_engine.models.tracking import (
 )
 
 NOW = "2026-09-08T00:00:00+00:00"
+
+
+def write_legacy_queue_fixture(config: StorageConfig, queue: BatchSubmissionQueue) -> None:
+    import json
+    from dataclasses import asdict
+    config.queue_dir.mkdir(parents=True, exist_ok=True)
+    (config.queue_dir / f"{queue.batch_id}.json").write_text(
+        json.dumps(asdict(queue), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def _config(tmp_path: Path) -> StorageConfig:
@@ -107,7 +115,7 @@ def _save_queue(
         )
         for index, (request_id, status) in enumerate(entries)
     ]
-    save_submission_queue(
+    write_legacy_queue_fixture(
         config,
         BatchSubmissionQueue(
             queue_id=f"queue-{batch_id}",

@@ -74,6 +74,7 @@ const abConfig = {
   auth_mode: 'password' as const, base_url: 'https://ab.invalid', username: 'user',
   password: 'secret', fallback_enabled: false,
 }
+const savedConnection = { connection_ref: '11111111-1111-4111-8111-111111111111', configuration_revision: 3 }
 
 function modifyResult(overrides: Partial<TrackingManagementResult> = {}): TrackingManagementResult {
   return {
@@ -191,7 +192,7 @@ describe('tracking modify form model (US-313)', () => {
   })
 })
 
-describe('tracking modify request (US-313)', () => {
+describe('tracking modify request (saved connection body)', () => {
   it('binds the management endpoint to the server-computed action code', () => {
     expect(isModifyActionCode('MODIFY')).toBe(true)
     expect(MANAGEMENT_ACTION_ENDPOINTS.MODIFY).toBe('/api/v1/tracking/items/{tracking_id}/modify')
@@ -231,38 +232,38 @@ describe('tracking modify request (US-313)', () => {
     const subscription = createTrackingManagementIntent(
       item(), 'MODIFY', 'SUBSCRIPTION', { title: '新标题', season: 2 }, capabilities(),
     )!
-    const body = createTrackingManagementBody(subscription, abConfig, 'profile')
+    const body = createTrackingManagementBody(subscription, savedConnection, 'profile')
     expect(body).toEqual({
       target_scope: 'SUBSCRIPTION',
       patch: { title: '新标题', season: 2 },
       expected_revision: 4,
       idempotency_key: subscription.idempotencyKey,
       confirm: true,
-      ab_config: abConfig,
+      connection_ref: savedConnection.connection_ref, configuration_revision: savedConnection.configuration_revision,
       storage_dir: 'profile',
     })
     // The same intent replays the very same key and revision binding.
-    expect(createTrackingManagementBody(subscription, abConfig, 'profile')).toEqual(body)
+    expect(createTrackingManagementBody(subscription, savedConnection, 'profile')).toEqual(body)
 
     const rss = createTrackingManagementIntent(item(), 'MODIFY', 'ASSOCIATED_RSS', { name: 'x' }, capabilities())!
-    const rssBody = createTrackingManagementBody(rss, abConfig)
+    const rssBody = createTrackingManagementBody(rss, savedConnection)
     expect(rssBody).toEqual({
       target_scope: 'ASSOCIATED_RSS',
       patch: { name: 'x' },
       expected_revision: 4,
       idempotency_key: rss.idempotencyKey,
       confirm: true,
-      ab_config: abConfig,
+      connection_ref: savedConnection.connection_ref, configuration_revision: savedConnection.configuration_revision,
     })
     // The body shape cannot express an external id, URL or raw response.
     expect(Object.keys(rssBody ?? {}).sort()).toEqual(
-      ['target_scope', 'patch', 'expected_revision', 'idempotency_key', 'confirm', 'ab_config'].sort(),
+      ['target_scope', 'patch', 'expected_revision', 'idempotency_key', 'confirm', 'connection_ref', 'configuration_revision'].sort(),
     )
     const rssPatch = rssBody && 'patch' in rssBody ? rssBody.patch : null
     expect(Object.keys(rssPatch ?? {})).toEqual(['name'])
 
     // A session without a server address is never turned into a request.
-    expect(createTrackingManagementBody(subscription, { ...abConfig, base_url: undefined })).toBeNull()
+    expect(createTrackingManagementBody(subscription, { connection_ref: savedConnection.connection_ref, configuration_revision: savedConnection.configuration_revision })).not.toBeNull()
   })
 })
 
@@ -365,7 +366,7 @@ function enableDetail(overrides: Partial<TrackingItem> = {}): TrackingItem {
   return item({ status: 'DISABLED', status_label: '已停用', available_actions: [ENABLE_ACTION], ...overrides })
 }
 
-describe('tracking set-enabled request (US-314)', () => {
+describe('tracking set-enabled request (saved connection body)', () => {
   it('derives the direction from the record status, never from the caller', () => {
     expect(createTrackingSetEnabledIntent(enableDetail(), 'SUBSCRIPTION', capabilities()))
       .toMatchObject({ action: 'SET_ENABLED', targetScope: 'SUBSCRIPTION', enabled: true, patch: null })
@@ -415,42 +416,42 @@ describe('tracking set-enabled request (US-314)', () => {
 
   it('builds only the boolean direction for the chosen scope', () => {
     const intent = createTrackingSetEnabledIntent(enableDetail(), 'SUBSCRIPTION', capabilities())!
-    const body = createTrackingManagementBody(intent, abConfig, 'profile')
+    const body = createTrackingManagementBody(intent, savedConnection, 'profile')
     expect(body).toEqual({
       target_scope: 'SUBSCRIPTION',
       enabled: true,
       expected_revision: 4,
       idempotency_key: intent.idempotencyKey,
       confirm: true,
-      ab_config: abConfig,
+      connection_ref: savedConnection.connection_ref, configuration_revision: savedConnection.configuration_revision,
       storage_dir: 'profile',
     })
     // The body has no patch field at all: an enable can never carry form fields.
     expect(Object.keys(body ?? {}).sort()).toEqual(
-      ['target_scope', 'enabled', 'expected_revision', 'idempotency_key', 'confirm', 'ab_config', 'storage_dir'].sort(),
+      ['target_scope', 'enabled', 'expected_revision', 'idempotency_key', 'confirm', 'connection_ref', 'configuration_revision', 'storage_dir'].sort(),
     )
-    expect(createTrackingManagementBody(intent, { ...abConfig, base_url: undefined })).toBeNull()
+    expect(createTrackingManagementBody(intent, savedConnection)).not.toBeNull()
   })
 })
 
-describe('tracking refresh request (US-314)', () => {
+describe('tracking refresh request (saved connection body)', () => {
   it('only ever targets the current record own associated RSS', () => {
     const intent = createTrackingRefreshRssIntent(item({ available_actions: [REFRESH_ACTION] }), capabilities())
     expect(intent).toMatchObject({
       action: 'REFRESH_RSS', targetScope: 'ASSOCIATED_RSS', patch: null, enabled: null,
     })
-    const body = createTrackingManagementBody(intent!, abConfig)
+    const body = createTrackingManagementBody(intent!, savedConnection)
     expect(body).toEqual({
       target_scope: 'ASSOCIATED_RSS',
       expected_revision: 4,
       idempotency_key: intent!.idempotencyKey,
       confirm: true,
-      ab_config: abConfig,
+      connection_ref: savedConnection.connection_ref, configuration_revision: savedConnection.configuration_revision,
     })
     // No patch, no enabled, no scope choice: the refresh body cannot express
     // another target, and there is no global refresh route to fall back to.
     expect(Object.keys(body ?? {}).sort()).toEqual(
-      ['target_scope', 'expected_revision', 'idempotency_key', 'confirm', 'ab_config'].sort(),
+      ['target_scope', 'expected_revision', 'idempotency_key', 'confirm', 'connection_ref', 'configuration_revision'].sort(),
     )
   })
 
@@ -528,7 +529,7 @@ const DELETE_ACTION = {
   requires_confirmation: true, target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'],
 } satisfies ItemAction
 
-describe('tracking external delete request (US-315)', () => {
+describe('tracking external delete request (saved connection body)', () => {
   it('deletes exactly one explicitly chosen external object of this record', () => {
     const record = item({ available_actions: [DELETE_ACTION] })
     const intent = createTrackingDeleteExternalIntent(record, 'SUBSCRIPTION', capabilities())!
@@ -536,18 +537,19 @@ describe('tracking external delete request (US-315)', () => {
       action: 'DELETE_EXTERNAL', targetScope: 'SUBSCRIPTION', patch: null, enabled: null,
       expectedRevision: 4, confirm: true,
     })
-    const body = createTrackingManagementBody(intent, abConfig)
+    const body = createTrackingManagementBody(intent, savedConnection)
     expect(body).toEqual({
       target_scope: 'SUBSCRIPTION',
       expected_revision: 4,
       idempotency_key: intent.idempotencyKey,
       confirm: true,
-      ab_config: abConfig,
+      connection_ref: savedConnection.connection_ref,
+      configuration_revision: savedConnection.configuration_revision,
     })
     // The generated delete body has no ``file`` field at all, and the intent
     // cannot carry a patch, a direction or a second scope.
     expect(Object.keys(body ?? {}).sort()).toEqual(
-      ['target_scope', 'expected_revision', 'idempotency_key', 'confirm', 'ab_config'].sort(),
+      ['target_scope', 'expected_revision', 'idempotency_key', 'confirm', 'connection_ref', 'configuration_revision'].sort(),
     )
     expect(serialize(body)).not.toContain('file')
 

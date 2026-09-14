@@ -77,6 +77,7 @@ function capabilities(overrides: Partial<CapabilityResult> = {}): CapabilityResu
     checked_at: null, safe_message: null, ...overrides,
   }
 }
+const savedConnection = { connection_ref: '11111111-1111-4111-8111-111111111111', configuration_revision: 3 }
 
 function action(overrides: Partial<ItemAction> = {}): ItemAction {
   return {
@@ -420,12 +421,9 @@ function recoverResult(overrides: Partial<TrackingRecoverResult> = {}): Tracking
   }
 }
 
-const sessionConfig = {
-  auth_mode: 'password' as const, base_url: 'https://ab.invalid', username: 'user',
-  password: 'secret-password', fallback_enabled: false,
-}
+const savedGeneration = savedConnection
 
-describe('tracking recovery projection (US-312)', () => {
+describe('tracking recovery projection (saved connection body)', () => {
   it('binds every recovery action to its own request body value and copy', () => {
     expect(RECOVERY_ACTIONS).toEqual(['RECOVER_AUTO', 'MARK_SUCCEEDED', 'MARK_FAILED', 'VERIFY_EXTERNAL'])
     expect(RECOVERY_ACTION_BODIES).toEqual({
@@ -456,37 +454,35 @@ describe('tracking recovery projection (US-312)', () => {
     expect(isRecoveryActionCode(null)).toBe(false)
   })
 
-  it('builds a credential-free AUTO body and a confirm-only manual body', () => {
-    expect(createTrackingRecoverBody('RECOVER_AUTO', 7, sessionConfig)).toEqual({
+  it('builds a local AUTO body and a confirm-only manual body', () => {
+    expect(createTrackingRecoverBody('RECOVER_AUTO', 7, savedGeneration)).toEqual({
       expected_revision: 7, action: 'AUTO',
     })
     for (const action of ['MARK_SUCCEEDED', 'MARK_FAILED'] as const) {
-      expect(createTrackingRecoverBody(action, 7, sessionConfig)).toEqual({
+      expect(createTrackingRecoverBody(action, 7, savedGeneration)).toEqual({
         expected_revision: 7, action, confirm: true,
       })
     }
-    expect(createTrackingRecoverBody('RECOVER_AUTO', 7, sessionConfig, 'profile')).toEqual({
+    expect(createTrackingRecoverBody('RECOVER_AUTO', 7, savedGeneration, 'profile')).toEqual({
       expected_revision: 7, action: 'AUTO', storage_dir: 'profile',
     })
     // The body shape itself cannot express an external id/URL/raw result/note.
-    const serialized = JSON.stringify(createTrackingRecoverBody('MARK_SUCCEEDED', 7, sessionConfig))
-    for (const leaked of ['external_id', 'external_url', 'raw', 'note', 'ab_config']) {
+    const serialized = JSON.stringify(createTrackingRecoverBody('MARK_SUCCEEDED', 7, savedGeneration))
+    for (const leaked of ['external_id', 'external_url', 'raw', 'note', 'saved_connection']) {
       expect(serialized).not.toContain(leaked)
     }
   })
 
-  it('sends the credential only for VERIFY_EXTERNAL, and never without a base url', () => {
-    expect(createTrackingRecoverBody('VERIFY_EXTERNAL', 2, sessionConfig)).toEqual({
-      expected_revision: 2, action: 'VERIFY_EXTERNAL', ab_config: sessionConfig,
+  it('binds VERIFY_EXTERNAL only to the saved generation', () => {
+    expect(createTrackingRecoverBody('VERIFY_EXTERNAL', 2, savedConnection)).toEqual({
+      expected_revision: 2, action: 'VERIFY_EXTERNAL', connection_ref: savedConnection.connection_ref, configuration_revision: 3,
     })
-    // Without the live page session (or without a server address) the read-only
-    // external verification is not sent at all.
+    // Without the live saved generation the read-only external verification is not sent.
     expect(createTrackingRecoverBody('VERIFY_EXTERNAL', 2, null)).toBeNull()
-    expect(createTrackingRecoverBody('VERIFY_EXTERNAL', 2, { ...sessionConfig, base_url: '' })).toBeNull()
-    expect(createTrackingRecoverBody('VERIFY_EXTERNAL', 2, { ...sessionConfig, base_url: undefined })).toBeNull()
-    // A base url is normalized, and the other actions never carry a credential.
-    expect(createTrackingRecoverBody('VERIFY_EXTERNAL', 2, { ...sessionConfig, base_url: ' https://ab.invalid ' }))
-      .toMatchObject({ ab_config: { base_url: 'https://ab.invalid' } })
+    // A missing saved generation is never sent.
+    expect(createTrackingRecoverBody('VERIFY_EXTERNAL', 2, { connection_ref: undefined, configuration_revision: undefined })).toEqual({
+      expected_revision: 2, action: 'VERIFY_EXTERNAL', connection_ref: undefined, configuration_revision: undefined,
+    })
   })
 
   it('accepts only a recovery action the server actually offers for the record', () => {

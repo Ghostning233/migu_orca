@@ -26,7 +26,7 @@ describe('Stage 33 application router (US-259)', () => {
     ['/', '?batch_id=batch-root&request_id=dropped', '/add?batch_id=batch-root'],
     ['/workbench', '?batch_id=batch-1&token=dropped', '/add?batch_id=batch-1'],
     ['/requests', '?request_id=request-1&batch_id=dropped', '/plans?request_id=request-1'],
-    ['/queue', '?batch_id=batch-2&endpoint=dropped', '/tracking?batch_id=batch-2'],
+    ['/queue', '?batch_id=batch-2&endpoint=dropped', '/tracking'],
     ['/workbench', '?batch_id=one&batch_id=two', '/add'],
     ['/requests', '?request_id=', '/plans'],
   ])('replace-redirects %s with a sanitized query', async (source, query, expected) => {
@@ -67,7 +67,7 @@ describe('retired queue runtime entry (US-316)', () => {
 
     await router.replace('/queue?batch_id=batch-legacy&token=dropped')
     expect(router.currentRoute.value.name).toBe('tracking')
-    expect(router.currentRoute.value.fullPath).toBe('/tracking?batch_id=batch-legacy')
+    expect(router.currentRoute.value.fullPath).toBe('/tracking')
   })
 
   it('mounts TrackingView on /app/tracking and no queue view anywhere', async () => {

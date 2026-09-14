@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
@@ -34,8 +34,16 @@ vi.mock('@/api/client', () => ({
   apiRequest: vi.fn(),
 }))
 
+const { refreshGlobalStatus } = vi.hoisted(() => ({ refreshGlobalStatus: vi.fn() }))
+vi.mock('@/app/stores/connectionStatus', () => ({
+  useConnectionStatus: () => ({ invalidate: refreshGlobalStatus }),
+  refreshConnectionStatus: refreshGlobalStatus,
+}))
+
 const apiGet = vi.mocked(api.get)
 const apiPost = vi.mocked(api.post)
+const apiPut = vi.mocked(api.put)
+const apiDelete = vi.mocked(api.delete)
 
 const DEFAULT_PREFERENCES = {
   version: 1,
@@ -93,6 +101,10 @@ describe('SettingsView storage panel (US-201)', () => {
     sessionStorage.clear()
     apiGet.mockReset()
     apiPost.mockReset()
+    apiPut.mockReset()
+    apiDelete.mockReset()
+    apiPut.mockReset()
+    apiDelete.mockReset()
     apiGet.mockResolvedValue(DEFAULT_PREFERENCES)
   })
 
@@ -104,9 +116,7 @@ describe('SettingsView storage panel (US-201)', () => {
 
     const dir = wrapper.find<HTMLInputElement>('#settings-storage-dir')
     expect(dir.element.value).toBe('backups')
-    // CheckboxRow renders the id on both the wrapper div and the native input;
-    // assert on the input itself.
-    expect(wrapper.find<HTMLInputElement>('input#settings-save-request').element.checked).toBe(false)
+    expect(localStorage.getItem('miguOrca.web.saveRequest')).toBeNull()
   })
 
   it('persists only the sanitized relative profile', async () => {
@@ -135,6 +145,29 @@ describe('SettingsView storage panel (US-201)', () => {
     expect(localStorage.getItem('miguOrca.web.storageDir')).toBeNull()
     expect(localStorage.getItem('miguOrca.web.saveRequest')).toBeNull()
     expect(wrapper.find('#storage-preferences-form .status-alert').text()).toContain('偏好已清除')
+  })
+})
+
+describe('Stage 39 saved connection conflict flow', () => {
+  it('rereads the safe summary after 409 and does not auto-resubmit secrets', async () => {
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/v1/settings/autobangumi') return {
+        configured: true, credential_present: true, connection_ref: 'ref-1',
+        configuration_revision: 2, connection_status: 'CONFIGURED',
+      } as never
+      return DEFAULT_PREFERENCES as never
+    })
+    apiPut.mockRejectedValue({ status: 409, type: 'configuration_conflict', message: '冲突' })
+    const { wrapper } = await mountSettings()
+    await nextTick()
+    await wrapper.find('#settings-ab-endpoint').setValue('https://ab.invalid')
+    await wrapper.find('#settings-ab-username').setValue('user')
+    await wrapper.find('#settings-ab-password').setValue('secret')
+    await wrapper.find('#settings-ab-save-form').trigger('submit')
+    await flushPromises()
+    expect(apiGet.mock.calls.filter(([path]) => path === '/api/v1/settings/autobangumi')).toHaveLength(3)
+    expect(apiPut).toHaveBeenCalledTimes(1)
+    expect(wrapper.find<HTMLInputElement>('#settings-ab-password').element.value).toBe('secret')
   })
 })
 
@@ -259,234 +292,97 @@ describe('SettingsView preferences panel (US-201)', () => {
   })
 })
 
-describe('SettingsView qBittorrent panel (US-201)', () => {
+describe('Stage 39 global status refresh events', () => {
   beforeEach(() => {
-    localStorage.clear()
-    sessionStorage.clear()
     apiGet.mockReset()
     apiPost.mockReset()
-    apiGet.mockResolvedValue(DEFAULT_PREFERENCES)
+    apiPut.mockReset()
+    apiDelete.mockReset()
   })
 
-  it('validates required fields before calling the API', async () => {
+  it('refreshes global status after saved connection probe', async () => {
+    refreshGlobalStatus.mockReset()
+    apiGet.mockImplementation(async (path) => path === '/api/v1/settings/autobangumi'
+      ? { configured: true, credential_present: true, connection_ref: 'ref-1', configuration_revision: 2, connection_status: 'CONFIGURED' } as never
+      : DEFAULT_PREFERENCES as never)
+    apiPost.mockResolvedValue({ probe_status: 'VERIFIED' } as never)
     const { wrapper } = await mountSettings()
-    await nextTick()
-
-    await wrapper.find('#settings-qbittorrent-test-submit').trigger('submit')
-    await nextTick()
-
-    expect(apiPost).not.toHaveBeenCalledWith('/api/v1/qbittorrent/test-connection', expect.anything())
-    expect(wrapper.find('#settings-qbittorrent-test-form .status-alert').text()).toContain('测试 qBittorrent 前必须填写')
+    await wrapper.find('#settings-ab-probe').trigger('click')
+    await flushPromises()
+    expect(refreshGlobalStatus).toHaveBeenCalled()
   })
 
-  it('requires confirmation, posts request-scoped config and clears fields on success', async () => {
-    apiPost.mockResolvedValue({ status: 'ok', reachable: true, version: '4.6.5' })
+  it.each(['#settings-ab-save', '#settings-ab-delete'])('refreshes global status after %s', async (button) => {
+    refreshGlobalStatus.mockReset()
+    apiGet.mockImplementation(async (path) => path === '/api/v1/settings/autobangumi'
+      ? { configured: true, credential_present: true, connection_ref: 'ref-1', configuration_revision: 2, connection_status: 'CONFIGURED' } as never
+      : DEFAULT_PREFERENCES as never)
     const { wrapper } = await mountSettings()
-    await nextTick()
-
-    await wrapper.find('#settings-qbittorrent-endpoint').setValue('http://private-qbt.local')
-    await wrapper.find('#settings-qbittorrent-username').setValue('private-user')
-    await wrapper.find('#settings-qbittorrent-password').setValue('private-password')
-    await wrapper.find('#settings-qbittorrent-test-submit').trigger('submit')
-    await nextTick()
-
-    const dialog = wrapper.find('.confirm-dialog')
-    expect(dialog.exists()).toBe(true)
-    expect(dialog.text()).toContain('测试 qBittorrent 连接')
-    await dialog.find('.primary-button').trigger('click')
-    await nextTick()
-    await nextTick()
-
-    const call = apiPost.mock.calls.find(([path]) => path === '/api/v1/qbittorrent/test-connection')
-    expect(call).toBeTruthy()
-    expect(call?.[1]?.body).toEqual({
-      qbittorrent_config: {
-        endpoint: 'http://private-qbt.local',
-        username: 'private-user',
-        password: 'private-password',
-        timeout_seconds: 10,
-        verify_tls: true,
-      },
-    })
-    const alertText = wrapper.find('#settings-qbittorrent-test-form .status-alert').text()
-    expect(alertText).toContain('status: ok')
-    expect(alertText).toContain('version: 4.6.5')
-    // Credentials are cleared from component memory and never persist.
-    expect(wrapper.find<HTMLInputElement>('#settings-qbittorrent-endpoint').element.value).toBe('')
-    expect(wrapper.find<HTMLInputElement>('#settings-qbittorrent-password').element.value).toBe('')
-    expect(localStorage.length).toBe(0)
-    expect(sessionStorage.length).toBe(0)
-  })
-
-  it('cancelled confirmation blocks the API call and preserves fields', async () => {
-    const { wrapper } = await mountSettings()
-    await nextTick()
-
-    await wrapper.find('#settings-qbittorrent-endpoint').setValue('http://private-qbt.local')
-    await wrapper.find('#settings-qbittorrent-username').setValue('user')
-    await wrapper.find('#settings-qbittorrent-password').setValue('pw')
-    await wrapper.find('#settings-qbittorrent-test-submit').trigger('submit')
-    await nextTick()
-
-    await wrapper.find('.confirm-dialog .secondary-button').trigger('click')
-    await nextTick()
-
-    expect(apiPost).not.toHaveBeenCalledWith('/api/v1/qbittorrent/test-connection', expect.anything())
-    expect(wrapper.find<HTMLInputElement>('#settings-qbittorrent-endpoint').element.value).toBe('http://private-qbt.local')
-  })
-
-  it('failure shows only a fixed Chinese message (never the raw server error)', async () => {
-    apiPost.mockRejectedValue({
-      type: 'qbittorrent_timeout',
-      message: 'qBittorrent HTTP 请求超时 from http://private-qbt.local private-user private-password secret-session',
-      status: 400,
-    })
-    const { wrapper } = await mountSettings()
-    await nextTick()
-
-    await wrapper.find('#settings-qbittorrent-endpoint').setValue('http://private-qbt.local')
-    await wrapper.find('#settings-qbittorrent-username').setValue('private-user')
-    await wrapper.find('#settings-qbittorrent-password').setValue('private-password')
-    await wrapper.find('#settings-qbittorrent-test-submit').trigger('submit')
-    await nextTick()
-
-    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
-    await nextTick()
-    await nextTick()
-
-    const alertText = wrapper.find('#settings-qbittorrent-test-form .status-alert').text()
-    expect(alertText).toContain('qBittorrent 连接测试失败')
-    // Raw error message (may contain endpoint/credentials) never reaches the DOM.
-    expect(alertText).not.toContain('private-qbt')
-    expect(alertText).not.toContain('private-user')
-    expect(alertText).not.toContain('private-password')
-    expect(alertText).not.toContain('secret-session')
-    expect(alertText).not.toContain('http://')
+    if (button.endsWith('save')) {
+      await wrapper.find('#settings-ab-endpoint').setValue('https://ab.invalid')
+      await wrapper.find('#settings-ab-username').setValue('u')
+      await wrapper.find('#settings-ab-password').setValue('p')
+    }
+    await wrapper.find(button).trigger('click')
+    if (button.endsWith('delete')) await wrapper.find('.confirm-dialog .danger-button').trigger('click')
+    expect(refreshGlobalStatus).toHaveBeenCalled()
   })
 })
 
-describe('SettingsView Auto Bangumi panel (US-201)', () => {
+describe('SettingsView saved Auto Bangumi connection flow', () => {
   beforeEach(() => {
     localStorage.clear()
     sessionStorage.clear()
     apiGet.mockReset()
     apiPost.mockReset()
+    apiPut.mockReset()
+    apiDelete.mockReset()
     apiGet.mockResolvedValue(DEFAULT_PREFERENCES)
   })
 
-  it('test-connection sends password-mode config and clears credentials on success', async () => {
-    apiPost.mockResolvedValue({
-      reachable: true,
-      authenticated: true,
-      version: '3.1.18',
-      auth_mode: '账号密码',
-      adapter: 'legacy_3_1',
-      submit_supported: true,
-    })
+  it('saves a connection through the generated saved operation and clears inputs', async () => {
+    apiPut.mockResolvedValue({ configured: true, credential_present: true, connection_ref: 'ref-1', configuration_revision: 2, connection_status: 'CONFIGURED' } as never)
     const { wrapper } = await mountSettings()
     await nextTick()
 
     await wrapper.find('#settings-ab-endpoint').setValue('192.168.1.20:7890')
     await wrapper.find('#settings-ab-username').setValue('browser-user')
     await wrapper.find('#settings-ab-password').setValue('browser-secret-password')
-    await wrapper.find('#settings-ab-test-submit').trigger('click')
+    await wrapper.find('#settings-ab-save-form').trigger('submit')
     await nextTick()
     await nextTick()
 
-    const call = apiPost.mock.calls.find(([path]) => path === '/api/v1/autobangumi/test-connection')
-    expect(call).toBeTruthy()
-    expect(call?.[1]?.body).toEqual({
-      ab_config: {
-        auth_mode: 'password',
-        base_url: 'http://192.168.1.20:7890',
-        username: 'browser-user',
-        password: 'browser-secret-password',
-        fallback_enabled: false,
-      },
-    })
-    expect(wrapper.find('#settings-ab-submit-form .status-alert').text()).toContain('连接成功')
+    expect(apiPut).toHaveBeenCalledWith('/api/v1/settings/autobangumi', expect.objectContaining({ body: expect.objectContaining({ confirm: true, config: expect.objectContaining({ base_url: 'http://192.168.1.20:7890' }) }) }))
+    expect(wrapper.text()).not.toContain('browser-secret-password')
+    expect(wrapper.find('#settings-ab-save-form .status-alert').text()).toContain('已保存')
     expect(wrapper.find<HTMLInputElement>('#settings-ab-endpoint').element.value).toBe('')
     expect(wrapper.find<HTMLInputElement>('#settings-ab-password').element.value).toBe('')
     expect(localStorage.length).toBe(0)
     expect(sessionStorage.length).toBe(0)
   })
 
-  it('submit-ab uses request_id from the URL query and confirms first', async () => {
-    apiPost.mockResolvedValue({
-      request: { request_id: 'req-ab-1', status: 'ACCEPTED' },
-      summary: {},
-      ab_submit_result: {
-        success: true,
-        ab_subscription_id: 'sub-1',
-        ab_response: { id: 'sub-1' },
-        fallback_config: null,
-        error: null,
-      },
-    })
-    const { wrapper } = await mountSettings({ request_id: 'req-ab-1' })
-    await nextTick()
-
-    expect(wrapper.find('#settings-ab-request-id').text()).toBe('req-ab-1')
-    await wrapper.find('#settings-ab-endpoint').setValue('http://ab.example.invalid')
-    await wrapper.find('#settings-ab-username').setValue('browser-user')
-    await wrapper.find('#settings-ab-password').setValue('browser-secret-password')
-    await wrapper.find('#settings-ab-submit').trigger('submit')
-    await nextTick()
-
-    const dialog = wrapper.find('.confirm-dialog')
-    expect(dialog.exists()).toBe(true)
-    expect(dialog.text()).toContain('提交 Auto Bangumi')
-    await dialog.find('.danger-button').trigger('click')
-    await nextTick()
-    await nextTick()
-
-    const call = apiPost.mock.calls.find(([path]) => path === '/api/v1/requests/{request_id}/submit-ab')
-    expect(call).toBeTruthy()
-    expect(call?.[1]).toMatchObject({
-      path: { request_id: 'req-ab-1' },
-      query: {},
-      body: {
-        ab_config: {
-          auth_mode: 'password',
-          base_url: 'http://ab.example.invalid',
-          username: 'browser-user',
-          password: 'browser-secret-password',
-          fallback_enabled: false,
-        },
-      },
-    })
-    expect(wrapper.find('#settings-ab-submit-form .status-alert').text()).toContain('Auto Bangumi 提交成功')
-    expect(wrapper.find<HTMLInputElement>('#settings-ab-endpoint').element.value).toBe('')
-    expect(wrapper.find<HTMLInputElement>('#settings-ab-password').element.value).toBe('')
-    expect(localStorage.length).toBe(0)
-  })
-
-  it('submit-ab without request_id shows a Chinese error without calling the API', async () => {
+  it('probes only an already saved ref and revision', async () => {
+    apiPost.mockResolvedValue({ ...SAVED_PREFERENCES, probe_status: 'VERIFIED', version: '3.1.18' } as never)
+    apiGet.mockImplementation(async (path) => path === '/api/v1/settings/autobangumi'
+      ? { configured: true, credential_present: true, connection_ref: 'ref-1', configuration_revision: 2, connection_status: 'CONFIGURED' } as never
+      : DEFAULT_PREFERENCES as never)
     const { wrapper } = await mountSettings()
     await nextTick()
 
-    await wrapper.find('#settings-ab-submit').trigger('submit')
-    await nextTick()
-
-    expect(wrapper.find('#settings-ab-submit-form .status-alert').text()).toContain('缺少 request_id')
-    expect(apiPost).not.toHaveBeenCalledWith('/api/v1/requests/{request_id}/submit-ab', expect.anything())
+    await wrapper.find('#settings-ab-probe').trigger('click')
+    await flushPromises()
+    expect(apiPost).toHaveBeenCalledWith('/api/v1/settings/autobangumi/probe', { body: { connection_ref: 'ref-1', configuration_revision: 2 } })
   })
 
-  it('switching auth mode clears the sensitive fields (API Token mode)', async () => {
+  it('canceling clear leaves the saved connection untouched and performs no delete', async () => {
+    apiGet.mockImplementation(async (path) => path === '/api/v1/settings/autobangumi'
+      ? { configured: true, credential_present: true, connection_ref: 'ref-1', configuration_revision: 2, connection_status: 'CONFIGURED' } as never
+      : DEFAULT_PREFERENCES as never)
     const { wrapper } = await mountSettings()
     await nextTick()
-
-    await wrapper.find('#settings-ab-endpoint').setValue('http://ab.example.invalid')
-    await wrapper.find('#settings-ab-username').setValue('user')
-    await wrapper.find('#settings-ab-password').setValue('pw')
-    // Switch to API Token mode.
-    await wrapper.find('#settings-ab-auth-mode').setValue('api_token')
-    await wrapper.find('#settings-ab-auth-mode').trigger('change')
-    await nextTick()
-
-    expect(wrapper.find<HTMLInputElement>('#settings-ab-username').exists()).toBe(false)
-    expect(wrapper.find<HTMLInputElement>('#settings-ab-token').exists()).toBe(true)
-    // Old password-mode credentials were cleared by the mode switch.
-    expect(wrapper.find<HTMLInputElement>('#settings-ab-endpoint').element.value).toBe('')
+    await wrapper.find('#settings-ab-delete').trigger('click')
+    expect(wrapper.find('.confirm-dialog').exists()).toBe(true)
+    await wrapper.find('.confirm-dialog .secondary-button').trigger('click')
+    expect(apiDelete).not.toHaveBeenCalled()
   })
 })

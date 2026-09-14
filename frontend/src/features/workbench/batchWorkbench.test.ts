@@ -20,8 +20,6 @@ import {
   canAcceptBatchCard,
   canChooseBatchCandidate,
   canExpandBatchCard,
-  queueItemSummary,
-  queueStatusLabel,
   orderBatchItemsForReview,
   validateBatchRawInput,
   type BatchItem,
@@ -205,17 +203,6 @@ describe('batchWorkbench helpers (US-205)', () => {
     expect(batchCardNeedsReview(batchItem({ needs_user_review: true, status: 'ACCEPTED' }))).toBe(false)
   })
 
-  it('maps queue statuses and builds item summaries', () => {
-    expect(queueStatusLabel('READY_TO_SUBMIT')).toBe('待提交')
-    expect(queueStatusLabel('SUCCEEDED')).toBe('提交成功')
-    expect(queueStatusLabel('FAILED')).toBe('提交失败')
-    expect(queueItemSummary({ ab_result_summary: 'Auto Bangumi 已接受' } as never)).toBe(
-      '结果：Auto Bangumi 已接受',
-    )
-    expect(queueItemSummary({ last_error: '连接失败' } as never)).toBe('错误：连接失败')
-    expect(queueItemSummary({} as never)).toBe('尚无结果摘要')
-  })
-
   it('blocks candidate selection for conflicts and unconfirmed seasons', () => {
     expect(
       batchCandidateSelectionIsBlocked({ season_evidence: { status: 'CONFLICT' } } as never, null),
@@ -240,9 +227,7 @@ describe('batchWorkbench helpers (US-205)', () => {
     )
     expect(payload).toMatchObject({
       title: '关于我转生变成史莱姆这档事 第四季',
-      source: 'mikan',
       mikan_bangumi: 'https://mikan.example/Home/Bangumi/42',
-      save_request: false,
       candidate_context: 'opaque-context',
       season_confirmation: 4,
     })

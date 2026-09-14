@@ -165,13 +165,6 @@ def _batch_accept_result(items: list[dict[str, Any]], queue_items: list[dict[str
             "ok": True,
             "result": {
                 "batch_id": batch_id,
-                "queue": {
-                    "queue_id": f"queue-{batch_id}",
-                    "batch_id": batch_id,
-                    "created_at": "2026-08-19T00:00:00+00:00",
-                    "updated_at": "2026-08-19T00:00:00+00:00",
-                    "items": queue_items,
-                },
                 "results": results,
                 "summary": summary,
             },
@@ -450,9 +443,7 @@ class TestAppBatchCandidateAndDraft:
         expect(card.locator(".batch-card-status")).to_contain_text("草案")
         assert captured
         payload = captured[0]
-        assert payload["source"] == "mikan"
         assert payload["mikan_bangumi"] == "https://mikan.example/Home/Bangumi/42"
-        assert payload["save_request"] is False
         # The draft_id never enters the URL or DOM.
         assert "request_id=" not in page.url
         assert "opaque" not in page.content()
@@ -879,7 +870,9 @@ class TestAppBatchAccept:
         assert len(batch_calls) == 1
         assert len(accept_calls) == 1
         assert "/api/v1/requests/req-saved/accept" in accept_urls[0]
-        assert len(tracking_calls) == 1
+        # Initial page hydration and the post-recovery tracking refresh are
+        # both read-only calls; neither is a retired queue write.
+        assert len(tracking_calls) == 2
         assert "retry_action" not in json.dumps(batch_calls[0])
 
 
