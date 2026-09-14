@@ -257,7 +257,8 @@ Stage 32 执行 PRD 为 `docs/MiGuOrca_stage32_contract_hardening_PRD.md`，分�
 2026-09-08 B-A 已作为 Stage 28 完成并交付，B-B 已作为 Stage 29 完成并交付；2026-09-09 B-C1
 已作为 Stage 30 完成，B-C2 已作为 Stage 31 完成；B-D 已作为 Stage 32 完成，F-A 已作为
 Stage 33 完成，F-B 已完成为 Stage 34，F-C 已完成为 Stage 35，F-D 已完成为 Stage 36，F-E 已完成为 Stage 37，F-F 已完成为 Stage 38。
-F-G 在本次用户讨论后已扩展为 Stage 39 开发 PRD，尚未启动；以下已完成阶段与早期候选顺序用于追溯：
+F-G 在本次用户讨论后已扩展为 Stage 39 开发 PRD；当前已实现为 Gate 5 候选并正在独立审核，
+以下已完成阶段与早期候选顺序属于历史追溯：
 
 1. BL-025 后端支撑：B-A 已作为 Stage 28 完成，覆盖 draft revision、可靠保存、单番/批量保存
    确认、36 部上限和 safe-info（见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md`）；B-B 已作为
@@ -366,5 +367,6 @@ Stage 32 generated contract 的严格 modify patch 与安全 target scopes，随
 先独立验收后端，再完成 F-G；删除 qB 独立接入及无用旧 Web 编排，MiKan 搜索由项目封装，
 顶部状态只进入设置、不打开凭据弹窗。Stage 39 US-318～US-340 已实现，候选门禁与独立审核记录见
 `docs/MiGuOrca_stage39_deployment_settings_PRD.md`；未宣称已发布。
-本节以上的完成阶段/候选顺序是历史基线，不代表 Stage 39 已实现或继续要求保留旧兼容写路径。
+本节以上的完成阶段/候选顺序是历史基线；Stage 39 当前状态以本节明确的 Gate 5 候选和独立审核记录为准，
+不要求保留旧兼容写路径。
 流式封面代理等未排期方向继续记录在 `docs/optional_features.md`。
