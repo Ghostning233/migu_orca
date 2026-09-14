@@ -37,7 +37,6 @@ from flask import redirect
 from apps.migu_orca_web import (  # noqa: F401
     routes_app,
     routes_batches,
-    routes_connections,
     routes_mikan,
     routes_requests,
     routes_settings,
@@ -52,6 +51,7 @@ from apps.migu_orca_web.contexts import (  # noqa: F401
     candidate_selection_contexts,
 )
 from apps.migu_orca_web.routes_app import app_blueprint  # noqa: F401
+
 
 # ---------------------------------------------------------------------------
 # Default Web entry (US-209)

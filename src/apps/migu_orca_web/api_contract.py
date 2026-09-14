@@ -355,14 +355,6 @@ class RequestPreviewModifyResultDTO(_StrictBase):
     draft_revision: int | None = None
 
 
-class RequestPreviewSaveResultDTO(_StrictBase):
-    """preview-save result equals the create result shape (draft consumed)."""
-
-    request: RequestSnapshotDTO
-    summary: RequestSummaryDTO
-    saved_request: RequestSnapshotDTO | None = None
-
-
 class RequestSaveConfirmHandoffDTO(_StrictBase):
     """Public ``handoff`` of a confirmed save (US-214 + US-222).
 
@@ -441,11 +433,6 @@ class AbSubmitResultDTO(_StrictBase):
     ab_response: dict[str, Any]
     fallback_config: dict[str, Any] | None = None
     error: dict[str, Any] | None = None
-
-
-class RequestAbSubmitResultDTO(RequestCreateResultDTO):
-    ab_submit_result: AbSubmitResultDTO
-    saved_ab_result: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -598,33 +585,6 @@ class BatchParseResultDTO(_StrictBase):
     items: list[BatchParseItemDTO]
 
 
-class BatchQueueItemDTO(_SnapshotBase):
-    """One public pre-submission queue item (non-sensitive fields only)."""
-
-    queue_id: str | None = None
-    batch_id: str | None = None
-    item_id: str | None = None
-    request_id: str | None = None
-    title: str | None = None
-    status: str | None = None
-    status_label: str | None = None
-    attempts: int | None = None
-    last_error: str | None = None
-    ab_result_summary: str | None = None
-    created_at: str | None = None
-    updated_at: str | None = None
-
-
-class BatchQueueDTO(_SnapshotBase):
-    """The public pre-submission queue (idempotent, sanitized summaries)."""
-
-    queue_id: str | None = None
-    batch_id: str | None = None
-    created_at: str | None = None
-    updated_at: str | None = None
-    items: list[BatchQueueItemDTO] = []
-
-
 class BatchResultItemDTO(_SnapshotBase):
     """One accept/submit result item (public Chinese reason only).
 
@@ -641,22 +601,6 @@ class BatchResultItemDTO(_SnapshotBase):
     error_type: str | None = None
     queued: bool | None = None
     attempts: int | None = None
-
-
-class BatchQueueResultDTO(_StrictBase):
-    batch_id: str
-    queue: BatchQueueDTO | None = None
-
-
-class BatchAcceptResultDTO(_StrictBase):
-    batch_id: str
-    queue: BatchQueueDTO
-    items: list[BatchResultItemDTO]
-    summary: dict[str, int]
-
-
-class BatchSubmitResultDTO(BatchAcceptResultDTO):
-    """submit/retry/recover results equal the accept result shape."""
 
 
 class BatchSaveConfirmItemResultDTO(_StrictBase):
@@ -1143,14 +1087,6 @@ class TrackingManagementResultDTO(_StrictBase):
 # ---------------------------------------------------------------------------
 # Connection tests family
 # ---------------------------------------------------------------------------
-
-
-class QbittorrentConnectionResultDTO(_StrictBase):
-    """Public whitelist; endpoint/username/password/cookie never appear."""
-
-    status: str
-    reachable: bool
-    version: str
 
 
 class AutoBangumiConnectionResultDTO(_StrictBase):

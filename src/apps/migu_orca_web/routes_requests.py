@@ -42,7 +42,6 @@ from apps.migu_orca_web.save_confirm_service import (
     run_save_confirm,
 )
 from apps.migu_orca_web.schemas import (
-    RequestAbSubmitPayload,
     RequestActionPayload,
     RequestCancelPayload,
     RequestCreatePayload,
@@ -50,7 +49,6 @@ from apps.migu_orca_web.schemas import (
     RequestListQuery,
     RequestModifyPayload,
     RequestPreviewModifyPayload,
-    RequestPreviewSavePayload,
     RequestSaveConfirmPayload,
 )
 from apps.migu_orca_web.serializers import (
@@ -69,7 +67,6 @@ from apps.migu_orca_web.services import (
     _storage_profile,
 )
 from apps.migu_orca_web.tracking_handoff import ensure_confirmed_request_tracking
-from apps.migu_orca_web.tracking_queue_compat import reflect_ab_result_into_tracking
 from extensions.flask_api import class_route
 from extensions.flask_api.views import GetView, PostView
 from request_engine.controllers.request_controller import (
@@ -255,25 +252,15 @@ class RequestCreateView(PostView):
             result["request"], trusted_hint, payload.season_confirmation
         )
 
-        result = apply_request_save_action(
-            result,
-            payload.save_request,
-            storage_dir=_storage_dir(payload.storage_dir),
-        )
-        if not result["success"]:
-            _raise_result_error(result)
-
         request = result["request"]
         response: dict[str, object] = {
             "request": request,
             "summary": summarize_request(request),
         }
-        if "saved_request" in result:
-            response["saved_request"] = result["saved_request"]
-        elif not payload.save_request:
+        if True:
             # US-194: an unsaved draft is server-authoritative. Store it in the
             # bounded draft store and hand the client only an opaque draft_id;
-            # preview-modify/preview-save reference this id instead of a
+            # preview-modify reference this id instead of a
             # client-supplied full Request. The draft itself never enters URL,
             # browser storage, history, logs or screenshots. US-211: the
             # monotonic draft_revision is returned alongside the id so the
@@ -337,9 +324,9 @@ class RequestPreviewModifyView(PostView):
         }
 
 
-@class_route(api_blueprint, "/api/v1/requests/preview-save", methods=["POST"])
+# retired US-334: save-confirm is the only Web persistence path
 class RequestPreviewSaveView(PostView):
-    request_validator_model = RequestPreviewSavePayload
+    request_validator_model = None
 
     def save(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, RequestPreviewSavePayload)
@@ -673,9 +660,9 @@ class RequestDeleteView(PostView):
         return delete_request_snapshot(config, payload.request_id)
 
 
-@class_route(api_blueprint, "/api/v1/requests/<path:request_id>/submit-ab", methods=["POST"])
+# retired US-334: tracking submit is the only external write path
 class RequestAbSubmitView(PostView):
-    request_validator_model = RequestAbSubmitPayload
+    request_validator_model = None
 
     def save(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, RequestAbSubmitPayload)

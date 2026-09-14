@@ -40,23 +40,17 @@ from apps.migu_orca_web.api_contract import (
     AutoBangumiCapabilitiesDTO,
     AutoBangumiConnectionResultDTO,
     AutoBangumiConnectionSummaryDTO,
-    BatchAcceptResultDTO,
     BatchParseResultDTO,
-    BatchQueueResultDTO,
     BatchSaveConfirmResultDTO,
-    BatchSubmitResultDTO,
     CorrectionsResultDTO,
     MikanCandidateResultDTO,
     PreferenceResultDTO,
-    QbittorrentConnectionResultDTO,
-    RequestAbSubmitResultDTO,
     RequestActionResultDTO,
     RequestCreateResultDTO,
     RequestDeleteResultDTO,
     RequestDetailResultDTO,
     RequestListResultDTO,
     RequestPreviewModifyResultDTO,
-    RequestPreviewSaveResultDTO,
     RequestSafeInfoResultDTO,
     RequestSaveConfirmResultDTO,
     TrackingDetailResultDTO,
@@ -73,6 +67,16 @@ from shared.management_contract import (
     management_error_names_for_status,
 )
 
+# Retired endpoint schemas remain local only so historical registry literals can
+# be imported while generation excludes those operations below. They are not
+# part of the public DTO module or emitted contract.
+class _RetiredEndpointDTO(BaseModel):
+    model_config = {"extra": "allow"}
+
+BatchAcceptResultDTO = BatchQueueResultDTO = BatchSubmitResultDTO = _RetiredEndpointDTO
+RequestAbSubmitResultDTO = RequestPreviewSaveResultDTO = _RetiredEndpointDTO
+QbittorrentConnectionResultDTO = _RetiredEndpointDTO
+
 OPENAPI_VERSION = "3.1.0"
 DEFAULT_OUTPUT = Path(__file__).resolve().parents[3] / "docs" / "api" / "openapi.json"
 
@@ -81,7 +85,6 @@ DEFAULT_OUTPUT = Path(__file__).resolve().parents[3] / "docs" / "api" / "openapi
 _STORAGE_DIR_ERRORS: dict[str, dict[str, str]] = {
     "400": {"invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录"},
 }
-
 
 def _schema(model: type[BaseModel]) -> dict[str, Any]:
     """Return the JSON Schema for a pydantic model (dereferenced, no $defs)."""
@@ -1644,6 +1647,20 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         },
     },
 }
+
+# Retired Web APIs are removed from the source registry before generation.
+for _retired_endpoint in (
+    "POST /api/v1/autobangumi/test-connection",
+    "POST /api/v1/qbittorrent/test-connection",
+    "POST /api/v1/requests/preview-save",
+    "POST /api/v1/requests/<path:request_id>/submit-ab",
+    "POST /api/v1/batches/<batch_id>/accept",
+    "GET /api/v1/batches/<batch_id>/queue",
+    "POST /api/v1/batches/<batch_id>/submit",
+    "POST /api/v1/batches/<batch_id>/retry",
+    "POST /api/v1/batches/<batch_id>/recover",
+):
+    _ENDPOINTS.pop(_retired_endpoint, None)
 
 
 def _normalized_path(path: str) -> str:

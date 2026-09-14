@@ -31,8 +31,6 @@ ENDPOINT_LIFECYCLE: Final[dict[tuple[str, str], EndpointLifecycle]] = {
         "使用已保存连接执行显式只读能力探测；结果仅绑定当前 ref/revision",
         "Capability probe cache",
     ),
-    ("POST", "/api/v1/autobangumi/test-connection"): _entry(_PRIMARY, "连接诊断，不替代管理写入校验", "Request-scoped probe"),
-    ("POST", "/api/v1/qbittorrent/test-connection"): _entry(_PRIMARY, "连接诊断", "Request-scoped probe"),
     ("GET", "/api/v1/preferences"): _entry(_PRIMARY, "偏好读取", "Preference store"),
     ("POST", "/api/v1/preferences"): _entry(_PRIMARY, "偏好保存", "Preference store"),
     ("GET", "/api/v1/corrections"): _entry(_PRIMARY, "纠正规则读取", "Correction store"),
@@ -62,13 +60,6 @@ ENDPOINT_LIFECYCLE: Final[dict[tuple[str, str], EndpointLifecycle]] = {
     ("POST", "/api/v1/requests/<path:request_id>/cancel"): _entry(_RECOVERY, "待确认 Request 的显式取消", "Request store"),
     ("POST", "/api/v1/requests/<path:request_id>/modify"): _entry(_RECOVERY, "已保存 Request 的兼容修改入口", "Request store"),
     ("POST", "/api/v1/requests/<path:request_id>/delete"): _entry(_RECOVERY, "本地 Request 显式删除入口", "Request store"),
-    ("POST", "/api/v1/requests/<path:request_id>/submit-ab"): _entry(_COMPATIBILITY, "旧单番提交；改由统一 TrackingRecord/operation 收敛", "TrackingRecord + operation"),
-    ("POST", "/api/v1/requests/preview-save"): _entry(_COMPATIBILITY, "旧预览保存；由 save-confirm 替代，保持可用", "DraftStore + TrackingRecord"),
-    ("POST", "/api/v1/batches/<batch_id>/accept"): _entry(_COMPATIBILITY, "旧批量接受；由批量 save-confirm 替代，保持可用", "TrackingRecord + queue projection"),
-    ("GET", "/api/v1/batches/<batch_id>/queue"): _entry(_COMPATIBILITY, "旧队列读取；保留为兼容投影", "TrackingRecord; queue projection"),
-    ("POST", "/api/v1/batches/<batch_id>/submit"): _entry(_COMPATIBILITY, "旧批量提交；收敛到统一提交服务", "TrackingRecord + operation"),
-    ("POST", "/api/v1/batches/<batch_id>/retry"): _entry(_COMPATIBILITY, "旧批量重试；收敛到统一恢复保护", "TrackingRecord + operation"),
-    ("POST", "/api/v1/batches/<batch_id>/recover"): _entry(_COMPATIBILITY, "旧批量恢复；收敛到统一恢复保护", "TrackingRecord + operation"),
 }
 
 LIFECYCLE_VALUES: Final[frozenset[str]] = frozenset({_PRIMARY, _RECOVERY, _COMPATIBILITY})

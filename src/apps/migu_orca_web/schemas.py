@@ -99,73 +99,6 @@ class BatchItemDescriptorPayload(BaseModel):
         return request_id
 
 
-class BatchAcceptPayload(BaseModel):
-    """Accept selected or all batch cards into the pre-submission queue.
-
-    ``batch_id`` comes from the URL path; ``items`` describes the batch cards
-    (the server never persists the parsed batch, so the client sends the cards
-    it currently holds). ``item_ids`` optionally filters which cards are
-    accepted (omit for accept-all, preserving batch order).
-    """
-
-    batch_id: str
-    items: list[BatchItemDescriptorPayload]
-    item_ids: list[str] | None = None
-    storage_dir: str | None = None
-
-
-class BatchQueueQuery(BaseModel):
-    """Read a batch pre-submission queue (URL path + query args only)."""
-
-    batch_id: str
-    storage_dir: str | None = None
-
-
-class BatchSubmitPayload(BaseModel):
-    """Submit a batch queue to Auto Bangumi with explicit request-scoped config.
-
-    ``ab_config`` is optional in the payload so the view can raise a Chinese
-    ``validation_error`` envelope when it is missing (instead of the default
-    English pydantic envelope); ``confirm`` is the explicit user confirmation
-    field. Neither value is ever persisted into the queue storage.
-    """
-
-    batch_id: str
-    ab_config: RequestAbConfigPayload | None = Field(default=None)
-    confirm: bool = False
-    storage_dir: str | None = None
-
-
-class BatchRetryPayload(BatchSubmitPayload):
-    """Retry a single FAILED/RETRYABLE queue item with explicit AB config.
-
-    ``request_id`` selects the queue item to retry; only FAILED/RETRYABLE items
-    are retried (already-SUCCEEDED items are skipped server-side). The request-
-    scoped ``ab_config``/``confirm`` contract matches ``BatchSubmitPayload`` and
-    is never persisted into the queue storage.
-    """
-
-    request_id: str
-
-
-class BatchRecoverPayload(BaseModel):
-    """Recover a stuck queue item (SUBMITTING / RESULT_PERSIST_FAILED).
-
-    ``action`` selects the recovery mode: ``auto`` (only for SUBMITTING, uses a
-    previously persisted AB result to finalize SUCCEEDED), ``succeeded``
-    (manual confirmation that Auto Bangumi created the subscription), or
-    ``failed`` (manual confirmation that it did not, turning the item into a
-    normal retryable FAILED). Manual actions require ``confirm=True`` so a
-    wrong click cannot silently mark a subscription as created.
-    """
-
-    batch_id: str
-    request_id: str
-    action: str
-    confirm: bool = False
-    storage_dir: str | None = None
-
-
 class PreferenceQuery(BaseModel):
     """Read the saved non-sensitive user preferences (query args only)."""
 
@@ -215,7 +148,6 @@ class RequestCreatePayload(BaseModel):
     )
     mikan_bangumi: str | None = None
     storage_dir: str | None = None
-    save_request: bool = False
     season_confirmation: int | None = None
     candidate_context: str | None = None
 
@@ -294,20 +226,6 @@ class RequestPreviewModifyPayload(BaseModel):
     draft_id: str
     base_revision: int = Field(ge=1)
     patch: dict[str, Any]
-    storage_dir: str | None = None
-
-
-class RequestPreviewSavePayload(BaseModel):
-    """Persist an unsaved, already-modified preview draft.
-
-    US-194: ``draft_id`` is a one-time capability. US-212: the save reserves
-    the draft against ``base_revision`` and only commits the replay tombstone
-    after the Request is written to disk; a failed persist releases the draft
-    so the same id/revision can be retried instead of forcing a re-search.
-    """
-
-    draft_id: str
-    base_revision: int = Field(ge=1)
     storage_dir: str | None = None
 
 
@@ -416,18 +334,6 @@ class RequestAbConfigPayload(BaseModel):
     password: str | None = None
     token: str | None = None
     fallback_enabled: bool
-
-
-class RequestAbSubmitPayload(RequestActionPayload):
-    connection_ref: UUID
-    configuration_revision: StrictInt = Field(ge=0)
-
-
-class AutoBangumiTestConnectionPayload(BaseModel):
-    """Explicit request-scoped credentials for a read-only AB probe."""
-
-    connection_ref: UUID
-    configuration_revision: StrictInt = Field(ge=0)
 
 
 class AutoBangumiConfigPayload(BaseModel):
@@ -651,42 +557,6 @@ class SavedTrackingRecoveryInput(BaseModel):
         elif supplied & {"connection_ref", "configuration_revision"}:
             raise ValueError("local recovery cannot include saved connection generation")
         return self
-
-
-class QbittorrentConfigPayload(BaseModel):
-    endpoint: str
-    username: str
-    password: str
-    timeout_seconds: float = Field(gt=0)
-    verify_tls: bool = True
-
-    @field_validator("endpoint")
-    @classmethod
-    def validate_endpoint(cls, value: str) -> str:
-        endpoint = value.strip()
-        if not endpoint:
-            raise ValueError("endpoint cannot be empty")
-        return endpoint
-
-    @field_validator("username")
-    @classmethod
-    def validate_username(cls, value: str) -> str:
-        username = value.strip()
-        if not username:
-            raise ValueError("username cannot be empty")
-        return username
-
-    @field_validator("password")
-    @classmethod
-    def validate_password(cls, value: str) -> str:
-        password = value.strip()
-        if not password:
-            raise ValueError("password cannot be empty")
-        return password
-
-
-class QbittorrentTestConnectionPayload(BaseModel):
-    qbittorrent_config: QbittorrentConfigPayload
 
 
 # ---------------------------------------------------------------------------

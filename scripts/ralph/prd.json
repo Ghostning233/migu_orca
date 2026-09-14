@@ -276,8 +276,8 @@
         "Typecheck passes"
       ],
       "priority": 16,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "qB Web/engine/契约/设置链路删除；Flask 404、OpenAPI 与前端构建验证通过。"
     },
     {
       "id": "US-334",
@@ -295,8 +295,8 @@
         "Typecheck passes"
       ],
       "priority": 17,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "旧单番端点取消注册并以 404 处理，Request create 仅签发服务端草案；类型/构建通过。"
     },
     {
       "id": "US-335",
@@ -313,8 +313,8 @@
         "Typecheck passes"
       ],
       "priority": 18,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "旧批量 accept/submit/retry/recover 路由取消注册，save-confirm 保留；URL map/OpenAPI/构建通过。"
     },
     {
       "id": "US-336",
@@ -331,8 +331,8 @@
         "Typecheck passes"
       ],
       "priority": 19,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "队列 UI/compat 投影删除，tracking 不再接受 batch_id；旧队列 API 404，前端构建通过。"
     },
     {
       "id": "US-337",

@@ -6,7 +6,7 @@ import re
 from urllib.parse import urlsplit
 
 from flask import Flask, Response, current_app, request
-from werkzeug.exceptions import SecurityError
+from werkzeug.exceptions import HTTPException, SecurityError
 
 from apps.registry import ALL_BLUEPRINTS
 from extensions.flask_api.api import failed_response
@@ -113,6 +113,17 @@ def create_app(config_name: str | None = None) -> Flask:
         if request.path.startswith("/api/v1/"):
             return failed_response("untrusted_host", "请求主机不受信任")
         return error
+
+    @app.errorhandler(405)
+    def _retired_api_method(error: HTTPException) -> Response:
+        # Removed endpoints must be indistinguishable from unknown URLs, even
+        # when a broad read-only path rule would otherwise produce 405.
+        retired = request.path in {
+            "/api/v1/requests/preview-save",
+        } or request.path.endswith("/submit-ab")
+        if retired:
+            return Response(status=404)
+        return error  # type: ignore[return-value]
 
     @app.after_request
     def _settings_no_store(response: Response) -> Response:

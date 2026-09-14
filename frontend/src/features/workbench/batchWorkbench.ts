@@ -35,18 +35,6 @@ export type BatchSaveConfirmResult = SaveConfirmBatchItemsResult
 export type BatchSaveConfirmItem = BatchSaveConfirmResult['results'][number]
 export type BatchTrackingItem = TrackingItemsResult['items'][number]
 
-/** Public submit-result item (submit/retry/recover share the accept shape). */
-export type BatchSubmitResult = NonNullable<
-  operations['submitBatchQueue']['responses']['200']['content']['application/json']['result']
->
-
-/** Public queue item (sanitized summaries only). */
-export type QueueItem = NonNullable<
-  NonNullable<
-    operations['getBatchQueue']['responses']['200']['content']['application/json']['result']['queue']
-  >['items']
->[number]
-
 /** User-facing Chinese label for a batch card status code. */
 export const BATCH_STATUS_LABELS: Record<string, string> = {
   RAW: '待解析',
@@ -172,33 +160,6 @@ export function batchCardSeedSummary(item: BatchItem): string {
 /** True when the card is flagged for human review (never for ACCEPTED). */
 export function batchCardNeedsReview(item: BatchItem): boolean {
   return item.needs_user_review === true && String(item.status ?? '') !== 'ACCEPTED'
-}
-
-/** Chinese label for a queue item status code. */
-export const QUEUE_STATUS_LABELS: Record<string, string> = {
-  READY_TO_SUBMIT: '待提交',
-  SUBMITTING: '提交中',
-  SUCCEEDED: '提交成功',
-  FAILED: '提交失败',
-  RETRYABLE: '可重试',
-  RESULT_PERSIST_FAILED: '结果保存失败',
-}
-
-/** Chinese label for a queue status; unknown codes render as-is. */
-export function queueStatusLabel(status: string | null | undefined): string {
-  const value = String(status ?? '')
-  return QUEUE_STATUS_LABELS[value] ?? value
-}
-
-/** One-line queue item summary (result summary > last error > none). */
-export function queueItemSummary(item: QueueItem): string {
-  if (item.ab_result_summary) {
-    return `结果：${item.ab_result_summary}`
-  }
-  if (item.last_error) {
-    return `错误：${item.last_error}`
-  }
-  return '尚无结果摘要'
 }
 
 /** Validate the batch raw input before calling the parse API. */
