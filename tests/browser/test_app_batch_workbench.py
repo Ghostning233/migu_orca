@@ -165,13 +165,6 @@ def _batch_accept_result(items: list[dict[str, Any]], queue_items: list[dict[str
             "ok": True,
             "result": {
                 "batch_id": batch_id,
-                "queue": {
-                    "queue_id": f"queue-{batch_id}",
-                    "batch_id": batch_id,
-                    "created_at": "2026-08-19T00:00:00+00:00",
-                    "updated_at": "2026-08-19T00:00:00+00:00",
-                    "items": queue_items,
-                },
                 "results": results,
                 "summary": summary,
             },

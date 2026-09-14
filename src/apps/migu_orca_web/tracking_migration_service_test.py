@@ -25,7 +25,7 @@ from batch_engine.models.queue import (
 )
 from request_engine.controllers.request_controller import ACCEPTED, PENDING_CONFIRM
 from storage_engine.controllers.ab_result_repository import save_ab_submit_result
-from storage_engine.controllers.queue_repository import save_submission_queue
+from storage_engine.controllers.queue_repository import write_legacy_queue_fixture
 from storage_engine.controllers.request_repository import save_request_snapshot
 from storage_engine.controllers.storage_config import (
     StorageConfig,
@@ -107,7 +107,7 @@ def _save_queue(
         )
         for index, (request_id, status) in enumerate(entries)
     ]
-    save_submission_queue(
+    write_legacy_queue_fixture(
         config,
         BatchSubmissionQueue(
             queue_id=f"queue-{batch_id}",

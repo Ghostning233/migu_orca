@@ -27,11 +27,11 @@ from batch_engine.controllers.batch_submit_controller import (
     SUBMIT_OUTCOME_SKIPPED,
     SUBMIT_OUTCOME_SUCCEEDED,
     SUBMIT_PERSIST_ERROR_TYPE,
-    compose_ab_submit_one,
-    recover_batch_queue_item,
-    retry_batch_queue_item,
+    compose_legacy_submit_one,
+    retired_recover_queue_item,
+    retired_retry_queue_item,
     serialize_batch_submit_result,
-    submit_batch_queue_items,
+    retired_submit_queue_items,
 )
 from batch_engine.models import (
     BATCH_QUEUE_STATUS_FAILED,
@@ -194,7 +194,7 @@ class TestAllSuccesses:
             calls.append(request["request_id"])
             return _success_submit(request, ab_config)
 
-        result = submit_batch_queue_items(
+        result = retired_submit_queue_items(
             batch_id="batch-1",
             queue=queue,
             ab_config=_ab_config(),
@@ -228,7 +228,7 @@ class TestAllSuccesses:
         store = FakeRequestStore([_accepted_request(request_id="req-1")])
         queue = _queue(request_ids=["req-1"])
 
-        result = submit_batch_queue_items(
+        result = retired_submit_queue_items(
             batch_id="batch-1",
             queue=queue,
             ab_config=_ab_config(),
@@ -280,7 +280,7 @@ class TestSingleFailureContinues:
                 }
             return _success_submit(request, ab_config)
 
-        result = submit_batch_queue_items(
+        result = retired_submit_queue_items(
             batch_id="batch-1",
             queue=queue,
             ab_config=_ab_config(),
@@ -311,7 +311,7 @@ class TestSingleFailureContinues:
                 {"status_code": 503},
             )
 
-        result = submit_batch_queue_items(
+        result = retired_submit_queue_items(
             batch_id="batch-1",
             queue=queue,
             ab_config=_ab_config(),
@@ -333,7 +333,7 @@ class TestSingleFailureContinues:
                 "token=secret endpoint=https://ab.example.com path=/home/ghostning"
             )
 
-        result = submit_batch_queue_items(
+        result = retired_submit_queue_items(
             batch_id="batch-1",
             queue=queue,
             ab_config=_ab_config(),
@@ -368,7 +368,7 @@ class TestRetryableClassification:
                 },
             }
 
-        result = submit_batch_queue_items(
+        result = retired_submit_queue_items(
             batch_id="batch-1",
             queue=queue,
             ab_config=_ab_config(),
@@ -396,7 +396,7 @@ class TestRetryableClassification:
                 },
             }
 
-        result = submit_batch_queue_items(
+        result = retired_submit_queue_items(
             batch_id="batch-1",
             queue=queue,
             ab_config=_ab_config(),
@@ -421,7 +421,7 @@ class TestRetryableClassification:
                 },
             }
 
-        result = submit_batch_queue_items(
+        result = retired_submit_queue_items(
             batch_id="batch-1",
             queue=queue,
             ab_config=_ab_config(),
@@ -443,7 +443,7 @@ class TestNonAcceptedPreSubmit:
             calls.append(request["request_id"])
             return _success_submit(request, ab_config)
 
-        result = submit_batch_queue_items(
+        result = retired_submit_queue_items(
             batch_id="batch-1",
             queue=queue,
             ab_config=_ab_config(),
@@ -473,7 +473,7 @@ class TestNonAcceptedPreSubmit:
             called = True
             return _success_submit(request, ab_config)
 
-        result = submit_batch_queue_items(
+        result = retired_submit_queue_items(
             batch_id="batch-1",
             queue=queue,
             ab_config=_ab_config(),
@@ -494,7 +494,7 @@ class TestNonAcceptedPreSubmit:
         )
         queue = _queue(request_ids=["req-1"])
 
-        result = submit_batch_queue_items(
+        result = retired_submit_queue_items(
             batch_id="batch-1",
             queue=queue,
             ab_config=_ab_config(),
@@ -515,7 +515,7 @@ class TestNonAcceptedPreSubmit:
         )
         queue = _queue(request_ids=["req-1"])
 
-        result = submit_batch_queue_items(
+        result = retired_submit_queue_items(
             batch_id="batch-1",
             queue=queue,
             ab_config=_ab_config(),
@@ -550,7 +550,7 @@ class TestAlreadySucceededSkipped:
             calls.append(request["request_id"])
             return _success_submit(request, ab_config)
 
-        result = submit_batch_queue_items(
+        result = retired_submit_queue_items(
             batch_id="batch-1",
             queue=queue,
             ab_config=_ab_config(),
@@ -597,7 +597,7 @@ class TestAlreadySucceededSkipped:
             calls.append(request["request_id"])
             return _success_submit(request, ab_config)
 
-        result = submit_batch_queue_items(
+        result = retired_submit_queue_items(
             batch_id="batch-1",
             queue=queue,
             ab_config=_ab_config(),
@@ -658,7 +658,7 @@ class TestPersistHooks:
         def persist_queue(q: BatchSubmissionQueue) -> None:
             snapshots.append(deepcopy(q))
 
-        submit_batch_queue_items(
+        retired_submit_queue_items(
             batch_id="batch-1",
             queue=queue,
             ab_config=_ab_config(),
@@ -686,7 +686,7 @@ class TestPersistHooks:
             events.append("submit")
             return _success_submit(request, ab_config)
 
-        submit_batch_queue_items(
+        retired_submit_queue_items(
             batch_id="batch-1",
             queue=queue,
             ab_config=_ab_config(),
@@ -708,7 +708,7 @@ class TestPersistHooks:
             calls.append((request["request_id"], deepcopy(ab_result)))
             return request
 
-        result = submit_batch_queue_items(
+        result = retired_submit_queue_items(
             batch_id="batch-1",
             queue=queue,
             ab_config=_ab_config(),
@@ -747,7 +747,7 @@ class TestPersistHooks:
             calls.append(deepcopy(ab_result))
             return request
 
-        result = submit_batch_queue_items(
+        result = retired_submit_queue_items(
             batch_id="batch-1",
             queue=queue,
             ab_config=_ab_config(),
@@ -784,7 +784,7 @@ class TestPersistHooks:
                 )
             return request
 
-        result = submit_batch_queue_items(
+        result = retired_submit_queue_items(
             batch_id="batch-1",
             queue=queue,
             ab_config=_ab_config(),
@@ -821,7 +821,7 @@ class TestPersistHooks:
             calls.append((request["request_id"], deepcopy(ab_result)))
             return request
 
-        result = retry_batch_queue_item(
+        result = retired_retry_queue_item(
             batch_id="batch-1",
             queue=queue,
             request_id="req-1",
@@ -851,7 +851,7 @@ class TestPersistHooks:
             submit_calls.append(request["request_id"])
             return _success_submit(request, ab_config)
 
-        result = submit_batch_queue_items(
+        result = retired_submit_queue_items(
             batch_id="batch-1",
             queue=queue,
             ab_config=_ab_config(),
@@ -875,7 +875,7 @@ class TestRecoverBatchQueueItem:
         request_id: str = "req-1",
         action: str = "auto",
     ):
-        return recover_batch_queue_item(
+        return retired_recover_queue_item(
             batch_id="batch-1",
             queue=queue,
             request_id=request_id,
@@ -1022,7 +1022,7 @@ class TestRecoverBatchQueueItem:
         def persist_queue(q: BatchSubmissionQueue) -> None:
             persisted.append(deepcopy(q))
 
-        result = recover_batch_queue_item(
+        result = retired_recover_queue_item(
             batch_id="batch-1",
             queue=queue,
             request_id="req-1",
@@ -1124,7 +1124,7 @@ class TestRecoverBatchQueueItem:
             submit_calls.append(request["request_id"])
             return _success_submit(request, ab_config)
 
-        result = retry_batch_queue_item(
+        result = retired_retry_queue_item(
             batch_id="batch-1",
             queue=queue,
             request_id="req-1",
@@ -1152,7 +1152,7 @@ class TestRecoverBatchQueueItem:
             submit_calls.append(request["request_id"])
             return _success_submit(request, ab_config)
 
-        result = submit_batch_queue_items(
+        result = retired_submit_queue_items(
             batch_id="batch-1",
             queue=queue,
             ab_config=_ab_config(),
@@ -1189,7 +1189,7 @@ class TestRecoverBatchQueueItem:
             submit_calls.append(request["request_id"])
             return _success_submit(request, ab_config)
 
-        result = submit_batch_queue_items(
+        result = retired_submit_queue_items(
             batch_id="batch-1",
             queue=queue,
             ab_config=_ab_config(),
@@ -1218,7 +1218,7 @@ class TestRecoverBatchQueueItem:
         store = FakeRequestStore([request])
         queue = _queue_with_item(_submitting_queue_item("req-1"))
 
-        result = recover_batch_queue_item(
+        result = retired_recover_queue_item(
             batch_id="batch-1",
             queue=queue,
             request_id="req-1",
@@ -1236,7 +1236,7 @@ class TestEmptyAndValidation:
         store = FakeRequestStore([])
         queue = _queue(request_ids=[])
 
-        result = submit_batch_queue_items(
+        result = retired_submit_queue_items(
             batch_id="batch-1",
             queue=queue,
             ab_config=_ab_config(),
@@ -1260,7 +1260,7 @@ class TestEmptyAndValidation:
         queue = _queue(request_ids=[])
 
         try:
-            submit_batch_queue_items(
+            retired_submit_queue_items(
                 batch_id="  ",
                 queue=queue,
                 ab_config=_ab_config(),
@@ -1289,7 +1289,7 @@ class TestSerialization:
                 },
             }
 
-        result = submit_batch_queue_items(
+        result = retired_submit_queue_items(
             batch_id="batch-1",
             queue=queue,
             ab_config=_ab_config(),
@@ -1372,7 +1372,7 @@ class TestComposeAbSubmitOne:
         request["confirmable_config"]["filter_rule"] = filter_rule
 
         with pytest.raises(Stage1Error) as error:
-            compose_ab_submit_one()(request, _ab_config(auth_mode="password"))
+            compose_legacy_submit_one()(request, _ab_config(auth_mode="password"))
 
         assert error.value.error_type == "ab_filter_unsupported"
         assert called is False
@@ -1389,7 +1389,7 @@ class TestComposeAbSubmitOne:
             lambda config: client,
         )
 
-        submit_one = compose_ab_submit_one()
+        submit_one = compose_legacy_submit_one()
         ab_config = _ab_config(fallback_enabled=False)
         ab_result = submit_one(
             _accepted_request(request_id="req-1", title="葬送的芙莉莲"),
@@ -1436,7 +1436,7 @@ class TestComposeAbSubmitOne:
             lambda config: client,
         )
 
-        submit_one = compose_ab_submit_one()
+        submit_one = compose_legacy_submit_one()
         ab_result = submit_one(
             _accepted_request(request_id="req-1", title="葬送的芙莉莲"),
             _ab_config(
@@ -1463,7 +1463,7 @@ class TestRetryBatchQueueItem:
         )
         queue = _queue_with_item(item)
 
-        result = retry_batch_queue_item(
+        result = retired_retry_queue_item(
             batch_id="batch-1",
             queue=queue,
             request_id="req-1",
@@ -1495,7 +1495,7 @@ class TestRetryBatchQueueItem:
         )
         queue = _queue_with_item(item)
 
-        result = retry_batch_queue_item(
+        result = retired_retry_queue_item(
             batch_id="batch-1",
             queue=queue,
             request_id="req-1",
@@ -1526,7 +1526,7 @@ class TestRetryBatchQueueItem:
                 },
             }
 
-        result = retry_batch_queue_item(
+        result = retired_retry_queue_item(
             batch_id="batch-1",
             queue=queue,
             request_id="req-1",
@@ -1563,7 +1563,7 @@ class TestRetryBatchQueueItem:
                 },
             }
 
-        result = retry_batch_queue_item(
+        result = retired_retry_queue_item(
             batch_id="batch-1",
             queue=queue,
             request_id="req-1",
@@ -1597,7 +1597,7 @@ class TestRetryBatchQueueItem:
         )
         assert queue.items[0].attempts == 2
 
-        result = retry_batch_queue_item(
+        result = retired_retry_queue_item(
             batch_id="batch-1",
             queue=queue,
             request_id="req-1",
@@ -1620,7 +1620,7 @@ class TestRetryBatchQueueItem:
             calls.append(request["request_id"])
             return _success_submit(request, ab_config)
 
-        result = retry_batch_queue_item(
+        result = retired_retry_queue_item(
             batch_id="batch-1",
             queue=queue,
             request_id="req-1",
@@ -1640,7 +1640,7 @@ class TestRetryBatchQueueItem:
         store = FakeRequestStore([_accepted_request(request_id="req-1")])
         queue = _queue(request_ids=["req-1"])
 
-        result = retry_batch_queue_item(
+        result = retired_retry_queue_item(
             batch_id="batch-1",
             queue=queue,
             request_id="req-1",
@@ -1661,7 +1661,7 @@ class TestRetryBatchQueueItem:
             queue, "req-1", now_factory=lambda: "2026-08-19T00:01:00+00:00"
         )
 
-        result = retry_batch_queue_item(
+        result = retired_retry_queue_item(
             batch_id="batch-1",
             queue=queue,
             request_id="req-1",
@@ -1687,7 +1687,7 @@ class TestRetryBatchQueueItem:
             called = True
             return _success_submit(request, ab_config)
 
-        result = retry_batch_queue_item(
+        result = retired_retry_queue_item(
             batch_id="batch-1",
             queue=queue,
             request_id="req-1",
@@ -1722,7 +1722,7 @@ class TestRetryBatchQueueItem:
             called = True
             return _success_submit(request, ab_config)
 
-        result = retry_batch_queue_item(
+        result = retired_retry_queue_item(
             batch_id="batch-1",
             queue=queue,
             request_id="req-1",
@@ -1750,7 +1750,7 @@ class TestRetryBatchQueueItem:
         )
         queue = _queue_with_item(item)
 
-        result = retry_batch_queue_item(
+        result = retired_retry_queue_item(
             batch_id="batch-1",
             queue=queue,
             request_id="req-1",
@@ -1773,7 +1773,7 @@ class TestRetryBatchQueueItem:
         )
 
         with pytest.raises(ValueError, match="unknown request_id"):
-            retry_batch_queue_item(
+            retired_retry_queue_item(
                 batch_id="batch-1",
                 queue=queue,
                 request_id="req-missing",
@@ -1797,7 +1797,7 @@ class TestRetryBatchQueueItem:
                 {"status_code": 503},
             )
 
-        result = retry_batch_queue_item(
+        result = retired_retry_queue_item(
             batch_id="batch-1",
             queue=queue,
             request_id="req-1",
@@ -1824,7 +1824,7 @@ class TestRetryBatchQueueItem:
                 "token=secret endpoint=https://ab.example.com path=/home/ghostning"
             )
 
-        result = retry_batch_queue_item(
+        result = retired_retry_queue_item(
             batch_id="batch-1",
             queue=queue,
             request_id="req-1",
@@ -1859,7 +1859,7 @@ class TestRetryBatchQueueItem:
             submitted.append(request["input"]["raw_title"])
             return _success_submit(request, ab_config)
 
-        result = retry_batch_queue_item(
+        result = retired_retry_queue_item(
             batch_id="batch-1",
             queue=queue,
             request_id="req-1",
@@ -1903,7 +1903,7 @@ class TestRetryBatchQueueItem:
             submitted_titles.append(request["input"]["raw_title"])
             return _success_submit(request, ab_config)
 
-        result = retry_batch_queue_item(
+        result = retired_retry_queue_item(
             batch_id="batch-1",
             queue=queue,
             request_id="req-1",
@@ -1951,7 +1951,7 @@ class TestRetryBatchQueueItem:
         succeeded = _succeeded_queue_item("req-2")
         queue = _queue_with_items([failed, succeeded])
 
-        result = retry_batch_queue_item(
+        result = retired_retry_queue_item(
             batch_id="batch-1",
             queue=queue,
             request_id="req-1",
@@ -1989,7 +1989,7 @@ class TestRetryBatchQueueItem:
                 },
             }
 
-        result = retry_batch_queue_item(
+        result = retired_retry_queue_item(
             batch_id="batch-1",
             queue=queue,
             request_id="req-1",

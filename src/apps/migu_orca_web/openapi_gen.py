@@ -1401,8 +1401,7 @@ def _operation_id(method: str, path: str) -> str:
     This is the fallback for endpoints without an explicit ``operationId`` in
     ``_ENDPOINTS`` (every current endpoint declares an explicit readable id,
     so the derivation only guards future additions). ``GET
-    /api/v1/requests/{request_id}`` → ``getRequestsByRequestId``; ``POST
-    /api/v1/batches/{batch_id}/submit`` → ``postBatchesByBatchIdSubmit``.
+    /api/v1/requests/{request_id}`` → ``getRequestsByRequestId``.
     Path params are inlined so each endpoint gets a distinct name and
     TypeScript client generators get deterministic identifiers.
     """

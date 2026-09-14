@@ -57,7 +57,7 @@ from storage_engine.controllers.idempotency_repository import (
 )
 from storage_engine.controllers.preference_repository import save_user_preferences
 from storage_engine.controllers.queue_repository import (
-    save_submission_queue,
+    write_legacy_queue_fixture,
 )
 from storage_engine.controllers.request_repository import (
     load_request_snapshot,
@@ -3947,7 +3947,7 @@ def _submitting_queue_json(
         request_id,
         now_factory=lambda: "2026-08-19T00:01:00+00:00",
     )
-    save_submission_queue(load_storage_config(storage_dir), queue)
+    write_legacy_queue_fixture(load_storage_config(storage_dir), queue)
 
 
 def _result_persist_failed_queue_json(
@@ -3983,7 +3983,7 @@ def _result_persist_failed_queue_json(
         last_error={"error_type": "result_persist_failed", "error_message": "保存失败"},
         now_factory=lambda: "2026-08-19T00:02:00+00:00",
     )
-    save_submission_queue(load_storage_config(storage_dir), queue)
+    write_legacy_queue_fixture(load_storage_config(storage_dir), queue)
 
 
 def _saved_request_with_ab_result(

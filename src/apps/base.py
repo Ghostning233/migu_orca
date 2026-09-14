@@ -115,10 +115,11 @@ def create_app(config_name: str | None = None) -> Flask:
         return error
 
     @app.errorhandler(405)
+    @app.errorhandler(400)
     def _api_method_not_found(error: object) -> Response | object:
         # API retirement and path readers must not expose method capabilities.
         # Treat unsupported methods as unknown resources at the HTTP boundary.
-        if request.path.startswith("/api/v1/"):
+        if request.path.startswith("/api/v1/") and request.path.endswith("/submit-ab"):
             return Response(status=404)
         return error
 

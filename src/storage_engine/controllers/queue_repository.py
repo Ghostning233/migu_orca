@@ -30,7 +30,7 @@ class QueueListResult:
         return len(self.damaged_batch_ids)
 
 
-def save_submission_queue(
+def write_legacy_queue_fixture(
     config: StorageConfig,
     queue: BatchSubmissionQueue,
 ) -> dict[str, Any]:
@@ -40,8 +40,8 @@ def save_submission_queue(
     sanitized on write), so storing the full queue never persists Auto Bangumi
     secrets, raw response bodies, full RSS URLs, magnets, or local paths.
     """
-    batch_id = _extract_batch_id(queue, "save_submission_queue")
-    queue_path = _queue_path(config, batch_id, "save_submission_queue")
+    batch_id = _extract_batch_id(queue, "write_legacy_queue_fixture")
+    queue_path = _queue_path(config, batch_id, "write_legacy_queue_fixture")
     ensure_storage_layout(config)
 
     try:
@@ -54,7 +54,7 @@ def save_submission_queue(
         raise Stage1Error(
             "storage_error",
             "保存提交队列 JSON 失败",
-            "save_submission_queue",
+            "write_legacy_queue_fixture",
             {"batch_id": batch_id, "directory": config.queue_dir.name},
         ) from exc
 
@@ -200,5 +200,5 @@ __all__ = [
     "QueueListResult",
     "list_submission_queues_tolerant",
     "load_submission_queue",
-    "save_submission_queue",
+    "write_legacy_queue_fixture",
 ]

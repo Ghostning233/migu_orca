@@ -11,7 +11,7 @@ never blocks the rest of the batch.
 The service stays decoupled from the apps layer: ``submit_one(request,
 ab_config)`` returns the existing sanitized ``ab_submit_result`` contract
 (success, ab_subscription_id, ab_response, fallback_config, error).
-``compose_ab_submit_one`` builds that callable from the existing Auto Bangumi
+``compose_legacy_submit_one`` builds that callable from the existing Auto Bangumi
 payload/client/submit primitives (the batch-domain equivalent of
 ``apply_ab_submit_action``'s AB portion) so later API/UI layers can wire the
 real path without reimplementing payload or client logic. Auto Bangumi secrets
@@ -112,7 +112,7 @@ class BatchSubmitResult:
     items: list[BatchSubmitItemResult]
 
 
-def submit_batch_queue_items(
+def retired_submit_queue_items(
     *,
     batch_id: str,
     queue: BatchSubmissionQueue,
@@ -163,7 +163,7 @@ def submit_batch_queue_items(
     )
 
 
-def retry_batch_queue_item(
+def retired_retry_queue_item(
     *,
     batch_id: str,
     queue: BatchSubmissionQueue,
@@ -186,7 +186,7 @@ def retry_batch_queue_item(
     submit. A single retry never affects sibling items, and one retry failure
     leaves the item FAILED/RETRYABLE with an incremented attempt count.
 
-    The same reliability contract as ``submit_batch_queue_items`` applies:
+    The same reliability contract as ``retired_submit_queue_items`` applies:
     ``persist_queue`` flushes SUBMITTING before the Auto Bangumi call and the
     final status after it; ``persist_submit_result`` writes the sanitized AB
     result into the Request snapshot and ``ab_results/<request_id>.json``.
@@ -267,7 +267,7 @@ def retry_batch_queue_item(
             {
                 "error_type": "unexpected_error",
                 "error_message": "Auto Bangumi 提交发生未预期错误",
-                "failed_step": "retry_batch_queue_item",
+                "failed_step": "retired_retry_queue_item",
                 "details": {},
             }
         )
@@ -372,7 +372,7 @@ def retry_batch_queue_item(
     )
 
 
-def recover_batch_queue_item(
+def retired_recover_queue_item(
     *,
     batch_id: str,
     queue: BatchSubmissionQueue,
@@ -685,7 +685,7 @@ def _not_recoverable_reason(status: str) -> str:
     return reasons.get(status, "该状态无需恢复")
 
 
-def compose_ab_submit_one() -> SubmitOne:
+def compose_legacy_submit_one() -> SubmitOne:
     """Build the standard ``submit_one`` from the existing AB primitives.
 
     Mirrors the AB portion of ``apply_ab_submit_action``: build the subscription
@@ -858,7 +858,7 @@ def _submit_one_item(
             {
                 "error_type": "unexpected_error",
                 "error_message": "Auto Bangumi 提交发生未预期错误",
-                "failed_step": "submit_batch_queue_items",
+                "failed_step": "retired_submit_queue_items",
                 "details": {},
             }
         )
@@ -1176,10 +1176,10 @@ __all__ = [
     "PersistQueue",
     "PersistSubmitResult",
     "SubmitOne",
-    "compose_ab_submit_one",
-    "recover_batch_queue_item",
-    "retry_batch_queue_item",
+    "compose_legacy_submit_one",
+    "retired_recover_queue_item",
+    "retired_retry_queue_item",
     "serialize_batch_submit_item",
     "serialize_batch_submit_result",
-    "submit_batch_queue_items",
+    "retired_submit_queue_items",
 ]

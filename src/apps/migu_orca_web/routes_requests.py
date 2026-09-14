@@ -11,6 +11,8 @@ safe-info whitelist for the read-only "全部信息" dialog.
 from pathlib import Path
 from typing import Any
 
+from flask import abort
+
 from apps.migu_orca_entry.controllers.entry_controller import (
     _build_history_event,
     _confirmation_history_details,
@@ -153,6 +155,8 @@ class RequestSafeInfoView(GetView):
 
     def get_object(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, RequestDetailQuery)
+        if self.request_validator_model.request_id.endswith("/submit-ab"):
+            abort(404)
         storage_dir = _storage_dir(self.request_validator_model.storage_dir)
         config = load_storage_config(storage_dir)
         request_id = self.request_validator_model.request_id
@@ -200,6 +204,8 @@ class RequestDetailView(GetView):
 
     def get_object(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, RequestDetailQuery)
+        if self.request_validator_model.request_id.endswith("/submit-ab"):
+            abort(404)
         config = load_storage_config(_storage_dir(self.request_validator_model.storage_dir))
         request_id = self.request_validator_model.request_id
         request = load_request_snapshot(config, request_id)

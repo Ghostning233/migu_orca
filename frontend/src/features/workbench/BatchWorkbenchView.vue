@@ -646,7 +646,6 @@ function applySaveConfirmResult(result: BatchSaveConfirmResult): void {
     for (const item of resultItems) {
       if (item.item_id !== row.item_id) continue
       if (batchSaveConfirmSucceeded(item)) {
-        const queueItem = (result as unknown as { queue?: { items?: Array<{ item_id?: string | null; status?: string | null }> } }).queue?.items?.find((candidate) => candidate.item_id === row.item_id)
         updated = {
           ...row,
           status: 'CONFIRMED',
@@ -654,7 +653,6 @@ function applySaveConfirmResult(result: BatchSaveConfirmResult): void {
           draft_revision: null,
           request_id: item.request_id,
           tracking_id: item.tracking_id,
-          queue_status: item.tracking_ready === true ? 'TRACKING_READY' : queueItem?.status ?? 'CONFIRMED',
         }
         draftSessions.get(row.item_id ?? '')?.invalidate()
         draftSessions.delete(row.item_id ?? '')
@@ -720,7 +718,7 @@ async function locateBatchTracking(item: BatchItem): Promise<'found' | 'not_foun
     const match = findBatchTrackingItem(result, requestId)
     if (!match || !isPublicRouteIdentifier(match.tracking_id)) return 'not_found'
     items.value = items.value.map((row) => row.item_id === item.item_id
-      ? { ...row, status: 'CONFIRMED', queue_status: 'TRACKING_READY', tracking_id: match.tracking_id }
+      ? { ...row, status: 'CONFIRMED', tracking_id: match.tracking_id }
       : row)
     journey.dispatch({ type: 'tracking_located', itemId: item.item_id ?? '', requestId, trackingId: match.tracking_id ?? '' })
     setRecoveryFeedback(item.item_id ?? '', '已定位到真实追番记录。')
@@ -745,7 +743,7 @@ async function retrySavedConfirmation(item: BatchItem): Promise<void> {
     // Accept was explicitly successful. From this point on only location may
     // be retried; the accept action is never reopened.
     items.value = items.value.map((row) => row.item_id === itemId
-      ? { ...row, status: 'CONFIRMED', request_id: requestId, tracking_id: null, queue_status: 'CONFIRMED' }
+      ? { ...row, status: 'CONFIRMED', request_id: requestId, tracking_id: null }
       : row)
     journey.dispatch({ type: 'accept_succeeded', itemId, requestId })
     const located = await locateBatchTracking({ ...item, request_id: requestId })

@@ -16,7 +16,7 @@ from batch_engine.models import (
 from shared.errors import Stage1Error
 from storage_engine.controllers.queue_repository import (
     load_submission_queue,
-    save_submission_queue,
+    write_legacy_queue_fixture,
 )
 from storage_engine.controllers.storage_config import load_storage_config
 
@@ -41,7 +41,7 @@ def test_save_and_load_submission_queue_round_trip(tmp_path: Path) -> None:
     config = load_storage_config(tmp_path / "migu-state")
     queue = _queue()
 
-    saved = save_submission_queue(config, queue)
+    saved = write_legacy_queue_fixture(config, queue)
     loaded = load_submission_queue(config, "batch-1")
 
     assert saved == {
@@ -87,15 +87,15 @@ def test_load_submission_queue_rejects_path_traversal_batch_id(
     assert "路径片段" in error.value.message
 
 
-def test_save_submission_queue_rejects_empty_batch_id(tmp_path: Path) -> None:
+def test_write_legacy_queue_fixture_rejects_empty_batch_id(tmp_path: Path) -> None:
     config = load_storage_config(tmp_path / "migu-state")
     empty = BatchSubmissionQueue(queue_id="queue-1", batch_id="  ", items=[])
 
     with pytest.raises(Stage1Error) as error:
-        save_submission_queue(config, empty)
+        write_legacy_queue_fixture(config, empty)
 
     assert error.value.error_type == "invalid_batch_id"
-    assert error.value.failed_step == "save_submission_queue"
+    assert error.value.failed_step == "write_legacy_queue_fixture"
 
 
 def test_load_submission_queue_preserves_status_and_sanitized_summaries(
@@ -120,7 +120,7 @@ def test_load_submission_queue_preserves_status_and_sanitized_summaries(
         ab_result_summary={"success": True, "ab_subscription_id": "ab-1"},
         now_factory=lambda: "2026-08-19T00:02:00+00:00",
     )
-    save_submission_queue(config, queue)
+    write_legacy_queue_fixture(config, queue)
 
     loaded = load_submission_queue(config, "batch-1")
 
@@ -196,7 +196,7 @@ def test_persisted_queue_serializes_without_sensitive_fields(tmp_path: Path) -> 
         },
         now_factory=lambda: "2026-08-19T00:02:00+00:00",
     )
-    save_submission_queue(config, queue)
+    write_legacy_queue_fixture(config, queue)
 
     body = (config.queue_dir / "batch-1.json").read_text(encoding="utf-8")
     loaded = load_submission_queue(config, "batch-1")

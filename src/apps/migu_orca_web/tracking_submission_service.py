@@ -42,6 +42,7 @@ from dataclasses import replace
 from typing import Any
 from uuid import UUID
 
+from ab_engine.controllers.tracking_submit_adapter import compose_tracking_submit_one
 from apps.migu_orca_web.save_confirm_service import compute_request_fingerprint
 from apps.migu_orca_web.schemas import SavedTrackingSubmitInput
 from apps.migu_orca_web.serializers import (
@@ -53,7 +54,6 @@ from apps.migu_orca_web.tracking_serializers import (
     tracking_available_actions,
     tracking_summary_fields,
 )
-from batch_engine.controllers.batch_submit_controller import compose_ab_submit_one
 from shared.errors import Stage1Error
 from storage_engine.controllers.ab_result_repository import save_ab_submit_result
 from storage_engine.controllers.autobangumi_config_repository import (
@@ -1146,7 +1146,7 @@ def _run_submit_one(
     ab_config: Any,
 ) -> dict[str, Any]:
     """Invoke the AB create seam, folding a raised error into a result dict."""
-    seam = submit_one or compose_ab_submit_one()
+    seam = submit_one or compose_tracking_submit_one()
     try:
         result = seam(request, ab_config)
         return result if isinstance(result, dict) else {"success": False, "error": None}

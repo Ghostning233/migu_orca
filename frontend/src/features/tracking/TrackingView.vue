@@ -292,50 +292,6 @@ function queryTrackingId(): string | null {
   return typeof value === 'string' ? value.trim() || null : null
 }
 
-/**
- * One-time compatibility location for a retired `batch_id` deep link (US-316).
- *
- * `/app/queue?batch_id=...` no longer mounts the queue page; it redirects here.
- * The only identifier that retired surface ever published publicly is each queue
- * item's `request_id`, so that is the only thing this reads — the location never
- * decides status, actions or the external picture, which stay with the tracking
- * DTO through the normal list + inspector path. The query is consumed either
- * way, so a stale `batch_id` can neither re-run nor survive as a second source
- * of truth, and a batch that cannot be located only produces a fixed next step.
- */
-/* retired US-336
-async function resolveBatchCompat(): Promise<void> {
-  const batchId = queryBatchId()
-  if (!batchId) return
-  const sequence = ++compatSequence
-  compatNotice.value = ''
-  let located: string | null = null
-  let readFailed = false
-  try {
-    const result = await api.get<BatchQueueResult>('/api/v1/batches/{batch_id}/queue', {
-      path: { batch_id: batchId }, query: { ...storageQuery() },
-    })
-    if (sequence !== compatSequence) return
-    located = locateTrackingIdForBatch(projectQueueRequestIds(result), items.value)
-  } catch {
-    if (sequence !== compatSequence) return
-    readFailed = true
-  }
-  if (located) {
-    // A record the user picked while the legacy read was in flight already won:
-    // the location must never steal a selection the user made themselves.
-    if (queryTrackingId()) return
-    // The public tracking_id replaces the legacy batch_id: the deep link is
-    // spent, and every later read of this page is tracking-authoritative.
-    await router.replace(routeLocation('tracking', { tracking_id: located }))
-    return
-  }
-  if (queryTrackingId()) return
-  compatNotice.value = readFailed ? BATCH_COMPAT_READ_FAILED : BATCH_COMPAT_NOT_LOCATED
-  await router.replace(routeLocation('tracking'))
-}
-*/
-
 async function focusSelection(): Promise<void> {
   await nextTick()
   const selected = listContainer.value?.querySelector<HTMLElement>('[aria-current="true"]')

@@ -9,7 +9,7 @@ from batch_engine.controllers.batch_accept_controller import (
     ACCEPT_OUTCOME_FAILED,
     ACCEPT_OUTCOME_UNACCEPTABLE,
     BatchAcceptItem,
-    accept_batch_items,
+    retired_accept_items,
     serialize_batch_accept_result,
 )
 from batch_engine.controllers.batch_queue_controller import (
@@ -75,7 +75,7 @@ def _run(
     queue: BatchSubmissionQueue | None = None,
     now: list[str] | None = None,
 ):
-    return accept_batch_items(
+    return retired_accept_items(
         batch_id="batch-1",
         items=items,
         load_request=store.load,
@@ -204,7 +204,7 @@ class TestAcceptSelectedAndAll:
         store = FakeRequestStore([_request(request_id="req-1")])
 
         try:
-            accept_batch_items(
+            retired_accept_items(
                 batch_id="  ",
                 items=[BatchAcceptItem(item_id="item-1", request_id="req-1")],
                 load_request=store.load,
@@ -411,11 +411,11 @@ class TestSingleItemFailureDoesNotBlock:
                 raise Stage1Error(
                     "storage_error",
                     "保存订阅方案 JSON 失败",
-                    "accept_batch_items",
+                    "retired_accept_items",
                 )
             return store.accept_one(request_id)
 
-        result = accept_batch_items(
+        result = retired_accept_items(
             batch_id="batch-1",
             items=[
                 BatchAcceptItem(item_id="item-1", request_id="req-1"),
@@ -440,7 +440,7 @@ class TestSingleItemFailureDoesNotBlock:
                 "token=secret endpoint=https://ab.example.com path=/home/ghostning"
             )
 
-        result = accept_batch_items(
+        result = retired_accept_items(
             batch_id="batch-1",
             items=[BatchAcceptItem(item_id="item-1", request_id="req-1")],
             load_request=store.load,

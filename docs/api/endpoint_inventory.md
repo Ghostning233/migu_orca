@@ -36,13 +36,13 @@
     US-194 的 `draft_expired`/`draft_evicted`/`draft_replayed`/`draft_mismatch` 与
     US-211 的 `draft_revision_conflict`、US-212 的 `draft_reserved`、US-213 的
     `idempotency_conflict`、US-214 的 `save_confirm_failed` 也归此类）。
-  - `401`：外部服务认证失败（`ab_auth_failed`、`qbittorrent_auth_failed`）。
+  - `401`：外部服务认证失败（`ab_auth_failed`）。
   - `502`：上游不可达/不健康（`mikan_connection_failed`、`mikan_http_failed`、
     `mikan_parse_failed`、`poster_unavailable`、`ab_connection_failed`、`ab_submit_failed`、
-    `qbittorrent_connection_failed` 等）。
+    等）。
   - `503`：上游不可用/版本不受支持（`ab_unsupported_version`、`ab_submit_unsupported`、
     `ab_probe_unsupported`）。
-  - `504`：上游超时（`mikan_timeout`、`ab_timeout`、`qbittorrent_timeout`）。
+  - `504`：上游超时（`mikan_timeout`、`ab_timeout`）。
   - `500`：服务端内部错误（`storage_error`、`storage_json_error`、未知异常）。
 - 唯一二进制端点 `/api/v1/mikan/posters/<key>` 不经 JSON envelope，成功返回图片字节；
   失败返回 JSON envelope + 分类状态码（US-198 校准后与 OpenAPI 声明一致）：
@@ -220,14 +220,7 @@ torrent 文件名，不含 magnet/下载 URL/原始 RSS）、`folder_name`（安
 `attempted_queries[]`、`candidates[]`、`applied_preferences?`、`preference_hits?`、
 `preference_warnings[]`、`review_hints[]`、`enhanced_search_queries[]`、`preview_request?`、`error?`。
 
-### 3.5 连接测试（`/api/v1/.../test-connection`）
-
-| 端点 | 请求字段 | 成功 `result`（白名单） | 业务失败示例 |
-| --- | --- | --- | --- |
-
-两类连接测试的请求凭据都保持 request-scoped：不写入 storage、URL、浏览器 storage、日志或测试 trace。
-
-### 3.6 Tracking（`/api/v1/tracking/items`，US-223 + US-224 + US-225 + US-226）
+### 3.5 Tracking（`/api/v1/tracking/items`，US-223 + US-224 + US-225 + US-226）
 
 Tracking 读端点全部是纯本地操作：执行前先运行历史回填协调器（manifest `COMPLETE` 后不再全量扫描），
 绝不访问外部系统。列表/详情/复核只返回 TrackingRecord 与 Request 的安全白名单投影；单条 tracking
@@ -279,12 +272,11 @@ issues、外部安全映射摘要和最近 20 条审计事件；绝不回显完�
   `SID`、`username`、`password`、`magnet`、raw HTML、raw RSS XML、原始响应体、
   完整失败 URL、本地绝对路径。
 - 连接测试成功响应只回白名单字段；`_sanitize_ab_connection_summary` /
-  `_sanitize_qbittorrent_connection_summary` 主动丢弃其他字段。
 - 失败 details 经 `sanitize_error_data` 与 `_strip_sensitive_result_fields` 双重脱敏。
 
 ### 4.2 request-scoped 配置（不进入 storage JSON / 浏览器 storage / URL / 日志 / trace）
 
-- `mikan_config`、`mikan_bangumi`、`ab_config`、`qbittorrent_config`、`candidate_context`、
+  - `mikan_config`、`mikan_bangumi`、`ab_config`、`candidate_context`、
   `draft_id`（US-194：draft 内容由服务端持有，客户端只持有 opaque id，绝不进入 URL /
   browser storage / 日志 / trace）。
 - `base_revision`/`draft_revision`（US-211：单调草案 revision 只在请求体与组件内存，

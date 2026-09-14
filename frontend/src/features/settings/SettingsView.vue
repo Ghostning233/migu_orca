@@ -5,15 +5,14 @@
 // (PanelSection/FormField/BaseInput/BaseTextarea/BaseSelect/CheckboxRow,
 // ConfirmDialog/StatusAlert, useSensitiveFields). Four panels:
 //
-//   1. Storage 偏好 — non-sensitive browser preferences (storage profile +
-//      default-save) stored ONLY in localStorage (legacy keys), sanitized to
+//   1. Storage 偏好 — non-sensitive browser preferences (storage profile)
+//      stored ONLY in localStorage, sanitized to
 //      a server-root-relative profile (US-193).
 //   2. 偏好默认值 — non-sensitive preference defaults read/saved through
 //      `/api/v1/preferences` (defaults when absent).
 //   3. Auto Bangumi deployment settings — credentials live only in component
 //      memory (useSensitiveFields) and are cleared on success/cancel/unmount.
-//   4. Auto Bangumi — request-scoped connection test + submit context
-//      (request_id from the URL query). Credentials live only in memory and
+//   4. Auto Bangumi deployment settings. Credentials live only in memory and
 //      are cleared on success/cancel/unmount.
 //
 // Security boundary: endpoint/username/password/token/base_url values are

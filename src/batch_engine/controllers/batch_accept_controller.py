@@ -85,7 +85,7 @@ class BatchAcceptResult:
     items: list[BatchAcceptItemResult]
 
 
-def accept_batch_items(
+def retired_accept_items(
     *,
     batch_id: str,
     items: Sequence[BatchAcceptItem],
@@ -380,7 +380,7 @@ __all__ = [
     "BatchAcceptItemResult",
     "BatchAcceptResult",
     "LoadRequest",
-    "accept_batch_items",
+    "retired_accept_items",
     "serialize_batch_accept_item",
     "serialize_batch_accept_result",
 ]
