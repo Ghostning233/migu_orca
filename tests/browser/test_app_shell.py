@@ -65,9 +65,11 @@ def test_app_shell_loads_and_mounts_spa(page: Page, live_server_url: str) -> Non
     assert nav.nth(3).locator("span").first.inner_text().strip() == "设置"
     assert nav.nth(0).get_attribute("aria-current") == "page"
     assert nav.nth(0).locator(".nav-current-marker").inner_text().strip() == "当前"
-    assert page.locator(".workspace-status").inner_text().strip() == "本地桌面工作区"
-    # The lazy-loaded workbench view mounted.
     assert page.locator("#workbench-heading").count() >= 1
+    assert "Auto Bangumi：" in page.locator(".workspace-status").inner_text()
+    page.locator(".workspace-status").click()
+    page.wait_for_url("**/app/settings", timeout=5000)
+    assert page.locator("#settings-heading").count() == 1
     # The placeholder must not leak into a built SPA.
     assert "frontend/dist" not in page.content()
 
