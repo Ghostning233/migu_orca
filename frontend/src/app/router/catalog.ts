@@ -67,13 +67,11 @@ export const routeCatalog = {
     path: '/app/tracking',
     routerPath: '/tracking',
     queryKey: 'tracking_id',
-    alternateQueryKey: 'batch_id',
     parity: {
       view: 'TrackingView',
       vitest: [
         'src/features/tracking/TrackingView.test.ts',
         'src/features/tracking/trackingProjection.test.ts',
-        'src/features/tracking/trackingCompat.test.ts',
       ],
       chromium: ['tests/browser/test_app_tracking.py'],
     },

@@ -76,18 +76,9 @@ import {
   type TrackingManagementResult,
 } from './trackingManagement'
 import TrackingInspector from './TrackingInspector.vue'
-import {
-  BATCH_COMPAT_NOT_LOCATED,
-  BATCH_COMPAT_READ_FAILED,
-  locateTrackingIdForBatch,
-  projectQueueRequestIds,
-} from './trackingCompat'
 
 type ListResult = NonNullable<
   operations['listTrackingItems']['responses']['200']['content']['application/json']['result']
->
-type BatchQueueResult = NonNullable<
-  operations['getBatchQueue']['responses']['200']['content']['application/json']['result']
 >
 type CapabilityResult = NonNullable<
   operations['probeSavedAutoBangumiCapabilities']['responses']['200']['content']['application/json']['result']
@@ -165,8 +156,6 @@ let syncSequence = 0
 let syncController: AbortController | null = null
 // Retired queue deep links (US-316): the one-time compat read is tracked by its
 // own sequence so a route change can never let a stale location win.
-const compatNotice = ref('')
-let compatSequence = 0
 
 async function loadSavedConnection(): Promise<void> {
   try {
@@ -303,11 +292,6 @@ function queryTrackingId(): string | null {
   return typeof value === 'string' ? value.trim() || null : null
 }
 
-function queryBatchId(): string | null {
-  const value = route.query.batch_id
-  return typeof value === 'string' ? value.trim() || null : null
-}
-
 /**
  * One-time compatibility location for a retired `batch_id` deep link (US-316).
  *
@@ -319,6 +303,7 @@ function queryBatchId(): string | null {
  * way, so a stale `batch_id` can neither re-run nor survive as a second source
  * of truth, and a batch that cannot be located only produces a fixed next step.
  */
+/* retired US-336
 async function resolveBatchCompat(): Promise<void> {
   const batchId = queryBatchId()
   if (!batchId) return
@@ -349,6 +334,7 @@ async function resolveBatchCompat(): Promise<void> {
   compatNotice.value = readFailed ? BATCH_COMPAT_READ_FAILED : BATCH_COMPAT_NOT_LOCATED
   await router.replace(routeLocation('tracking'))
 }
+*/
 
 async function focusSelection(): Promise<void> {
   await nextTick()
@@ -1041,17 +1027,12 @@ onMounted(() => {
   void loadList().then(() => {
     // A legacy batch link is located against the freshly read local list, so the
     // compat read never races the tracking list it maps onto.
-    if (queryBatchId()) return resolveBatchCompat()
     if (selectedTrackingId.value) void focusSelection()
   })
 })
 watch(() => route.query.tracking_id, () => {
-  if (queryBatchId()) return
   syncSelection()
   void focusSelection()
-})
-watch(() => route.query.batch_id, () => {
-  void resolveBatchCompat()
 })
 watch(selectedTrackingId, (trackingId) => {
   if (trackingId) void focusSelection()
@@ -1063,7 +1044,6 @@ watch([writeSession, recoverySession, managementSession], () => {
   if (blockedIntentNotice.value && !hasPendingIntentLock()) blockedIntentNotice.value = null
 })
 onBeforeUnmount(() => {
-  compatSequence += 1
   cancelSync()
   resetWrite()
   resetRecovery()
@@ -1081,7 +1061,6 @@ onBeforeUnmount(() => {
         <BaseButton id="tracking-refresh" variant="secondary" :loading="loading" @click="refreshTracking">刷新列表</BaseButton>
       </template>
       <p id="tracking-heading" class="tracking-lede">查看本地追番状态。选择单条记录后，右侧将显示检查器入口。</p>
-      <p v-if="compatNotice" id="tracking-compat-notice" class="tracking-compat-notice" role="status">{{ compatNotice }}</p>
     </PanelSection>
 
     <section class="tracking-status-overview" aria-labelledby="tracking-status-heading">
