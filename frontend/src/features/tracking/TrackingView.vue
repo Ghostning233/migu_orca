@@ -238,38 +238,6 @@ function blockReplay(trackingId: string): void {
   blockedIntentNotice.value = { trackingId, message: REPLAY_BLOCKED_MESSAGE }
 }
 
-function invalidateWriteReplayOnConnectionChange(): void {
-  const session = writeSession.value
-  if (!session || !writeIntent || (!writeSessionKeepsIntent(session.state) && session.state !== 'IN_FLIGHT')) return
-  writeReplayBlocked.value = true
-  writeConfigSnapshot = null
-  if (writeLoading.value) {
-    writeSequence += 1
-    writeController?.abort()
-    writeController = null
-    writeLoading.value = false
-    writePending.value = false
-    writeSession.value = createWriteSession(session.trackingId, session.action, 'UNKNOWN')
-  }
-}
-
-function invalidateManagementReplayOnConnectionChange(): void {
-  const session = managementSession.value
-  if (!session || !managementIntent || (!managementSessionKeepsIntent(session) && session.state !== 'IN_FLIGHT')) return
-  managementReplayBlocked.value = true
-  managementConfigSnapshot = null
-  if (managementLoading.value) {
-    managementSequence += 1
-    managementController?.abort()
-    managementController = null
-    managementLoading.value = false
-    managementPending.value = false
-    managementSession.value = createManagementSession(
-      session.trackingId, session.action, session.targetScope, 'UNKNOWN', true,
-    )
-  }
-}
-
 /** The notice shown on the selected record; empty while nothing is blocked. */
 const selectedIntentNotice = computed(() => {
   const notice = blockedIntentNotice.value
