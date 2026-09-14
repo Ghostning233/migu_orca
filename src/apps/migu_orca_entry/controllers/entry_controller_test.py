@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from ab_engine.controllers.ab_client import FakeAutoBangumiClient
 from apps.migu_orca_entry.controllers.entry_controller import (
     apply_ab_submit_action,

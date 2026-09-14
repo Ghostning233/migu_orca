@@ -38,8 +38,6 @@ from apps.migu_orca_web.serializers import (
     serialize_request_safe_info,
 )
 from batch_engine.controllers.batch_draft_controller import create_batch_draft
-from batch_engine.controllers.batch_queue_controller import serialize_queue
-from batch_engine.models import BatchSubmissionQueue
 from request_engine.controllers.request_controller import (
     accept_request,
     summarize_request,
@@ -66,32 +64,6 @@ def _safe_detail_request(title: str = "芙莉莲") -> dict[str, Any]:
 
 def _summary(request: dict[str, Any]) -> dict[str, Any]:
     return summarize_request(request)
-
-
-def _accept_result() -> dict[str, Any]:
-    queue = BatchSubmissionQueue(
-        queue_id="queue-1",
-        batch_id="batch-1",
-        created_at="2026-08-29T00:00:00+00:00",
-        updated_at="2026-08-29T00:00:00+00:00",
-        items=[],
-    )
-    return {
-        "batch_id": "batch-1",
-        "queue": serialize_queue(queue),
-        "items": [
-            {
-                "item_id": "item-1",
-                "request_id": None,
-                "title": "示例",
-                "status": "unacceptable",
-                "reason": "卡片缺少订阅草案，无法接受",
-                "error_type": None,
-                "queued": False,
-            }
-        ],
-        "summary": {"accepted": 0, "already_accepted": 0, "unacceptable": 1, "failed": 0},
-    }
 
 
 # ---------------------------------------------------------------------------

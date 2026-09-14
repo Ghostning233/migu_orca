@@ -368,8 +368,8 @@
         "Typecheck passes"
       ],
       "priority": 21,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "真实 Chromium 配置 API 旅程与完整 tests/browser 已通过（197 passed）；非 browser pytest 1528 passed/197 deselected。覆盖 saved generation 跨页/刷新、重建配置、probe、submit/retry、sync、恢复、四管理、CAS、代际锁、未配置与敏感 canary；所有外部交互均为 fake transport，未访问真实上游。"
     },
     {
       "id": "US-339",
@@ -385,8 +385,8 @@
         "Typecheck passes"
       ],
       "priority": 22,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "已按实际实现同步 README、docs 索引/main/future/backlog、架构、M10/M13/M14、根与模块 AGENTS、前端交互/实施、后端支撑、API handoff、dev-browser 现行规则；明确 AB 专用配置为唯一秘密持久化例外及权限/备份/卷/清除/无加密/单进程/无认证边界，记录退役端点字段与历史 reader。未修改 archive。文档路径冲突检查、typecheck/lint/build 通过。"
     },
     {
       "id": "US-340",
@@ -403,8 +403,8 @@
         "Typecheck passes"
       ],
       "priority": 23,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "完整门禁实际通过：compileall、Ruff、OpenAPI check、frontend api:check/typecheck/lint/Vitest 46 files/545 tests/build；非 browser pytest 1528 passed/197 deselected；真实 Chromium tests/browser 197 passed。Gate 5 正/失败/partial/unknown/restart/cross-page/viewports/200%/敏感信息证据已在受影响测试与配置旅程中覆盖；无 skip 冒充，未访问真实上游。US-340 按授权不创建 git 提交。"
     }
   ]
 }
