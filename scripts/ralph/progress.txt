@@ -378,3 +378,8 @@ Started: 2026-09-13
 - 提交：US-331 `fa5a56a`；US-332 待本记录提交。
 - 验证：`npm run test:unit -- --run src/features/settings/storagePreferences.test.ts src/features/settings/preferences.test.ts` → 17 passed；`npm run build` → 通过；`npm run typecheck` → 通过。全 Settings 旧测试仍包含待后续 qB 退役故事的旧断言，本工作包未运行其失败集合；lint 仍有既有 tracking 文件 4 个 `no-explicit-any`。
 - 风险：本轮未执行真实 Chromium；US-331/332 的新增浏览器矩阵待工作包审核阶段补齐；未访问真实 Auto Bangumi。
+
+## 2026-09-14 / 工作包 B 审核修复
+- 回补 US-332 越界删除的 qBittorrent 设置面板、请求作用域凭据状态、确认与固定错误反馈；未恢复 saveRequest 控件或其 localStorage 写入，未改 qB 后端。
+- 定向 Vitest：App/Settings/偏好/存储 `40 passed`；`npm run build`、`npm run api:check`、`npm run typecheck` 通过。
+- 真实 Chromium：`uv run pytest tests/browser/test_app_settings.py -q` → `14 passed, 4 failed`；14 项覆盖旧键/存储、偏好恢复与敏感边界通过。4 项为旧 US-201/US-330 断言（已删除 saveRequest 控件、旧 submit-ab 入口），不代表本轮新增 AC 失败，待主 Agent审核是否更新旧测试。

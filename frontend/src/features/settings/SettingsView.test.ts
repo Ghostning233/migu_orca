@@ -108,9 +108,7 @@ describe('SettingsView storage panel (US-201)', () => {
 
     const dir = wrapper.find<HTMLInputElement>('#settings-storage-dir')
     expect(dir.element.value).toBe('backups')
-    // CheckboxRow renders the id on both the wrapper div and the native input;
-    // assert on the input itself.
-    expect(wrapper.find<HTMLInputElement>('input#settings-save-request').element.checked).toBe(false)
+    expect(localStorage.getItem('miguOrca.web.saveRequest')).toBeNull()
   })
 
   it('persists only the sanitized relative profile', async () => {

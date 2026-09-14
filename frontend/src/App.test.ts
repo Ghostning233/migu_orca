@@ -60,7 +60,7 @@ describe('App shell (US-260)', () => {
     expect(wrapper.find('.app-shell').exists()).toBe(true)
     expect(wrapper.find('.app-title').text()).toBe('MiGuOrca')
     expect(wrapper.find('.brand-eyebrow').text()).toBe('桌面番剧工作台')
-    expect(wrapper.find('.workspace-status').text()).toBe('本地桌面工作区')
+    expect(wrapper.find('.workspace-status').text()).toContain('Auto Bangumi：需检查')
 
     const navLinks = wrapper.findAll('.top-nav .nav-link')
     expect(navLinks).toHaveLength(4)
