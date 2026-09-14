@@ -6,7 +6,7 @@ These helpers were previously defined in ``views.py``. They reuse the existing
 engine/repository seams (title parsing, candidate search, preferences,
 corrections, request snapshots, batch queue) and never duplicate business
 rules. Keeping the seams importable here is what lets API tests monkeypatch
-external transports without touching real MiKan/AutoBangumi/qBittorrent.
+external transports without touching real MiKan or AutoBangumi.
 """
 
 import os
@@ -392,7 +392,7 @@ def _build_batch_preview_request(
 ) -> dict[str, object]:
     """Build the editable in-memory draft (``preview_request``) for a parsed
     batch item so the card can enter the existing preview-modify /
-    preview-save / accept flow.
+    save-confirm flow.
 
     The draft is a PENDING_CONFIRM skeleton whose editable defaults come from
     the user preferences: the first preferred subtitle group, the default
@@ -400,7 +400,7 @@ def _build_batch_preview_request(
     the preferred folder name. RSS/seed data is intentionally absent — it is
     only available after a MiKan collection is chosen — so seeds start empty.
     Only non-sensitive public fields are included; the request-scoped
-    ``request_id`` is derived from the batch/item identity so preview-save can
+    ``request_id`` is derived from the batch/item identity so save-confirm can
     persist it without colliding across batches.
     """
     config = applied.to_dict() if applied is not None else None
@@ -529,7 +529,7 @@ def _build_batch_accept_one(storage_dir: Path | None) -> AcceptOne:
 def _build_batch_persist_submit_result(storage_dir: Path | None):
     """Build the injected per-item AB-result persister for batch submit/retry.
 
-    Mirrors the single-item submit-ab storage contract: sanitize the AB result,
+    Mirrors the external submission storage contract: sanitize the AB result,
     attach it to the Request snapshot, persist the snapshot, and write
     ``ab_results/<request_id>.json`` so the Request detail API can read and show
     the result. Auto Bangumi secrets (endpoint/token/cookie/raw response) never
@@ -605,7 +605,7 @@ def _load_ab_result_section(config: StorageConfig, request_id: str) -> dict[str,
 def _build_save_confirm_persist_pending(storage_dir: Path | None):
     """Build the seam that durably persists a PENDING_CONFIRM snapshot.
 
-    Mirrors ``preview-save``: only a PENDING_CONFIRM draft may enter the saved
+    Mirrors ``save-confirm``: only a PENDING_CONFIRM draft may enter the saved
     confirmation flow (accept/cancel/modify/delete). The draft content is the
     authoritative server-side snapshot returned by ``reserve_for_save`` — never
     a client-supplied Request.

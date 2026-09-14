@@ -7,8 +7,6 @@ from typing import Any
 import pytest
 from flask.testing import FlaskClient
 
-from ab_engine.controllers.ab_client import FakeAutoBangumiClient
-from ab_engine.controllers.ab_config import AutoBangumiConfig
 from apps.base import create_app
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from batch_engine.controllers.anime_title_parser import FakeAnimeTitleParsingProvider
@@ -22,9 +20,6 @@ from batch_engine.models import (
     BATCH_ITEM_STATUS_EMPTY,
     BATCH_ITEM_STATUS_FAILED,
     BATCH_ITEM_STATUS_FOUND,
-    BATCH_QUEUE_STATUS_READY_TO_SUBMIT,
-    BATCH_QUEUE_STATUS_RETRYABLE,
-    BATCH_QUEUE_STATUS_SUCCEEDED,
 )
 from mikan_engine.controllers.mikan_client import MikanCandidate, create_mikan_client
 from mikan_engine.controllers.mikan_config import (
@@ -34,7 +29,6 @@ from mikan_engine.controllers.mikan_config import (
     default_mikan_config,
 )
 from mikan_engine.controllers.mikan_poster_cache import poster_cache_key
-from qbittorrent_engine.controllers.qbittorrent_config import QBittorrentConfig
 from request_engine.controllers.request_controller import (
     accept_request,
     cancel_request,
@@ -53,23 +47,19 @@ from shared.models import (
     VersionedUserPreference,
 )
 from storage_engine.controllers.ab_result_repository import (
-    load_ab_submit_result,
     save_ab_submit_result,
 )
 from storage_engine.controllers.history_repository import (
     append_status_history,
-    load_status_history,
 )
 from storage_engine.controllers.idempotency_repository import (
     load_idempotency_record,
 )
 from storage_engine.controllers.preference_repository import save_user_preferences
 from storage_engine.controllers.queue_repository import (
-    load_submission_queue,
     save_submission_queue,
 )
 from storage_engine.controllers.request_repository import (
-    delete_request_snapshot,
     load_request_snapshot,
     save_request_snapshot,
 )
@@ -80,7 +70,6 @@ from storage_engine.controllers.tracking_repository import (
 )
 from tracking_engine.models.tracking import (
     TRACKING_ORIGIN_LEGACY_ACCEPT,
-    TRACKING_ORIGIN_SAVE_CONFIRM,
     TRACKING_STATUS_PENDING_SUBMIT,
     tracking_id_for_request,
 )
@@ -1115,7 +1104,6 @@ def test_create_request_generates_without_writing_storage(tmp_path: Path) -> Non
         json={
             "title": "芙莉莲",
             "storage_dir": _profile(tmp_path, storage_dir.name),
-            "save_request": False,
         },
     )
 
@@ -1145,7 +1133,6 @@ def test_create_request_defaults_to_static_fixture_without_mikan_config(
         "/api/v1/requests",
         json={
             "title": "芙莉莲",
-            "save_request": False,
         },
     )
 
@@ -1195,7 +1182,6 @@ def test_create_request_uses_inline_mikan_config_when_explicitly_requested(
                 "search_endpoint": "https://mikan.example/Home/Search",
                 "timeout_seconds": 5,
             },
-            "save_request": False,
         },
     )
 
@@ -1254,13 +1240,11 @@ def test_create_request_accepts_request_scoped_mikan_direct_entry(
             },
             "mikan_bangumi": "123",
             "storage_dir": _profile(tmp_path, storage_dir.name),
-            "save_request": True,
         },
     )
 
     payload = response.get_json()
     request = payload["result"]["request"]
-    saved_path = storage_dir / "requests" / payload["result"]["saved_request"]["filename"]
     assert response.status_code == 200
     assert payload["ok"] is True
     assert transport.requests == [
@@ -1272,8 +1256,6 @@ def test_create_request_accepts_request_scoped_mikan_direct_entry(
         request["source_info"]["matched_bangumi"]["mikan_url"]
         == "https://mikan.example/Home/Bangumi/123"
     )
-    assert saved_path.exists()
-    assert "mikan_bangumi" not in saved_path.read_text(encoding="utf-8")
 
 
 def test_create_request_does_not_trust_client_candidate_aliases_for_season(
@@ -1310,7 +1292,6 @@ def test_create_request_does_not_trust_client_candidate_aliases_for_season(
             "mikan_bangumi": "https://mikan.example/Home/Bangumi/44",
             "candidate_aliases": ["某番 S4"],
             "poster_url": "/api/v1/mikan/posters/forged",
-            "save_request": False,
         },
     )
 
@@ -1345,7 +1326,7 @@ def test_create_request_requires_one_time_server_candidate_context_for_nonfirst_
         }
 
     monkeypatch.setattr("apps.migu_orca_web.routes_requests.generate_request", fake_generate_request)
-    payload = {"title": "公开标题", "source": "mikan", "mikan_bangumi": mikan_url, "save_request": False}
+    payload = {"title": "公开标题", "source": "mikan", "mikan_bangumi": mikan_url}
 
     rejected = _client().post(
         "/api/v1/requests", json={**payload, "candidate_context": rejected_context}
@@ -1403,7 +1384,6 @@ def test_create_request_rejects_invalid_mikan_direct_entry(
                 "timeout_seconds": 5,
             },
             "mikan_bangumi": "   ",
-            "save_request": False,
         },
     )
 
@@ -1452,7 +1432,6 @@ def test_create_request_uses_default_mikan_config_when_source_is_mikan(
         json={
             "title": "芙莉莲",
             "source": "mikan",
-            "save_request": False,
         },
     )
 
@@ -1487,7 +1466,6 @@ def test_create_request_rejects_unsupported_source(
         json={
             "title": "芙莉莲",
             "source": "real-live-mikan",
-            "save_request": False,
         },
     )
 
@@ -1520,7 +1498,6 @@ def test_create_request_rejects_invalid_mikan_timeout(
                 "search_endpoint": "https://mikan.example/Home/Search",
                 "timeout_seconds": 0,
             },
-            "save_request": False,
         },
     )
 
@@ -3451,7 +3428,7 @@ def test_default_request_create_does_not_call_candidate_search_api_or_real_mikan
 
     response = _client().post(
         "/api/v1/requests",
-        json={"title": "芙莉莲", "save_request": False},
+        json={"title": "芙莉莲"},
     )
 
     payload = response.get_json()
@@ -3461,30 +3438,6 @@ def test_default_request_create_does_not_call_candidate_search_api_or_real_mikan
     assert called is False
 
 
-def test_create_request_saves_when_explicitly_requested(tmp_path: Path) -> None:
-    storage_dir = tmp_path / "storage"
-
-    response = _client().post(
-        "/api/v1/requests",
-        json={
-            "title": "芙莉莲",
-            "storage_dir": _profile(tmp_path, storage_dir.name),
-            "save_request": True,
-        },
-    )
-
-    payload = response.get_json()
-    saved_request = payload["result"]["saved_request"]
-    saved_path = storage_dir / "requests" / saved_request["filename"]
-    assert response.status_code == 200
-    assert payload["ok"] is True
-    assert saved_request == {
-        "request_id": payload["result"]["request"]["request_id"],
-        "storage": "local_json",
-        "directory": "requests",
-        "filename": f"{payload['result']['request']['request_id']}.json",
-    }
-    assert saved_path.exists()
 
 
 def _issue_draft(
@@ -3493,7 +3446,7 @@ def _issue_draft(
     """Generate an unsaved preview draft; return (draft_id, draft_revision)."""
     response = client.post(
         "/api/v1/requests",
-        json={"title": title, "save_request": False},
+        json={"title": title},
     )
     payload = response.get_json()
     assert response.status_code == 200
@@ -3554,7 +3507,7 @@ def test_preview_modify_switches_selected_subtitle_group(tmp_path: Path) -> None
     # The stored draft's groups mirror the fixture; read them via the response.
     issued = client.post(
         "/api/v1/requests",
-        json={"title": "咒术回战", "save_request": False},
+        json={"title": "咒术回战"},
     ).get_json()["result"]
     preview = issued["request"]
     groups = {s["subtitle_group"] for s in preview["source_info"]["rss_sources"]}
@@ -3657,158 +3610,12 @@ def test_preview_modify_rejects_unknown_draft() -> None:
     assert payload["error_message"] == "订阅草案已过期或不存在，请重新生成"
 
 
-def test_preview_save_persists_draft_and_enters_confirmation_flow(tmp_path: Path) -> None:
-    storage_dir = tmp_path / "storage"
-    client = _client()
-    issued = client.post(
-        "/api/v1/requests",
-        json={"title": "芙莉莲", "save_request": False},
-    ).get_json()["result"]
-    draft_id = issued["draft_id"]
-    preview = issued["request"]
-
-    response = client.post(
-        "/api/v1/requests/preview-save",
-        json={"draft_id": draft_id, "base_revision": 1, "storage_dir": _profile(tmp_path, storage_dir.name)},
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 200
-    assert payload["ok"] is True
-    result = payload["result"]
-    assert result["request"]["request_id"] == preview["request_id"]
-    assert result["request"]["status"] == "PENDING_CONFIRM"
-    assert result["saved_request"] == {
-        "request_id": preview["request_id"],
-        "storage": "local_json",
-        "directory": "requests",
-        "filename": f"{preview['request_id']}.json",
-    }
-    saved_path = storage_dir / "requests" / f"{preview['request_id']}.json"
-    assert saved_path.exists()
 
 
-def test_preview_save_rejects_replayed_draft(tmp_path: Path) -> None:
-    """A saved draft is consumed; a second save of the same id is a 409."""
-    storage_dir = tmp_path / "storage"
-    client = _client()
-    draft_id, _ = _issue_draft(client, "芙莉莲")
-
-    first = client.post(
-        "/api/v1/requests/preview-save",
-        json={"draft_id": draft_id, "base_revision": 1, "storage_dir": _profile(tmp_path, storage_dir.name)},
-    )
-    assert first.status_code == 200
-
-    second = client.post(
-        "/api/v1/requests/preview-save",
-        json={"draft_id": draft_id, "base_revision": 1, "storage_dir": _profile(tmp_path, storage_dir.name)},
-    )
-    payload = second.get_json()
-    assert second.status_code == 409
-    assert payload["ok"] is False
-    assert payload["error_type"] == "draft_replayed"
 
 
-def test_preview_save_stale_base_revision_conflicts(tmp_path: Path) -> None:
-    """US-212: a save with a stale base_revision reserves nothing and is a 409."""
-    storage_dir = tmp_path / "storage"
-    client = _client()
-    draft_id, _ = _issue_draft(client, "芙莉莲")
-    # Bump the draft revision 1 → 2 through a dry-run modify.
-    modified = client.post(
-        "/api/v1/requests/preview-modify",
-        json={"draft_id": draft_id, "base_revision": 1, "patch": {"expected_folder_name": "并发修改"}},
-    )
-    assert modified.status_code == 200
-
-    stale = client.post(
-        "/api/v1/requests/preview-save",
-        json={"draft_id": draft_id, "base_revision": 1, "storage_dir": _profile(tmp_path, storage_dir.name)},
-    )
-    payload = stale.get_json()
-    assert stale.status_code == 409
-    assert payload["ok"] is False
-    assert payload["error_type"] == "draft_revision_conflict"
-    assert payload["error_data"]["details"] == {
-        "field": "base_revision",
-        "current_revision": 2,
-    }
-    # Nothing was persisted by the stale save.
-    assert not (storage_dir / "requests").exists()
 
 
-def test_preview_save_persistence_failure_keeps_draft_for_retry(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """US-212: a failed disk write releases the draft; retry persists once.
-
-    The old consume-before-persist flow destroyed the draft on write failure,
-    forcing the user to re-search. The reservation lifecycle keeps the same
-    draft_id/revision usable so a retry succeeds and only one Request is ever
-    written.
-    """
-    from apps.migu_orca_entry.controllers.entry_controller import apply_request_save_action as original_save
-
-    storage_dir = tmp_path / "storage"
-    client = _client()
-    draft_id, _ = _issue_draft(client, "芙莉莲")
-
-    failures = {"count": 0}
-
-    def flaky_save(result: dict[str, Any], save_request: bool, **kwargs: object) -> dict[str, Any]:
-        if failures["count"] == 0:
-            failures["count"] += 1
-            return {
-                "success": False,
-                "request": None,
-                "error": {
-                    "error_type": "storage_error",
-                    "error_message": f"模拟写盘失败 {tmp_path}",
-                    "failed_step": "save_request_snapshot",
-                    "details": {"reason": "disk full"},
-                },
-            }
-        return original_save(result, save_request, **kwargs)
-
-    monkeypatch.setattr(
-        "apps.migu_orca_web.routes_requests.apply_request_save_action", flaky_save
-    )
-
-    # First save fails at the persistence seam.
-    first = client.post(
-        "/api/v1/requests/preview-save",
-        json={"draft_id": draft_id, "base_revision": 1, "storage_dir": _profile(tmp_path, storage_dir.name)},
-    )
-    payload = first.get_json()
-    assert first.status_code == 500
-    assert payload["ok"] is False
-    assert payload["error_type"] == "storage_error"
-    serialized = str(payload)
-    assert str(tmp_path) not in serialized
-
-    # The draft survived the failure at its original revision; retry the exact
-    # save (reservation must still accept base_revision=1).
-    second = client.post(
-        "/api/v1/requests/preview-save",
-        json={"draft_id": draft_id, "base_revision": 1, "storage_dir": _profile(tmp_path, storage_dir.name)},
-    )
-    spayload = second.get_json()
-    assert second.status_code == 200
-    assert spayload["ok"] is True
-    saved_request_id = spayload["result"]["request"]["request_id"]
-    # Exactly one Request file exists for the saved id.
-    saved_files = list((storage_dir / "requests").glob(f"{saved_request_id}.json"))
-    assert len(saved_files) == 1
-
-    # A third save is a replay (draft consumed by the successful retry).
-    third = client.post(
-        "/api/v1/requests/preview-save",
-        json={"draft_id": draft_id, "base_revision": 1, "storage_dir": _profile(tmp_path, storage_dir.name)},
-    )
-    assert third.status_code == 409
-    assert third.get_json()["error_type"] == "draft_replayed"
 
 
 def _save_confirm(
@@ -3834,7 +3641,7 @@ def test_save_confirm_persists_confirms_and_returns_handoff(tmp_path: Path) -> N
     storage_dir = tmp_path / "storage"
     client = _client()
     issued = client.post(
-        "/api/v1/requests", json={"title": "芙莉莲", "save_request": False}
+        "/api/v1/requests", json={"title": "芙莉莲"}
     ).get_json()["result"]
     draft_id = issued["draft_id"]
     request_id = issued["request"]["request_id"]
@@ -3892,7 +3699,7 @@ def test_save_confirm_confirm_failure_returns_saved_confirm_failed_envelope(
     storage_dir = tmp_path / "storage"
     client = _client()
     issued = client.post(
-        "/api/v1/requests", json={"title": "芙莉莲", "save_request": False}
+        "/api/v1/requests", json={"title": "芙莉莲"}
     ).get_json()["result"]
     draft_id = issued["draft_id"]
     request_id = issued["request"]["request_id"]
@@ -4010,559 +3817,24 @@ def test_create_request_returns_validation_error_for_invalid_storage_dir_type() 
     assert payload["error_data"]["errors"][0]["field"] == "storage_dir"
 
 
-def test_create_request_returns_unified_error_for_save_failure(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    def fail_save(*args: object, **kwargs: object) -> dict[str, Any]:
-        return {
-            "success": False,
-            "request": None,
-            "error": Stage1Error(
-                "storage_error",
-                "保存订阅方案 JSON 失败",
-                "save_request_snapshot",
-                {
-                    "reason": f"cannot write {tmp_path}/private-token at https://example.test/api",
-                    "directory": "requests",
-                },
-            ).as_dict(),
-        }
-
-    monkeypatch.setattr(
-        "apps.migu_orca_web.routes_requests.apply_request_save_action",
-        fail_save,
-    )
-
-    response = _client().post(
-        "/api/v1/requests",
-        json={
-            "title": "芙莉莲",
-            "storage_dir": "storage",
-            "save_request": True,
-        },
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 500
-    assert payload["ok"] is False
-    assert payload["error_type"] == "storage_error"
-    assert payload["error_message"] == "保存订阅方案 JSON 失败"
-    assert payload["error_data"]["failed_step"] == "save_request_snapshot"
-    assert payload["error_data"]["details"]["directory"] == "requests"
-    assert str(tmp_path) not in str(payload)
-    assert "https://example.test/api" not in str(payload)
-    assert "token" not in str(payload).lower()
 
 
-def test_submit_ab_accepts_request_scoped_config_and_persists_result(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    request = _saved_accepted_request(tmp_path)
-    storage_dir = tmp_path / "storage"
-    client = FakeAutoBangumiClient()
-    factory_configs = []
-
-    def build_client(ab_config):
-        factory_configs.append(ab_config)
-        return client
-
-    monkeypatch.setattr(
-        "apps.migu_orca_entry.controllers.entry_controller.ab_http_client.create_auto_bangumi_http_client",
-        build_client,
-    )
-
-    response = _client().post(
-        f"/api/v1/requests/{request['request_id']}/submit-ab",
-        json={
-            "storage_dir": _profile(tmp_path, storage_dir.name),
-            "ab_config": {
-                "auth_mode": "api_token",
-                "base_url": "http://auto-bangumi.local",
-                "token": "secret-token",
-                "fallback_enabled": False,
-            },
-        },
-    )
-
-    payload = response.get_json()
-    result = payload["result"]
-    saved_request = load_storage_config(storage_dir).requests_dir / (
-        f"{request['request_id']}.json"
-    )
-    saved_ab_result = load_storage_config(storage_dir).ab_results_dir / (
-        f"{request['request_id']}.json"
-    )
-    assert response.status_code == 200
-    assert payload["ok"] is True
-    assert result["request"]["status"] == "ACCEPTED"
-    assert result["ab_submit_result"] == {
-        "success": True,
-        "ab_subscription_id": "fake-ab-subscription",
-        "ab_response": {"id": "fake-ab-subscription", "status": "created"},
-        "fallback_config": None,
-        "error": None,
-    }
-    assert result["request"]["ab_submit_result"] == result["ab_submit_result"]
-    assert result["saved_request"]["request_id"] == request["request_id"]
-    assert result["saved_ab_result"]["request_id"] == request["request_id"]
-    assert saved_request.exists()
-    assert saved_ab_result.exists()
-    assert factory_configs[0].base_url == "http://auto-bangumi.local"
-    assert factory_configs[0].token == "secret-token"
-    assert client.calls
-    assert "secret-token" not in saved_request.read_text(encoding="utf-8")
-    assert "auto-bangumi.local" not in saved_request.read_text(encoding="utf-8")
-    assert "secret-token" not in saved_ab_result.read_text(encoding="utf-8")
-    assert "auto-bangumi.local" not in saved_ab_result.read_text(encoding="utf-8")
 
 
-def test_submit_ab_persists_sanitized_fallback_failure(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    request = _saved_accepted_request(tmp_path)
-    storage_dir = tmp_path / "storage"
-    client = FakeAutoBangumiClient(
-        error=Stage1Error(
-            "ab_submit_failed",
-            "Auto Bangumi rejected http://auto-bangumi.local/api secret-token",
-            "create_ab_subscription",
-            {
-                "Authorization": "Bearer secret-token",
-                "auth_mode": "api_token",
-                "base_url": "http://auto-bangumi.local",
-            },
-        )
-    )
-    monkeypatch.setattr(
-        "apps.migu_orca_entry.controllers.entry_controller.ab_http_client.create_auto_bangumi_http_client",
-        lambda _config: client,
-    )
-
-    response = _client().post(
-        f"/api/v1/requests/{request['request_id']}/submit-ab",
-        json={
-            "storage_dir": _profile(tmp_path, storage_dir.name),
-            "ab_config": {
-                "auth_mode": "api_token",
-                "base_url": "http://auto-bangumi.local",
-                "token": "secret-token",
-                "fallback_enabled": True,
-            },
-        },
-    )
-
-    payload = response.get_json()
-    serialized = str(payload)
-    saved_ab_result = (
-        load_storage_config(storage_dir).ab_results_dir / f"{request['request_id']}.json"
-    ).read_text(encoding="utf-8")
-    assert response.status_code == 200
-    assert payload["ok"] is True
-    assert payload["result"]["ab_submit_result"]["success"] is False
-    assert payload["result"]["ab_submit_result"]["fallback_config"]["title"]
-    assert "secret-token" not in serialized
-    assert "auto-bangumi.local" not in serialized
-    assert "Authorization" not in serialized
-    assert "secret-token" not in saved_ab_result
-    assert "auto-bangumi.local" not in saved_ab_result
 
 
-def test_submit_ab_rejects_missing_token_without_calling_ab(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    request = _saved_accepted_request(tmp_path)
-    called = False
-
-    def fail_if_called(*args: object, **kwargs: object) -> object:
-        nonlocal called
-        called = True
-        raise AssertionError("AB client should not be created for invalid payload")
-
-    monkeypatch.setattr(
-        "apps.migu_orca_entry.controllers.entry_controller.ab_http_client.create_auto_bangumi_http_client",
-        fail_if_called,
-    )
-
-    response = _client().post(
-        f"/api/v1/requests/{request['request_id']}/submit-ab",
-        json={
-            "storage_dir": "storage",
-            "ab_config": {
-                "auth_mode": "api_token",
-                "base_url": "http://auto-bangumi.local",
-                "fallback_enabled": False,
-            },
-        },
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 400
-    assert payload["ok"] is False
-    assert payload["error_type"] == "config_error"
-    assert payload["error_data"] == {
-        "failed_step": "load_ab_config",
-        "details": {"field": "[redacted]"},
-    }
-    assert called is False
-    assert "auto-bangumi.local" not in str(payload)
 
 
-def test_submit_ab_rejects_non_accepted_request(tmp_path: Path) -> None:
-    request = _saved_request(tmp_path, "芙莉莲", "request-1")
-
-    response = _client().post(
-        f"/api/v1/requests/{request['request_id']}/submit-ab",
-        json={
-            "storage_dir": "storage",
-            "ab_config": {
-                "auth_mode": "api_token",
-                "base_url": "http://auto-bangumi.local",
-                "token": "secret-token",
-                "fallback_enabled": False,
-            },
-        },
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 409
-    assert payload["ok"] is False
-    assert payload["error_type"] == "invalid_request_status"
-    assert payload["error_message"] == "只有已确认订阅方案可以提交到 Auto Bangumi"
-    assert payload["error_data"]["failed_step"] == "build_ab_subscription_payload"
-    assert "secret-token" not in str(payload)
-    assert "auto-bangumi.local" not in str(payload)
 
 
-def test_submit_ab_sanitizes_echoed_ab_response(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    request = _saved_accepted_request(tmp_path)
-    storage_dir = tmp_path / "storage"
-    client = FakeAutoBangumiClient(
-        response={
-            "id": "sub-123",
-            "auth_mode": "api_token",
-            "base_url": "http://auto-bangumi.local",
-            "Authorization": "Bearer secret-token",
-        }
-    )
-    monkeypatch.setattr(
-        "apps.migu_orca_entry.controllers.entry_controller.ab_http_client.create_auto_bangumi_http_client",
-        lambda _config: client,
-    )
-
-    response = _client().post(
-        f"/api/v1/requests/{request['request_id']}/submit-ab",
-        json={
-            "storage_dir": _profile(tmp_path, storage_dir.name),
-            "ab_config": {
-                "auth_mode": "api_token",
-                "base_url": "http://auto-bangumi.local",
-                "token": "secret-token",
-                "fallback_enabled": False,
-            },
-        },
-    )
-
-    payload = response.get_json()
-    saved_ab_result = (
-        load_storage_config(storage_dir).ab_results_dir / f"{request['request_id']}.json"
-    ).read_text(encoding="utf-8")
-    assert response.status_code == 200
-    assert payload["ok"] is True
-    assert payload["result"]["ab_submit_result"]["ab_response"] == {
-        "id": "sub-123",
-        "auth_mode": "api_[redacted]",
-        "base_url": "[redacted-url]",
-        "[redacted]": "[redacted]",
-    }
-    assert "secret-token" not in str(payload)
-    assert "auto-bangumi.local" not in str(payload)
-    assert "secret-token" not in saved_ab_result
-    assert "auto-bangumi.local" not in saved_ab_result
 
 
-def test_autobangumi_test_connection_returns_safe_summary(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, Any] = {}
-
-    def fake_test_ab_connection(*, ab_config: AutoBangumiConfig) -> dict[str, Any]:
-        captured["config"] = ab_config
-        return {
-            "success": True,
-            "summary": {
-                "reachable": True,
-                "authenticated": True,
-                "version": "3.1.18",
-                "auth_mode": "账号密码",
-                "adapter": "legacy_3_1",
-                "submit_supported": True,
-                "base_url": "http://private-auto-bangumi.local",
-                "token": "secret-token",
-            },
-            "error": None,
-        }
-
-    monkeypatch.setattr("apps.migu_orca_web.routes_connections.test_ab_connection", fake_test_ab_connection)
-    response = _client().post(
-        "/api/v1/autobangumi/test-connection",
-        json={"ab_config": {"auth_mode": "password", "base_url": "http://private-auto-bangumi.local", "username": "private-user", "password": "private-password", "fallback_enabled": False}},
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 200
-    assert payload == {"ok": True, "result": {"reachable": True, "authenticated": True, "version": "3.1.18", "auth_mode": "账号密码", "adapter": "legacy_3_1", "submit_supported": True}}
-    assert captured["config"].username == "private-user"
-    assert "private" not in str(payload)
-    assert "secret" not in str(payload)
 
 
-def test_autobangumi_test_connection_sanitizes_failures(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "apps.migu_orca_web.routes_connections.test_ab_connection",
-        lambda *, ab_config: {"success": False, "summary": None, "error": {"error_type": "ab_auth_failed", "error_message": "http://private-auto-bangumi.local token=secret-token", "failed_step": "probe_ab_connection", "details": {"username": "private-user", "password": "private-password", "cookie": "token=secret-token", "category": "auth"}}},
-    )
-    response = _client().post(
-        "/api/v1/autobangumi/test-connection",
-        json={"ab_config": {"auth_mode": "api_token", "base_url": "http://private-auto-bangumi.local", "token": "secret-token", "fallback_enabled": False}},
-    )
-    payload = response.get_json()
-    assert response.status_code == 401
-    assert payload["ok"] is False
-    assert payload["error_type"] == "ab_auth_failed"
-    assert payload["error_data"] == {"failed_step": "probe_ab_connection", "details": {"category": "auth"}}
-    assert "private" not in str(payload)
-    assert "secret" not in str(payload)
 
 
-def test_qbittorrent_test_connection_returns_safe_summary(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, Any] = {}
-
-    def fake_test_qbittorrent_connection(
-        *,
-        qbittorrent_config: QBittorrentConfig,
-    ) -> dict[str, Any]:
-        captured["config"] = qbittorrent_config
-        return {
-            "success": True,
-            "summary": {
-                "status": "connected",
-                "reachable": True,
-                "version": "v4.6.7",
-                "endpoint": "http://qbittorrent.local:8080",
-                "username": "private-user",
-                "password": "private-password",
-                "cookie": "SID=secret-session",
-            },
-            "error": None,
-        }
-
-    monkeypatch.setattr(
-        "apps.migu_orca_web.routes_connections.test_qbittorrent_connection",
-        fake_test_qbittorrent_connection,
-    )
-
-    response = _client().post(
-        "/api/v1/qbittorrent/test-connection",
-        json={
-            "qbittorrent_config": {
-                "endpoint": "http://qbittorrent.local:8080",
-                "username": "private-user",
-                "password": "private-password",
-                "timeout_seconds": 7,
-                "verify_tls": False,
-            }
-        },
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 200
-    assert payload == {
-        "ok": True,
-        "result": {
-            "status": "connected",
-            "reachable": True,
-            "version": "v4.6.7",
-        },
-    }
-    assert "private-user" not in str(payload)
-    assert "private-password" not in str(payload)
-    assert "SID=secret-session" not in str(payload)
-    assert "qbittorrent.local" not in str(payload)
-    assert captured["config"] == QBittorrentConfig(
-        endpoint="http://qbittorrent.local:8080",
-        username="private-user",
-        password="private-password",
-        timeout_seconds=7.0,
-        verify_tls=False,
-    )
 
 
-def test_qbittorrent_test_connection_requires_password_without_calling_controller(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    called = False
-
-    def fail_if_called(*args: object, **kwargs: object) -> object:
-        nonlocal called
-        called = True
-        raise AssertionError("qBittorrent controller should not be called")
-
-    monkeypatch.setattr(
-        "apps.migu_orca_web.routes_connections.test_qbittorrent_connection",
-        fail_if_called,
-    )
-
-    response = _client().post(
-        "/api/v1/qbittorrent/test-connection",
-        json={
-            "qbittorrent_config": {
-                "endpoint": "http://qbittorrent.local:8080",
-                "username": "private-user",
-                "timeout_seconds": 7,
-                "verify_tls": True,
-            }
-        },
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 400
-    assert payload["ok"] is False
-    assert payload["error_type"] == "data_validation_errors"
-    assert any(
-        error["field"] == "qbittorrent_config.[redacted]"
-        for error in payload["error_data"]["errors"]
-    )
-    assert called is False
-    assert "private-user" not in str(payload)
-    assert "qbittorrent.local" not in str(payload)
-
-
-@pytest.mark.parametrize(
-    ("controller_result", "expected_error_type", "expected_status"),
-    [
-        (
-            {
-                "success": False,
-                "summary": None,
-                "error": {
-                    "error_type": "qbittorrent_auth_failed",
-                    "error_message": (
-                        "qBittorrent 认证失败 http://qbittorrent.local:8080 "
-                        "private-user private-password SID=secret-session"
-                    ),
-                    "failed_step": "qbittorrent_login",
-                    "details": {
-                        "category": "auth",
-                        "endpoint": "http://qbittorrent.local:8080",
-                        "username": "private-user",
-                        "password": "private-password",
-                        "cookie": "SID=secret-session",
-                    },
-                },
-            },
-            "qbittorrent_auth_failed",
-            401,
-        ),
-        (
-            {
-                "success": False,
-                "summary": None,
-                "error": {
-                    "error_type": "qbittorrent_timeout",
-                    "error_message": "qBittorrent HTTP 请求超时",
-                    "failed_step": "qbittorrent_login",
-                    "details": {"category": "timeout"},
-                },
-            },
-            "qbittorrent_timeout",
-            504,
-        ),
-    ],
-)
-def test_qbittorrent_test_connection_returns_sanitized_failures(
-    monkeypatch: pytest.MonkeyPatch,
-    controller_result: dict[str, Any],
-    expected_error_type: str,
-    expected_status: int,
-) -> None:
-    monkeypatch.setattr(
-        "apps.migu_orca_web.routes_connections.test_qbittorrent_connection",
-        lambda *, qbittorrent_config: controller_result,
-    )
-
-    response = _client().post(
-        "/api/v1/qbittorrent/test-connection",
-        json={
-            "qbittorrent_config": {
-                "endpoint": "http://qbittorrent.local:8080",
-                "username": "private-user",
-                "password": "private-password",
-                "timeout_seconds": 7,
-                "verify_tls": True,
-            }
-        },
-    )
-
-    payload = response.get_json()
-    assert response.status_code == expected_status
-    assert payload["ok"] is False
-    assert payload["error_type"] == expected_error_type
-    assert payload["error_data"]["failed_step"] == controller_result["error"][
-        "failed_step"
-    ]
-    assert "private-user" not in str(payload)
-    assert "private-password" not in str(payload)
-    assert "SID=secret-session" not in str(payload)
-    assert "qbittorrent.local" not in str(payload)
-
-
-def test_qbittorrent_test_connection_rejects_invalid_endpoint() -> None:
-    response = _client().post(
-        "/api/v1/qbittorrent/test-connection",
-        json={
-            "qbittorrent_config": {
-                "endpoint": "qbittorrent.local:8080",
-                "username": "private-user",
-                "password": "private-password",
-                "timeout_seconds": 7,
-                "verify_tls": True,
-            }
-        },
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 400
-    assert payload["ok"] is False
-    assert payload["error_type"] == "config_error"
-    assert payload["error_message"] == "qBittorrent endpoint 必须是 http(s) URL"
-    assert payload["error_data"]["failed_step"] == "load_qbittorrent_config"
-    assert "private-user" not in str(payload)
-    assert "private-password" not in str(payload)
-    assert "qbittorrent.local" not in str(payload)
-
-
-def test_qbittorrent_test_connection_rejects_missing_config_object() -> None:
-    response = _client().post(
-        "/api/v1/qbittorrent/test-connection",
-        json={},
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 400
-    assert payload["ok"] is False
-    assert payload["error_type"] == "data_validation_errors"
-    assert payload["error_data"]["errors"][0]["field"] == "qbittorrent_config"
 
 
 def _batch_accept(
@@ -4595,1071 +3867,58 @@ def _batch_submit_payload(storage_profile: str) -> dict[str, Any]:
     }
 
 
-def test_batch_accept_api_accepts_selected_items_and_returns_queue(
-    tmp_path: Path,
-) -> None:
-    _saved_request(tmp_path, "芙莉莲", "request-a")
-    _saved_request(tmp_path, "咒术回战第三季", "request-b")
-    storage_dir = tmp_path / "storage"
-
-    response = _batch_accept(
-        _client(),
-        "batch-1",
-        storage_dir,
-        items=[
-            {"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"},
-            {
-                "item_id": "item-b",
-                "request_id": "request-b",
-                "title": "咒术回战第三季",
-            },
-        ],
-        item_ids=["item-a"],
-    )
-
-    payload = response.get_json()
-    result = payload["result"]
-    assert response.status_code == 200
-    assert payload["ok"] is True
-    assert result["batch_id"] == "batch-1"
-    assert result["summary"] == {
-        "accepted": 1,
-        "already_accepted": 0,
-        "unacceptable": 0,
-        "failed": 0,
-    }
-    assert result["items"] == [
-        {
-            "item_id": "item-a",
-            "request_id": "request-a",
-            "title": "芙莉莲",
-            "status": "accepted",
-            "reason": None,
-            "error_type": None,
-            "queued": True,
-        }
-    ]
-    queue_items = result["queue"]["items"]
-    assert len(queue_items) == 1
-    assert queue_items[0]["item_id"] == "item-a"
-    assert queue_items[0]["request_id"] == "request-a"
-    assert queue_items[0]["status"] == BATCH_QUEUE_STATUS_READY_TO_SUBMIT
-    assert queue_items[0]["status_label"] == "待提交"
-    assert queue_items[0]["attempts"] == 0
-    assert queue_items[0]["last_error"] is None
-    assert queue_items[0]["ab_result_summary"] is None
-
-    # The accepted request is persisted as ACCEPTED with an ACCEPT history event.
-    config = load_storage_config(storage_dir)
-    saved = load_request_snapshot(config, "request-a")
-    assert saved["status"] == "ACCEPTED"
-    history = load_status_history(config, "request-a")
-    assert history[-1]["action"] == "ACCEPT"
-    # US-222: the batch accept entry also converges into the tracking list.
-    tracking = load_tracking_record(config, tracking_id_for_request("request-a"))
-    assert tracking.origin == TRACKING_ORIGIN_LEGACY_ACCEPT
-    assert tracking.status == TRACKING_STATUS_PENDING_SUBMIT
-
-
-def test_batch_accept_api_accepts_all_when_item_ids_omitted(tmp_path: Path) -> None:
-    _saved_request(tmp_path, "芙莉莲", "request-a")
-    _saved_request(tmp_path, "咒术回战第三季", "request-b")
-    storage_dir = tmp_path / "storage"
-
-    response = _batch_accept(
-        _client(),
-        "batch-1",
-        storage_dir,
-        items=[
-            {"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"},
-            {
-                "item_id": "item-b",
-                "request_id": "request-b",
-                "title": "咒术回战第三季",
-            },
-        ],
-    )
-
-    payload = response.get_json()
-    result = payload["result"]
-    assert payload["ok"] is True
-    assert [item["status"] for item in result["items"]] == ["accepted", "accepted"]
-    assert [item["queued"] for item in result["items"]] == [True, True]
-    assert [item["item_id"] for item in result["queue"]["items"]] == [
-        "item-a",
-        "item-b",
-    ]
-    assert result["summary"]["accepted"] == 2
-
-
-def test_batch_accept_api_marks_unacceptable_items_with_chinese_reason(
-    tmp_path: Path,
-) -> None:
-    _saved_request(tmp_path, "芙莉莲", "request-a")
-    storage_dir = tmp_path / "storage"
-
-    response = _batch_accept(
-        _client(),
-        "batch-1",
-        storage_dir,
-        items=[
-            {"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"},
-            {"item_id": "item-b", "request_id": "missing-request", "title": "不存在"},
-            {"item_id": "item-c", "title": "无草案"},
-        ],
-    )
-
-    payload = response.get_json()
-    items = payload["result"]["items"]
-    assert payload["ok"] is True
-    assert [(item["status"], item["queued"]) for item in items] == [
-        ("accepted", True),
-        ("unacceptable", False),
-        ("unacceptable", False),
-    ]
-    assert items[1]["reason"] == "订阅方案不存在或已删除"
-    assert items[2]["reason"] == "卡片缺少订阅草案，无法接受"
-    assert payload["result"]["summary"]["unacceptable"] == 2
-    assert len(payload["result"]["queue"]["items"]) == 1
-
-
-def test_batch_accept_api_is_idempotent_for_already_accepted_items(
-    tmp_path: Path,
-) -> None:
-    _saved_accepted_request(tmp_path, "芙莉莲", "request-a")
-    storage_dir = tmp_path / "storage"
-
-    response = _batch_accept(
-        _client(),
-        "batch-1",
-        storage_dir,
-        items=[{"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"}],
-    )
-
-    payload = response.get_json()
-    item = payload["result"]["items"][0]
-    assert payload["ok"] is True
-    assert item["status"] == "already_accepted"
-    assert item["reason"] == "该订阅方案已确认，已补建提交队列"
-    assert item["queued"] is True
-    # The ACCEPTED Request had no queue item, so one READY_TO_SUBMIT item is
-    # rebuilt so it can still be submitted.
-    queue_items = payload["result"]["queue"]["items"]
-    assert len(queue_items) == 1
-    assert queue_items[0]["request_id"] == "request-a"
-    assert queue_items[0]["status"] == BATCH_QUEUE_STATUS_READY_TO_SUBMIT
-    assert payload["result"]["summary"]["already_accepted"] == 1
-
-
-def test_batch_accept_api_keeps_existing_queue_item_idempotent(
-    tmp_path: Path,
-) -> None:
-    """ACCEPTED + queue already holds the request_id: no duplicate enqueue."""
-    _saved_accepted_request(tmp_path, "芙莉莲", "request-a")
-    storage_dir = tmp_path / "storage"
-    _batch_accept(
-        _client(),
-        "batch-1",
-        storage_dir,
-        items=[{"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"}],
-    )
-
-    response = _batch_accept(
-        _client(),
-        "batch-1",
-        storage_dir,
-        items=[{"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"}],
-    )
-
-    payload = response.get_json()
-    item = payload["result"]["items"][0]
-    assert payload["ok"] is True
-    assert item["status"] == "already_accepted"
-    assert item["reason"] == "该订阅方案已确认，跳过重复接受"
-    assert item["queued"] is False
-    assert len(payload["result"]["queue"]["items"]) == 1
-
-
-def test_batch_accept_api_accepts_empty_selection(tmp_path: Path) -> None:
-    storage_dir = tmp_path / "storage"
-
-    response = _batch_accept(_client(), "batch-1", storage_dir, items=[])
-
-    payload = response.get_json()
-    result = payload["result"]
-    assert response.status_code == 200
-    assert payload["ok"] is True
-    assert result["batch_id"] == "batch-1"
-    assert result["items"] == []
-    assert result["queue"]["items"] == []
-    assert result["summary"] == {
-        "accepted": 0,
-        "already_accepted": 0,
-        "unacceptable": 0,
-        "failed": 0,
-    }
-
-
-def test_batch_accept_api_single_failure_does_not_block_others(
-    tmp_path: Path,
-) -> None:
-    _saved_request(tmp_path, "芙莉莲", "request-a")
-    _saved_cancelled_request(tmp_path, "咒术回战", "request-b")
-    storage_dir = tmp_path / "storage"
-
-    response = _batch_accept(
-        _client(),
-        "batch-1",
-        storage_dir,
-        items=[
-            {"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"},
-            {"item_id": "item-b", "request_id": "request-b", "title": "咒术回战"},
-        ],
-    )
-
-    payload = response.get_json()
-    items = payload["result"]["items"]
-    assert payload["ok"] is True
-    assert items[0]["status"] == "accepted"
-    assert items[1]["status"] == "unacceptable"
-    assert items[1]["error_type"] == "request_cancelled"
-    assert len(payload["result"]["queue"]["items"]) == 1
-
-
-def test_batch_accept_api_redacts_sensitive_item_title(tmp_path: Path) -> None:
-    _saved_request(tmp_path, "芙莉莲", "request-a")
-    storage_dir = tmp_path / "storage"
-    malicious_title = "芙莉莲 https://ab.example.com/api token=secret-token"
-
-    response = _batch_accept(
-        _client(),
-        "batch-1",
-        storage_dir,
-        items=[
-            {
-                "item_id": "item-a",
-                "request_id": "request-a",
-                "title": malicious_title,
-            }
-        ],
-    )
-
-    payload = response.get_json()
-    body = response.get_data(as_text=True)
-    assert payload["ok"] is True
-    assert (
-        payload["result"]["items"][0]["title"]
-        == "芙莉莲 [redacted-url] [redacted]"
-    )
-    assert (
-        payload["result"]["queue"]["items"][0]["title"]
-        == "芙莉莲 [redacted-url] [redacted]"
-    )
-    assert "ab.example.com" not in body
-    assert "secret-token" not in body
-
-
-def test_batch_queue_api_returns_sanitized_queue(tmp_path: Path) -> None:
-    _saved_request(tmp_path, "芙莉莲", "request-a")
-    storage_dir = tmp_path / "storage"
-    _batch_accept(
-        _client(),
-        "batch-1",
-        storage_dir,
-        items=[{"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"}],
-    )
-
-    response = _client().get(
-        "/api/v1/batches/batch-1/queue",
-        query_string={"storage_dir": _profile(tmp_path, storage_dir.name)},
-    )
-
-    payload = response.get_json()
-    result = payload["result"]
-    assert response.status_code == 200
-    assert payload["ok"] is True
-    assert result["batch_id"] == "batch-1"
-    assert result["queue"]["batch_id"] == "batch-1"
-    assert result["queue"]["queue_id"]
-    assert len(result["queue"]["items"]) == 1
-    item = result["queue"]["items"][0]
-    assert item["request_id"] == "request-a"
-    assert item["status"] == BATCH_QUEUE_STATUS_READY_TO_SUBMIT
-    assert item["status_label"] == "待提交"
-    assert item["attempts"] == 0
-    assert item["last_error"] is None
-    assert item["ab_result_summary"] is None
-
-
-def test_batch_queue_api_returns_none_when_queue_missing(tmp_path: Path) -> None:
-    response = _client().get(
-        "/api/v1/batches/batch-missing/queue",
-        query_string={"storage_dir": "storage"},
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 200
-    assert payload == {
-        "ok": True,
-        "result": {"batch_id": "batch-missing", "queue": None},
-    }
-
-
-def test_batch_queue_api_does_not_leak_sensitive_values(tmp_path: Path) -> None:
-    _saved_request(tmp_path, "芙莉莲", "request-a")
-    storage_dir = tmp_path / "storage"
-    _batch_accept(
-        _client(),
-        "batch-1",
-        storage_dir,
-        items=[
-            {
-                "item_id": "item-a",
-                "request_id": "request-a",
-                "title": "芙莉莲 https://ab.example.com/api token=secret-token",
-            }
-        ],
-    )
-
-    response = _client().get(
-        "/api/v1/batches/batch-1/queue",
-        query_string={"storage_dir": _profile(tmp_path, storage_dir.name)},
-    )
-
-    body = response.get_data(as_text=True)
-    assert response.status_code == 200
-    assert "ab.example.com" not in body
-    assert "secret-token" not in body
-    assert "Authorization" not in body
-
-
-def test_batch_submit_api_requires_confirmation(tmp_path: Path) -> None:
-    storage_dir = tmp_path / "storage"
-
-    response = _client().post(
-        "/api/v1/batches/batch-1/submit",
-        json={
-            "storage_dir": _profile(tmp_path, storage_dir.name),
-            "ab_config": {
-                "auth_mode": "api_token",
-                "base_url": "http://auto-bangumi.local",
-                "token": "secret-token",
-                "fallback_enabled": False,
-            },
-        },
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 400
-    assert payload == {
-        "ok": False,
-        "error_type": "validation_error",
-        "error_message": "请确认提交到 Auto Bangumi",
-        "error_data": {
-            "failed_step": "batch_submit",
-            "details": {"field": "confirm"},
-        },
-    }
-    assert "secret-token" not in str(payload)
-
-
-def test_batch_submit_api_requires_ab_config(tmp_path: Path) -> None:
-    storage_dir = tmp_path / "storage"
-
-    response = _client().post(
-        "/api/v1/batches/batch-1/submit",
-        json={"storage_dir": _profile(tmp_path, storage_dir.name), "confirm": True},
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 400
-    assert payload == {
-        "ok": False,
-        "error_type": "validation_error",
-        "error_message": "请提供 Auto Bangumi 配置",
-        "error_data": {
-            "failed_step": "batch_submit",
-            "details": {"field": "ab_config"},
-        },
-    }
-
-
-def test_batch_submit_api_submits_queue_items_successfully(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _saved_request(tmp_path, "芙莉莲", "request-a")
-    storage_dir = tmp_path / "storage"
-    _batch_accept(
-        _client(),
-        "batch-1",
-        storage_dir,
-        items=[{"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"}],
-    )
-
-    client = FakeAutoBangumiClient()
-    received_configs = []
-
-    def build_client(ab_config):
-        received_configs.append(ab_config)
-        return client
-
-    monkeypatch.setattr(
-        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
-        build_client,
-    )
-
-    response = _client().post(
-        "/api/v1/batches/batch-1/submit",
-        json=_batch_submit_payload(_profile(tmp_path, storage_dir.name)),
-    )
-
-    payload = response.get_json()
-    result = payload["result"]
-    assert response.status_code == 200
-    assert payload["ok"] is True
-    assert result["batch_id"] == "batch-1"
-    assert result["summary"] == {
-        "succeeded": 1,
-        "failed": 0,
-        "retryable": 0,
-        "skipped": 0,
-        "needs_manual": 0,
-    }
-    assert result["items"] == [
-        {
-            "item_id": "item-a",
-            "request_id": "request-a",
-            "title": "芙莉莲",
-            "status": "succeeded",
-            "reason": None,
-            "error_type": None,
-            "attempts": 1,
-        }
-    ]
-    queue_item = result["queue"]["items"][0]
-    assert queue_item["status"] == BATCH_QUEUE_STATUS_SUCCEEDED
-    assert queue_item["status_label"] == "提交成功"
-    assert queue_item["attempts"] == 1
-    assert (
-        queue_item["ab_result_summary"]
-        == "ab_subscription_id=fake-ab-subscription; success=True"
-    )
-    assert len(client.calls) == 1
-    assert received_configs[0].base_url == "http://auto-bangumi.local"
-    assert received_configs[0].token == "secret-token"
-
-    # The request-scoped ab_config is never persisted into the queue storage.
-    queue_body = (
-        load_storage_config(storage_dir).queue_dir / "batch-1.json"
-    ).read_text(encoding="utf-8")
-    assert "secret-token" not in queue_body
-    assert "auto-bangumi.local" not in queue_body
-
-
-def test_batch_submit_api_single_failure_does_not_block_others(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _saved_request(tmp_path, "芙莉莲", "request-a")
-    _saved_request(tmp_path, "咒术回战第三季", "request-b")
-    storage_dir = tmp_path / "storage"
-    _batch_accept(
-        _client(),
-        "batch-1",
-        storage_dir,
-        items=[
-            {"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"},
-            {
-                "item_id": "item-b",
-                "request_id": "request-b",
-                "title": "咒术回战第三季",
-            },
-        ],
-    )
-    # Remove request-b's snapshot so pre-submit validation rejects that item.
-    delete_request_snapshot(load_storage_config(storage_dir), "request-b")
-
-    client = FakeAutoBangumiClient()
-    monkeypatch.setattr(
-        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
-        lambda _config: client,
-    )
-
-    response = _client().post(
-        "/api/v1/batches/batch-1/submit",
-        json=_batch_submit_payload(_profile(tmp_path, storage_dir.name)),
-    )
-
-    payload = response.get_json()
-    result = payload["result"]
-    assert payload["ok"] is True
-    assert result["summary"] == {
-        "succeeded": 1,
-        "failed": 1,
-        "retryable": 0,
-        "skipped": 0,
-        "needs_manual": 0,
-    }
-    assert result["items"][0]["status"] == "succeeded"
-    assert result["items"][1]["status"] == "failed"
-    assert result["items"][1]["error_type"] == "request_not_found"
-    assert result["items"][1]["reason"] == "订阅方案不存在或已删除，无法提交"
-    # Only the surviving item was submitted to Auto Bangumi.
-    assert len(client.calls) == 1
-
-
-def test_batch_submit_api_skips_already_succeeded_items(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _saved_request(tmp_path, "芙莉莲", "request-a")
-    storage_dir = tmp_path / "storage"
-    _batch_accept(
-        _client(),
-        "batch-1",
-        storage_dir,
-        items=[{"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"}],
-    )
-
-    client = FakeAutoBangumiClient()
-    monkeypatch.setattr(
-        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
-        lambda _config: client,
-    )
-
-    submit_payload = _batch_submit_payload(_profile(tmp_path, storage_dir.name))
-    first = _client().post("/api/v1/batches/batch-1/submit", json=submit_payload)
-    second = _client().post("/api/v1/batches/batch-1/submit", json=submit_payload)
-
-    assert first.status_code == 200
-    assert second.status_code == 200
-    second_payload = second.get_json()
-    assert second_payload["ok"] is True
-    assert second_payload["result"]["summary"] == {
-        "succeeded": 0,
-        "failed": 0,
-        "retryable": 0,
-        "skipped": 1,
-        "needs_manual": 0,
-    }
-    assert second_payload["result"]["items"][0]["status"] == "skipped"
-    assert (
-        second_payload["result"]["items"][0]["reason"]
-        == "已提交成功，跳过重复提交"
-    )
-    # The already-succeeded item is never re-submitted.
-    assert len(client.calls) == 1
-
-
-def test_batch_submit_api_returns_queue_not_found_for_missing_queue(
-    tmp_path: Path,
-) -> None:
-    response = _client().post(
-        "/api/v1/batches/batch-missing/submit",
-        json=_batch_submit_payload("storage"),
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 400
-    assert payload == {
-        "ok": False,
-        "error_type": "queue_not_found",
-        "error_message": "未找到该批次的提交队列",
-        "error_data": {
-            "failed_step": "load_submission_queue",
-            "details": {"batch_id": "batch-missing"},
-        },
-    }
-
-
-def test_batch_submit_api_does_not_leak_sensitive_values(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _saved_request(tmp_path, "芙莉莲", "request-a")
-    storage_dir = tmp_path / "storage"
-    _batch_accept(
-        _client(),
-        "batch-1",
-        storage_dir,
-        items=[
-            {
-                "item_id": "item-a",
-                "request_id": "request-a",
-                "title": "芙莉莲 https://ab.example.com/api token=secret-token",
-            }
-        ],
-    )
-
-    monkeypatch.setattr(
-        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
-        lambda _config: FakeAutoBangumiClient(),
-    )
-
-    response = _client().post(
-        "/api/v1/batches/batch-1/submit",
-        json=_batch_submit_payload(_profile(tmp_path, storage_dir.name)),
-    )
-
-    body = response.get_data(as_text=True)
-    assert response.status_code == 200
-    assert "ab.example.com" not in body
-    assert "secret-token" not in body
-    assert "auto-bangumi.local" not in body
-    assert "Authorization" not in body
-
-
-def test_batch_submit_api_persists_ab_result_into_request_and_ab_results(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """Batch submit writes the sanitized AB result into the Request snapshot and
-    ab_results/<request_id>.json, and the detail API can read it."""
-    _saved_request(tmp_path, "芙莉莲", "request-a")
-    storage_dir = tmp_path / "storage"
-    _batch_accept(
-        _client(),
-        "batch-1",
-        storage_dir,
-        items=[{"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"}],
-    )
-
-    monkeypatch.setattr(
-        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
-        lambda _config: FakeAutoBangumiClient(),
-    )
-
-    response = _client().post(
-        "/api/v1/batches/batch-1/submit",
-        json=_batch_submit_payload(_profile(tmp_path, storage_dir.name)),
-    )
-    payload = response.get_json()
-    assert response.status_code == 200
-    assert payload["ok"] is True
-    assert payload["result"]["items"][0]["status"] == "succeeded"
-
-    config = load_storage_config(storage_dir)
-    # Request snapshot carries the sanitized AB result (single-item contract).
-    request_body = (config.requests_dir / "request-a.json").read_text(encoding="utf-8")
-    request_snapshot = json.loads(request_body)
-    assert request_snapshot["ab_submit_result"]["success"] is True
-    assert (
-        request_snapshot["ab_submit_result"]["ab_subscription_id"]
-        == "fake-ab-subscription"
-    )
-    # ab_results/<request_id>.json exists with the sanitized record.
-    ab_result = load_ab_submit_result(config, "request-a")
-    assert ab_result["request_id"] == "request-a"
-    assert ab_result["ab_submit_result"]["success"] is True
-    assert (
-        ab_result["ab_submit_result"]["ab_subscription_id"]
-        == "fake-ab-subscription"
-    )
-    # The Request detail API can read and show the result.
-    detail = _client().get(
-        "/api/v1/requests/request-a",
-        query_string={"storage_dir": _profile(tmp_path, storage_dir.name)},
-    ).get_json()
-    assert detail["ok"] is True
-    assert detail["result"]["ab_result"]["available"] is True
-    assert (
-        detail["result"]["ab_result"]["record"]["ab_submit_result"][
-            "ab_subscription_id"
-        ]
-        is None
-    )
-    # No secrets in any persisted file.
-    for text in (
-        request_body,
-        (config.ab_results_dir / "request-a.json").read_text(encoding="utf-8"),
-    ):
-        assert "secret-token" not in text
-        assert "auto-bangumi.local" not in text
-        assert "Authorization" not in text
-
-
-def test_batch_submit_api_persists_failed_ab_result(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """A failed batch submit also persists the sanitized failure result."""
-    _saved_request(tmp_path, "芙莉莲", "request-a")
-    storage_dir = tmp_path / "storage"
-    _batch_accept(
-        _client(),
-        "batch-1",
-        storage_dir,
-        items=[{"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"}],
-    )
-
-    failing_client = FakeAutoBangumiClient(
-        error=Stage1Error(
-            "ab_auth_failed",
-            "Auto Bangumi 认证失败",
-            "submit_ab_subscription",
-            {},
-        )
-    )
-    monkeypatch.setattr(
-        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
-        lambda _config: failing_client,
-    )
-
-    response = _client().post(
-        "/api/v1/batches/batch-1/submit",
-        json=_batch_submit_payload(_profile(tmp_path, storage_dir.name)),
-    )
-    payload = response.get_json()
-    assert payload["ok"] is True
-    assert payload["result"]["items"][0]["status"] == "failed"
-    assert payload["result"]["items"][0]["error_type"] == "ab_auth_failed"
-
-    config = load_storage_config(storage_dir)
-    request_snapshot = json.loads(
-        (config.requests_dir / "request-a.json").read_text(encoding="utf-8")
-    )
-    assert request_snapshot["ab_submit_result"]["success"] is False
-    assert (
-        request_snapshot["ab_submit_result"]["error"]["error_type"]
-        == "ab_auth_failed"
-    )
-    ab_result = load_ab_submit_result(config, "request-a")
-    assert ab_result["ab_submit_result"]["success"] is False
-    assert ab_result["ab_submit_result"]["error"]["error_type"] == "ab_auth_failed"
-
-
-def test_batch_retry_api_requires_ab_config(tmp_path: Path) -> None:
-    storage_dir = tmp_path / "storage"
-
-    response = _client().post(
-        "/api/v1/batches/batch-1/retry",
-        json={
-            "storage_dir": _profile(tmp_path, storage_dir.name),
-            "request_id": "request-a",
-            "confirm": True,
-        },
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 400
-    assert payload == {
-        "ok": False,
-        "error_type": "validation_error",
-        "error_message": "请提供 Auto Bangumi 配置",
-        "error_data": {
-            "failed_step": "batch_retry",
-            "details": {"field": "ab_config"},
-        },
-    }
-
-
-def test_batch_retry_api_requires_confirmation(tmp_path: Path) -> None:
-    storage_dir = tmp_path / "storage"
-
-    response = _client().post(
-        "/api/v1/batches/batch-1/retry",
-        json={
-            "storage_dir": _profile(tmp_path, storage_dir.name),
-            "request_id": "request-a",
-            "ab_config": {
-                "auth_mode": "api_token",
-                "base_url": "http://auto-bangumi.local",
-                "token": "secret-token",
-                "fallback_enabled": False,
-            },
-        },
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 400
-    assert payload == {
-        "ok": False,
-        "error_type": "validation_error",
-        "error_message": "请确认提交到 Auto Bangumi",
-        "error_data": {
-            "failed_step": "batch_retry",
-            "details": {"field": "confirm"},
-        },
-    }
-    assert "secret-token" not in str(payload)
-
-
-def test_batch_retry_api_retries_failed_item_successfully(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _saved_request(tmp_path, "芙莉莲", "request-a")
-    storage_dir = tmp_path / "storage"
-    _batch_accept(
-        _client(),
-        "batch-1",
-        storage_dir,
-        items=[{"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"}],
-    )
-
-    failing_client = FakeAutoBangumiClient(
-        error=Stage1Error(
-            "ab_submit_failed",
-            "离线模拟失败",
-            "create_ab_subscription",
-            {"status_code": 503},
-        )
-    )
-    monkeypatch.setattr(
-        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
-        lambda _config: failing_client,
-    )
-    first = _client().post(
-        "/api/v1/batches/batch-1/submit",
-        json=_batch_submit_payload(_profile(tmp_path, storage_dir.name)),
-    )
-    first_result = first.get_json()["result"]
-    assert first_result["items"][0]["status"] == "failed"
-    assert first_result["items"][0]["attempts"] == 1
-
-    success_client = FakeAutoBangumiClient()
-    monkeypatch.setattr(
-        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
-        lambda _config: success_client,
-    )
-    response = _client().post(
-        "/api/v1/batches/batch-1/retry",
-        json={**_batch_submit_payload(_profile(tmp_path, storage_dir.name)), "request_id": "request-a"},
-    )
-
-    payload = response.get_json()
-    result = payload["result"]
-    assert response.status_code == 200
-    assert payload["ok"] is True
-    assert result["batch_id"] == "batch-1"
-    assert result["summary"] == {
-        "succeeded": 1,
-        "failed": 0,
-        "retryable": 0,
-        "skipped": 0,
-        "needs_manual": 0,
-    }
-    assert result["items"] == [
-        {
-            "item_id": "item-a",
-            "request_id": "request-a",
-            "title": "芙莉莲",
-            "status": "succeeded",
-            "reason": None,
-            "error_type": None,
-            "attempts": 2,
-        }
-    ]
-    queue_item = result["queue"]["items"][0]
-    assert queue_item["status"] == BATCH_QUEUE_STATUS_SUCCEEDED
-    assert queue_item["status_label"] == "提交成功"
-    assert queue_item["attempts"] == 2
-    # The retry submitted exactly one more Auto Bangumi request.
-    assert len(success_client.calls) == 1
-    assert len(failing_client.calls) == 1
-
-    # The request-scoped ab_config is never persisted into the queue storage.
-    queue_body = (
-        load_storage_config(storage_dir).queue_dir / "batch-1.json"
-    ).read_text(encoding="utf-8")
-    assert "secret-token" not in queue_body
-    assert "auto-bangumi.local" not in queue_body
-
-
-def test_batch_retry_api_failure_keeps_retryable_status_and_increments_attempts(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _saved_request(tmp_path, "芙莉莲", "request-a")
-    storage_dir = tmp_path / "storage"
-    _batch_accept(
-        _client(),
-        "batch-1",
-        storage_dir,
-        items=[{"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"}],
-    )
-
-    timeout_client = FakeAutoBangumiClient(
-        error=Stage1Error(
-            "ab_timeout",
-            "请求超时",
-            "create_ab_subscription",
-            {"category": "timeout"},
-        )
-    )
-    monkeypatch.setattr(
-        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
-        lambda _config: timeout_client,
-    )
-    first = _client().post(
-        "/api/v1/batches/batch-1/submit",
-        json=_batch_submit_payload(_profile(tmp_path, storage_dir.name)),
-    )
-    assert first.get_json()["result"]["items"][0]["status"] == "retryable"
-
-    response = _client().post(
-        "/api/v1/batches/batch-1/retry",
-        json={**_batch_submit_payload(_profile(tmp_path, storage_dir.name)), "request_id": "request-a"},
-    )
-
-    payload = response.get_json()
-    result = payload["result"]
-    assert payload["ok"] is True
-    assert result["summary"] == {
-        "succeeded": 0,
-        "failed": 0,
-        "retryable": 1,
-        "skipped": 0,
-        "needs_manual": 0,
-    }
-    item = result["items"][0]
-    assert item["status"] == "retryable"
-    assert item["error_type"] == "ab_timeout"
-    assert item["reason"] == "请求超时"
-    assert item["attempts"] == 2
-    queue_item = result["queue"]["items"][0]
-    assert queue_item["status"] == BATCH_QUEUE_STATUS_RETRYABLE
-    assert queue_item["status_label"] == "可重试"
-    assert queue_item["attempts"] == 2
-    assert len(timeout_client.calls) == 2
-
-
-def test_batch_retry_api_skips_succeeded_items_without_resubmit(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _saved_request(tmp_path, "芙莉莲", "request-a")
-    storage_dir = tmp_path / "storage"
-    _batch_accept(
-        _client(),
-        "batch-1",
-        storage_dir,
-        items=[{"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"}],
-    )
-
-    success_client = FakeAutoBangumiClient()
-    monkeypatch.setattr(
-        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
-        lambda _config: success_client,
-    )
-    first = _client().post(
-        "/api/v1/batches/batch-1/submit",
-        json=_batch_submit_payload(_profile(tmp_path, storage_dir.name)),
-    )
-    assert first.get_json()["result"]["items"][0]["status"] == "succeeded"
-
-    retry_client = FakeAutoBangumiClient()
-    monkeypatch.setattr(
-        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
-        lambda _config: retry_client,
-    )
-    response = _client().post(
-        "/api/v1/batches/batch-1/retry",
-        json={**_batch_submit_payload(_profile(tmp_path, storage_dir.name)), "request_id": "request-a"},
-    )
-
-    payload = response.get_json()
-    result = payload["result"]
-    assert payload["ok"] is True
-    assert result["summary"] == {
-        "succeeded": 0,
-        "failed": 0,
-        "retryable": 0,
-        "skipped": 1,
-        "needs_manual": 0,
-    }
-    assert result["items"][0]["status"] == "skipped"
-    assert result["items"][0]["reason"] == "已提交成功，不可重复提交"
-    assert result["items"][0]["attempts"] == 1
-    assert result["queue"]["items"][0]["status"] == BATCH_QUEUE_STATUS_SUCCEEDED
-    # The already-succeeded item is never re-submitted.
-    assert len(retry_client.calls) == 0
-
-
-def test_batch_retry_api_returns_queue_item_not_found_for_unknown_request_id(
-    tmp_path: Path,
-) -> None:
-    _saved_request(tmp_path, "芙莉莲", "request-a")
-    storage_dir = tmp_path / "storage"
-    _batch_accept(
-        _client(),
-        "batch-1",
-        storage_dir,
-        items=[{"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"}],
-    )
-
-    response = _client().post(
-        "/api/v1/batches/batch-1/retry",
-        json={**_batch_submit_payload(_profile(tmp_path, storage_dir.name)), "request_id": "request-missing"},
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 404
-    assert payload == {
-        "ok": False,
-        "error_type": "queue_item_not_found",
-        "error_message": "队列中不存在该订阅方案项目",
-        "error_data": {
-            "failed_step": "batch_retry",
-            "details": {"field": "request_id", "batch_id": "batch-1"},
-        },
-    }
-
-
-def test_batch_retry_api_does_not_leak_sensitive_values(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _saved_request(tmp_path, "芙莉莲", "request-a")
-    storage_dir = tmp_path / "storage"
-    _batch_accept(
-        _client(),
-        "batch-1",
-        storage_dir,
-        items=[
-            {
-                "item_id": "item-a",
-                "request_id": "request-a",
-                "title": "芙莉莲 https://ab.example.com/api token=secret-token",
-            }
-        ],
-    )
-
-    failing_client = FakeAutoBangumiClient(
-        error=Stage1Error(
-            "ab_submit_failed",
-            "离线模拟失败",
-            "create_ab_subscription",
-            {"status_code": 503},
-        )
-    )
-    monkeypatch.setattr(
-        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
-        lambda _config: failing_client,
-    )
-    first = _client().post(
-        "/api/v1/batches/batch-1/submit",
-        json=_batch_submit_payload(_profile(tmp_path, storage_dir.name)),
-    )
-    assert first.get_json()["result"]["items"][0]["status"] == "failed"
-
-    monkeypatch.setattr(
-        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
-        lambda _config: FakeAutoBangumiClient(),
-    )
-    response = _client().post(
-        "/api/v1/batches/batch-1/retry",
-        json={**_batch_submit_payload(_profile(tmp_path, storage_dir.name)), "request_id": "request-a"},
-    )
-
-    body = response.get_data(as_text=True)
-    assert response.status_code == 200
-    assert "ab.example.com" not in body
-    assert "secret-token" not in body
-    assert "auto-bangumi.local" not in body
-    assert "Authorization" not in body
-    assert "<rss" not in body
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 def _submitting_queue_json(
@@ -5744,143 +4003,14 @@ def _saved_request_with_ab_result(
     save_request_snapshot(load_storage_config(tmp_path / "storage"), request)
 
 
-def test_batch_recover_api_auto_recovers_submitting_to_succeeded(
-    tmp_path: Path,
-) -> None:
-    """auto recovery: SUBMITTING item whose Request already has a persisted AB
-    result is finalized to SUCCEEDED (interruption-safe queue recovery)."""
-    _saved_request_with_ab_result(tmp_path, "芙莉莲", "request-a")
-    storage_dir = tmp_path / "storage"
-    _submitting_queue_json(storage_dir)
-
-    response = _client().post(
-        "/api/v1/batches/batch-1/recover",
-        json={
-            "storage_dir": _profile(tmp_path, storage_dir.name),
-            "request_id": "request-a",
-            "action": "auto",
-        },
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 200
-    assert payload["ok"] is True
-    assert payload["result"]["items"][0]["status"] == "succeeded"
-    assert (
-        payload["result"]["items"][0]["reason"]
-        == "已根据保存的提交结果恢复为提交成功"
-    )
-    queue_item = payload["result"]["queue"]["items"][0]
-    assert queue_item["status"] == "SUCCEEDED"
-    # The recovered queue is persisted.
-    persisted = load_submission_queue(load_storage_config(storage_dir), "batch-1")
-    assert persisted.items[0].status == "SUCCEEDED"
 
 
-def test_batch_recover_api_auto_returns_needs_manual_without_result(
-    tmp_path: Path,
-) -> None:
-    _saved_accepted_request(tmp_path, "芙莉莲", "request-a")
-    storage_dir = tmp_path / "storage"
-    _submitting_queue_json(storage_dir)
-
-    response = _client().post(
-        "/api/v1/batches/batch-1/recover",
-        json={
-            "storage_dir": _profile(tmp_path, storage_dir.name),
-            "request_id": "request-a",
-            "action": "auto",
-        },
-    )
-
-    payload = response.get_json()
-    assert payload["ok"] is True
-    item = payload["result"]["items"][0]
-    assert item["status"] == "needs_manual"
-    assert item["error_type"] == "requires_manual_recovery"
-    assert payload["result"]["queue"]["items"][0]["status"] == "SUBMITTING"
 
 
-def test_batch_recover_api_manual_succeeded_requires_confirm(
-    tmp_path: Path,
-) -> None:
-    _saved_accepted_request(tmp_path, "芙莉莲", "request-a")
-    storage_dir = tmp_path / "storage"
-    _result_persist_failed_queue_json(storage_dir)
-
-    # Without confirm the manual action is rejected.
-    response = _client().post(
-        "/api/v1/batches/batch-1/recover",
-        json={
-            "storage_dir": _profile(tmp_path, storage_dir.name),
-            "request_id": "request-a",
-            "action": "succeeded",
-        },
-    )
-    payload = response.get_json()
-    assert payload["ok"] is False
-    assert payload["error_type"] == "validation_error"
-    assert payload["error_message"] == "请确认人工核验结果后再恢复"
-
-    # With confirm the item is resolved to SUCCEEDED.
-    response = _client().post(
-        "/api/v1/batches/batch-1/recover",
-        json={
-            "storage_dir": _profile(tmp_path, storage_dir.name),
-            "request_id": "request-a",
-            "action": "succeeded",
-            "confirm": True,
-        },
-    )
-    payload = response.get_json()
-    assert payload["ok"] is True
-    assert payload["result"]["items"][0]["status"] == "succeeded"
-    assert payload["result"]["queue"]["items"][0]["status"] == "SUCCEEDED"
 
 
-def test_batch_recover_api_manual_failed_resolves_result_persist_failed(
-    tmp_path: Path,
-) -> None:
-    _saved_accepted_request(tmp_path, "芙莉莲", "request-a")
-    storage_dir = tmp_path / "storage"
-    _result_persist_failed_queue_json(storage_dir)
-
-    response = _client().post(
-        "/api/v1/batches/batch-1/recover",
-        json={
-            "storage_dir": _profile(tmp_path, storage_dir.name),
-            "request_id": "request-a",
-            "action": "failed",
-            "confirm": True,
-        },
-    )
-
-    payload = response.get_json()
-    assert payload["ok"] is True
-    assert payload["result"]["items"][0]["status"] == "failed"
-    assert payload["result"]["queue"]["items"][0]["status"] == "FAILED"
-    # The recovered FAILED item is a normal retryable failure now.
-    persisted = load_submission_queue(load_storage_config(storage_dir), "batch-1")
-    assert persisted.items[0].status == "FAILED"
-    assert "manual_recovery_failed" in (persisted.items[0].last_error or "")
 
 
-def test_batch_recover_api_rejects_invalid_action(tmp_path: Path) -> None:
-    storage_dir = tmp_path / "storage"
-
-    response = _client().post(
-        "/api/v1/batches/batch-1/recover",
-        json={
-            "storage_dir": _profile(tmp_path, storage_dir.name),
-            "request_id": "request-a",
-            "action": "invalid",
-        },
-    )
-
-    payload = response.get_json()
-    assert payload["ok"] is False
-    assert payload["error_type"] == "validation_error"
-    assert payload["error_message"] == "恢复动作必须是 auto、succeeded 或 failed"
 
 
 def _preferences_save_body(
@@ -6297,7 +4427,7 @@ def _issue_batch_draft_items(
     items: list[dict[str, object]] = []
     for index, title in enumerate(titles):
         issued = client.post(
-            "/api/v1/requests", json={"title": title, "save_request": False}
+            "/api/v1/requests", json={"title": title}
         ).get_json()["result"]
         items.append(
             {
@@ -6945,7 +5075,7 @@ def test_save_confirm_tracking_write_failure_returns_not_ready_handoff(
     storage_dir = tmp_path / "storage"
     client = _client()
     issued = client.post(
-        "/api/v1/requests", json={"title": "芙莉莲", "save_request": False}
+        "/api/v1/requests", json={"title": "芙莉莲"}
     ).get_json()["result"]
     draft_id = issued["draft_id"]
     request_id = issued["request"]["request_id"]
@@ -6979,88 +5109,3 @@ def test_save_confirm_tracking_write_failure_returns_not_ready_handoff(
         load_storage_config(storage_dir), request_id
     )["status"] == "ACCEPTED"
     assert list_tracking_records(load_storage_config(storage_dir)).records == []
-
-
-def test_batch_save_confirm_confirmed_items_enter_tracking_list(
-    tmp_path: Path,
-) -> None:
-    """US-222: every CONFIRMED batch item returns a tracking_id/ready pair."""
-    storage_dir = tmp_path / "storage"
-    client = _client()
-    items = _issue_batch_draft_items(client, ["芙莉莲", "咒术回战"])
-
-    response = _batch_save_confirm(client, items)
-    payload = response.get_json()
-    assert response.status_code == 200
-    result = payload["result"]
-    assert result["summary"] == {"requested": 2, "confirmed": 2, "failed": 0}
-
-    config = load_storage_config(storage_dir)
-    for row in result["results"]:
-        assert row["outcome"] == "CONFIRMED"
-        assert row["tracking_ready"] is True
-        assert row["tracking_id"] == tracking_id_for_request(row["request_id"])
-    assert len(list_tracking_records(config).records) == 2
-    for row in result["results"]:
-        tracking = load_tracking_record(config, row["tracking_id"])
-        assert tracking.origin == TRACKING_ORIGIN_SAVE_CONFIRM
-        assert tracking.status == TRACKING_STATUS_PENDING_SUBMIT
-        assert tracking.revision == 1
-
-
-def test_batch_save_confirm_one_tracking_failure_keeps_siblings_confirmed(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """US-222: one item's tracking failure never rolls back other items."""
-    import apps.migu_orca_web.tracking_handoff as tracking_handoff
-
-    storage_dir = tmp_path / "storage"
-    client = _client()
-
-    def issue(title: str, key: str) -> tuple[str, dict[str, object]]:
-        issued = client.post(
-            "/api/v1/requests", json={"title": title, "save_request": False}
-        ).get_json()["result"]
-        descriptor = {
-            "item_id": key,
-            "draft_id": issued["draft_id"],
-            "base_revision": issued["draft_revision"],
-            "idempotency_key": f"view-batch-{key}",
-        }
-        return issued["request"]["request_id"], descriptor
-
-    first_request_id, first = issue("芙莉莲", "item-a")
-    second_request_id, second = issue("咒术回战", "item-b")
-
-    def failing_for_second(_config: Any, record: Any) -> Any:
-        if record.request_id == second_request_id:
-            raise Stage1Error(
-                "storage_error", "模拟追番记录写入失败", "ensure_tracking_record", {}
-            )
-        # Fall back to the real ensure for the healthy sibling.
-        import storage_engine.controllers.tracking_repository as tracking_repository
-
-        return tracking_repository.ensure_tracking_record(_config, record)
-
-    monkeypatch.setattr(tracking_handoff, "ensure_tracking_record", failing_for_second)
-
-    response = _batch_save_confirm(client, [first, second])
-    payload = response.get_json()
-    assert response.status_code == 200
-    result = payload["result"]
-    rows_by_item = {row["item_id"]: row for row in result["results"]}
-    assert rows_by_item["item-a"]["outcome"] == "CONFIRMED"
-    assert rows_by_item["item-a"]["tracking_ready"] is True
-    assert rows_by_item["item-a"]["tracking_id"] == tracking_id_for_request(
-        first_request_id
-    )
-    # The failing item stays CONFIRMED with a not-ready tracking handoff.
-    assert rows_by_item["item-b"]["outcome"] == "CONFIRMED"
-    assert rows_by_item["item-b"]["tracking_ready"] is False
-    assert rows_by_item["item-b"]["tracking_id"] == tracking_id_for_request(
-        second_request_id
-    )
-    # Only the healthy sibling's record was persisted.
-    records = list_tracking_records(load_storage_config(storage_dir)).records
-    assert [record.request_id for record in records] == [first_request_id]

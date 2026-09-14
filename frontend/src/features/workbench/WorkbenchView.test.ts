@@ -418,7 +418,6 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
         source: 'mikan',
         mikan_bangumi: 'https://mikan.example/Home/Bangumi/2353',
         storage_dir: null,
-        save_request: false,
       },
       timeoutMs: 240000,
     })
@@ -824,7 +823,6 @@ describe('WorkbenchView direct fallback (US-204)', () => {
         source: 'mikan',
         mikan_bangumi: '2353',
         storage_dir: null,
-        save_request: false,
       },
       timeoutMs: 240000,
     })

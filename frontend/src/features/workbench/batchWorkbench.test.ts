@@ -229,7 +229,6 @@ describe('batchWorkbench helpers (US-205)', () => {
       title: '关于我转生变成史莱姆这档事 第四季',
       source: 'mikan',
       mikan_bangumi: 'https://mikan.example/Home/Bangumi/42',
-      save_request: false,
       candidate_context: 'opaque-context',
       season_confirmation: 4,
     })

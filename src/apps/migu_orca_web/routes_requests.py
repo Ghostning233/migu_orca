@@ -11,11 +11,9 @@ safe-info whitelist for the read-only "全部信息" dialog.
 from pathlib import Path
 from typing import Any
 
-from ab_engine.controllers.ab_config import build_ab_config
 from apps.migu_orca_entry.controllers.entry_controller import (
     _build_history_event,
     _confirmation_history_details,
-    apply_ab_submit_action,
     apply_confirmation_action,
     apply_modify_action,
     apply_request_save_action,
@@ -53,7 +51,6 @@ from apps.migu_orca_web.schemas import (
 )
 from apps.migu_orca_web.serializers import (
     _raise_result_error,
-    _sanitize_ab_submit_result,
     serialize_request_detail,
     serialize_request_safe_info,
 )
@@ -70,7 +67,6 @@ from apps.migu_orca_web.tracking_handoff import ensure_confirmed_request_trackin
 from extensions.flask_api import class_route
 from extensions.flask_api.views import GetView, PostView
 from request_engine.controllers.request_controller import (
-    PENDING_CONFIRM,
     summarize_request,
 )
 from shared.errors import Stage1Error
@@ -301,7 +297,7 @@ class RequestPreviewModifyView(PostView):
         req = result["request"]
         # CAS against the revision the client observed. On success the
         # server-side draft is replaced atomically and the revision bumps by 1
-        # so preview-save persists the exact state the user just reviewed.
+        # so save-confirm persists the exact state the user just reviewed.
         new_revision, swap_reason = draft_store.compare_and_swap(
             payload.draft_id,
             payload.base_revision,
@@ -322,71 +318,6 @@ class RequestPreviewModifyView(PostView):
             "draft_id": payload.draft_id,
             "draft_revision": new_revision,
         }
-
-
-# retired US-334: save-confirm is the only Web persistence path
-class RequestPreviewSaveView(PostView):
-    request_validator_model = None
-
-    def save(self) -> dict[str, object]:
-        assert isinstance(self.request_validator_model, RequestPreviewSavePayload)
-        payload = self.request_validator_model
-        # US-194/US-212: preview-save *reserves* the draft against the
-        # base_revision the client observed, persists the authoritative
-        # snapshot, and only then commits the replay tombstone. A persistence
-        # failure releases the reservation so the same draft_id/revision can be
-        # retried — the user never loses their edit and is never forced to
-        # re-search (the old consume-before-persist destroyed the draft on a
-        # failed disk write). The authoritative draft content never comes from
-        # the client; a stale/expired/already-saved/reserved id returns a
-        # stable 409.
-        request, save_reason = draft_store.reserve_for_save(
-            payload.draft_id, payload.base_revision
-        )
-        if request is None or save_reason != REASON_OK:
-            # US-211 parity: a revision conflict re-reads so the safe error
-            # data carries the true current revision for the retry.
-            current_revision = None
-            if save_reason == REASON_REVISION_CONFLICT:
-                latest_read, latest_reason = draft_store.get(payload.draft_id)
-                if latest_read is not None and latest_reason == REASON_OK:
-                    current_revision = latest_read.revision
-            raise _draft_store_error(save_reason, current_revision=current_revision)
-        try:
-            # Only a PENDING_CONFIRM draft may be saved; this keeps the saved
-            # object entering the existing confirmation flow
-            # (accept/cancel/modify/delete).
-            if request.get("status") != PENDING_CONFIRM:
-                raise Stage1Error(
-                    "invalid_request_status",
-                    "只有待确认的订阅草案可以保存",
-                    "save_preview_request",
-                    {"status": request.get("status")},
-                )
-            result = apply_request_save_action(
-                {"success": True, "request": request, "error": None},
-                True,
-                storage_dir=_storage_dir(payload.storage_dir),
-            )
-            if not result["success"]:
-                _raise_result_error(result)
-            # The Request is durable; only now consume the draft (replay
-            # protection) so a later save of the same id is ``draft_replayed``.
-            draft_store.commit_save(payload.draft_id)
-            req = result["request"]
-            response: dict[str, object] = {
-                "request": req,
-                "summary": summarize_request(req),
-            }
-            if "saved_request" in result:
-                response["saved_request"] = result["saved_request"]
-            return response
-        except Exception:
-            # Persistence (or a validation guard) failed before commit: keep the
-            # draft alive at its current revision so the client can retry the
-            # exact same save.
-            draft_store.release_save(payload.draft_id)
-            raise
 
 
 def _run_draft_save_confirm(
@@ -658,57 +589,3 @@ class RequestDeleteView(PostView):
         payload = self.request_validator_model
         config = load_storage_config(_storage_dir(payload.storage_dir))
         return delete_request_snapshot(config, payload.request_id)
-
-
-# retired US-334: tracking submit is the only external write path
-class RequestAbSubmitView(PostView):
-    request_validator_model = None
-
-    def save(self) -> dict[str, object]:
-        assert isinstance(self.request_validator_model, RequestAbSubmitPayload)
-        payload = self.request_validator_model
-        storage_dir = _storage_dir(payload.storage_dir)
-        config = load_storage_config(storage_dir)
-        request = load_request_snapshot(config, payload.request_id)
-        ab_config = build_ab_config(payload.ab_config.model_dump(exclude_none=True))
-
-        result = apply_ab_submit_action(
-            {"success": True, "request": request, "error": None},
-            True,
-            ab_config=ab_config,
-        )
-        if not result["success"]:
-            _raise_result_error(result)
-
-        result["ab_submit_result"] = _sanitize_ab_submit_result(
-            result["ab_submit_result"]
-        )
-        result["request"]["ab_submit_result"] = result["ab_submit_result"]
-        result = apply_request_save_action(
-            result,
-            True,
-            storage_dir=storage_dir,
-        )
-        if not result["success"]:
-            _raise_result_error(result)
-
-        # US-226 compat projection: the legacy single submit-ab path drives the
-        # old Request submit, so mirror its classified outcome into the unified
-        # TrackingRecord (best-effort, never raising, never downgrading ACTIVE).
-        reflect_ab_result_into_tracking(
-            config,
-            request_id=payload.request_id,
-            ab_result=result["ab_submit_result"],
-        )
-
-        req = result["request"]
-        response: dict[str, object] = {
-            "request": req,
-            "summary": summarize_request(req),
-            "ab_submit_result": result["ab_submit_result"],
-        }
-        if "saved_request" in result:
-            response["saved_request"] = result["saved_request"]
-        if "saved_ab_result" in result:
-            response["saved_ab_result"] = result["saved_ab_result"]
-        return response

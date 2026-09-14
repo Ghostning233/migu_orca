@@ -26,13 +26,11 @@ const EXPECTED_OPERATION_IDS = [
   'getRequestSafeInfo',
   'createRequest',
   'previewModifyRequest',
-  'previewSaveRequest',
   'confirmRequestSave',
   'acceptRequest',
   'cancelRequest',
   'modifyRequest',
   'deleteRequest',
-  'submitRequestToAutoBangumi',
   'searchMikanCandidates',
   'getMikanPoster',
   'getPreferences',
@@ -41,13 +39,6 @@ const EXPECTED_OPERATION_IDS = [
   'saveCorrection',
   'parseBatchTitles',
   'saveConfirmBatchItems',
-  'acceptBatchItems',
-  'getBatchQueue',
-  'submitBatchQueue',
-  'retryBatchQueueItem',
-  'recoverBatchQueueItem',
-  'testQbittorrentConnection',
-  'testAutoBangumiConnection',
   'listTrackingItems',
   'getTrackingItemDetail',
   'revalidateTrackingItem',
@@ -75,13 +66,11 @@ describe('generated API client (US-198)', () => {
       | 'getRequestSafeInfo'
       | 'createRequest'
       | 'previewModifyRequest'
-      | 'previewSaveRequest'
       | 'confirmRequestSave'
       | 'acceptRequest'
       | 'cancelRequest'
       | 'modifyRequest'
       | 'deleteRequest'
-      | 'submitRequestToAutoBangumi'
       | 'searchMikanCandidates'
       | 'getMikanPoster'
       | 'getPreferences'
@@ -90,13 +79,6 @@ describe('generated API client (US-198)', () => {
       | 'saveCorrection'
       | 'parseBatchTitles'
       | 'saveConfirmBatchItems'
-      | 'acceptBatchItems'
-      | 'getBatchQueue'
-      | 'submitBatchQueue'
-      | 'retryBatchQueueItem'
-      | 'recoverBatchQueueItem'
-      | 'testQbittorrentConnection'
-      | 'testAutoBangumiConnection'
       | 'listTrackingItems'
       | 'getTrackingItemDetail'
       | 'revalidateTrackingItem'
@@ -116,22 +98,14 @@ describe('generated API client (US-198)', () => {
     expectTypeOf<PathKeys>().toMatchTypeOf<
       | '/api/v1/settings/autobangumi'
       | '/api/v1/settings/autobangumi/probe'
-      | '/api/v1/autobangumi/test-connection'
       | '/api/v1/batches/parse'
-      | '/api/v1/batches/{batch_id}/accept'
-      | '/api/v1/batches/{batch_id}/queue'
-      | '/api/v1/batches/{batch_id}/recover'
-      | '/api/v1/batches/{batch_id}/retry'
       | '/api/v1/batches/{batch_id}/save-confirm'
-      | '/api/v1/batches/{batch_id}/submit'
       | '/api/v1/corrections'
       | '/api/v1/mikan/candidates'
       | '/api/v1/mikan/posters/{key}'
       | '/api/v1/preferences'
-      | '/api/v1/qbittorrent/test-connection'
       | '/api/v1/requests'
       | '/api/v1/requests/preview-modify'
-      | '/api/v1/requests/preview-save'
       | '/api/v1/requests/save-confirm'
       | '/api/v1/requests/{request_id}'
       | '/api/v1/requests/{request_id}/accept'
@@ -139,7 +113,6 @@ describe('generated API client (US-198)', () => {
       | '/api/v1/requests/{request_id}/delete'
       | '/api/v1/requests/{request_id}/modify'
       | '/api/v1/requests/{request_id}/safe-info'
-      | '/api/v1/requests/{request_id}/submit-ab'
       | '/api/v1/tracking/items'
       | '/api/v1/tracking/items/{tracking_id}'
       | '/api/v1/tracking/items/{tracking_id}/revalidate'
@@ -186,6 +159,6 @@ describe('generated API client (US-198)', () => {
   })
 
   it('has a non-empty expected operation set (guards the fixture)', () => {
-    expect(EXPECTED_OPERATION_IDS).toHaveLength(42)
+    expect(EXPECTED_OPERATION_IDS).toHaveLength(33)
   })
 })

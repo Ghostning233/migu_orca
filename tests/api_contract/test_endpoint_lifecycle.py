@@ -72,23 +72,3 @@ def test_openapi_projects_lifecycle_registry() -> None:
         for (method, path), entry in ENDPOINT_LIFECYCLE.items()
     }
     assert projected == expected
-
-
-def test_legacy_routes_are_explicit_compatibility_and_tracking_is_authority() -> None:
-    legacy = {
-        ("POST", "/api/v1/requests/preview-save"),
-        ("POST", "/api/v1/requests/<request_id>/submit-ab"),
-        ("POST", "/api/v1/batches/<batch_id>/accept"),
-        ("GET", "/api/v1/batches/<batch_id>/queue"),
-        ("POST", "/api/v1/batches/<batch_id>/submit"),
-        ("POST", "/api/v1/batches/<batch_id>/retry"),
-        ("POST", "/api/v1/batches/<batch_id>/recover"),
-    }
-    for key in legacy:
-        matching = [entry for (method, path), entry in ENDPOINT_LIFECYCLE.items() if (method, _normalized(path)) == key]
-        assert matching and matching[0]["lifecycle"] == "COMPATIBILITY"
-    assert all(
-        "TrackingRecord" in entry["authority"]
-        for (method, path), entry in ENDPOINT_LIFECYCLE.items()
-        if (method, _normalized(path)) in legacy
-    )

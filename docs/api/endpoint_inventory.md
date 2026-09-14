@@ -157,9 +157,9 @@ CLI 显式 `--storage-dir` 行为不受影响）。
 | GET `/api/v1/requests` | `storage_dir?` | `{"requests": [summary...]}` | 损坏 snapshot → `storage_json_error` |
 | GET `/api/v1/requests/<request_id>` | `request_id`（路径）、`storage_dir?` | `{"request": <snapshot>, "history": {available, events, error}, "ab_result": {available, record, error}}` | 缺失 → `request_not_found`；路径片段 → `invalid_request_id` |
 | GET `/api/v1/requests/<request_id>/safe-info` | `request_id`（路径）、`storage_dir?` | `{"safe_info": <RequestSafeInfoDTO>}`（US-217 严格白名单，`extra="forbid"`） | 缺失 → `request_not_found`；路径片段 → `invalid_request_id`；损坏 → `storage_json_error` |
-| POST `/api/v1/requests` | `title`、`source`（`static-fixture`/`mikan`）、`mikan_config?`、`mikan_bangumi?`、`storage_dir?`、`save_request`（默认 false）、`season_confirmation?`、`candidate_context?` | `{"request", "summary", "saved_request"?}`；`save_request=false` 时另含 `draft_id` + `draft_revision`（US-194/211：服务端权威草案 opaque id 与单调 revision） | `data_validation_errors`（title 缺失）；`candidate_context_invalid`；保存失败 → `storage_error` |
+| POST `/api/v1/requests` | `title`、`source`（`static-fixture`/`mikan`）、`mikan_config?`、`mikan_bangumi?`、`storage_dir?`、`season_confirmation?`、`candidate_context?` | `{"request", "summary", "draft_id", "draft_revision"}`（仅签发服务端权威草案） | `data_validation_errors`（title 缺失）；`candidate_context_invalid` |
 | POST `/api/v1/requests/preview-modify` | `draft_id`（US-194，不再收完整 `request`）、`base_revision`（US-211 必填，compare-and-swap）、`patch`、`storage_dir?` | `{"request", "summary", "draft_id", "draft_revision"}` | `invalid_modify_patch_field`；draft 失效 → `draft_expired`/`draft_evicted`/`draft_replayed`（409）；`base_revision` 过期 → `draft_revision_conflict`（409，error_data 只含 `field`/`current_revision`） |
-| POST `/api/v1/requests/save-confirm` | `draft_id`、`base_revision`、`idempotency_key`、`storage_dir?`（US-214；不接受完整 Request） | `{"outcome": "CONFIRMED", "request", "summary", "handoff": {request_id, status: "ACCEPTED", next_action: "OPEN_TRACKING", tracking_id, tracking_status?, tracking_ready, safe_message?}}`（US-222 起 handoff 携带 unified tracking 身份；tracking 写失败时 `tracking_ready=false` + 固定 `safe_message`，不回滚已确认 Request） | 同 preview-save 的 draft 409；同键不同 payload/操作 → `idempotency_conflict`（409）；确认失败 → `save_confirm_failed`（409，details 只含 `outcome=SAVED_CONFIRM_FAILED`/`request_id`/`retry_action=ACCEPT_SAVED_REQUEST`） |
+| POST `/api/v1/requests/save-confirm` | `draft_id`、`base_revision`、`idempotency_key`、`storage_dir?`（不接受完整 Request） | `{"outcome": "CONFIRMED", "request", "summary", "handoff": {...}}` | draft 冲突；`idempotency_conflict`；`save_confirm_failed` |
 | POST `/api/v1/requests/<request_id>/accept` | `request_id`（路径）、`storage_dir?` | `{"request", "summary", "saved_request"?}` | 缺失 → `request_not_found`；状态冲突 → `invalid_request_status` |
 | POST `/api/v1/requests/<request_id>/cancel` | `request_id`（路径）、`cancel_reason?`、`storage_dir?` | `{"request", "summary", "saved_request"?}` | 同上 |
 | POST `/api/v1/requests/<request_id>/modify` | `request_id`（路径）、`patch`、`storage_dir?` | `{"request", "summary", "saved_request"?}` | `invalid_modify_patch_field` |
@@ -305,14 +305,14 @@ issues、外部安全映射摘要和最近 20 条审计事件；绝不回显完�
   `services._storage_dir` 返回 `_WEB_STORAGE_ROOT`），绝不返回 `None`——返回 `None` 会让
   `load_storage_config(None)` 回退 CLI 默认 `DEFAULT_STORAGE_DIR`（仓库根），绕过服务端
   root 覆盖；golden contract 已覆盖「不传 `storage_dir` 的保存写入服务端根而非仓库根」。
-- US-194：`preview-modify`/`preview-save` 不再接收客户端完整 Request，只接受服务端签发的
+- US-194：`preview-modify` 不再接收客户端完整 Request，只接受服务端签发的
   `draft_id`；未保存草案由 `DraftStore`（`apps/migu_orca_web/drafts.py`）持有，TTL 30 分钟、
   容量 128、一次性保存与重放保护，失效/重放统一 409 `draft_expired`/`draft_evicted`/
   `draft_replayed`，错误 details 不回显 draft_id 或草案内容。
 - US-210/211：每个草案带单调 revision（签发为 1，成功 CAS 修改 +1）。`preview-modify`
   必填 `base_revision` 做 compare-and-swap，过期 base → 409 `draft_revision_conflict`，
   error_data 只含 `field=base_revision` 与 `current_revision`，绝不回显 draft_id 或草案内容。
-- US-212：`preview-save` 改为「预留 → 持久化 → 提交/释放」。`draft_id` + `base_revision`
+- US-212：`save-confirm` 采用「预留 → 持久化 → 提交/释放」。`draft_id` + `base_revision`
   通过 `reserve_for_save` 校验并预留草案；Request 成功落盘后才 `commit_save`（写入重放
   tombstone），持久化异常用 `release_save` 释放并保留原 revision——同一草案写盘失败后可重试，
   不再先 pop 后持久化导致用户重新搜索。预留期间的并发修改/保存返回 409 `draft_reserved`。
@@ -444,26 +444,23 @@ Vue 3 + TypeScript + Vite 工程，生产构建由 Flask 在 `/app/` 同源托�
 ### 5.2 URL 参数（SPA history 状态）
 
 - `?request_id=<id>`：详情选择状态（SPA RequestsView 从 URL query 读取，刷新恢复）。
-- `?batch_id=<id>`：批量队列恢复状态（SPA QueueView 从 URL query 读取）。
+- `?batch_id=<id>`：退役队列入口仅用于安全重定向，Tracking 不读取该参数。
 - `?storage_dir=<profile>`：通过统一 transport 追加到 GET 请求（US-193 起为相对 profile，
   绝不携带绝对路径）。
 
 ### 5.3 生命周期（US-190 在 OpenAPI 中记录）
 
-- **request_id**：`POST /api/v1/requests` 生成 → 保存后进入待确认流程（PENDING_CONFIRM）→
-  accept/cancel/modify/delete/submit-ab；删除后 `request_not_found`。
-  预览草案（`save_request: false`）由服务端权威 draft 持有（见 draft_id），
-  `preview-save` 持久化成功后才消费 draft（US-212：写盘失败释放预留可重试），随后获得持久
-  request_id。
+- **request_id**：`POST /api/v1/requests` 生成服务端草案 → save-confirm 后进入待确认流程；
+  accept/cancel/modify/delete；删除后 `request_not_found`。
 - **batch_id**：`POST /api/v1/batches/parse` 返回并仅用于批量 save-confirm。
   通过 URL `batch_id` 恢复；服务端不持久化解析后的批量（客户端回传卡片）。
 - **candidate_context**：`POST /api/v1/mikan/candidates` 在季数需确认时签发（`CandidateSelectionContextStore`，
   TTL 300s、容量 128、单次消费、绑定 mikan_url）；`POST /api/v1/requests` 用
   `candidate_context` + `season_confirmation` 消费，失效 → `candidate_context_invalid`。
-- **draft_id**（US-194）：候选与直连生成（`save_request=false`）签发 opaque `draft_id`，
+- **draft_id**（US-194）：候选与直连生成签发 opaque `draft_id`，
   服务端在 `DraftStore`（`apps/migu_orca_web/drafts.py`）保存权威 PENDING_CONFIRM 草案；
   `preview-modify` 只收 `draft_id` + `base_revision` + 允许 patch（返回更新草案、同一
-  draft_id 与新 draft_revision，US-211），`preview-save` 预留并持久化有效 `draft_id` +
+  draft_id 与新 draft_revision，US-211），`save-confirm` 预留并持久化有效 `draft_id` +
   `base_revision`（成功后才消费，重放 → 409 `draft_replayed`；US-212 起写盘失败不丢草案）。
   draft store 有 TTL（默认 30 分钟）、容量上限（128）、自动清理与一次性保存/重放保护；
   过期/逐出/未知 → 409 `draft_expired`/`draft_evicted`；`base_revision` 过期 → 409

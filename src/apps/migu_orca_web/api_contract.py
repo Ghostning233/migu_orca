@@ -14,7 +14,7 @@ Scope notes
   half of the contract.
 - Deep engine dicts that are intentionally opaque to the frontend
   (``request`` snapshots, preference/correction objects, batch items,
-  ``parse_result``, queue items, AB/qBittorrent results) are typed as
+  ``parse_result`` and historical result records) are typed as
   ``dict[str, Any]``/``list[dict[str, Any]]`` *inside* a whitelisted
   envelope.  The DTOs therefore guarantee the envelope shape and the
   **top-level** result keys, while per-field secret sanitization stays in the
@@ -213,7 +213,7 @@ class AbSubmitResultRecordDTO(_SnapshotBase):
     """Lenient copy of the sanitized AB submit result for the Audit section.
 
     The strict ``AbSubmitResultDTO`` (extra="forbid") whitelists the
-    submit-ab *response*; records read back from storage may carry extra
+    historical external-submit records; records read back from storage may carry extra
     fields, so the detail panel uses this lenient variant.
     """
 
@@ -1087,17 +1087,6 @@ class TrackingManagementResultDTO(_StrictBase):
 # ---------------------------------------------------------------------------
 # Connection tests family
 # ---------------------------------------------------------------------------
-
-
-class AutoBangumiConnectionResultDTO(_StrictBase):
-    """Public whitelist; base_url/token/credentials never appear."""
-
-    reachable: bool
-    authenticated: bool
-    version: str
-    auth_mode: str
-    adapter: str
-    submit_supported: bool
 
 
 class AutoBangumiCapabilitiesDTO(_StrictBase):

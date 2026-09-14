@@ -2656,8 +2656,8 @@
         ]
       },
       "post": {
-        "summary": "生成订阅方案（可保存）",
-        "description": "按标题生成 Request。save_request=false 时仅返回内存预览，并签发服务端权威 draft_id 与 draft_revision（US-194/211：preview-modify/preview-save 只接受 draft_id，不接受客户端完整 Request；US-211 起响应同时携带单调 draft_revision 供下次修改作为 base_revision）；save_request=true 时持久化为 PENDING_CONFIRM 草案。mikan_config/mikan_bangumi/candidate_context 均为 request-scoped，绝不落盘。",
+        "summary": "生成订阅草案",
+        "description": "按标题生成订阅草案。服务端签发权威 draft_id 与 draft_revision，持久化仅由 save-confirm 完成；mikan_config/mikan_bangumi/candidate_context 均为 request-scoped，绝不落盘。",
         "operationId": "createRequest",
         "responses": {
           "200": {
@@ -4111,10 +4111,6 @@
                     ],
                     "default": "static-fixture"
                   },
-                  "save_request": {
-                    "type": "boolean",
-                    "default": false
-                  },
                   "season_confirmation": {
                     "type": "integer",
                     "description": "用户确认的季数（1-99）。"
@@ -4150,7 +4146,6 @@
               "example": {
                 "title": "示例",
                 "source": "static-fixture",
-                "save_request": false,
                 "season_confirmation": 1,
                 "candidate_context": null,
                 "mikan_config": {
@@ -4160,7 +4155,7 @@
               }
             }
           },
-          "description": "生成订阅方案（可保存）"
+          "description": "生成订阅草案"
         }
       }
     },
@@ -8455,6 +8450,222 @@
                   "ok": false,
                   "error_type": "storage_error",
                   "error_message": "读取追番记录失败",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ab_auth_failed: Auto Bangumi 认证失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "ab_auth_failed",
+                  "error_message": "Auto Bangumi 认证失败",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "ab_connection_failed: Auto Bangumi 连接失败 / ab_submit_failed: Auto Bangumi 提交失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "ab_connection_failed",
+                  "error_message": "Auto Bangumi 连接失败",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "ab_submit_unsupported: Auto Bangumi 提交能力不可用 / ab_unsupported_version: Auto Bangumi 版本不受支持 / ab_probe_unsupported: Auto Bangumi 探测能力不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "ab_submit_unsupported",
+                  "error_message": "Auto Bangumi 提交能力不可用",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "ab_timeout: Auto Bangumi 请求超时",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "ab_timeout",
+                  "error_message": "Auto Bangumi 请求超时",
                   "error_data": {
                     "failed_step": "示例步骤"
                   }

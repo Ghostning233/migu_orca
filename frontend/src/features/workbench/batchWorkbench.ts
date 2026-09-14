@@ -261,7 +261,6 @@ export function buildBatchCandidateCreatePayload(
     source: 'mikan',
     mikan_bangumi: candidate.mikan_url,
     storage_dir: options.storageDir || null,
-    save_request: false,
   }
   if (typeof candidate.candidate_context === 'string' && candidate.candidate_context) {
     payload.candidate_context = candidate.candidate_context

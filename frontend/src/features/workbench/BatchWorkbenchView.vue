@@ -10,7 +10,7 @@
 //     returns independent FOUND / EMPTY / FAILED cards plus a batch_id;
 //   - each FOUND card selects the current detail item; the right-hand
 //     CandidateCollectionList chooses a candidate and generates a server-authoritative
-//     draft (POST /api/v1/requests save_request=false) into the card;
+//     server-authoritative draft into the card;
 //   - DRAFT cards open the shared AnimeDraftEditor (preview-modify) plus a
 //     batch-specific 加入批量确认 / 删除当前批量卡片 action row;
 //     action row;

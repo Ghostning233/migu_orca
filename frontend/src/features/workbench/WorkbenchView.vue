@@ -9,7 +9,7 @@
 //      handling and the auditable title-parse summary;
 //   2. 直连合集 fallback — optional checkbox reveals the direct MiKan
 //      URL/ID form; both paths generate an unsaved server-authoritative draft
-//      (save_request=false) through POST /api/v1/requests;
+//      through POST /api/v1/requests;
 //   3. 订阅草案 preview — the returned draft_id + display snapshot render in
 //      SingleAnimeReviewPanel (editable preview-modify + atomic save-confirm).
 //

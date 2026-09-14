@@ -11,7 +11,6 @@ success endpoint on top of the single save-confirm service.
 
 from dataclasses import replace
 
-from ab_engine.controllers.ab_config import build_ab_config
 from apps.migu_orca_web.blueprints import api_blueprint
 from apps.migu_orca_web.routes_requests import _run_draft_save_confirm
 from apps.migu_orca_web.save_confirm_service import (
@@ -38,12 +37,7 @@ from apps.migu_orca_web.serializers import (
 )
 from apps.migu_orca_web.services import (
     _batch_title_parsing_provider,
-    _build_batch_accept_one,
-    _build_batch_load_request,
-    _build_batch_persist_queue,
-    _build_batch_persist_submit_result,
     _enhanced_entries_for_item,
-    _load_batch_queue_or_none,
     _load_corrections_for_batch,
     _load_preferences_for_batch,
     _preference_application_for_item,
@@ -61,23 +55,10 @@ from batch_engine.controllers.anime_title_parser import (
     RuleAnimeTitleParsingProvider,
     parse_anime_title,
 )
-from batch_engine.controllers.batch_accept_controller import (
-    BatchAcceptItem,
-    accept_batch_items,
-    serialize_batch_accept_result,
-)
 from batch_engine.controllers.batch_draft_controller import (
     create_batch_draft,
     split_batch_raw_input,
     update_batch_item_status,
-)
-from batch_engine.controllers.batch_queue_controller import serialize_queue
-from batch_engine.controllers.batch_submit_controller import (
-    compose_ab_submit_one,
-    recover_batch_queue_item,
-    retry_batch_queue_item,
-    serialize_batch_submit_result,
-    submit_batch_queue_items,
 )
 from batch_engine.controllers.preference_applicator import build_review_metadata
 from batch_engine.models import (
@@ -85,20 +66,12 @@ from batch_engine.models import (
     BATCH_ITEM_STATUS_FAILED,
     BATCH_ITEM_STATUS_FOUND,
     MAX_BATCH_ITEMS,
-    BatchSubmissionQueue,
 )
 from extensions.flask_api import class_route
-from extensions.flask_api.views import GetView, PostView
+from extensions.flask_api.views import PostView
 from shared.errors import Stage1Error
-from storage_engine.controllers.queue_repository import (
-    load_submission_queue,
-    save_submission_queue,
-)
 from storage_engine.controllers.request_repository import load_request_snapshot
-from storage_engine.controllers.storage_config import (
-    StorageConfig,
-    load_storage_config,
-)
+from storage_engine.controllers.storage_config import StorageConfig, load_storage_config
 from tracking_engine.models.tracking import TRACKING_ORIGIN_SAVE_CONFIRM
 
 
@@ -405,26 +378,6 @@ def _tracking_handoff_for_confirmed_item(
         return unavailable_tracking_handoff(request_id)
 
 
-def _reflect_batch_queue_tracking(
-    config: StorageConfig,
-    queue: BatchSubmissionQueue,
-) -> None:
-    """Mirror every legacy queue item's state into its unified TrackingRecord.
-
-    Best-effort per item and never raising: the old batch queue is the compat
-    projection, so after an old batch submit/retry/recover the authoritative
-    TrackingRecord is advanced to the matching terminal state (SUCCEEDED ->
-    ACTIVE, FAILED/RETRYABLE -> SUBMIT_FAILED, RESULT_PERSIST_FAILED ->
-    RECOVERY_REQUIRED).  A failure for one item never blocks a sibling.
-    """
-    for item in queue.items:
-        reflect_queue_outcome_into_tracking(
-            config,
-            request_id=item.request_id,
-            queue_status=item.status,
-        )
-
-
 @class_route(api_blueprint, "/api/v1/batches/<batch_id>/save-confirm", methods=["POST"])
 class BatchSaveConfirmView(PostView):
     """Save + confirm selected batch draft cards in one partial-success call.
@@ -480,219 +433,3 @@ class BatchSaveConfirmView(PostView):
         # never rolls back its own confirmation or any sibling's.
         result = _ensure_batch_tracking(result, config)
         return serialize_batch_save_confirm_result(result)
-
-
-# retired US-335: batch accept is replaced by save-confirm
-class BatchAcceptView(PostView):
-    request_validator_model = None
-
-    def save(self) -> dict[str, object]:
-        assert isinstance(self.request_validator_model, BatchAcceptPayload)
-        payload = self.request_validator_model
-        storage_dir = _storage_dir(payload.storage_dir)
-        config = load_storage_config(storage_dir)
-
-        existing_queue = _load_batch_queue_or_none(config, payload.batch_id)
-        items = [
-            BatchAcceptItem(
-                item_id=item.item_id,
-                request_id=item.request_id,
-                title=item.title,
-            )
-            for item in payload.items
-        ]
-        result = accept_batch_items(
-            batch_id=payload.batch_id,
-            items=items,
-            load_request=_build_batch_load_request(storage_dir),
-            accept_one=_build_batch_accept_one(storage_dir),
-            item_ids=payload.item_ids,
-            queue=existing_queue,
-        )
-        # Persist the (possibly extended) queue so later queue-read/submit calls
-        # observe the same items. The queue only holds non-sensitive public
-        # fields, so writing it never stores Auto Bangumi secrets.
-        save_submission_queue(config, result.queue)
-        return serialize_batch_accept_result(result)
-
-
-# retired US-336: queue reads are no longer a Web API
-class BatchQueueView(GetView):
-    request_validator_model = None
-
-    def get_object(self) -> dict[str, object]:
-        assert isinstance(self.request_validator_model, BatchQueueQuery)
-        payload = self.request_validator_model
-        config = load_storage_config(_storage_dir(payload.storage_dir))
-        queue = _load_batch_queue_or_none(config, payload.batch_id)
-        return {
-            "batch_id": payload.batch_id,
-            "queue": serialize_queue(queue) if queue is not None else None,
-        }
-
-
-# retired US-335: external writes are tracking-only
-class BatchSubmitView(PostView):
-    request_validator_model = None
-
-    def save(self) -> dict[str, object]:
-        assert isinstance(self.request_validator_model, BatchSubmitPayload)
-        payload = self.request_validator_model
-        if payload.ab_config is None:
-            raise Stage1Error(
-                "validation_error",
-                "请提供 Auto Bangumi 配置",
-                "batch_submit",
-                {"field": "ab_config"},
-            )
-        if not payload.confirm:
-            raise Stage1Error(
-                "validation_error",
-                "请确认提交到 Auto Bangumi",
-                "batch_submit",
-                {"field": "confirm"},
-            )
-
-        storage_dir = _storage_dir(payload.storage_dir)
-        config = load_storage_config(storage_dir)
-        queue = load_submission_queue(config, payload.batch_id)
-        ab_config = build_ab_config(payload.ab_config.model_dump(exclude_none=True))
-        result = submit_batch_queue_items(
-            batch_id=payload.batch_id,
-            queue=queue,
-            ab_config=ab_config,
-            load_request=_build_batch_load_request(storage_dir),
-            submit_one=compose_ab_submit_one(),
-            persist_queue=_build_batch_persist_queue(config),
-            persist_submit_result=_build_batch_persist_submit_result(storage_dir),
-        )
-        # Persist the updated queue so retries and queue reads observe the new
-        # statuses/summaries. The request-scoped ab_config is never stored; the
-        # service already flushed each item's SUBMITTING and final status before
-        # returning, so a crash mid-batch cannot resurrect READY_TO_SUBMIT.
-        save_submission_queue(config, result.queue)
-        # US-226 compat projection: the old batch queue stays the driver for the
-        # legacy path, so mirror each item's final state into its authoritative
-        # unified TrackingRecord (best-effort, never raising).
-        _reflect_batch_queue_tracking(config, result.queue)
-        return serialize_batch_submit_result(result)
-
-
-# retired US-335: external writes are tracking-only
-class BatchRetryView(PostView):
-    request_validator_model = None
-
-    def save(self) -> dict[str, object]:
-        assert isinstance(self.request_validator_model, BatchRetryPayload)
-        payload = self.request_validator_model
-        if payload.ab_config is None:
-            raise Stage1Error(
-                "validation_error",
-                "请提供 Auto Bangumi 配置",
-                "batch_retry",
-                {"field": "ab_config"},
-            )
-        if not payload.confirm:
-            raise Stage1Error(
-                "validation_error",
-                "请确认提交到 Auto Bangumi",
-                "batch_retry",
-                {"field": "confirm"},
-            )
-
-        storage_dir = _storage_dir(payload.storage_dir)
-        config = load_storage_config(storage_dir)
-        queue = load_submission_queue(config, payload.batch_id)
-        ab_config = build_ab_config(payload.ab_config.model_dump(exclude_none=True))
-        if not (payload.request_id or "").strip():
-            raise Stage1Error(
-                "validation_error",
-                "请提供要重试的订阅方案 request_id",
-                "batch_retry",
-                {"field": "request_id"},
-            )
-        try:
-            result = retry_batch_queue_item(
-                batch_id=payload.batch_id,
-                queue=queue,
-                request_id=payload.request_id,
-                ab_config=ab_config,
-                load_request=_build_batch_load_request(storage_dir),
-                submit_one=compose_ab_submit_one(),
-                persist_queue=_build_batch_persist_queue(config),
-                persist_submit_result=_build_batch_persist_submit_result(storage_dir),
-            )
-        except ValueError as exc:
-            # After the request_id validation above, the only remaining
-            # ValueError from the service is an unknown queue item.
-            raise Stage1Error(
-                "queue_item_not_found",
-                "队列中不存在该订阅方案项目",
-                "batch_retry",
-                {"field": "request_id", "batch_id": payload.batch_id},
-            ) from exc
-        # Persist the updated queue so queue reads observe the retried status.
-        # The request-scoped ab_config is never stored.
-        save_submission_queue(config, result.queue)
-        # US-226 compat projection: mirror the retried item's terminal state
-        # into its unified TrackingRecord (best-effort, never raising).
-        _reflect_batch_queue_tracking(config, result.queue)
-        return serialize_batch_submit_result(result)
-
-
-# retired US-335: recovery is tracking-only
-class BatchRecoverView(PostView):
-    request_validator_model = None
-
-    def save(self) -> dict[str, object]:
-        assert isinstance(self.request_validator_model, BatchRecoverPayload)
-        payload = self.request_validator_model
-        if payload.action not in {"auto", "succeeded", "failed"}:
-            raise Stage1Error(
-                "validation_error",
-                "恢复动作必须是 auto、succeeded 或 failed",
-                "batch_recover",
-                {"field": "action"},
-            )
-        if payload.action != "auto" and not payload.confirm:
-            raise Stage1Error(
-                "validation_error",
-                "请确认人工核验结果后再恢复",
-                "batch_recover",
-                {"field": "confirm"},
-            )
-        if not (payload.request_id or "").strip():
-            raise Stage1Error(
-                "validation_error",
-                "请提供要恢复的订阅方案 request_id",
-                "batch_recover",
-                {"field": "request_id"},
-            )
-
-        storage_dir = _storage_dir(payload.storage_dir)
-        config = load_storage_config(storage_dir)
-        queue = load_submission_queue(config, payload.batch_id)
-        try:
-            result = recover_batch_queue_item(
-                batch_id=payload.batch_id,
-                queue=queue,
-                request_id=payload.request_id,
-                action=payload.action,
-                load_request=_build_batch_load_request(storage_dir),
-                persist_queue=_build_batch_persist_queue(config),
-            )
-        except ValueError as exc:
-            # After the request_id/action validation above, the only remaining
-            # ValueError from the service is an unknown queue item.
-            raise Stage1Error(
-                "queue_item_not_found",
-                "队列中不存在该订阅方案项目",
-                "batch_recover",
-                {"field": "request_id", "batch_id": payload.batch_id},
-            ) from exc
-        # Persist the recovered queue so queue reads observe the new status.
-        save_submission_queue(config, result.queue)
-        # US-226 compat projection: mirror the recovered item's terminal state
-        # into its unified TrackingRecord (best-effort, never raising).
-        _reflect_batch_queue_tracking(config, result.queue)
-        return serialize_batch_submit_result(result)

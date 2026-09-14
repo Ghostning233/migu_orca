@@ -55,7 +55,6 @@ _HTTP_BAD_REQUEST_ERROR_TYPES = {
     "invalid_ab_response",
     "invalid_ab_payload",
     "invalid_ab_submit_result",
-    "invalid_batch_id",
     "invalid_confirmation_action",
     "invalid_input",
     "invalid_request_id",
@@ -64,7 +63,6 @@ _HTTP_BAD_REQUEST_ERROR_TYPES = {
     "invalid_poster_key",
     "invalid_cancel_reason",
     "invalid_storage_dir",
-    "queue_not_found",
     "config_error",
     # US-215: a single batch parse accepts 1..36 non-empty lines; 37+ is a
     # client-input error rejected before any title parse/MiKan/persist seam.
@@ -77,7 +75,6 @@ _HTTP_BAD_REQUEST_ERROR_TYPES = {
 _HTTP_NOT_FOUND_ERROR_TYPES = {
     "request_not_found",
     "poster_not_found",
-    "queue_item_not_found",
     "tracking_not_found",
 }
 # 409 — the request conflicts with the current server state (replay/expired/

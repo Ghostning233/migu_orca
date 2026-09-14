@@ -38,7 +38,6 @@ from apps.base import create_app
 from apps.migu_orca_web.api_contract import (
     ApiErrorEnvelope,
     AutoBangumiCapabilitiesDTO,
-    AutoBangumiConnectionResultDTO,
     AutoBangumiConnectionSummaryDTO,
     BatchParseResultDTO,
     BatchSaveConfirmResultDTO,
@@ -66,16 +65,6 @@ from shared.management_contract import (
     MANAGEMENT_ERROR_MESSAGES,
     management_error_names_for_status,
 )
-
-# Retired endpoint schemas remain local only so historical registry literals can
-# be imported while generation excludes those operations below. They are not
-# part of the public DTO module or emitted contract.
-class _RetiredEndpointDTO(BaseModel):
-    model_config = {"extra": "allow"}
-
-BatchAcceptResultDTO = BatchQueueResultDTO = BatchSubmitResultDTO = _RetiredEndpointDTO
-RequestAbSubmitResultDTO = RequestPreviewSaveResultDTO = _RetiredEndpointDTO
-QbittorrentConnectionResultDTO = _RetiredEndpointDTO
 
 OPENAPI_VERSION = "3.1.0"
 DEFAULT_OUTPUT = Path(__file__).resolve().parents[3] / "docs" / "api" / "openapi.json"
@@ -533,8 +522,8 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     },
     "POST /api/v1/requests": {
         "operationId": "createRequest",
-        "summary": "生成订阅方案（可保存）",
-        "description": "按标题生成 Request。save_request=false 时仅返回内存预览，并签发服务端权威 draft_id 与 draft_revision（US-194/211：preview-modify/preview-save 只接受 draft_id，不接受客户端完整 Request；US-211 起响应同时携带单调 draft_revision 供下次修改作为 base_revision）；save_request=true 时持久化为 PENDING_CONFIRM 草案。mikan_config/mikan_bangumi/candidate_context 均为 request-scoped，绝不落盘。",
+        "summary": "生成订阅草案",
+        "description": "按标题生成订阅草案。服务端签发权威 draft_id 与 draft_revision，持久化仅由 save-confirm 完成；mikan_config/mikan_bangumi/candidate_context 均为 request-scoped，绝不落盘。",
         "requestBody": {
             "type": "object",
             "properties": {
@@ -543,10 +532,6 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                     "type": "string",
                     "enum": ["static-fixture", "mikan"],
                     "default": "static-fixture",
-                },
-                "save_request": {
-                    "type": "boolean",
-                    "default": False,
                 },
                 "season_confirmation": {
                     "type": "integer",
@@ -651,40 +636,6 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "draft_evicted": "订阅草案已失效（服务器容量已满），请重新生成",
                 "draft_replayed": "订阅草案已被保存，请勿重复保存",
                 "draft_revision_conflict": "草案已被更新，请基于最新版本重试",
-            },
-        },
-    },
-    "POST /api/v1/requests/preview-save": {
-        "operationId": "previewSaveRequest",
-        "summary": "保存未修改的预览草案",
-        "description": "US-194/US-212：以 draft_id + base_revision 预留服务端权威草案，持久化成功后才提交重放 tombstone；持久化失败会释放预留，同一 draft/revision 可安全重试，不再因写盘失败丢失草案。仅允许 PENDING_CONFIRM 草案落盘并返回保存结果。",
-        "requestBody": {
-            "type": "object",
-            "required": ["draft_id", "base_revision"],
-            "properties": {
-                "draft_id": {
-                    "type": "string",
-                    "description": "生成/修改时服务端签发的 opaque draft_id（一次性，保存成功后失效）。",
-                    "x-legacy": True,
-                },
-                "base_revision": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "客户端最后观察到的草案 revision（US-212，预留校验；不匹配返回 409 draft_revision_conflict）。",
-                },
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
-            },
-        },
-        "success": RequestPreviewSaveResultDTO,
-        "errors": {
-            "400": {"invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录"},
-            "409": {
-                "invalid_request_status": "只有待确认的订阅草案可以保存",
-                "draft_expired": "订阅草案已过期或不存在，请重新生成",
-                "draft_evicted": "订阅草案已失效（服务器容量已满），请重新生成",
-                "draft_replayed": "订阅草案已被保存，请勿重复保存",
-                "draft_revision_conflict": "草案已被更新，请基于最新版本重试",
-                "draft_reserved": "订阅草案正在保存中，请稍后重试",
             },
         },
     },
@@ -834,33 +785,6 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             "404": {"request_not_found": "订阅方案不存在"},
         },
     },
-    "POST /api/v1/requests/<path:request_id>/submit-ab": {
-        "operationId": "submitRequestToAutoBangumi",
-        "summary": "提交订阅方案到 Auto Bangumi",
-        "description": "ab_config 为 request-scoped 凭据，绝不进入 storage、URL、浏览器 storage、日志或 trace。",
-        "requestBody": {
-            "type": "object",
-            "required": ["ab_config"],
-            "properties": {
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
-            },
-        },
-        "success": RequestAbSubmitResultDTO,
-        "errors": {
-            "400": {
-                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
-                "config_error": "Auto Bangumi 配置无效",
-            },
-            "404": {"request_not_found": "订阅方案不存在"},
-            "409": {"invalid_request_status": "只有已确认订阅方案可以提交"},
-            "502": {
-                "ab_connection_failed": "Auto Bangumi HTTP 连接失败",
-                "ab_submit_failed": "Auto Bangumi HTTP 提交失败",
-            },
-            "503": {"ab_submit_unsupported": "当前 Auto Bangumi 版本或认证模式暂不支持提交"},
-            "504": {"ab_timeout": "Auto Bangumi HTTP 请求超时"},
-        },
-    },
     "GET /api/v1/tracking/items": {
         "operationId": "listTrackingItems",
         "summary": "列出统一追番记录安全摘要",
@@ -913,6 +837,10 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "tracking_storage_error": "追番记录存储失败",
                 "tracking_migration_error": "历史数据迁移失败",
             },
+            "401": {"ab_auth_failed": "Auto Bangumi 认证失败"},
+            "502": {"ab_connection_failed": "Auto Bangumi 连接失败", "ab_submit_failed": "Auto Bangumi 提交失败"},
+            "503": {"ab_submit_unsupported": "Auto Bangumi 提交能力不可用", "ab_unsupported_version": "Auto Bangumi 版本不受支持", "ab_probe_unsupported": "Auto Bangumi 探测能力不可用"},
+            "504": {"ab_timeout": "Auto Bangumi 请求超时"},
         },
     },
     "POST /api/v1/tracking/sync": {
@@ -1402,266 +1330,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             },
         },
     },
-    "POST /api/v1/batches/<batch_id>/accept": {
-        "operationId": "acceptBatchItems",
-        "summary": "接受批量卡片进入提交前队列",
-        "requestBody": {
-            "type": "object",
-            "required": ["batch_id", "items"],
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "item_id": {"type": "string"},
-                            "request_id": {"type": "string"},
-                            "title": {"type": "string"},
-                        },
-                        "required": ["item_id"],
-                    },
-                },
-                "item_ids": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "可选：只接受指定卡片（缺省接受全部）。",
-                },
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
-            },
-        },
-        "success": BatchAcceptResultDTO,
-        "errors": {
-            "400": {
-                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
-                "invalid_batch_id": "batch_id 不能包含路径片段",
-            },
-        },
-    },
-    "GET /api/v1/batches/<batch_id>/queue": {
-        "operationId": "getBatchQueue",
-        "summary": "读取提交前队列",
-        "parameters": [
-            {
-                "name": "batch_id",
-                "in": "path",
-                "required": True,
-                "schema": {"type": "string"},
-            },
-            {
-                "name": "storage_dir",
-                "in": "query",
-                "required": False,
-                "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
-                "schema": {"type": "string"},
-            },
-        ],
-        "success": BatchQueueResultDTO,
-        "errors": {
-            "400": {
-                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
-                "invalid_batch_id": "batch_id 不能包含路径片段",
-            },
-        },
-    },
-    "POST /api/v1/batches/<batch_id>/submit": {
-        "operationId": "submitBatchQueue",
-        "summary": "提交队列到 Auto Bangumi",
-        "requestBody": {
-            "type": "object",
-            "required": ["batch_id", "confirm"],
-            "properties": {
-                "legacy_config": {
-                    "type": "object",
-                    "x-request-scoped": True,
-                    "description": "Auto Bangumi 凭据（request-scoped，绝不落盘）。",
-                    "properties": {
-                        "auth_mode": {"type": "string", "enum": ["password", "api_token"]},
-                        "base_url": {"type": "string", "x-request-scoped": True},
-                        "username": {"type": "string", "x-request-scoped": True},
-                        "password": {"type": "string", "x-request-scoped": True},
-                        "token": {"type": "string", "x-request-scoped": True},
-                        "fallback_enabled": {"type": "boolean"},
-                    },
-                    "required": ["auth_mode", "fallback_enabled"],
-                },
-                "confirm": {"type": "boolean", "description": "显式用户确认。"},
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
-            },
-        },
-        "success": BatchSubmitResultDTO,
-        "errors": {
-            "400": {
-                "validation_error": "缺少 ab_config 或 confirm",
-                "queue_not_found": "队列不存在",
-                "invalid_batch_id": "batch_id 不能包含路径片段",
-                "config_error": "Auto Bangumi 配置无效",
-                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
-            },
-            "502": {
-                "ab_connection_failed": "Auto Bangumi HTTP 连接失败",
-                "ab_submit_failed": "Auto Bangumi HTTP 提交失败",
-            },
-            "503": {"ab_submit_unsupported": "当前 Auto Bangumi 版本或认证模式暂不支持提交"},
-            "504": {"ab_timeout": "Auto Bangumi HTTP 请求超时"},
-        },
-    },
-    "POST /api/v1/batches/<batch_id>/retry": {
-        "operationId": "retryBatchQueueItem",
-        "summary": "重试队列中单个失败项目",
-        "requestBody": {
-            "type": "object",
-            "required": ["batch_id", "request_id", "confirm"],
-            "properties": {
-                "request_id": {"type": "string"},
-                "ab_config": {
-                    "type": "object",
-                    "x-request-scoped": True,
-                    "properties": {
-                        "auth_mode": {"type": "string", "enum": ["password", "api_token"]},
-                        "base_url": {"type": "string", "x-request-scoped": True},
-                        "username": {"type": "string", "x-request-scoped": True},
-                        "password": {"type": "string", "x-request-scoped": True},
-                        "token": {"type": "string", "x-request-scoped": True},
-                        "fallback_enabled": {"type": "boolean"},
-                    },
-                    "required": ["auth_mode", "fallback_enabled"],
-                },
-                "confirm": {"type": "boolean"},
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
-            },
-        },
-        "success": BatchSubmitResultDTO,
-        "errors": {
-            "400": {
-                "validation_error": "缺少 ab_config/confirm/request_id",
-                "queue_not_found": "队列不存在",
-                "invalid_batch_id": "batch_id 不能包含路径片段",
-                "config_error": "Auto Bangumi 配置无效",
-                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
-            },
-            "404": {"queue_item_not_found": "队列中不存在该 request_id"},
-            "502": {
-                "ab_connection_failed": "Auto Bangumi HTTP 连接失败",
-                "ab_submit_failed": "Auto Bangumi HTTP 提交失败",
-            },
-            "503": {"ab_submit_unsupported": "当前 Auto Bangumi 版本或认证模式暂不支持提交"},
-            "504": {"ab_timeout": "Auto Bangumi HTTP 请求超时"},
-        },
-    },
-    "POST /api/v1/batches/<batch_id>/recover": {
-        "operationId": "recoverBatchQueueItem",
-        "summary": "恢复卡住的队列项目",
-        "requestBody": {
-            "type": "object",
-            "required": ["batch_id", "request_id", "action"],
-            "properties": {
-                "request_id": {"type": "string"},
-                "action": {
-                    "type": "string",
-                    "enum": ["auto", "succeeded", "failed"],
-                },
-                "confirm": {"type": "boolean"},
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
-            },
-        },
-        "success": BatchSubmitResultDTO,
-        "errors": {
-            "400": {
-                "validation_error": "action 非法或缺少确认",
-                "invalid_batch_id": "batch_id 不能包含路径片段",
-                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
-            },
-            "404": {"queue_item_not_found": "队列中不存在该 request_id"},
-        },
-    },
-    "POST /api/v1/qbittorrent/test-connection": {
-        "operationId": "testQbittorrentConnection",
-        "summary": "测试 qBittorrent 连接",
-        "description": "qbittorrent_config 为 request-scoped 凭据；成功响应只回白名单字段。",
-        "requestBody": {
-            "type": "object",
-            "required": ["qbittorrent_config"],
-            "properties": {
-                "qbittorrent_config": {
-                    "type": "object",
-                    "x-request-scoped": True,
-                    "properties": {
-                        "endpoint": {"type": "string", "x-request-scoped": True},
-                        "username": {"type": "string", "x-request-scoped": True},
-                        "password": {"type": "string", "x-request-scoped": True},
-                        "timeout_seconds": {"type": "number"},
-                        "verify_tls": {"type": "boolean"},
-                    },
-                    "required": ["endpoint", "username", "password"],
-                }
-            },
-        },
-        "success": QbittorrentConnectionResultDTO,
-        "errors": {
-            "400": {"config_error": "qBittorrent 配置无效"},
-            "401": {"qbittorrent_auth_failed": "认证失败"},
-            "502": {
-                "qbittorrent_connection_failed": "连接失败",
-                "qbittorrent_http_failed": "HTTP 请求失败",
-                "qbittorrent_unexpected_response": "响应无法识别",
-            },
-            "504": {"qbittorrent_timeout": "请求超时"},
-        },
-    },
-    "POST /api/v1/autobangumi/test-connection": {
-        "operationId": "testAutoBangumiConnection",
-        "summary": "测试 Auto Bangumi 连接",
-        "description": "ab_config 为 request-scoped 凭据；成功响应只回白名单字段。",
-        "requestBody": {
-            "type": "object",
-            "required": ["ab_config"],
-            "properties": {
-                "ab_config": {
-                    "type": "object",
-                    "x-request-scoped": True,
-                    "properties": {
-                        "auth_mode": {"type": "string", "enum": ["password", "api_token"]},
-                        "base_url": {"type": "string", "x-request-scoped": True},
-                        "username": {"type": "string", "x-request-scoped": True},
-                        "password": {"type": "string", "x-request-scoped": True},
-                        "token": {"type": "string", "x-request-scoped": True},
-                        "fallback_enabled": {"type": "boolean"},
-                    },
-                    "required": ["auth_mode", "fallback_enabled"],
-                }
-            },
-        },
-        "success": AutoBangumiConnectionResultDTO,
-        "errors": {
-            "400": {"config_error": "Auto Bangumi 配置无效"},
-            "401": {"ab_auth_failed": "认证失败"},
-            "502": {
-                "ab_connection_failed": "连接失败",
-                "ab_submit_failed": "提交失败",
-            },
-            "503": {
-                "ab_unsupported_version": "版本不受支持",
-                "ab_probe_unsupported": "当前认证模式不支持此探测方式",
-            },
-            "504": {"ab_timeout": "请求超时"},
-        },
-    },
 }
-
-# Retired Web APIs are removed from the source registry before generation.
-for _retired_endpoint in (
-    "POST /api/v1/autobangumi/test-connection",
-    "POST /api/v1/qbittorrent/test-connection",
-    "POST /api/v1/requests/preview-save",
-    "POST /api/v1/requests/<path:request_id>/submit-ab",
-    "POST /api/v1/batches/<batch_id>/accept",
-    "GET /api/v1/batches/<batch_id>/queue",
-    "POST /api/v1/batches/<batch_id>/submit",
-    "POST /api/v1/batches/<batch_id>/retry",
-    "POST /api/v1/batches/<batch_id>/recover",
-):
-    _ENDPOINTS.pop(_retired_endpoint, None)
-
 
 def _normalized_path(path: str) -> str:
     """Convert url_map <...> placeholders to OpenAPI {param} form."""

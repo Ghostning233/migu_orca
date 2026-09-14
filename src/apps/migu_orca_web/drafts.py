@@ -3,16 +3,16 @@ from __future__ import annotations
 """Server-authoritative draft store for unsaved preview requests (US-194).
 
 The old preview flow trusted the client to send back the *complete* preview
-Request for every ``preview-modify`` and ``preview-save`` call. US-194 makes
+Request for every draft modification call. US-194 makes
 the server the authority for unsaved drafts:
 
-- generation endpoints (``POST /api/v1/requests`` with ``save_request=false``)
+- generation endpoint (``POST /api/v1/requests``) issues a server draft
   store the authoritative PENDING_CONFIRM draft in this bounded store and
   return an opaque ``draft_id`` plus its initial ``draft_revision`` (US-211);
 - ``preview-modify`` accepts ``draft_id`` + ``base_revision`` + an allowed patch
   (never a client full Request), performs a compare-and-swap, and returns the
   updated in-memory draft with the bumped ``draft_revision``;
-- ``preview-save`` reserves a *valid* ``draft_id`` for persistence, commits the
+- ``save-confirm`` reserves a *valid* ``draft_id`` for persistence, commits the
   replay tombstone only after the Request is written, and releases the draft on
   a failed persist so the same draft/revision can be retried (US-212).
 

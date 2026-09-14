@@ -91,8 +91,8 @@ export interface paths {
         get: operations["listRequests"];
         put?: never;
         /**
-         * 生成订阅方案（可保存）
-         * @description 按标题生成 Request。save_request=false 时仅返回内存预览，并签发服务端权威 draft_id 与 draft_revision（US-194/211：preview-modify/preview-save 只接受 draft_id，不接受客户端完整 Request；US-211 起响应同时携带单调 draft_revision 供下次修改作为 base_revision）；save_request=true 时持久化为 PENDING_CONFIRM 草案。mikan_config/mikan_bangumi/candidate_context 均为 request-scoped，绝不落盘。
+         * 生成订阅草案
+         * @description 按标题生成订阅草案。服务端签发权威 draft_id 与 draft_revision，持久化仅由 save-confirm 完成；mikan_config/mikan_bangumi/candidate_context 均为 request-scoped，绝不落盘。
          */
         post: operations["createRequest"];
         delete?: never;
@@ -2020,14 +2020,13 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        /** @description 生成订阅方案（可保存） */
+        /** @description 生成订阅草案 */
         requestBody: {
             content: {
                 /**
                  * @example {
                  *       "title": "示例",
                  *       "source": "static-fixture",
-                 *       "save_request": false,
                  *       "season_confirmation": 1,
                  *       "candidate_context": null,
                  *       "mikan_config": {
@@ -2044,8 +2043,6 @@ export interface operations {
                      * @enum {string}
                      */
                     source?: "static-fixture" | "mikan";
-                    /** @default false */
-                    save_request?: boolean;
                     /** @description 用户确认的季数（1-99）。 */
                     season_confirmation?: number;
                     /** @description 候选搜索签发的一次性 opaque token（request-scoped）。 */
@@ -4861,6 +4858,42 @@ export interface operations {
                     };
                 };
             };
+            /** @description ab_auth_failed: Auto Bangumi 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "ab_auth_failed",
+                     *       "error_message": "Auto Bangumi 认证失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
             /** @description storage_error: 读取追番记录失败 / storage_json_error: 追番记录 JSON 损坏 / tracking_storage_error: 追番记录存储失败 / tracking_migration_error: 历史数据迁移失败 */
             500: {
                 headers: {
@@ -4872,6 +4905,114 @@ export interface operations {
                      *       "ok": false,
                      *       "error_type": "storage_error",
                      *       "error_message": "读取追番记录失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description ab_connection_failed: Auto Bangumi 连接失败 / ab_submit_failed: Auto Bangumi 提交失败 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "ab_connection_failed",
+                     *       "error_message": "Auto Bangumi 连接失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description ab_submit_unsupported: Auto Bangumi 提交能力不可用 / ab_unsupported_version: Auto Bangumi 版本不受支持 / ab_probe_unsupported: Auto Bangumi 探测能力不可用 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "ab_submit_unsupported",
+                     *       "error_message": "Auto Bangumi 提交能力不可用",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description ab_timeout: Auto Bangumi 请求超时 */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "ab_timeout",
+                     *       "error_message": "Auto Bangumi 请求超时",
                      *       "error_data": {
                      *         "failed_step": "示例步骤"
                      *       }

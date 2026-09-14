@@ -6,7 +6,6 @@ These tests freeze the *current* behavior (success envelope, validation-failure
 envelope, business-failure envelope, sanitized-error envelope) so later Stage 26
 work (US-190 DTO/OpenAPI, US-191 route split, US-192 HTTP status) cannot
 silently change what old pages depend on. Every test uses only fakes and
-``tmp_path`` storage — no real MiKan, AutoBangumi or qBittorrent access.
 """
 
 from pathlib import Path
@@ -15,7 +14,6 @@ from typing import Any
 import pytest
 from flask.testing import FlaskClient
 
-from ab_engine.controllers.ab_client import FakeAutoBangumiClient
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from batch_engine.models import (
     BATCH_ITEM_STATUS_EMPTY,
@@ -287,30 +285,6 @@ def test_golden_request_create_success(client: FlaskClient, tmp_path: Path) -> N
     assert not (tmp_path / "storage").exists()
 
 
-def test_golden_request_create_without_storage_dir_uses_server_root(
-    client: FlaskClient, tmp_path: Path
-) -> None:
-    """US-193/196 regression: omitting ``storage_dir`` must use the server-side
-    Web storage root (the autouse ``_web_storage_root`` fixture points it at
-    ``tmp_path``), never fall back to the CLI default
-    ``DEFAULT_STORAGE_DIR`` (repo ``.migu_orca/storage``)."""
-    from storage_engine.controllers.storage_config import DEFAULT_STORAGE_DIR
-
-    response = client.post(
-        "/api/v1/requests",
-        json={"title": "芙莉莲", "save_request": True},
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 200
-    assert payload["ok"] is True
-    saved = payload["result"]["saved_request"]
-    # The save landed under the server root (tmp_path), not the repo root.
-    saved_path = tmp_path / "requests" / saved["filename"]
-    assert saved_path.exists()
-    assert not (tmp_path / "storage").exists()
-    # The repo-default storage directory is never touched by the Web API.
-    assert not DEFAULT_STORAGE_DIR.exists()
 
 
 def test_golden_request_create_validation_failure(client: FlaskClient) -> None:
@@ -503,137 +477,14 @@ def test_golden_preview_modify_missing_base_revision_is_validation_error(
     assert any(e["field"] == "base_revision" for e in payload["error_data"]["errors"])
 
 
-def test_golden_preview_save_rejects_non_pending(client: FlaskClient) -> None:
-    # A draft is always PENDING_CONFIRM server-side; a *client-supplied* full
-    # Request is no longer accepted (US-194). Missing draft_id/base_revision is
-    # a validation error; a consumed/unknown draft is a 409.
-    response = client.post(
-        "/api/v1/requests/preview-save",
-        json={},
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 400
-    assert payload["ok"] is False
-    assert payload["error_type"] == "data_validation_errors"
-    fields = {e["field"] for e in payload["error_data"]["errors"]}
-    assert "draft_id" in fields
-    # US-212: base_revision is a required request field (>=1).
-    assert "base_revision" in fields
 
 
-def test_golden_preview_save_consumes_draft_once(client: FlaskClient) -> None:
-    """US-194/US-212: preview-save is one-shot; a second save is a 409 replay."""
-    draft_id, _ = _issue_preview_draft(client)
-
-    first = client.post(
-        "/api/v1/requests/preview-save",
-        json={"draft_id": draft_id, "base_revision": 1},
-    )
-    assert first.status_code == 200
-    assert first.get_json()["ok"] is True
-    assert first.get_json()["result"]["request"]["status"] == "PENDING_CONFIRM"
-
-    second = client.post(
-        "/api/v1/requests/preview-save",
-        json={"draft_id": draft_id, "base_revision": 1},
-    )
-    payload = second.get_json()
-    assert second.status_code == 409
-    assert payload["ok"] is False
-    assert payload["error_type"] == "draft_replayed"
-    assert payload["error_message"] == "订阅草案已被保存，请勿重复保存"
-    assert payload["error_data"]["details"] == {"field": "draft_id"}
 
 
-def test_golden_preview_save_stale_revision_conflicts(client: FlaskClient) -> None:
-    """US-212: a save with a stale base_revision never persists the draft.
-
-    The save reserves against the client's last-observed revision; after a
-    concurrent modify bumps the revision, an old save is a 409
-    draft_revision_conflict and the draft stays intact at the newer revision.
-    """
-    draft_id, _ = _issue_preview_draft(client)
-    # A concurrent modify bumps the revision 1 → 2.
-    modify = client.post(
-        "/api/v1/requests/preview-modify",
-        json={
-            "draft_id": draft_id,
-            "base_revision": 1,
-            "patch": {"expected_folder_name": "并发修改"},
-        },
-    )
-    assert modify.status_code == 200
-
-    # A stale save still sends base_revision=1: rejected, draft untouched.
-    stale = client.post(
-        "/api/v1/requests/preview-save",
-        json={"draft_id": draft_id, "base_revision": 1},
-    )
-    payload = stale.get_json()
-    assert stale.status_code == 409
-    assert payload["ok"] is False
-    assert payload["error_type"] == "draft_revision_conflict"
-    assert payload["error_data"]["details"] == {
-        "field": "base_revision",
-        "current_revision": 2,
-    }
-    assert draft_id not in str(payload)
-
-    # A retry with the true current revision still saves exactly one Request.
-    retry = client.post(
-        "/api/v1/requests/preview-save",
-        json={"draft_id": draft_id, "base_revision": 2},
-    )
-    assert retry.status_code == 200
-    assert retry.get_json()["result"]["request"]["request_id"] is not None
 
 
-def test_golden_preview_save_rejects_unknown_draft(client: FlaskClient) -> None:
-    """A never-issued / expired draft id is a stable 409, never a leak."""
-    response = client.post(
-        "/api/v1/requests/preview-save",
-        json={"draft_id": "forged-or-expired-draft-id", "base_revision": 1},
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 409
-    assert payload["ok"] is False
-    assert payload["error_type"] == "draft_expired"
-    assert payload["error_message"] == "订阅草案已过期或不存在，请重新生成"
-    assert payload["error_data"]["details"] == {"field": "draft_id"}
-    # The raw draft id is never echoed back.
-    assert "forged-or-expired-draft-id" not in str(payload)
 
 
-def test_golden_preview_save_reserved_draft_conflicts(client: FlaskClient) -> None:
-    """US-212: a save-in-progress owns the draft → 409 draft_reserved.
-
-    The reservation is pinned server-side; a concurrent save (or modify) of the
-    same draft reports draft_reserved and the safe error data never leaks the
-    draft id or content.
-    """
-    from apps.migu_orca_web.drafts import draft_store
-
-    draft_id, _ = _issue_preview_draft(client)
-    # Another save-in-progress has reserved the draft.
-    reserved, reason = draft_store.reserve_for_save(draft_id, 1)
-    assert reserved is not None
-    assert reason == "ok"
-    try:
-        response = client.post(
-            "/api/v1/requests/preview-save",
-            json={"draft_id": draft_id, "base_revision": 1},
-        )
-        payload = response.get_json()
-        assert response.status_code == 409
-        assert payload["ok"] is False
-        assert payload["error_type"] == "draft_reserved"
-        assert payload["error_message"] == "订阅草案正在保存中，请稍后重试"
-        assert payload["error_data"]["details"] == {"field": "draft_id"}
-        assert draft_id not in str(payload)
-    finally:
-        draft_store.release_save(draft_id)
 
 
 # ---------------------------------------------------------------------------
@@ -1397,121 +1248,16 @@ def test_golden_batch_parse_failed_item_error_sanitized(
     assert item["error"]["error_type"] == "mikan_http_failed"
 
 
-def test_golden_batch_queue_read_success(client: FlaskClient, tmp_path: Path) -> None:
-    response = client.get(
-        "/api/v1/batches/nonexistent/queue",
-        query_string={"storage_dir": "storage"},
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 200
-    assert payload == {
-        "ok": True,
-        "result": {"batch_id": "nonexistent", "queue": None},
-    }
 
 
-def test_golden_batch_accept_reports_unacceptable_item(
-    client: FlaskClient, tmp_path: Path
-) -> None:
-    response = client.post(
-        "/api/v1/batches/batch-1/accept",
-        json={
-            "batch_id": "batch-1",
-            "items": [
-                {
-                    "item_id": "item-1",
-                    "request_id": "missing-request",
-                    "title": "示例标题",
-                }
-            ],
-            "storage_dir": "storage",
-        },
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 200
-    assert payload["ok"] is True
-    item = payload["result"]["items"][0]
-    assert item["status"] == "unacceptable"
-    assert item["queued"] is False
-    assert item["reason"] == "订阅方案不存在或已删除"
-    # The queue is persisted with non-sensitive fields only.
-    assert payload["result"]["queue"]["items"] == []
 
 
-def test_golden_batch_submit_requires_ab_config(client: FlaskClient) -> None:
-    response = client.post(
-        "/api/v1/batches/batch-1/submit",
-        json={"batch_id": "batch-1"},
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 400
-    assert payload["ok"] is False
-    assert payload["error_type"] == "validation_error"
-    assert payload["error_message"] == "请提供 Auto Bangumi 配置"
-    assert payload["error_data"]["details"] == {"field": "ab_config"}
 
 
-def test_golden_batch_submit_requires_confirmation(client: FlaskClient) -> None:
-    response = client.post(
-        "/api/v1/batches/batch-1/submit",
-        json={
-            "batch_id": "batch-1",
-            "ab_config": {
-                "auth_mode": "api_token",
-                "base_url": "http://ab.example",
-                "token": "secret-token",
-                "fallback_enabled": False,
-            },
-        },
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 400
-    assert payload["ok"] is False
-    assert payload["error_type"] == "validation_error"
-    assert payload["error_message"] == "请确认提交到 Auto Bangumi"
-    assert "secret-token" not in str(payload)
 
 
-def test_golden_batch_recover_rejects_bad_action(client: FlaskClient) -> None:
-    response = client.post(
-        "/api/v1/batches/batch-1/recover",
-        json={"batch_id": "batch-1", "request_id": "request-1", "action": "bogus"},
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 400
-    assert payload["ok"] is False
-    assert payload["error_type"] == "validation_error"
-    assert payload["error_message"] == "恢复动作必须是 auto、succeeded 或 failed"
 
 
-def test_golden_batch_retry_unknown_item(client: FlaskClient) -> None:
-    response = client.post(
-        "/api/v1/batches/batch-1/retry",
-        json={
-            "batch_id": "batch-1",
-            "request_id": "missing-request",
-            "ab_config": {
-                "auth_mode": "api_token",
-                "base_url": "http://ab.example",
-                "token": "secret-token",
-                "fallback_enabled": False,
-            },
-            "confirm": True,
-        },
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 400
-    assert payload["ok"] is False
-    assert payload["error_type"] == "queue_not_found"
-    assert payload["error_message"] == "未找到该批次的提交队列"
-    assert payload["error_data"]["details"] == {"batch_id": "batch-1"}
-    assert "secret-token" not in str(payload)
 
 
 # Batch save-confirm (US-216)
@@ -2022,126 +1768,12 @@ def test_golden_corrections_save_missing(client: FlaskClient) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_golden_qbittorrent_connection_success_whitelist(
-    client: FlaskClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def fake_test(*, qbittorrent_config: Any) -> dict[str, Any]:
-        return {
-            "success": True,
-            "summary": {
-                "status": "connected",
-                "reachable": True,
-                "version": "v4.6.7",
-                "endpoint": "http://private.example:8080",
-                "username": "private-user",
-                "password": "private-password",
-                "cookie": "SID=secret-session",
-            },
-            "error": None,
-        }
-
-    monkeypatch.setattr(
-        "apps.migu_orca_web.routes_connections.test_qbittorrent_connection", fake_test
-    )
-    response = client.post(
-        "/api/v1/qbittorrent/test-connection",
-        json={
-            "qbittorrent_config": {
-                "endpoint": "http://private.example:8080",
-                "username": "private-user",
-                "password": "private-password",
-                "timeout_seconds": 7,
-                "verify_tls": False,
-            }
-        },
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 200
-    # Only the whitelist survives; credentials never appear.
-    assert payload == {
-        "ok": True,
-        "result": {"status": "connected", "reachable": True, "version": "v4.6.7"},
-    }
-    serialized = str(payload)
-    assert "private" not in serialized
-    assert "secret" not in serialized
 
 
-def test_golden_qbittorrent_connection_validation_failure(
-    client: FlaskClient,
-) -> None:
-    response = client.post("/api/v1/qbittorrent/test-connection", json={})
-
-    payload = response.get_json()
-    assert response.status_code == 400
-    assert payload["ok"] is False
-    assert payload["error_type"] == "data_validation_errors"
-    assert any(
-        e["field"] == "qbittorrent_config"
-        for e in payload["error_data"]["errors"]
-    )
 
 
-def test_golden_ab_connection_success_whitelist(
-    client: FlaskClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def fake_test(*, ab_config: Any) -> dict[str, Any]:
-        return {
-            "success": True,
-            "summary": {
-                "reachable": True,
-                "authenticated": True,
-                "version": "3.1.18",
-                "auth_mode": "账号密码",
-                "adapter": "legacy_3_1",
-                "submit_supported": True,
-                "base_url": "http://private-ab.example",
-                "token": "secret-token",
-            },
-            "error": None,
-        }
-
-    monkeypatch.setattr("apps.migu_orca_web.routes_connections.test_ab_connection", fake_test)
-    response = client.post(
-        "/api/v1/autobangumi/test-connection",
-        json={
-            "ab_config": {
-                "auth_mode": "password",
-                "base_url": "http://private-ab.example",
-                "username": "private-user",
-                "password": "private-password",
-                "fallback_enabled": False,
-            }
-        },
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 200
-    assert payload == {
-        "ok": True,
-        "result": {
-            "reachable": True,
-            "authenticated": True,
-            "version": "3.1.18",
-            "auth_mode": "账号密码",
-            "adapter": "legacy_3_1",
-            "submit_supported": True,
-        },
-    }
-    serialized = str(payload)
-    assert "private" not in serialized
-    assert "secret" not in serialized
 
 
-def test_golden_ab_connection_validation_failure(client: FlaskClient) -> None:
-    response = client.post("/api/v1/autobangumi/test-connection", json={})
-
-    payload = response.get_json()
-    assert response.status_code == 400
-    assert payload["ok"] is False
-    assert payload["error_type"] == "data_validation_errors"
-    assert any(e["field"] == "ab_config" for e in payload["error_data"]["errors"])
 
 
 # ---------------------------------------------------------------------------
@@ -2149,90 +1781,8 @@ def test_golden_ab_connection_validation_failure(client: FlaskClient) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_golden_submit_ab_rejects_non_accepted(
-    client: FlaskClient, tmp_path: Path
-) -> None:
-    saved_request(tmp_path, "芙莉莲", "request-1")
-
-    response = client.post(
-        "/api/v1/requests/request-1/submit-ab",
-        json={
-            "storage_dir": "storage",
-            "ab_config": {
-                "auth_mode": "api_token",
-                "base_url": "http://private-ab.example",
-                "token": "secret-token",
-                "fallback_enabled": False,
-            },
-        },
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 409
-    assert payload["ok"] is False
-    assert payload["error_type"] == "invalid_request_status"
-    assert payload["error_message"] == "只有已确认订阅方案可以提交到 Auto Bangumi"
-    serialized = str(payload)
-    assert "secret-token" not in serialized
-    assert "private-ab.example" not in serialized
 
 
-def test_golden_submit_ab_success_sanitizes_ab_result(
-    client: FlaskClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from request_engine.controllers.request_controller import accept_request
-    from storage_engine.controllers.request_repository import save_request_snapshot
-    from storage_engine.controllers.storage_config import load_storage_config
-
-    request = accept_request(
-        {
-            **_generated_request("芙莉莲"),
-            "request_id": "request-1",
-        }
-    )
-    save_request_snapshot(load_storage_config(tmp_path / "storage"), request)
-
-    fake_client = FakeAutoBangumiClient(
-        response={
-            "id": "fake-ab-subscription",
-            "status": "created",
-            "token": "leaked-internal",
-            "cookie": "SID=leaked",
-        }
-    )
-
-    def build_client(ab_config: Any) -> FakeAutoBangumiClient:
-        return fake_client
-
-    monkeypatch.setattr(
-        "apps.migu_orca_entry.controllers.entry_controller.ab_http_client.create_auto_bangumi_http_client",
-        build_client,
-    )
-
-    response = client.post(
-        "/api/v1/requests/request-1/submit-ab",
-        json={
-            "storage_dir": "storage",
-            "ab_config": {
-                "auth_mode": "api_token",
-                "base_url": "http://private-ab.example",
-                "token": "secret-token",
-                "fallback_enabled": False,
-            },
-        },
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 200
-    assert payload["ok"] is True
-    result = payload["result"]
-    assert result["request"]["status"] == "ACCEPTED"
-    assert result["ab_submit_result"]["success"] is True
-    serialized = str(payload)
-    assert "leaked-internal" not in serialized
-    assert "SID=leaked" not in serialized
-    assert "secret-token" not in serialized
-    assert "private-ab.example" not in serialized
 
 
 # ---------------------------------------------------------------------------
@@ -2252,7 +1802,6 @@ def test_golden_upstream_failures_map_to_stable_status(
     assert _error_http_status("mikan_http_failed") == 502
     assert _error_http_status("ab_connection_failed") == 502
     assert _error_http_status("ab_submit_failed") == 502
-    assert _error_http_status("qbittorrent_connection_failed") == 502
     assert _error_http_status("poster_unavailable") == 502
     # 503 — upstream unavailable or client version unsupported.
     assert _error_http_status("ab_unsupported_version") == 503
@@ -2260,7 +1809,6 @@ def test_golden_upstream_failures_map_to_stable_status(
     # 504 — upstream timeout (retryable).
     assert _error_http_status("mikan_timeout") == 504
     assert _error_http_status("ab_timeout") == 504
-    assert _error_http_status("qbittorrent_timeout") == 504
     # 500 — server-side storage errors never masquerade as client errors.
     assert _error_http_status("storage_error") == 500
     assert _error_http_status("storage_json_error") == 500

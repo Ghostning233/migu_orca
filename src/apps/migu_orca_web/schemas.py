@@ -73,7 +73,7 @@ class BatchItemDescriptorPayload(BaseModel):
     """One batch card descriptor for the accept endpoint.
 
     ``request_id`` is present only when the card already has a saved Request
-    (unsaved preview drafts are persisted through preview-save before accept).
+    (legacy descriptor retained only for local parsing compatibility).
     """
 
     item_id: str
