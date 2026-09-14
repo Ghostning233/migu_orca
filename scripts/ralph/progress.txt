@@ -317,3 +317,9 @@ Started: 2026-09-13
 - 删除 tracking 未使用 `TrackingSubmitPayload` 旧定义，更新 submit/retry/recovery 路由与 TrackingView 的过时 request-scoped 注释；移除输出后处理清洗器，tracking OpenAPI 描述与属性直接由源定义生成。
 - 退役旧 tracking browser 模块替换为 saved-flow 独立覆盖，tracking source residual contract `2 passed`；management/projection 既有测试完成旧字段断言迁移（仍有历史非关键 skip 组，未伪称零 skip）。
 - 重新生成 OpenAPI/generated client；`openapi --check`、api generate/check、typecheck、build、saved browser suite `9 passed`、tracking residual contract `3 passed`、Settings/Tracking Vitest `21 passed` 均通过。
+
+## 2026-09-14 / 工作包 A P1 测试契约迁移收口
+- 正式 tracking OpenAPI 源定义不再以 `legacy_config` 改名掩盖旧字段；移除 tracking 旧 payload 定义与 request-scoped 注释，正式 request body 仅保留 saved generation 与业务字段。
+- management 四组与 recovery projection 从旧 credential body 断言迁移至 `connection_ref + configuration_revision`，保留 scope/capability/confirm/unknown/zero-write 语义；新增 source residual tests 均通过。
+- 验证：management/projection Vitest `61 passed`；Settings/Tracking Vitest `21 passed`；API residual/saved body contracts `5 passed`；OpenAPI/API generate/check、typecheck、build、Ruff、diff check、saved Chromium suite `9 passed`。
+- 遗留风险：为彻底退役旧 tracking browser fixture，旧大文件已替换为 saved-flow 入口；本轮未扩展每个历史 Stage 38 case 的独立 saved 等价覆盖，需审核确认覆盖面。

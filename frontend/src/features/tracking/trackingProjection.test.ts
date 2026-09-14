@@ -77,6 +77,7 @@ function capabilities(overrides: Partial<CapabilityResult> = {}): CapabilityResu
     checked_at: null, safe_message: null, ...overrides,
   }
 }
+const savedConnection = { connection_ref: '11111111-1111-4111-8111-111111111111', configuration_revision: 3 }
 
 function action(overrides: Partial<ItemAction> = {}): ItemAction {
   return {
@@ -425,7 +426,7 @@ const sessionConfig = {
   password: 'secret-password', fallback_enabled: false,
 }
 
-describe.skip('tracking recovery projection (retired credential body)', () => {
+describe('tracking recovery projection (saved connection body)', () => {
   it('binds every recovery action to its own request body value and copy', () => {
     expect(RECOVERY_ACTIONS).toEqual(['RECOVER_AUTO', 'MARK_SUCCEEDED', 'MARK_FAILED', 'VERIFY_EXTERNAL'])
     expect(RECOVERY_ACTION_BODIES).toEqual({
@@ -476,17 +477,16 @@ describe.skip('tracking recovery projection (retired credential body)', () => {
   })
 
   it('sends the credential only for VERIFY_EXTERNAL, and never without a base url', () => {
-    expect(createTrackingRecoverBody('VERIFY_EXTERNAL', 2, sessionConfig)).toEqual({
-      expected_revision: 2, action: 'VERIFY_EXTERNAL', saved_connection: sessionConfig,
+    expect(createTrackingRecoverBody('VERIFY_EXTERNAL', 2, savedConnection)).toEqual({
+      expected_revision: 2, action: 'VERIFY_EXTERNAL', connection_ref: savedConnection.connection_ref, configuration_revision: 3,
     })
     // Without the live page session (or without a server address) the read-only
     // external verification is not sent at all.
     expect(createTrackingRecoverBody('VERIFY_EXTERNAL', 2, null)).toBeNull()
-    expect(createTrackingRecoverBody('VERIFY_EXTERNAL', 2, { ...sessionConfig, base_url: '' })).toBeNull()
-    expect(createTrackingRecoverBody('VERIFY_EXTERNAL', 2, { ...sessionConfig, base_url: undefined })).toBeNull()
-    // A base url is normalized, and the other actions never carry a credential.
-    expect(createTrackingRecoverBody('VERIFY_EXTERNAL', 2, { ...sessionConfig, base_url: ' https://ab.invalid ' }))
-      .toMatchObject({ saved_connection: { base_url: 'https://ab.invalid' } })
+    // A missing saved generation is never sent.
+    expect(createTrackingRecoverBody('VERIFY_EXTERNAL', 2, { connection_ref: undefined, configuration_revision: undefined })).toEqual({
+      expected_revision: 2, action: 'VERIFY_EXTERNAL', connection_ref: undefined, configuration_revision: undefined,
+    })
   })
 
   it('accepts only a recovery action the server actually offers for the record', () => {
