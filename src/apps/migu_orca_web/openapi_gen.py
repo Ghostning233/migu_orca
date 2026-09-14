@@ -1783,8 +1783,41 @@ def _build_openapi() -> dict[str, Any]:
             }
         },
     }
+    _strip_retired_tracking_credentials(document)
     _make_storage_dir_nullable(document)
     return document
+
+
+_SAVED_TRACKING_OPERATION_IDS = frozenset({
+    "syncTrackingItems", "submitTrackingItem", "retryTrackingItem",
+    "modifyTrackingItem", "setEnabledTrackingItem", "deleteExternalTrackingItem",
+    "refreshTrackingItem", "recoverTrackingItem",
+})
+
+
+def _strip_retired_tracking_credentials(document: dict[str, Any]) -> None:
+    """Keep the formal tracking contract on saved connection generations only."""
+    def clean(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: clean(item)
+                for key, item in value.items()
+                if key not in {"ab_config", "legacy_credentials"}
+            }
+        if isinstance(value, list):
+            return [clean(item) for item in value]
+        if isinstance(value, str):
+            return value.replace("request-scoped Auto Bangumi 配置", "已保存连接 generation") \
+                .replace("request-scoped 凭据", "已保存连接 generation") \
+                .replace("ab_config", "saved connection")
+        return value
+
+    for methods in document["paths"].values():
+        for operation in methods.values():
+            if operation.get("operationId") in _SAVED_TRACKING_OPERATION_IDS:
+                cleaned = clean(operation)
+                operation.clear()
+                operation.update(cleaned)
 
 
 def _path_sort_key(path: str) -> tuple[int, str]:

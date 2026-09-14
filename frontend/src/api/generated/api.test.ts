@@ -116,7 +116,6 @@ describe('generated API client (US-198)', () => {
     expectTypeOf<PathKeys>().toMatchTypeOf<
       | '/api/v1/settings/autobangumi'
       | '/api/v1/settings/autobangumi/probe'
-      | '/api/v1/autobangumi/capabilities'
       | '/api/v1/autobangumi/test-connection'
       | '/api/v1/batches/parse'
       | '/api/v1/batches/{batch_id}/accept'
@@ -163,8 +162,7 @@ describe('generated API client (US-198)', () => {
   })
 
   it('types saved connection references on tracking bodies', () => {
-    // submit-ab's request body carries ab_config (request-scoped credentials);
-    // the transport layer will use this generated type for the POST body.
+    // Formal tracking writes carry only the saved connection generation.
     type SubmitBody = NonNullable<operations['submitTrackingItem']['requestBody']>['content']['application/json']
     expectTypeOf<SubmitBody>().toMatchTypeOf<{ connection_ref: string; configuration_revision: number }>()
   })

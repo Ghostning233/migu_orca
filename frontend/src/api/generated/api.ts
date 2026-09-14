@@ -271,7 +271,7 @@ export interface paths {
         put?: never;
         /**
          * 同步外部追番安全投影
-         * @description US-233：使用 request-scoped Auto Bangumi 配置执行一次只读同步。confirm 必须为 true；响应只返回能力、安全计数与 TrackingItemDTO，不返回上游对象、外部 ID、URL 或凭据。
+         * @description US-233：使用 已保存连接 generation执行一次只读同步。confirm 必须为 true；响应只返回能力、安全计数与 TrackingItemDTO，不返回上游对象、外部 ID、URL 或凭据。
          */
         post: operations["syncTrackingItems"];
         delete?: never;
@@ -635,7 +635,7 @@ export interface paths {
         put?: never;
         /**
          * 重试明确失败的统一追番提交（可靠顺序）
-         * @description US-226：只允许从 SUBMIT_FAILED 重试；VERIFYING_EXTERNAL/RECOVERY_REQUIRED 必须先 recover 再 retry。请求 shape 与 submit 相同（confirm 严格 true、ab_config 只在单次请求内存、opaque idempotency_key）。服务复用统一提交序列：重新读取最新本地 Request 并复核、bind 新 operation=PREPARED、持久化 TrackingRecord=SUBMITTING、operation=IN_PROGRESS 作为外部边界、单次 Auto Bangumi 调用、结果分类与落盘。同 idempotency_key 网络重放复用原 operation。expected_revision 过期 → 409 tracking_revision_conflict；非 SUBMIT_FAILED → 409 tracking_state_conflict；confirm=false → 400 tracking_confirmation_required；同键不同绑定 → 409 tracking_idempotency_conflict。
+         * @description US-226：只允许从 SUBMIT_FAILED 重试；VERIFYING_EXTERNAL/RECOVERY_REQUIRED 必须先 recover 再 retry。请求 shape 与 submit 相同（confirm 严格 true、saved connection 只在单次请求内存、opaque idempotency_key）。服务复用统一提交序列：重新读取最新本地 Request 并复核、bind 新 operation=PREPARED、持久化 TrackingRecord=SUBMITTING、operation=IN_PROGRESS 作为外部边界、单次 Auto Bangumi 调用、结果分类与落盘。同 idempotency_key 网络重放复用原 operation。expected_revision 过期 → 409 tracking_revision_conflict；非 SUBMIT_FAILED → 409 tracking_state_conflict；confirm=false → 400 tracking_confirmation_required；同键不同绑定 → 409 tracking_idempotency_conflict。
          */
         post: operations["retryTrackingItem"];
         delete?: never;
@@ -692,7 +692,7 @@ export interface paths {
         put?: never;
         /**
          * 提交统一追番方案到 Auto Bangumi（可靠顺序）
-         * @description US-225：对单条统一追番记录执行可靠提交流程。confirm 必须严格为 true，ab_config 只在单次请求内存中存在（绝不进入 storage/URL/日志/trace）。服务端重新读取最新本地 Request 并执行完整本地复核（纯本地，不信任浏览器 fingerprint）；复核不通过时不访问 Auto Bangumi，已落盘业务结果仍返回 HTTP 200，outcome 为 NEEDS_RECONFIRM/SUBMIT_FAILED/VERIFYING_EXTERNAL/RECOVERY_REQUIRED/ACTIVE。仅 Request fingerprint 变化且其余复核通过时，confirm=true 表示采纳最新方案并继续同一次提交。外部调用前先持久化 TrackingRecord=SUBMITTING 与 operation=IN_PROGRESS 作为外部可能发生的持久化边界；同 idempotency_key 重放复用原 operation，并发同键只允许一次外部调用。expected_revision 过期 → 409 tracking_revision_conflict；confirm=false → 400 tracking_confirmation_required；同键不同绑定 → 409 tracking_idempotency_conflict；进行中的提交操作 → 409 tracking_operation_in_progress。
+         * @description US-225：对单条统一追番记录执行可靠提交流程。confirm 必须严格为 true，saved connection 只在单次请求内存中存在（绝不进入 storage/URL/日志/trace）。服务端重新读取最新本地 Request 并执行完整本地复核（纯本地，不信任浏览器 fingerprint）；复核不通过时不访问 Auto Bangumi，已落盘业务结果仍返回 HTTP 200，outcome 为 NEEDS_RECONFIRM/SUBMIT_FAILED/VERIFYING_EXTERNAL/RECOVERY_REQUIRED/ACTIVE。仅 Request fingerprint 变化且其余复核通过时，confirm=true 表示采纳最新方案并继续同一次提交。外部调用前先持久化 TrackingRecord=SUBMITTING 与 operation=IN_PROGRESS 作为外部可能发生的持久化边界；同 idempotency_key 重放复用原 operation，并发同键只允许一次外部调用。expected_revision 过期 → 409 tracking_revision_conflict；confirm=false → 400 tracking_confirmation_required；同键不同绑定 → 409 tracking_idempotency_conflict；进行中的提交操作 → 409 tracking_operation_in_progress。
          */
         post: operations["submitTrackingItem"];
         delete?: never;
@@ -14527,15 +14527,7 @@ export interface operations {
                  * @example {
                  *       "expected_revision": 1,
                  *       "idempotency_key": "示例",
-                 *       "confirm": true,
-                 *       "legacy_credentials": {
-                 *         "auth_mode": "示例",
-                 *         "base_url": null,
-                 *         "username": null,
-                 *         "password": null,
-                 *         "token": null,
-                 *         "fallback_enabled": true
-                 *       }
+                 *       "confirm": true
                  *     }
                  */
                 "application/json": {
@@ -14548,15 +14540,6 @@ export interface operations {
                      * @enum {boolean}
                      */
                     confirm: true;
-                    legacy_credentials?: {
-                        /** @enum {string} */
-                        auth_mode: "password" | "api_token";
-                        base_url?: string;
-                        username?: string;
-                        password?: string;
-                        token?: string;
-                        fallback_enabled: boolean;
-                    };
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
                     storage_dir?: string | null;
                 };
@@ -15668,15 +15651,7 @@ export interface operations {
                  *       "idempotency_key": "示例",
                  *       "confirm": true,
                  *       "connection_ref": "示例",
-                 *       "configuration_revision": 1,
-                 *       "legacy_credentials": {
-                 *         "auth_mode": "示例",
-                 *         "base_url": null,
-                 *         "username": null,
-                 *         "password": null,
-                 *         "token": null,
-                 *         "fallback_enabled": true
-                 *       }
+                 *       "configuration_revision": 1
                  *     }
                  */
                 "application/json": {
@@ -15692,15 +15667,6 @@ export interface operations {
                     /** Format: uuid */
                     connection_ref: string;
                     configuration_revision: number;
-                    legacy_credentials?: {
-                        /** @enum {string} */
-                        auth_mode: "password" | "api_token";
-                        base_url?: string;
-                        username?: string;
-                        password?: string;
-                        token?: string;
-                        fallback_enabled: boolean;
-                    };
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
                     storage_dir?: string | null;
                 };
