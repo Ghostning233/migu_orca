@@ -390,3 +390,4 @@ Started: 2026-09-13
 - 最终验证：受影响 Vitest `36 passed`；frontend build、api:check、typecheck、受影响 ESLint 通过；真实 Chromium shell/settings `27 passed`；未访问真实上游。
 - 追加刷新与真实浏览器补证：`invalidate()` 现在同时使摘要与 profile 待处理徽标失效并重读，summary/list 各自代际校验；新增 `tests/browser/test_stage39_global_status.py` 覆盖未配置状态、键盘进入设置及 items-only 徽标。最终受影响 Vitest `44 passed`，真实 Chromium shell/settings/global `29 passed`，build/api:check/typecheck/受影响 ESLint 全部通过。
 - 继续修复 profile 失败响应代际门控：loadPending 错误仅在 request+当前 profile 同时匹配时写入 unknown；App 增加 profile 变化轮询触发受控刷新。global 浏览器矩阵扩展至 8 cases，旧 badge 不得伪装为当前 profile 的 2 条计数；定向 Vitest/build/typecheck/api:check/ESLint 通过。
+- 修正驻留 SPA held route 时序：默认 profile 首次请求先安全 fulfill，profile-a 首次响应建立 2 条徽标，第二次 A 请求 held；Settings 实际保存 profile-b 后立即隐藏旧徽标并读取 B=1，释放旧 A 响应不覆盖。global Chromium `8 passed`。

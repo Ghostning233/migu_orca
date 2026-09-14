@@ -18,6 +18,8 @@ import { currentStorageDir } from '@/features/requests/requestStorage'
 const route = useRoute()
 const mainContent = ref<HTMLElement | null>(null)
 const connection = useConnectionStatus()
+const connectionState = connection.state
+const pendingCount = connection.pendingCount
 let profilePoll: ReturnType<typeof setInterval> | undefined
 let observedProfile = ''
 
@@ -101,9 +103,9 @@ watch(
           aria-label="Auto Bangumi 连接状态，进入设置"
         >
           <span class="workspace-status-dot" aria-hidden="true"></span>
-          <span>Auto Bangumi：{{ connection.state.value.label }}（本地桌面工作区）</span>
-          <span v-if="connection.pendingCount" class="pending-badge" aria-label="待处理追番数量">
-            {{ connection.pendingCount }}
+          <span>Auto Bangumi：{{ connectionState.label }}（本地桌面工作区）</span>
+          <span v-if="pendingCount" class="pending-badge" aria-label="待处理追番数量">
+            {{ pendingCount }}
           </span>
         </RouterLink>
       </div>

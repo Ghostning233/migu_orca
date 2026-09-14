@@ -99,7 +99,7 @@ def test_profile_switch_uses_new_query_and_failure_never_fabricates_zero(page: P
 
     page.route("**/api/v1/settings/autobangumi", handle)
     page.route("**/api/v1/tracking/items**", handle)
-    page.goto(f"{live_server_url}/app/add")
+    page.goto(f"{live_server_url}/app/tracking")
     page.evaluate("localStorage.clear()")
     page.evaluate("localStorage.setItem('miguOrca.web.storageDir', 'profile-a')")
     page.reload()
@@ -141,3 +141,59 @@ def test_status_entry_keyboard_brand_and_zoom_canary(page: Page, live_server_url
     assert page.evaluate("location.pathname") == "/app/add"
     assert page.evaluate("Object.keys(localStorage).join(',')") == ""
     assert page.evaluate("Object.keys(sessionStorage).join(',')") == ""
+
+
+def test_profile_change_while_app_is_mounted_invalidates_held_old_list(page: Page, live_server_url: str) -> None:
+    held_old = []
+    a_calls = 0
+    requests: list[str] = []
+
+    def handle(route, request):
+        if request.url.endswith("/settings/autobangumi"):
+            route.fulfill(status=200, content_type="application/json", body=_envelope({
+                "configured": True, "credential_present": True, "connection_ref": "ref-a",
+                "configuration_revision": 1, "connection_status": "CONFIGURED",
+            }))
+        elif "/tracking/items" in request.url:
+            requests.append(request.url)
+            if "profile-b" in request.url:
+                route.fulfill(status=200, content_type="application/json", body=_envelope({
+                    "items": [{"status": "PENDING_SUBMIT"}],
+                }))
+            else:
+                nonlocal a_calls
+                if "profile-a" not in request.url:
+                    route.fulfill(status=200, content_type="application/json", body=_envelope({"items": []}))
+                elif a_calls == 0:
+                    a_calls += 1
+                    route.fulfill(status=200, content_type="application/json", body=_envelope({
+                        "items": [{"status": "PENDING_SUBMIT"}, {"status": "SUBMIT_FAILED"}],
+                    }))
+                else:
+                    held_old.append(route)
+        elif request.url.endswith("/preferences") and request.method == "POST":
+            route.fulfill(status=200, content_type="application/json", body=_envelope({}))
+        else:
+            route.continue_()
+
+    page.route("**/api/v1/settings/autobangumi", handle)
+    page.route("**/api/v1/tracking/items**", handle)
+    page.route("**/api/v1/preferences", handle)
+    page.goto(f"{live_server_url}/app/tracking")
+    page.evaluate("localStorage.setItem('miguOrca.web.storageDir', 'profile-a')")
+    page.reload()
+    expect(page.locator(".pending-badge")).to_have_text("2")
+
+    # Change the profile through the real Settings form while keeping the SPA alive.
+    page.locator(".workspace-status").press("Enter")
+    page.wait_for_url("**/app/settings")
+    page.locator("#settings-storage-dir").fill("profile-b")
+    page.locator("#storage-preferences-save").click()
+    page.locator(".brand-block").press("Enter")
+    page.wait_for_url("**/app/add")
+    expect(page.locator(".pending-badge")).to_have_text("1")
+    assert any("storage_dir=profile-b" in url for url in requests)
+    held_old[0].fulfill(status=200, content_type="application/json", body=_envelope({
+        "items": [{"status": "PENDING_SUBMIT"}, {"status": "SUBMIT_FAILED"}],
+    }))
+    expect(page.locator(".pending-badge")).to_have_text("1")
