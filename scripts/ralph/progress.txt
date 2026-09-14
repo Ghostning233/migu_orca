@@ -367,3 +367,7 @@ Started: 2026-09-13
 ## 2026-09-14 / 工作包 A management intent 换代连续旅程
 - 扩展 management UNKNOWN 真实 journey：同 ref 显式 probe 后 MODIFY 写入返回 UNKNOWN，随后摘要刷新为新 generation，旧 intent 保持锁定且没有第二次 POST；补充新 generation 读取无旧 mapping 写入的页面断言。
 - 验证：`npm --prefix frontend run build` 通过；完整 saved Chromium suite `27 passed`，`git diff --check` 通过。
+
+## 2026-09-14 / 工作包 A submit/retry 单飞时间序列旅程
+- 新增参数化真实 Chromium journey（PENDING_SUBMIT、SUBMIT_FAILED/RETRY）：saved refA 显式 probe 后确认请求，route 延迟返回 RECOVERY_REQUIRED，重复点击期间仅捕获一次 POST/key/refA/revision；刷新读取新 generation 不重放旧意图。
+- 验证：`npm --prefix frontend run build` 通过；完整 saved suite `29 passed`（真实 Chromium）。

@@ -1,5 +1,7 @@
 """Stage 39 browser red tests for the retired credential boundary."""
 
+import time
+
 import pytest
 from playwright.sync_api import expect
 
@@ -958,6 +960,53 @@ def test_management_generation_refresh_keeps_external_id_unbound(page, live_serv
     page.reload()
     page.wait_for_selector("#tracking-probe-saved")
     assert calls == []
+
+
+@pytest.mark.browser
+@pytest.mark.parametrize("status_code", [("PENDING_SUBMIT", "SUBMIT"), ("SUBMIT_FAILED", "RETRY")])
+def test_submit_retry_singleflight_holds_unknown_lock_across_generation(page, live_server_url, status_code):
+    status, code = status_code
+    ref_a = "11111111-1111-4111-8111-111111111111"
+    ref_b = "22222222-2222-4222-8222-222222222222"
+    settings_reads = 0
+    posts: list[dict] = []
+    item = {**_item("tracking-a", "单飞提交", status), "status": status,
+        "available_actions": [{"code": code, "label": code, "style": "PRIMARY", "requires_confirmation": True, "target_scopes": []}]}
+
+    def handler(route, request):
+        nonlocal settings_reads
+        path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+        if request.method == "GET" and path == "/settings/autobangumi":
+            settings_reads += 1; ref = ref_a if settings_reads == 1 else ref_b
+            route.fulfill(json={"ok": True, "result": {"configured": True, "credential_present": True, "connection_ref": ref, "configuration_revision": settings_reads, "connection_status": "CONFIGURED"}}); return
+        if request.method == "GET" and path == "/tracking/items":
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}}); return
+        if request.method == "GET" and path == "/tracking/items/tracking-a":
+            route.fulfill(json={"ok": True, "result": _detail_payload(item)}); return
+        if request.method == "POST" and path.endswith("/probe"):
+            route.fulfill(json={"ok": True, "result": _probe_capabilities()}); return
+        if request.method == "POST" and (path.endswith("/submit") or path.endswith("/retry")):
+            posts.append(request.post_data_json or {})
+            time.sleep(0.35)
+            route.fulfill(json={"ok": True, "result": {"tracking_id": "tracking-a", "action": code, "outcome": "RECOVERY_REQUIRED", "needs_manual": True, "tracking": item}}); return
+        route.continue_()
+
+    page.route("**/api/v1/**", handler)
+    page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+    page.wait_for_selector("#tracking-probe-saved")
+    page.locator("#tracking-probe-saved").click()
+    selector = "#tracking-submit" if code == "SUBMIT" else "#tracking-retry"
+    page.wait_for_selector(selector)
+    page.locator(selector).click()
+    page.locator(".confirm-dialog .primary-button").click()
+    page.locator(selector).dblclick(force=True)
+    page.wait_for_timeout(500)
+    assert len(posts) == 1
+    assert posts[0]["connection_ref"] == ref_a and posts[0]["configuration_revision"] == 1
+    assert "ab_config" not in posts[0] and "password" not in str(posts[0])
+    page.reload()
+    page.wait_for_selector("#tracking-probe-saved")
+    assert len(posts) == 1
 
 
 @pytest.mark.browser
