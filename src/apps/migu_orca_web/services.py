@@ -20,7 +20,6 @@ from apps.migu_orca_entry.controllers.entry_controller import (
     apply_confirmation_action,
     apply_request_save_action,
 )
-from apps.migu_orca_web.schemas import RequestMikanConfigPayload
 from apps.migu_orca_web.serializers import (
     _optional_error,
     _raise_result_error,
@@ -49,7 +48,6 @@ from mikan_engine.controllers.mikan_candidate_cache import (
 )
 from mikan_engine.controllers.mikan_config import (
     MikanConfig,
-    default_mikan_config,
 )
 from request_engine.controllers.request_controller import (
     ACCEPTED,
@@ -169,22 +167,6 @@ def set_web_storage_root(root: Path | None) -> None:
 def _web_storage_root() -> Path:
     """Return the resolved server-side Web storage root (for docs/tests)."""
     return _WEB_STORAGE_ROOT
-
-
-def _resolve_mikan_config(explicit: RequestMikanConfigPayload | None) -> MikanConfig:
-    """Build the MiKan config for a request, falling back to system defaults.
-
-    An explicit request-scoped ``mikan_config`` overrides the system default as a
-    test seam or for advanced callers. The resolved config is request-scoped only:
-    it is never written to browser storage, URL state, history, or Request
-    snapshots, and it contains no secrets.
-    """
-    if explicit is not None:
-        return MikanConfig(
-            search_endpoint=explicit.search_endpoint,
-            timeout_seconds=explicit.timeout_seconds,
-        )
-    return default_mikan_config()
 
 
 def _batch_title_parsing_provider() -> AnimeTitleParsingProvider:

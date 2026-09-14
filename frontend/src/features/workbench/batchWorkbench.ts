@@ -258,7 +258,6 @@ export function buildBatchCandidateCreatePayload(
 ): Record<string, unknown> {
   const payload: Record<string, unknown> = {
     title: candidate.title || '未命名合集',
-    source: 'mikan',
     mikan_bangumi: candidate.mikan_url,
     storage_dir: options.storageDir || null,
   }

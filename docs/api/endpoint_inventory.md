@@ -157,7 +157,7 @@ CLI 显式 `--storage-dir` 行为不受影响）。
 | GET `/api/v1/requests` | `storage_dir?` | `{"requests": [summary...]}` | 损坏 snapshot → `storage_json_error` |
 | GET `/api/v1/requests/<request_id>` | `request_id`（路径）、`storage_dir?` | `{"request": <snapshot>, "history": {available, events, error}, "ab_result": {available, record, error}}` | 缺失 → `request_not_found`；路径片段 → `invalid_request_id` |
 | GET `/api/v1/requests/<request_id>/safe-info` | `request_id`（路径）、`storage_dir?` | `{"safe_info": <RequestSafeInfoDTO>}`（US-217 严格白名单，`extra="forbid"`） | 缺失 → `request_not_found`；路径片段 → `invalid_request_id`；损坏 → `storage_json_error` |
-| POST `/api/v1/requests` | `title`、`source`（`static-fixture`/`mikan`）、`mikan_config?`、`mikan_bangumi?`、`storage_dir?`、`season_confirmation?`、`candidate_context?` | `{"request", "summary", "draft_id", "draft_revision"}`（仅签发服务端权威草案） | `data_validation_errors`（title 缺失）；`candidate_context_invalid` |
+| POST `/api/v1/requests` | `title`、`mikan_bangumi?`、`storage_dir?`、`season_confirmation?`、`candidate_context?` | `{"request", "summary", "draft_id", "draft_revision"}`（仅签发服务端权威草案） | `data_validation_errors`（title 缺失）；`candidate_context_invalid` |
 | POST `/api/v1/requests/preview-modify` | `draft_id`（US-194，不再收完整 `request`）、`base_revision`（US-211 必填，compare-and-swap）、`patch`、`storage_dir?` | `{"request", "summary", "draft_id", "draft_revision"}` | `invalid_modify_patch_field`；draft 失效 → `draft_expired`/`draft_evicted`/`draft_replayed`（409）；`base_revision` 过期 → `draft_revision_conflict`（409，error_data 只含 `field`/`current_revision`） |
 | POST `/api/v1/requests/save-confirm` | `draft_id`、`base_revision`、`idempotency_key`、`storage_dir?`（不接受完整 Request） | `{"outcome": "CONFIRMED", "request", "summary", "handoff": {...}}` | draft 冲突；`idempotency_conflict`；`save_confirm_failed` |
 | POST `/api/v1/requests/<request_id>/accept` | `request_id`（路径）、`storage_dir?` | `{"request", "summary", "saved_request"?}` | 缺失 → `request_not_found`；状态冲突 → `invalid_request_status` |
@@ -191,7 +191,7 @@ torrent 文件名，不含 magnet/下载 URL/原始 RSS）、`folder_name`（安
 
 | 端点 | 请求字段 | 成功 `result` | 业务失败示例 |
 | --- | --- | --- | --- |
-| POST `/api/v1/mikan/candidates` | `query`、`mikan_config?`（`search_endpoint`/`timeout_seconds`） | `{"query", "status", "parse_result", "attempted_queries", "candidates": [candidate...], "error"?}` | 空 query → `data_validation_errors`；搜索失败 → 结果内 `error` + `status=FAILED` |
+| POST `/api/v1/mikan/candidates` | `query` | `{"query", "status", "parse_result", "attempted_queries", "candidates": [candidate...], "error"?}` | 空 query → `data_validation_errors`；搜索失败 → 结果内 `error` + `status=FAILED` |
 | GET `/api/v1/mikan/posters/<key>` | `key`（路径，opaque） | 图片字节（`image/jpeg`/`image/png`/`image/gif`/`image/webp`），`Cache-Control: private, max-age=86400` | 见 §4.3 |
 
 `candidate` 形状：`bangumi_id`、`title`、`mikan_url`、`poster_url`（同源 opaque 代理 URL 或 null）、
@@ -211,7 +211,7 @@ torrent 文件名，不含 magnet/下载 URL/原始 RSS）、`folder_name`（安
 
 | 端点 | 请求字段 | 成功 `result` | 业务失败示例 |
 | --- | --- | --- | --- |
-| POST `/api/v1/batches/parse` | `raw_input`、`mikan_config?`、`storage_dir?` | `{"batch_id", "raw_input", "items": [item...]}` | 空输入 → `validation_error`「请至少输入一个番剧名称」；超过 36 个非空行 → `batch_limit_exceeded`（400，details 只含 `field=raw_input`/`limit=36`/`actual`，任何标题解析/MiKan/持久化 seam 前拒绝） |
+| POST `/api/v1/batches/parse` | `raw_input`、`storage_dir?` | `{"batch_id", "raw_input", "items": [item...]}` | 空输入 → `validation_error`「请至少输入一个番剧名称」；超过 36 个非空行 → `batch_limit_exceeded`（400，details 只含 `field=raw_input`/`limit=36`/`actual`，任何标题解析/MiKan/持久化 seam 前拒绝） |
 | POST `/api/v1/batches/<batch_id>/save-confirm` | `batch_id`（路径）、`items[]`（`item_id`/`draft_id`/`base_revision`/`idempotency_key`）、`item_ids?`、`storage_dir?` | `{"batch_id", "results": [{item_id, outcome, request_id?, status?, error_type?, error_message?, tracking_id?, tracking_ready?}], "summary": {requested, confirmed, failed}}`（HTTP 200 逐条部分成功；US-222 起 CONFIRMED 项携带 `tracking_id`/`tracking_ready`，单条 tracking 写失败不回滚该已确认项或其他条目） | 每条复用单番 save-confirm 用例；可预期单条失败（`draft_expired`/`draft_revision_conflict`/`draft_reserved`/`idempotency_conflict`/`save_confirm_failed` 等）→ 逐条 `failed` 脱敏结果，不回滚成功项；重复 `item_id` → `skipped`；请求级错误仍走普通失败 envelope（缺 item 字段/idempotency_key → `data_validation_errors`；非法 storage_dir → `invalid_storage_dir`） |
 
 `parse` 的 `item` 形状：`item_id`、`raw_title`、`status`（`RAW`/`PARSED`/`FOUND`/`EMPTY`/`FAILED`）、

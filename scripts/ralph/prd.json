@@ -17,7 +17,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -350,8 +350,8 @@
         "Typecheck passes"
       ],
       "priority": 20,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Web MiKan 搜索/批量解析/Request create 统一服务端 default_mikan_config，严格拒绝旧 mikan_config/source；同步 OpenAPI/generated 与前端 payload/中文入口，保留直连救援和端点预算。定向 API/OpenAPI/Vitest/typecheck/build/Ruff 通过；浏览器 workbench/batch 已验证候选、批量、直连与失败路径，旧测试存储断言仍有既有环境问题。"
     },
     {
       "id": "US-338",

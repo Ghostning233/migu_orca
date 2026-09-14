@@ -50,7 +50,7 @@ export interface paths {
         put?: never;
         /**
          * 搜索 MiKan 候选
-         * @description 按标题搜索 MiKan 候选，返回公开候选元数据。mikan_config 为 request-scoped。
+         * @description 按标题搜索 MiKan 候选，返回公开候选元数据。搜索配置由服务端提供。
          */
         post: operations["searchMikanCandidates"];
         delete?: never;
@@ -92,7 +92,7 @@ export interface paths {
         put?: never;
         /**
          * 生成订阅草案
-         * @description 按标题生成订阅草案。服务端签发权威 draft_id 与 draft_revision，持久化仅由 save-confirm 完成；mikan_config/mikan_bangumi/candidate_context 均为 request-scoped，绝不落盘。
+         * @description 按标题生成订阅草案。Web 统一使用服务端 MiKan 配置；服务端签发权威 draft_id 与 draft_revision，持久化仅由 save-confirm 完成。
          */
         post: operations["createRequest"];
         delete?: never;
@@ -591,18 +591,11 @@ export interface operations {
             content: {
                 /**
                  * @example {
-                 *       "raw_input": "示例",
-                 *       "mikan_config": {
-                 *         "timeout_seconds": 1
-                 *       }
+                 *       "raw_input": "示例"
                  *     }
                  */
                 "application/json": {
                     raw_input: string;
-                    mikan_config?: {
-                        search_endpoint?: string;
-                        timeout_seconds?: number;
-                    };
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
                     storage_dir?: string | null;
                 };
@@ -1265,18 +1258,11 @@ export interface operations {
             content: {
                 /**
                  * @example {
-                 *       "query": "示例",
-                 *       "mikan_config": {
-                 *         "timeout_seconds": 1
-                 *       }
+                 *       "query": "示例"
                  *     }
                  */
                 "application/json": {
                     query: string;
-                    mikan_config?: {
-                        search_endpoint?: string;
-                        timeout_seconds?: number;
-                    };
                 };
             };
         };
@@ -2020,32 +2006,18 @@ export interface operations {
                 /**
                  * @example {
                  *       "title": "示例",
-                 *       "source": "static-fixture",
                  *       "season_confirmation": 1,
                  *       "candidate_context": null,
-                 *       "mikan_config": {
-                 *         "timeout_seconds": 1
-                 *       },
                  *       "mikan_bangumi": null
                  *     }
                  */
                 "application/json": {
                     /** @description 番剧名称（必填）。 */
                     title: string;
-                    /**
-                     * @default static-fixture
-                     * @enum {string}
-                     */
-                    source?: "static-fixture" | "mikan";
                     /** @description 用户确认的季数（1-99）。 */
                     season_confirmation?: number;
                     /** @description 候选搜索签发的一次性 opaque token（request-scoped）。 */
                     candidate_context?: string;
-                    /** @description MiKan 搜索配置（request-scoped，不落盘）。 */
-                    mikan_config?: {
-                        search_endpoint?: string;
-                        timeout_seconds?: number;
-                    };
                     /** @description MiKan 详情页 URL（request-scoped）。 */
                     mikan_bangumi?: string;
                 };

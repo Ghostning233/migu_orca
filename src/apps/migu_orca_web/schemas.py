@@ -31,25 +31,9 @@ class RequestDetailQuery(BaseModel):
     storage_dir: str | None = None
 
 
-class RequestMikanConfigPayload(BaseModel):
-    search_endpoint: str
-    timeout_seconds: float = Field(gt=0)
-
-    @field_validator("search_endpoint")
-    @classmethod
-    def validate_search_endpoint(cls, value: str) -> str:
-        endpoint = value.strip()
-        if not endpoint:
-            raise ValueError("search_endpoint cannot be empty")
-        return endpoint
-
-
 class MikanCandidateSearchPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     query: str
-    mikan_config: RequestMikanConfigPayload | None = Field(
-        default=None,
-        validate_default=True,
-    )
 
     @field_validator("query")
     @classmethod
@@ -61,11 +45,8 @@ class MikanCandidateSearchPayload(BaseModel):
 
 
 class BatchParsePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     raw_input: str
-    mikan_config: RequestMikanConfigPayload | None = Field(
-        default=None,
-        validate_default=True,
-    )
     storage_dir: str | None = None
 
 
@@ -140,12 +121,8 @@ class CorrectionSavePayload(BaseModel):
 
 
 class RequestCreatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     title: str
-    source: str = "static-fixture"
-    mikan_config: RequestMikanConfigPayload | None = Field(
-        default=None,
-        validate_default=True,
-    )
     mikan_bangumi: str | None = None
     storage_dir: str | None = None
     season_confirmation: int | None = None
@@ -158,14 +135,6 @@ class RequestCreatePayload(BaseModel):
         if not title:
             raise ValueError("title cannot be empty")
         return title
-
-    @field_validator("source")
-    @classmethod
-    def validate_source(cls, value: str) -> str:
-        source = value.strip()
-        if source not in {"static-fixture", "mikan"}:
-            raise ValueError("source must be static-fixture or mikan")
-        return source
 
     @field_validator("mikan_bangumi")
     @classmethod

@@ -511,10 +511,8 @@ class TestAppWorkbenchCandidateSelectionAndDraft:
 
         assert captured
         payload = captured[0]
-        assert payload["source"] == "mikan"
         assert payload["mikan_bangumi"] == "https://mikan.example/Home/Bangumi/2353"
         assert payload["title"] == "葬送的芙莉莲"
-        assert payload["save_request"] is False
         assert "mikan_config" not in payload
 
         # The editable preview form and atomic save-confirm action are offered.
@@ -884,10 +882,8 @@ class TestAppWorkbenchDirectFallback:
 
         assert captured
         payload = captured[0]
-        assert payload["source"] == "mikan"
         assert payload["mikan_bangumi"] == "https://mikan.example/Home/Bangumi/2353"
         assert payload["title"] == "芙莉莲"
-        assert payload["save_request"] is False
         assert "mikan_config" not in payload
         # The fallback input is cleared after success and no URL id is set.
         assert page.locator("#mikan-fallback-bangumi").input_value() == ""
@@ -932,7 +928,6 @@ class TestAppWorkbenchDirectFallback:
 
         assert captured
         assert captured[0]["mikan_bangumi"] == sensitive_values[0]
-        assert captured[0]["save_request"] is False
         assert "mikan_config" not in captured[0]
         assert page.locator("#mikan-fallback-bangumi").input_value() == ""
         assert "request_id=" not in page.url

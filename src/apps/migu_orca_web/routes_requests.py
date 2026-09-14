@@ -61,13 +61,13 @@ from apps.migu_orca_web.services import (
     _build_save_confirm_persist_pending,
     _load_ab_result_section,
     _load_history_section,
-    _resolve_mikan_config,
     _storage_dir,
     _storage_profile,
 )
 from apps.migu_orca_web.tracking_handoff import ensure_confirmed_request_tracking
 from extensions.flask_api import class_route
 from extensions.flask_api.views import GetView, PostView
+from mikan_engine.controllers.mikan_config import default_mikan_config
 from request_engine.controllers.request_controller import (
     summarize_request,
 )
@@ -224,13 +224,10 @@ class RequestCreateView(PostView):
     def save(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, RequestCreatePayload)
         payload = self.request_validator_model
-        mikan_config = None
-        if payload.source == "mikan":
-            mikan_config = _resolve_mikan_config(payload.mikan_config)
         result = generate_request(
             EntryRequest(raw_title=payload.title),
-            source_mode="mikan_http" if payload.source == "mikan" else "static_fixture",
-            mikan_config=mikan_config,
+            source_mode="mikan_http",
+            mikan_config=default_mikan_config(),
             mikan_bangumi=payload.mikan_bangumi,
         )
         if not result["success"]:

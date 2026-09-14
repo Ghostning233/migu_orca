@@ -41,7 +41,6 @@ from apps.migu_orca_web.services import (
     _load_corrections_for_batch,
     _load_preferences_for_batch,
     _preference_application_for_item,
-    _resolve_mikan_config,
     _search_batch_item_candidates,
     _search_candidates_from_parse_result,
     _storage_dir,
@@ -69,6 +68,7 @@ from batch_engine.models import (
 )
 from extensions.flask_api import class_route
 from extensions.flask_api.views import PostView
+from mikan_engine.controllers.mikan_config import default_mikan_config
 from shared.errors import Stage1Error
 from storage_engine.controllers.request_repository import load_request_snapshot
 from storage_engine.controllers.storage_config import StorageConfig, load_storage_config
@@ -107,7 +107,7 @@ class BatchParseView(PostView):
             )
         batch = create_batch_draft(raw_input)
 
-        mikan_config = _resolve_mikan_config(self.request_validator_model.mikan_config)
+        mikan_config = default_mikan_config()
         config = load_storage_config(
             _storage_dir(self.request_validator_model.storage_dir)
         )

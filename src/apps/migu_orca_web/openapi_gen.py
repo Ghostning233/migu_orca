@@ -523,16 +523,11 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     "POST /api/v1/requests": {
         "operationId": "createRequest",
         "summary": "生成订阅草案",
-        "description": "按标题生成订阅草案。服务端签发权威 draft_id 与 draft_revision，持久化仅由 save-confirm 完成；mikan_config/mikan_bangumi/candidate_context 均为 request-scoped，绝不落盘。",
+        "description": "按标题生成订阅草案。Web 统一使用服务端 MiKan 配置；服务端签发权威 draft_id 与 draft_revision，持久化仅由 save-confirm 完成。",
         "requestBody": {
             "type": "object",
             "properties": {
                 "title": {"type": "string", "description": "番剧名称（必填）。"},
-                "source": {
-                    "type": "string",
-                    "enum": ["static-fixture", "mikan"],
-                    "default": "static-fixture",
-                },
                 "season_confirmation": {
                     "type": "integer",
                     "description": "用户确认的季数（1-99）。",
@@ -541,17 +536,6 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                     "type": "string",
                     "description": "候选搜索签发的一次性 opaque token（request-scoped）。",
                     "x-legacy": True,
-                },
-                "mikan_config": {
-                    "type": "object",
-                    "description": "MiKan 搜索配置（request-scoped，不落盘）。",
-                    "properties": {
-                        "search_endpoint": {
-                            "type": "string",
-                            "x-request-scoped": True,
-                        },
-                        "timeout_seconds": {"type": "number"},
-                    },
                 },
                 "mikan_bangumi": {
                     "type": "string",
@@ -1100,22 +1084,12 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     "POST /api/v1/mikan/candidates": {
         "operationId": "searchMikanCandidates",
         "summary": "搜索 MiKan 候选",
-        "description": "按标题搜索 MiKan 候选，返回公开候选元数据。mikan_config 为 request-scoped。",
+        "description": "按标题搜索 MiKan 候选，返回公开候选元数据。搜索配置由服务端提供。",
         "requestBody": {
             "type": "object",
             "required": ["query"],
             "properties": {
                 "query": {"type": "string"},
-                "mikan_config": {
-                    "type": "object",
-                    "properties": {
-                        "search_endpoint": {
-                            "type": "string",
-                            "x-request-scoped": True,
-                        },
-                        "timeout_seconds": {"type": "number"},
-                    },
-                },
             },
         },
         "success": MikanCandidateResultDTO,
@@ -1256,16 +1230,6 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             "required": ["raw_input"],
             "properties": {
                 "raw_input": {"type": "string"},
-                "mikan_config": {
-                    "type": "object",
-                    "properties": {
-                        "search_endpoint": {
-                            "type": "string",
-                            "x-request-scoped": True,
-                        },
-                        "timeout_seconds": {"type": "number"},
-                    },
-                },
                 "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
             },
         },

@@ -443,7 +443,6 @@ class TestAppBatchCandidateAndDraft:
         expect(card.locator(".batch-card-status")).to_contain_text("草案")
         assert captured
         payload = captured[0]
-        assert payload["source"] == "mikan"
         assert payload["mikan_bangumi"] == "https://mikan.example/Home/Bangumi/42"
         # The draft_id never enters the URL or DOM.
         assert "request_id=" not in page.url

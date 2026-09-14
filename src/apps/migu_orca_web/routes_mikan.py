@@ -21,7 +21,6 @@ from apps.migu_orca_web.serializers import (
     poster_service,
 )
 from apps.migu_orca_web.services import (
-    _resolve_mikan_config,
     _search_candidates_from_parse_result,
 )
 from batch_engine.controllers.anime_title_parser import parse_anime_title
@@ -29,6 +28,7 @@ from batch_engine.models import BATCH_ITEM_STATUS_FAILED
 from extensions.flask_api import class_route
 from extensions.flask_api.api import _error_http_status, failed_response
 from extensions.flask_api.views import PostView
+from mikan_engine.controllers.mikan_config import default_mikan_config
 from shared.errors import Stage1Error
 
 
@@ -39,7 +39,7 @@ class MikanCandidateSearchView(PostView):
     def save(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, MikanCandidateSearchPayload)
         payload = self.request_validator_model
-        mikan_config = _resolve_mikan_config(payload.mikan_config)
+        mikan_config = default_mikan_config()
         parse_result = parse_anime_title(payload.query)
         searched = _search_candidates_from_parse_result(parse_result, mikan_config)
         result: dict[str, object] = {
