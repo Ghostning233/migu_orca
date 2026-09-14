@@ -257,8 +257,7 @@ Stage 32 执行 PRD 为 `docs/MiGuOrca_stage32_contract_hardening_PRD.md`，分�
 2026-09-08 B-A 已作为 Stage 28 完成并交付，B-B 已作为 Stage 29 完成并交付；2026-09-09 B-C1
 已作为 Stage 30 完成，B-C2 已作为 Stage 31 完成；B-D 已作为 Stage 32 完成，F-A 已作为
 Stage 33 完成，F-B 已完成为 Stage 34，F-C 已完成为 Stage 35，F-D 已完成为 Stage 36，F-E 已完成为 Stage 37，F-F 已完成为 Stage 38。
-F-G 在本次用户讨论后已扩展为 Stage 39 开发 PRD；当前已实现为 Gate 5 候选并正在独立审核，
-以下已完成阶段与早期候选顺序属于历史追溯：
+F-G 已由 Stage 39 完成并通过 Gate 5 审核；以下已完成阶段与早期候选顺序属于历史追溯：
 
 1. BL-025 后端支撑：B-A 已作为 Stage 28 完成，覆盖 draft revision、可靠保存、单番/批量保存
    确认、36 部上限和 safe-info（见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md`）；B-B 已作为
@@ -361,12 +360,12 @@ Stage 31 已完成 B-C2 可靠写管理；Stage 32 已完成 B-D 契约收尾，
 在已保存 Request 语境下独占真实 `SafeInfoDialog`/`getRequestSafeInfo`，并交付列表—详情、共享修改、
 复制再用与精确 tracking 链接。F-F 正式追番管理已完成为 Stage 38（US-303～US-317）：US-303 先补齐
 Stage 32 generated contract 的严格 modify patch 与安全 target scopes，随后交付 `/app/tracking` 正式
-管理页与单条外部管理闭环；`QueueView` 已退出默认运行时但组件与后端兼容端点保留。F-G 继续独立评审，
-原 handoff 范围在 2026-09-13 用户讨论中修订：
+管理页与单条外部管理闭环；`QueueView` 已退出默认运行时但组件与后端兼容端点保留。F-G 的
+范围在 2026-09-13 用户讨论中修订并由 Stage 39 完成：
 [Stage 39 PRD](MiGuOrca_stage39_deployment_settings_PRD.md)增加仅 AB 的部署端私有配置和连接绑定，
 先独立验收后端，再完成 F-G；删除 qB 独立接入及无用旧 Web 编排，MiKan 搜索由项目封装，
-顶部状态只进入设置、不打开凭据弹窗。Stage 39 US-318～US-340 已实现，候选门禁与独立审核记录见
-`docs/MiGuOrca_stage39_deployment_settings_PRD.md`；未宣称已发布。
-本节以上的完成阶段/候选顺序是历史基线；Stage 39 当前状态以本节明确的 Gate 5 候选和独立审核记录为准，
-不要求保留旧兼容写路径。
+顶部状态只进入设置、不打开凭据弹窗。Stage 39 US-318～US-340 已完成独立 Gate 5 审核并合并；
+记录见 `docs/MiGuOrca_stage39_deployment_settings_PRD.md` 与 Stage 39 archive。
+本节以上的完成阶段/候选顺序是历史基线；下一步先由用户审核已交付前端功能并提出问题，
+不预设新的 Stage 或保留旧兼容写路径。
 流式封面代理等未排期方向继续记录在 `docs/optional_features.md`。

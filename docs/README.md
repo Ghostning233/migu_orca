@@ -7,8 +7,7 @@
 - 项目使用、运行方式与已实现能力：[仓库 README](../README.md)
 - Agent 常驻入口与全仓库规范：[AGENTS.md](../AGENTS.md)
 - 按需查阅的验证、Ralph、审核与发布流程：[开发流程](development/workflow.md)
-- Stage 39 后半程的原子工作包与干净 Agent 交接：[Stage 39 过渡开发流程](development/stage39-transition-workflow.md)
-- 新主 Agent 接续 Stage 39 的一次性交接快照：[Stage 39 当前交接](development/stage39-current-handoff.md)
+- Stage 39 的归档、Gate 5 结论与后续审核安排：[Stage 39 收尾记录](archive/stage39/closeout.md)
 - 产品定位与总体需求：[主 PRD](MiGuOrca_main_PRD.md)
 - 当前代码架构与目录边界：[架构与目录约定](design/architecture.md)
 - Stage 19 以后方向与已完成阶段：[Future Stages](MiGuOrca_future_stages.md)
@@ -22,9 +21,8 @@
   B-D 已完成为 Stage 32；F-A 已作为 Stage 33 完成（US-257～US-265），F-B 已作为
   Stage 34 完成（US-266～US-274）并归档；Stage 35 完成（US-275～US-283）并归档；Stage 36
   完成 F-D（US-284～US-293）并归档；Stage 37 已完成 F-E（US-294～US-302）并归档；Stage 38
-  已完成 F-F（US-303～US-317）并归档；F-G 经本次用户决策扩展为 Stage 39 的后端前置支撑与
-  设置发布收尾；US-318～US-326 后端前置工作包已完成并独立验收，后续从 US-327 开始按
-  原子工作包推进，范围见下方阶段入口。
+  已完成 F-F（US-303～US-317）并归档；F-G 已由 Stage 39 完成并归档（US-318～US-340）。
+  前端体验重构现等待用户审核已交付功能并形成问题清单，暂不预设下一 Stage。
   工作目标、候选 Stage、设计决策门和 Agent 协作顺序见
   [前端体验重构：工作目标与协作流程](frontend-ux-refactor-work-goals.md)。
 - 页面体验设计与视觉评审已经作为独立工作完成。后续必须先完成后端支撑和前端分片 PRD、
@@ -49,12 +47,9 @@
   F-F 已完成并归档为[Stage 38：正式追番管理](MiGuOrca_stage38_tracking_management_PRD.md)，
   F-G 新决策见[Stage 39：部署连接配置与设置发布收尾](MiGuOrca_stage39_deployment_settings_PRD.md)。
 
-截至 2026-09-13，最近完成阶段为 Stage 38「正式追番管理」（F-F，US-303～US-317 已全部完成并归档）。
-Stage 38 不实现 F-G 设置/发布收尾。2026-09-13 用户确认新目标：仅 AB 凭据保存在部署端，取消全局
-凭据弹窗、删除无用 qB/旧 Web 编排，MiKan 搜索由服务端封装。Stage 39 先独立验收新增后端支撑，
-再接入 F-G；US-318～US-340 已在当前候选分支完成实现与定向验证，Gate 5 完整门禁记录见
-Stage 39 PRD §8.2 与 progress。US-338～US-340 仍需独立审核后才可作为发布候选，不将候选分支
-误称为已发布。
+Stage 39「部署连接配置与设置发布收尾」（F-G，US-318～US-340）已完成独立 Gate 5 审核，并经 PR #64
+合并至 `main`（merge `f29e217`）。Ralph 快照与阶段交接已归档；后续由用户审核已交付的前端功能并提出问题，
+问题澄清后再决定是否建立新 Stage PRD。
 
 ## Stage PRD
 
@@ -77,7 +72,7 @@ Stage 39 PRD §8.2 与 progress。US-338～US-340 仍需独立审核后才可作
 - Stage 36：[批量审核完整旅程](MiGuOrca_stage36_batch_review_journey_PRD.md)（F-D，US-284～US-293 已完成并归档；不实现 F-E～F-G）
 - Stage 37：[追番方案与安全信息](MiGuOrca_stage37_plans_safe_info_PRD.md)（F-E，US-294～US-302 已完成并归档；不实现 F-F～F-G）
 - Stage 38：[正式追番管理](MiGuOrca_stage38_tracking_management_PRD.md)（F-F，US-303～US-317 已完成并归档；不实现 F-G）
-- Stage 39：[部署连接配置与设置发布收尾](MiGuOrca_stage39_deployment_settings_PRD.md)（候选验收中；US-318～US-340 已实现，等待独立审核）
+- Stage 39：[部署连接配置与设置发布收尾](MiGuOrca_stage39_deployment_settings_PRD.md)（US-318～US-340 已完成并归档）
 
 Stage PRD 记录单一阶段的范围、非目标、决策和验收结果。已完成阶段的 Ralph 执行快照位于 `../scripts/ralph/archive/`。
 
