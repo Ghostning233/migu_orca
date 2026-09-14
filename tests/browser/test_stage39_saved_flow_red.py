@@ -36,7 +36,7 @@ def test_saved_settings_probe_and_tracking_summary_are_explicit_and_non_sensitiv
     captured: list[tuple[str, dict]] = []
 
     def api(route, request):
-        path = request.url.split("/api/v1", 1)[-1]
+        path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
         if request.method == "GET" and path.startswith("/settings/autobangumi"):
             route.fulfill(
                 json={
@@ -174,7 +174,7 @@ def test_saved_management_actions_send_only_bound_connection_fields(page, live_s
         detail = _delete_detail(1)
 
     def handler(route, request):
-        path = request.url.split("/api/v1", 1)[-1]
+        path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
         if request.method == "GET" and path.startswith("/settings/autobangumi"):
             route.fulfill(
                 json={
@@ -412,13 +412,17 @@ def test_saved_sync_requires_explicit_probe_and_sends_ref_revision(page, live_se
 
 
 @pytest.mark.browser
-def test_saved_verify_external_is_unknown_safe_when_unavailable(page, live_server_url):
+def test_saved_verify_external_preserves_unknown_source_lock(page, live_server_url):
     ref = "11111111-1111-4111-8111-111111111111"
     calls: list[dict] = []
+    writes: list[str] = []
+    console_messages: list[str] = []
+    secret = "verify-secret-canary"
+    page.on("console", lambda message: console_messages.append(message.text))
     unknown = _detail_payload(_recovery_item("tracking-a", "未知结果", revision=4))
 
     def handler(route, request):
-        path = request.url.split("/api/v1", 1)[-1]
+        path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
         if request.method == "GET" and path.startswith("/settings/autobangumi"):
             route.fulfill(
                 json={
@@ -433,7 +437,10 @@ def test_saved_verify_external_is_unknown_safe_when_unavailable(page, live_serve
                 }
             )
             return
-        if request.method == "GET" and path.startswith("/tracking/items"):
+        if request.method == "GET" and path.startswith("/tracking/items/tracking-a"):
+            route.fulfill(json={"ok": True, "result": unknown})
+            return
+        if request.method == "GET" and path == "/tracking/items":
             route.fulfill(
                 json={
                     "ok": True,
@@ -474,13 +481,32 @@ def test_saved_verify_external_is_unknown_safe_when_unavailable(page, live_serve
                 }
             )
             return
+        if request.method == "POST" and path.startswith("/tracking/items/tracking-a/"):
+            writes.append(path)
+            route.continue_()
+            return
         route.continue_()
 
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
     page.wait_for_selector("#tracking-overview")
-    expect(page.locator("#tracking-recover-verify")).to_have_count(0)
+    page.wait_for_selector(".tracking-inspector-detail")
     page.locator("#tracking-probe-saved").click()
-    page.wait_for_timeout(300)
-    assert page.locator("#tracking-recover-verify").count() == 0
-    assert calls == []
+    page.wait_for_selector("#tracking-recover-verify")
+    page.locator("#tracking-recover-verify").click()
+    expect(page.locator(".confirm-dialog-message")).to_contain_text("只读核对")
+    page.locator(".confirm-dialog-actions button").filter(has_text="确认只读核验").click()
+    page.wait_for_selector("#tracking-recovery-result")
+    assert calls == [{
+        "expected_revision": 4,
+        "action": "VERIFY_EXTERNAL",
+        "connection_ref": ref,
+        "configuration_revision": 3,
+    }]
+    expect(page.locator("#tracking-recovery-result")).to_contain_text("独立核对")
+    expect(page.locator("#tracking-recovery-result")).not_to_contain_text("RECOVERY_REQUIRED")
+    assert not any(endpoint in path for path in writes for endpoint in ("/submit", "/retry", "/modify", "/set-enabled", "/refresh", "/delete-external"))
+    assert secret not in page.locator("body").inner_text()
+    assert secret not in page.url
+    assert secret not in page.evaluate("() => location.href + JSON.stringify(history.state) + JSON.stringify(localStorage) + JSON.stringify(sessionStorage)")
+    assert secret not in " ".join(console_messages)

@@ -302,3 +302,8 @@ Started: 2026-09-13
 - 完整 external mapping 的 DELETE_EXTERNAL 成功路径已真实通过；同 ref saved summary/probe 后捕获 confirm、idempotency_key、expected_revision、ref/revision 且无 `file`/秘密。
 - `uv run pytest tests/browser/test_stage39_saved_flow_red.py -q` → `9 passed`。
 - 遗留风险：当前 TrackingView fixture 对绑定 unknown operation 的 VERIFY_EXTERNAL 仍无法使按钮进入可执行态，因此未伪造成功证据；保留安全降级零写测试，需后续修正 fixture/页面状态建模后再补成功路径。
+
+## 2026-09-14 / 工作包 A VERIFY_EXTERNAL 成功路径收口
+- 修正 browser handler 将列表与详情严格分流；saved summary + explicit probe 后，绑定同 ref 的 unknown operation 记录实际展示 VERIFY_EXTERNAL。确认后捕获 recover 请求，body 严格为 expected_revision/action/ref/revision，无 confirm、idempotency_key、秘密或 `ab_config`。
+- fake recover 返回 `VERIFY_EXTERNAL` + `RECOVERY_REQUIRED`/needs_manual envelope；浏览器断言结果保持未知、源锁未解除，且无 submit/retry/management 写请求，并检查 body、URL/history、local/sessionStorage、console 敏感 canary。
+- 验证：`npm --prefix frontend run build` 通过；`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q` → `9 passed`（真实 Chromium）。
