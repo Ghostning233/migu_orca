@@ -49,7 +49,6 @@ from apps.migu_orca_web.serializers import (
     serialize_request_safe_info,
 )
 from apps.migu_orca_web.tracking_migration_service import run_tracking_migration
-from apps.migu_orca_web.tracking_queue_compat import sync_queue_projection_for_tracking
 from apps.migu_orca_web.tracking_serializers import (
     tracking_available_actions,
     tracking_summary_fields,
@@ -1137,13 +1136,8 @@ def _sync_queue_projection(
     the old batch queue stays a faithful compat projection of the authoritative
     TrackingRecord.  Never raises and never overwrites a durable queue success.
     """
-    if not record.request_id:
-        return
-    sync_queue_projection_for_tracking(
-        config,
-        request_id=record.request_id,
-        tracking_status=tracking_status,
-    )
+    # Retired US-336: TrackingRecord is the sole authority; no queue projection.
+    return
 
 
 def _run_submit_one(

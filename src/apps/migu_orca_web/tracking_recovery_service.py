@@ -42,9 +42,6 @@ from apps.migu_orca_web.save_confirm_service import compute_request_fingerprint
 from apps.migu_orca_web.serializers import serialize_request_safe_info
 from apps.migu_orca_web.tracking_management_service import recover_tracking_management
 from apps.migu_orca_web.tracking_migration_service import run_tracking_migration
-from apps.migu_orca_web.tracking_queue_compat import (
-    sync_queue_projection_for_tracking,
-)
 from apps.migu_orca_web.tracking_serializers import (
     tracking_available_actions,
     tracking_summary_fields,
@@ -744,13 +741,8 @@ def _sync_queue_projection(
     tracking_status: str,
 ) -> None:
     """Best-effort mirror of a recovery outcome into any legacy queue item."""
-    if not record.request_id:
-        return
-    sync_queue_projection_for_tracking(
-        config,
-        request_id=record.request_id,
-        tracking_status=tracking_status,
-    )
+    # Retired US-336: recovery never writes a legacy queue projection.
+    return
 
 
 def _recover_result_payload(

@@ -26,13 +26,8 @@ from apps.migu_orca_web.save_confirm_service import (
     serialize_batch_save_confirm_result,
 )
 from apps.migu_orca_web.schemas import (
-    BatchAcceptPayload,
     BatchParsePayload,
-    BatchQueueQuery,
-    BatchRecoverPayload,
-    BatchRetryPayload,
     BatchSaveConfirmPayload,
-    BatchSubmitPayload,
 )
 from apps.migu_orca_web.serializers import (
     _serialize_attempted_queries,
@@ -61,9 +56,6 @@ from apps.migu_orca_web.tracking_handoff import (
     TrackingHandoff,
     ensure_confirmed_request_tracking,
     unavailable_tracking_handoff,
-)
-from apps.migu_orca_web.tracking_queue_compat import (
-    reflect_queue_outcome_into_tracking,
 )
 from batch_engine.controllers.anime_title_parser import (
     RuleAnimeTitleParsingProvider,
@@ -490,9 +482,9 @@ class BatchSaveConfirmView(PostView):
         return serialize_batch_save_confirm_result(result)
 
 
-@class_route(api_blueprint, "/api/v1/batches/<batch_id>/accept", methods=["POST"])
+# retired US-335: batch accept is replaced by save-confirm
 class BatchAcceptView(PostView):
-    request_validator_model = BatchAcceptPayload
+    request_validator_model = None
 
     def save(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, BatchAcceptPayload)
@@ -524,9 +516,9 @@ class BatchAcceptView(PostView):
         return serialize_batch_accept_result(result)
 
 
-@class_route(api_blueprint, "/api/v1/batches/<batch_id>/queue", methods=["GET"])
+# retired US-336: queue reads are no longer a Web API
 class BatchQueueView(GetView):
-    request_validator_model = BatchQueueQuery
+    request_validator_model = None
 
     def get_object(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, BatchQueueQuery)
@@ -539,9 +531,9 @@ class BatchQueueView(GetView):
         }
 
 
-@class_route(api_blueprint, "/api/v1/batches/<batch_id>/submit", methods=["POST"])
+# retired US-335: external writes are tracking-only
 class BatchSubmitView(PostView):
-    request_validator_model = BatchSubmitPayload
+    request_validator_model = None
 
     def save(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, BatchSubmitPayload)
@@ -586,9 +578,9 @@ class BatchSubmitView(PostView):
         return serialize_batch_submit_result(result)
 
 
-@class_route(api_blueprint, "/api/v1/batches/<batch_id>/retry", methods=["POST"])
+# retired US-335: external writes are tracking-only
 class BatchRetryView(PostView):
-    request_validator_model = BatchRetryPayload
+    request_validator_model = None
 
     def save(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, BatchRetryPayload)
@@ -648,9 +640,9 @@ class BatchRetryView(PostView):
         return serialize_batch_submit_result(result)
 
 
-@class_route(api_blueprint, "/api/v1/batches/<batch_id>/recover", methods=["POST"])
+# retired US-335: recovery is tracking-only
 class BatchRecoverView(PostView):
-    request_validator_model = BatchRecoverPayload
+    request_validator_model = None
 
     def save(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, BatchRecoverPayload)
