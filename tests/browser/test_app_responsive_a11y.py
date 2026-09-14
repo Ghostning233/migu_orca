@@ -529,6 +529,12 @@ class TestReducedMotionAndFeedback:
             content_type="application/json",
             body=json.dumps({"ok": True, "result": {"items": [], "summary": {}, "warnings": []}}),
         )
+        for route in held[1:]:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"ok": True, "result": {"items": [], "summary": {}, "warnings": []}}),
+            )
         expect(refresh).to_be_enabled()
 
 

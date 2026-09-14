@@ -503,18 +503,26 @@ def test_saved_verify_external_preserves_unknown_source_lock(page, live_server_u
     expect(page.locator(".confirm-dialog-message")).to_contain_text("只读核对")
     page.locator(".confirm-dialog-actions button").filter(has_text="确认只读核验").click()
     page.wait_for_selector("#tracking-recovery-result")
-    assert calls == [{
-        "expected_revision": 4,
-        "action": "VERIFY_EXTERNAL",
-        "connection_ref": ref,
-        "configuration_revision": 3,
-    }]
+    assert calls == [
+        {
+            "expected_revision": 4,
+            "action": "VERIFY_EXTERNAL",
+            "connection_ref": ref,
+            "configuration_revision": 3,
+        }
+    ]
     expect(page.locator("#tracking-recovery-result")).to_contain_text("独立核对")
     expect(page.locator("#tracking-recovery-result")).not_to_contain_text("RECOVERY_REQUIRED")
-    assert not any(endpoint in path for path in writes for endpoint in ("/submit", "/retry", "/modify", "/set-enabled", "/refresh", "/delete-external"))
+    assert not any(
+        endpoint in path
+        for path in writes
+        for endpoint in ("/submit", "/retry", "/modify", "/set-enabled", "/refresh", "/delete-external")
+    )
     assert secret not in page.locator("body").inner_text()
     assert secret not in page.url
-    assert secret not in page.evaluate("() => location.href + JSON.stringify(history.state) + JSON.stringify(localStorage) + JSON.stringify(sessionStorage)")
+    assert secret not in page.evaluate(
+        "() => location.href + JSON.stringify(history.state) + JSON.stringify(localStorage) + JSON.stringify(sessionStorage)"
+    )
     assert secret not in " ".join(console_messages)
 
 
@@ -529,11 +537,18 @@ def test_settings_cas_conflict_rereads_summary_without_resubmitting(page, live_s
         path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
         if request.method == "GET" and path == "/settings/autobangumi":
             gets += 1
-            route.fulfill(json={"ok": True, "result": {
-                "configured": True, "credential_present": True,
-                "connection_ref": ref, "configuration_revision": gets,
-                "connection_status": "CONFIGURED",
-            }})
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "configured": True,
+                        "credential_present": True,
+                        "connection_ref": ref,
+                        "configuration_revision": gets,
+                        "connection_status": "CONFIGURED",
+                    },
+                }
+            )
             return
         if request.method == "PUT" and path == "/settings/autobangumi":
             puts += 1
@@ -565,8 +580,18 @@ def test_saved_probe_failure_keeps_summary_across_refresh_and_navigation(page, l
         nonlocal probe_calls
         path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
         if request.method == "GET" and path == "/settings/autobangumi":
-            route.fulfill(json={"ok": True, "result": {"configured": True, "credential_present": True,
-                "connection_ref": ref, "configuration_revision": 3, "connection_status": "CONFIGURED"}})
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "configured": True,
+                        "credential_present": True,
+                        "connection_ref": ref,
+                        "configuration_revision": 3,
+                        "connection_status": "CONFIGURED",
+                    },
+                }
+            )
             return
         if request.method == "POST" and path == "/settings/autobangumi/probe":
             probe_calls += 1
@@ -588,7 +613,9 @@ def test_saved_probe_failure_keeps_summary_across_refresh_and_navigation(page, l
     page.wait_for_selector("#tracking-probe-saved")
     assert page.locator("#tracking-probe-saved").is_enabled()
     assert secret not in page.locator("body").inner_text()
-    assert secret not in page.evaluate("() => location.href + JSON.stringify(history.state) + JSON.stringify(localStorage) + JSON.stringify(sessionStorage)")
+    assert secret not in page.evaluate(
+        "() => location.href + JSON.stringify(history.state) + JSON.stringify(localStorage) + JSON.stringify(sessionStorage)"
+    )
 
 
 @pytest.mark.browser
@@ -600,8 +627,18 @@ def test_tracking_refresh_does_not_probe_or_sync_saved_connection(page, live_ser
     def handler(route, request):
         path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
         if request.method == "GET" and path == "/settings/autobangumi":
-            route.fulfill(json={"ok": True, "result": {"configured": True, "credential_present": True,
-                "connection_ref": ref, "configuration_revision": 3, "connection_status": "CONFIGURED"}})
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "configured": True,
+                        "credential_present": True,
+                        "connection_ref": ref,
+                        "configuration_revision": 3,
+                        "connection_status": "CONFIGURED",
+                    },
+                }
+            )
             return
         if request.method == "GET" and path == "/tracking/items":
             route.fulfill(json={"ok": True, "result": {"items": [], "summary": {"total": 0}, "warnings": []}})
@@ -624,24 +661,60 @@ def test_tracking_saved_capability_degrade_hides_management_actions(page, live_s
     """Unsupported capabilities fail closed and cannot produce a management write."""
     ref = "11111111-1111-4111-8111-111111111111"
     item = {**_item("tracking-a", "降级番"), "available_actions": _management_actions("ACTIVE"), "revision": 1}
-    detail = {"ok": True, "result": {**item, "origin": "single", "batch_id": None,
-        "created_at": "2026-09-01T00:00:00Z", "updated_at": "2026-09-01T00:00:00Z",
-        "last_synced_at": None, "safe_info": None, "current_operation": None,
-        "revalidation_issues": [], "external_mapping": None, "audit_events": [], "warnings": []}}
+    detail = {
+        "ok": True,
+        "result": {
+            **item,
+            "origin": "single",
+            "batch_id": None,
+            "created_at": "2026-09-01T00:00:00Z",
+            "updated_at": "2026-09-01T00:00:00Z",
+            "last_synced_at": None,
+            "safe_info": None,
+            "current_operation": None,
+            "revalidation_issues": [],
+            "external_mapping": None,
+            "audit_events": [],
+            "warnings": [],
+        },
+    }
     writes: list[str] = []
 
     def handler(route, request):
         path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
         if request.method == "GET" and path == "/settings/autobangumi":
-            route.fulfill(json={"ok": True, "result": {"configured": True, "credential_present": True,
-                "connection_ref": ref, "configuration_revision": 3, "connection_status": "CONFIGURED"}}); return
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "configured": True,
+                        "credential_present": True,
+                        "connection_ref": ref,
+                        "configuration_revision": 3,
+                        "connection_status": "CONFIGURED",
+                    },
+                }
+            )
+            return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}}); return
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}})
+            return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
-            route.fulfill(json=detail); return
+            route.fulfill(json=detail)
+            return
         if request.method == "POST" and path == "/settings/autobangumi/probe":
-            route.fulfill(json={"ok": True, "result": {**_probe_capabilities(), "subscription_modify": "UNSUPPORTED",
-                "subscription_enable": "UNSUPPORTED", "rss_refresh": "UNSUPPORTED"}}); return
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        **_probe_capabilities(),
+                        "subscription_modify": "UNSUPPORTED",
+                        "subscription_enable": "UNSUPPORTED",
+                        "rss_refresh": "UNSUPPORTED",
+                    },
+                }
+            )
+            return
         if request.method == "POST" and "/tracking/items/" in path:
             writes.append(path)
         route.continue_()
@@ -660,27 +733,67 @@ def test_tracking_saved_capability_degrade_hides_management_actions(page, live_s
 
 
 @pytest.mark.browser
-@pytest.mark.parametrize(("status", "code", "selector"), [("PENDING_SUBMIT", "SUBMIT", "#tracking-submit"), ("SUBMIT_FAILED", "RETRY", "#tracking-retry")])
+@pytest.mark.parametrize(
+    ("status", "code", "selector"),
+    [("PENDING_SUBMIT", "SUBMIT", "#tracking-submit"), ("SUBMIT_FAILED", "RETRY", "#tracking-retry")],
+)
 def test_saved_submit_and_retry_use_one_explicit_generation(page, live_server_url, status, code, selector):
     ref = "11111111-1111-4111-8111-111111111111"
-    body_item = {**_item("tracking-a", "提交番", status), "status": status,
-        "available_actions": [{"code": code, "label": code, "style": "PRIMARY", "requires_confirmation": True, "target_scopes": []}]}
+    body_item = {
+        **_item("tracking-a", "提交番", status),
+        "status": status,
+        "available_actions": [
+            {"code": code, "label": code, "style": "PRIMARY", "requires_confirmation": True, "target_scopes": []}
+        ],
+    }
     detail = {"ok": True, "result": {**_detail_payload(body_item), "revision": 4}}
     calls: list[dict] = []
 
     def handler(route, request):
         path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
         if request.method == "GET" and path == "/settings/autobangumi":
-            route.fulfill(json={"ok": True, "result": {"configured": True, "credential_present": True, "connection_ref": ref, "configuration_revision": 3, "connection_status": "CONFIGURED"}}); return
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "configured": True,
+                        "credential_present": True,
+                        "connection_ref": ref,
+                        "configuration_revision": 3,
+                        "connection_status": "CONFIGURED",
+                    },
+                }
+            )
+            return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [body_item], "summary": {"total": 1}, "warnings": []}}); return
+            route.fulfill(json={"ok": True, "result": {"items": [body_item], "summary": {"total": 1}, "warnings": []}})
+            return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
-            route.fulfill(json=detail); return
+            route.fulfill(json=detail)
+            return
         if request.method == "POST" and path == "/settings/autobangumi/probe":
-            route.fulfill(json={"ok": True, "result": _probe_capabilities()}); return
-        if request.method == "POST" and path.endswith("/submit") or request.method == "POST" and path.endswith("/retry"):
+            route.fulfill(json={"ok": True, "result": _probe_capabilities()})
+            return
+        if (
+            request.method == "POST"
+            and path.endswith("/submit")
+            or request.method == "POST"
+            and path.endswith("/retry")
+        ):
             calls.append(request.post_data_json or {})
-            route.fulfill(json={"ok": True, "result": {"tracking_id": "tracking-a", "action": code, "outcome": "OUTCOME_UNKNOWN", "needs_manual": True, "tracking": body_item}}); return
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "tracking_id": "tracking-a",
+                        "action": code,
+                        "outcome": "OUTCOME_UNKNOWN",
+                        "needs_manual": True,
+                        "tracking": body_item,
+                    },
+                }
+            )
+            return
         route.continue_()
 
     page.route("**/api/v1/**", handler)
@@ -707,10 +820,34 @@ def test_saved_submit_and_retry_use_one_explicit_generation(page, live_server_ur
 def test_local_recovery_needs_no_saved_probe_and_revalidate_is_local(page, live_server_url):
     item = _recovery_item("tracking-a", "本地恢复", revision=4)
     item["available_actions"] = [
-        {"code": "RECOVER_AUTO", "label": "自动恢复", "style": "SECONDARY", "requires_confirmation": False, "target_scopes": []},
-        {"code": "MARK_SUCCEEDED", "label": "标记成功", "style": "PRIMARY", "requires_confirmation": True, "target_scopes": []},
-        {"code": "MARK_FAILED", "label": "标记失败", "style": "DANGER", "requires_confirmation": True, "target_scopes": []},
-        {"code": "REVALIDATE", "label": "本地复核", "style": "SECONDARY", "requires_confirmation": False, "target_scopes": []},
+        {
+            "code": "RECOVER_AUTO",
+            "label": "自动恢复",
+            "style": "SECONDARY",
+            "requires_confirmation": False,
+            "target_scopes": [],
+        },
+        {
+            "code": "MARK_SUCCEEDED",
+            "label": "标记成功",
+            "style": "PRIMARY",
+            "requires_confirmation": True,
+            "target_scopes": [],
+        },
+        {
+            "code": "MARK_FAILED",
+            "label": "标记失败",
+            "style": "DANGER",
+            "requires_confirmation": True,
+            "target_scopes": [],
+        },
+        {
+            "code": "REVALIDATE",
+            "label": "本地复核",
+            "style": "SECONDARY",
+            "requires_confirmation": False,
+            "target_scopes": [],
+        },
     ]
     detail = {"ok": True, "result": _detail_payload(item)}
     calls: list[tuple[str, dict]] = []
@@ -718,17 +855,46 @@ def test_local_recovery_needs_no_saved_probe_and_revalidate_is_local(page, live_
     def handler(route, request):
         path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
         if request.method == "GET" and path == "/settings/autobangumi":
-            route.fulfill(json={"ok": True, "result": {"configured": False, "credential_present": False, "connection_ref": None, "configuration_revision": 0, "connection_status": "UNCONFIGURED"}}); return
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "configured": False,
+                        "credential_present": False,
+                        "connection_ref": None,
+                        "configuration_revision": 0,
+                        "connection_status": "UNCONFIGURED",
+                    },
+                }
+            )
+            return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}}); return
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}})
+            return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
-            route.fulfill(json=detail); return
+            route.fulfill(json=detail)
+            return
         if request.method == "POST" and path.endswith("/recover"):
             calls.append(("recover", request.post_data_json or {}))
-            route.fulfill(json={"ok": True, "result": {"tracking_id": "tracking-a", "action": "RECOVER_AUTO", "outcome": "SUCCEEDED", "checked_revision": 4, "next_revision": 5, "needs_manual": False, "tracking": item}}); return
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "tracking_id": "tracking-a",
+                        "action": "RECOVER_AUTO",
+                        "outcome": "SUCCEEDED",
+                        "checked_revision": 4,
+                        "next_revision": 5,
+                        "needs_manual": False,
+                        "tracking": item,
+                    },
+                }
+            )
+            return
         if request.method == "POST" and path.endswith("/revalidate"):
             calls.append(("revalidate", request.post_data_json or {}))
-            route.fulfill(json={"ok": True, "result": {"ready": False, "next_status": "NEEDS_RECONFIRM", "issues": []}}); return
+            route.fulfill(json={"ok": True, "result": {"ready": False, "next_status": "NEEDS_RECONFIRM", "issues": []}})
+            return
         if request.method == "POST":
             raise AssertionError(f"unexpected external call: {path}")
         route.continue_()
@@ -749,10 +915,34 @@ def test_settings_bare_endpoint_is_normalized_and_navigation_cancels_save(page, 
     def handler(route, request):
         path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
         if request.method == "GET" and path == "/settings/autobangumi":
-            route.fulfill(json={"ok": True, "result": {"configured": False, "credential_present": False, "connection_ref": None, "configuration_revision": 0, "connection_status": "UNCONFIGURED"}}); return
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "configured": False,
+                        "credential_present": False,
+                        "connection_ref": None,
+                        "configuration_revision": 0,
+                        "connection_status": "UNCONFIGURED",
+                    },
+                }
+            )
+            return
         if request.method == "PUT" and path == "/settings/autobangumi":
             puts.append(request.post_data_json or {})
-            route.fulfill(json={"ok": True, "result": {"configured": True, "credential_present": True, "connection_ref": ref, "configuration_revision": 1, "connection_status": "CONFIGURED"}}); return
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "configured": True,
+                        "credential_present": True,
+                        "connection_ref": ref,
+                        "configuration_revision": 1,
+                        "connection_status": "CONFIGURED",
+                    },
+                }
+            )
+            return
         route.continue_()
 
     page.route("**/api/v1/**", handler)
@@ -784,11 +974,25 @@ def test_unconfigured_recovery_has_no_external_verify_or_probe(page, live_server
     def handler(route, request):
         path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
         if request.method == "GET" and path == "/settings/autobangumi":
-            route.fulfill(json={"ok": True, "result": {"configured": False, "credential_present": False, "connection_ref": None, "configuration_revision": 0, "connection_status": "UNCONFIGURED"}}); return
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "configured": False,
+                        "credential_present": False,
+                        "connection_ref": None,
+                        "configuration_revision": 0,
+                        "connection_status": "UNCONFIGURED",
+                    },
+                }
+            )
+            return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}}); return
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}})
+            return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
-            route.fulfill(json=detail); return
+            route.fulfill(json=detail)
+            return
         if request.method == "POST":
             external_calls.append(path)
         route.continue_()
@@ -800,7 +1004,9 @@ def test_unconfigured_recovery_has_no_external_verify_or_probe(page, live_server
     assert external_calls == []
     secret = "unbound-canary"
     assert secret not in page.locator("body").inner_text()
-    assert secret not in page.evaluate("() => location.href + JSON.stringify(history.state) + JSON.stringify(localStorage) + JSON.stringify(sessionStorage)")
+    assert secret not in page.evaluate(
+        "() => location.href + JSON.stringify(history.state) + JSON.stringify(localStorage) + JSON.stringify(sessionStorage)"
+    )
 
 
 @pytest.mark.browser
@@ -813,12 +1019,37 @@ def test_settings_delete_requires_confirmation_and_then_tracking_degrades(page, 
         path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
         if request.method == "GET" and path == "/settings/autobangumi":
             configured = deletes == 0
-            route.fulfill(json={"ok": True, "result": {"configured": configured, "credential_present": configured, "connection_ref": ref if configured else None, "configuration_revision": 3 if configured else 0, "connection_status": "CONFIGURED" if configured else "UNCONFIGURED"}}); return
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "configured": configured,
+                        "credential_present": configured,
+                        "connection_ref": ref if configured else None,
+                        "configuration_revision": 3 if configured else 0,
+                        "connection_status": "CONFIGURED" if configured else "UNCONFIGURED",
+                    },
+                }
+            )
+            return
         if request.method == "DELETE" and path == "/settings/autobangumi":
             deletes += 1
-            route.fulfill(json={"ok": True, "result": {"configured": False, "credential_present": False, "connection_ref": None, "configuration_revision": 0, "connection_status": "UNCONFIGURED"}}); return
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "configured": False,
+                        "credential_present": False,
+                        "connection_ref": None,
+                        "configuration_revision": 0,
+                        "connection_status": "UNCONFIGURED",
+                    },
+                }
+            )
+            return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [], "summary": {"total": 0}, "warnings": []}}); return
+            route.fulfill(json={"ok": True, "result": {"items": [], "summary": {"total": 0}, "warnings": []}})
+            return
         route.continue_()
 
     page.route("**/api/v1/**", handler)
@@ -840,16 +1071,35 @@ def test_settings_delete_requires_confirmation_and_then_tracking_degrades(page, 
 @pytest.mark.browser
 def test_submit_actions_are_not_available_before_explicit_probe(page, live_server_url):
     ref = "11111111-1111-4111-8111-111111111111"
-    item = {**_item("tracking-a", "待探测"), "available_actions": [{"code": "SUBMIT", "label": "提交", "style": "PRIMARY", "requires_confirmation": True, "target_scopes": []}]}
+    item = {
+        **_item("tracking-a", "待探测"),
+        "available_actions": [
+            {"code": "SUBMIT", "label": "提交", "style": "PRIMARY", "requires_confirmation": True, "target_scopes": []}
+        ],
+    }
 
     def handler(route, request):
         path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
         if request.method == "GET" and path == "/settings/autobangumi":
-            route.fulfill(json={"ok": True, "result": {"configured": True, "credential_present": True, "connection_ref": ref, "configuration_revision": 3, "connection_status": "CONFIGURED"}}); return
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "configured": True,
+                        "credential_present": True,
+                        "connection_ref": ref,
+                        "configuration_revision": 3,
+                        "connection_status": "CONFIGURED",
+                    },
+                }
+            )
+            return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}}); return
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}})
+            return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
-            route.fulfill(json={"ok": True, "result": _detail_payload(item)}); return
+            route.fulfill(json={"ok": True, "result": _detail_payload(item)})
+            return
         route.continue_()
 
     page.route("**/api/v1/**", handler)
@@ -864,7 +1114,13 @@ def test_management_unknown_keeps_lock_and_does_not_resend(page, live_server_url
     ref_b = "22222222-2222-4222-8222-222222222222"
     summary_reads = 0
     item = {**_item("tracking-a", "未知管理"), "available_actions": _modify_actions()}
-    detail = {"ok": True, "result": {**_detail_payload(item), "external_mapping": {"match_reason": "标题", "enabled": True, "external_deleted": False}}}
+    detail = {
+        "ok": True,
+        "result": {
+            **_detail_payload(item),
+            "external_mapping": {"match_reason": "标题", "enabled": True, "external_deleted": False},
+        },
+    }
     calls: list[dict] = []
 
     def handler(route, request):
@@ -872,17 +1128,45 @@ def test_management_unknown_keeps_lock_and_does_not_resend(page, live_server_url
         path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
         if request.method == "GET" and path == "/settings/autobangumi":
             summary_reads += 1
-            current_ref = ref if summary_reads == 1 else ref_b
-            route.fulfill(json={"ok": True, "result": {"configured": True, "credential_present": True, "connection_ref": current_ref, "configuration_revision": summary_reads + 2, "connection_status": "CONFIGURED"}}); return
+            current_ref = ref if summary_reads <= 2 else ref_b
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "configured": True,
+                        "credential_present": True,
+                        "connection_ref": current_ref,
+                        "configuration_revision": summary_reads + 2,
+                        "connection_status": "CONFIGURED",
+                    },
+                }
+            )
+            return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}}); return
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}})
+            return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
-            route.fulfill(json=detail); return
+            route.fulfill(json=detail)
+            return
         if request.method == "POST" and path == "/settings/autobangumi/probe":
-            route.fulfill(json={"ok": True, "result": _probe_capabilities()}); return
+            route.fulfill(json={"ok": True, "result": _probe_capabilities()})
+            return
         if request.method == "POST" and "/tracking/items/tracking-a/" in path:
             calls.append(request.post_data_json or {})
-            route.fulfill(json={"ok": True, "result": {"action": "MODIFY", "management_status": "UNKNOWN", "needs_manual": True, "safe_message": "结果未知，请人工恢复", "operation_id": "op-unknown", "tracking": item}}); return
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "action": "MODIFY",
+                        "management_status": "UNKNOWN",
+                        "needs_manual": True,
+                        "safe_message": "结果未知，请人工恢复",
+                        "operation_id": "op-unknown",
+                        "tracking": item,
+                    },
+                }
+            )
+            return
         route.continue_()
 
     page.route("**/api/v1/**", handler)
@@ -914,17 +1198,34 @@ def test_generation_switch_does_not_reuse_old_management_intent(page, live_serve
         nonlocal reads
         path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
         if request.method == "GET" and path == "/settings/autobangumi":
-            ref = refs[min(reads, 1)]; reads += 1
-            route.fulfill(json={"ok": True, "result": {"configured": True, "credential_present": True, "connection_ref": ref, "configuration_revision": reads, "connection_status": "CONFIGURED"}}); return
+            ref = refs[min(reads, 1)]
+            reads += 1
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "configured": True,
+                        "credential_present": True,
+                        "connection_ref": ref,
+                        "configuration_revision": reads,
+                        "connection_status": "CONFIGURED",
+                    },
+                }
+            )
+            return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}}); return
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}})
+            return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
-            route.fulfill(json={"ok": True, "result": _detail_payload(item)}); return
+            route.fulfill(json={"ok": True, "result": _detail_payload(item)})
+            return
         if request.method == "POST" and path.endswith("/probe"):
-            route.fulfill(json={"ok": True, "result": _probe_capabilities()}); return
+            route.fulfill(json={"ok": True, "result": _probe_capabilities()})
+            return
         if request.method == "POST" and "/tracking/items/tracking-a/" in path:
             writes.append(request.post_data_json or {})
-            route.continue_(); return
+            route.continue_()
+            return
         route.continue_()
 
     page.route("**/api/v1/**", handler)
@@ -934,7 +1235,10 @@ def test_generation_switch_does_not_reuse_old_management_intent(page, live_serve
     page.wait_for_selector("#tracking-probe-saved")
     page.reload()
     page.wait_for_selector("#tracking-probe-saved")
-    assert page.locator("#tracking-modify-subscription-submit").count() == 0 or page.locator("#tracking-modify-subscription-submit").is_disabled()
+    assert (
+        page.locator("#tracking-modify-subscription-submit").count() == 0
+        or page.locator("#tracking-modify-subscription-submit").is_disabled()
+    )
     assert writes == []
 
 
@@ -947,9 +1251,22 @@ def test_management_generation_refresh_keeps_external_id_unbound(page, live_serv
     def handler(route, request):
         path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
         if request.method == "GET" and path == "/settings/autobangumi":
-            route.fulfill(json={"ok": True, "result": {"configured": True, "credential_present": True, "connection_ref": ref, "configuration_revision": 9, "connection_status": "CONFIGURED"}}); return
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "configured": True,
+                        "credential_present": True,
+                        "connection_ref": ref,
+                        "configuration_revision": 9,
+                        "connection_status": "CONFIGURED",
+                    },
+                }
+            )
+            return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [], "summary": {"total": 0}, "warnings": []}}); return
+            route.fulfill(json={"ok": True, "result": {"items": [], "summary": {"total": 0}, "warnings": []}})
+            return
         if request.method == "POST":
             calls.append(path)
         route.continue_()
@@ -970,25 +1287,58 @@ def test_submit_retry_singleflight_holds_unknown_lock_across_generation(page, li
     ref_b = "22222222-2222-4222-8222-222222222222"
     settings_reads = 0
     posts: list[dict] = []
-    item = {**_item("tracking-a", "单飞提交", status), "status": status,
-        "available_actions": [{"code": code, "label": code, "style": "PRIMARY", "requires_confirmation": True, "target_scopes": []}]}
+    item = {
+        **_item("tracking-a", "单飞提交", status),
+        "status": status,
+        "available_actions": [
+            {"code": code, "label": code, "style": "PRIMARY", "requires_confirmation": True, "target_scopes": []}
+        ],
+    }
 
     def handler(route, request):
         nonlocal settings_reads
         path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
         if request.method == "GET" and path == "/settings/autobangumi":
-            settings_reads += 1; ref = ref_a if settings_reads == 1 else ref_b
-            route.fulfill(json={"ok": True, "result": {"configured": True, "credential_present": True, "connection_ref": ref, "configuration_revision": settings_reads, "connection_status": "CONFIGURED"}}); return
+            settings_reads += 1
+            ref = ref_a if settings_reads <= 2 else ref_b
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "configured": True,
+                        "credential_present": True,
+                        "connection_ref": ref,
+                            "configuration_revision": 1 if settings_reads <= 2 else settings_reads,
+                        "connection_status": "CONFIGURED",
+                    },
+                }
+            )
+            return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}}); return
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}})
+            return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
-            route.fulfill(json={"ok": True, "result": _detail_payload(item)}); return
+            route.fulfill(json={"ok": True, "result": _detail_payload(item)})
+            return
         if request.method == "POST" and path.endswith("/probe"):
-            route.fulfill(json={"ok": True, "result": _probe_capabilities()}); return
+            route.fulfill(json={"ok": True, "result": _probe_capabilities()})
+            return
         if request.method == "POST" and (path.endswith("/submit") or path.endswith("/retry")):
             posts.append(request.post_data_json or {})
             time.sleep(0.35)
-            route.fulfill(json={"ok": True, "result": {"tracking_id": "tracking-a", "action": code, "outcome": "RECOVERY_REQUIRED", "needs_manual": True, "tracking": item}}); return
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "tracking_id": "tracking-a",
+                        "action": code,
+                        "outcome": "RECOVERY_REQUIRED",
+                        "needs_manual": True,
+                        "tracking": item,
+                    },
+                }
+            )
+            return
         route.continue_()
 
     page.route("**/api/v1/**", handler)
@@ -1015,24 +1365,56 @@ def test_submit_unknown_lock_survives_new_generation_refresh(page, live_server_u
     ref_b = "22222222-2222-4222-8222-222222222222"
     generation = 0
     posts: list[dict] = []
-    item = {**_item("tracking-a", "代际提交"), "available_actions": [{"code": "SUBMIT", "label": "提交", "style": "PRIMARY", "requires_confirmation": True, "target_scopes": []}]}
+    item = {
+        **_item("tracking-a", "代际提交"),
+        "available_actions": [
+            {"code": "SUBMIT", "label": "提交", "style": "PRIMARY", "requires_confirmation": True, "target_scopes": []}
+        ],
+    }
 
     def handler(route, request):
         nonlocal generation
         path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
         if request.method == "GET" and path == "/settings/autobangumi":
             generation += 1
-            ref = ref_a if generation == 1 else ref_b
-            route.fulfill(json={"ok": True, "result": {"configured": True, "credential_present": True, "connection_ref": ref, "configuration_revision": generation, "connection_status": "CONFIGURED"}}); return
+            ref = ref_a if generation <= 2 else ref_b
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "configured": True,
+                        "credential_present": True,
+                        "connection_ref": ref,
+                        "configuration_revision": generation,
+                        "connection_status": "CONFIGURED",
+                    },
+                }
+            )
+            return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}}); return
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}})
+            return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
-            route.fulfill(json={"ok": True, "result": _detail_payload(item)}); return
+            route.fulfill(json={"ok": True, "result": _detail_payload(item)})
+            return
         if request.method == "POST" and path.endswith("/probe"):
-            route.fulfill(json={"ok": True, "result": _probe_capabilities()}); return
+            route.fulfill(json={"ok": True, "result": _probe_capabilities()})
+            return
         if request.method == "POST" and path.endswith("/submit"):
             posts.append(request.post_data_json or {})
-            route.fulfill(json={"ok": True, "result": {"tracking_id": "tracking-a", "action": "SUBMIT", "outcome": "UNKNOWN", "needs_manual": True, "tracking": item}}); return
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "tracking_id": "tracking-a",
+                        "action": "SUBMIT",
+                        "outcome": "UNKNOWN",
+                        "needs_manual": True,
+                        "tracking": item,
+                    },
+                }
+            )
+            return
         route.continue_()
 
     page.route("**/api/v1/**", handler)
@@ -1061,14 +1443,30 @@ def test_unknown_operation_after_configuration_change_cannot_verify(page, live_s
         nonlocal reads
         path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
         if request.method == "GET" and path == "/settings/autobangumi":
-            reads += 1; ref = ref_a if reads == 1 else ref_b
-            route.fulfill(json={"ok": True, "result": {"configured": True, "credential_present": True, "connection_ref": ref, "configuration_revision": reads, "connection_status": "CONFIGURED"}}); return
+            reads += 1
+            ref = ref_a if reads <= 2 else ref_b
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "configured": True,
+                        "credential_present": True,
+                        "connection_ref": ref,
+                        "configuration_revision": reads,
+                        "connection_status": "CONFIGURED",
+                    },
+                }
+            )
+            return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}}); return
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}})
+            return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
-            route.fulfill(json={"ok": True, "result": _detail_payload(item)}); return
+            route.fulfill(json={"ok": True, "result": _detail_payload(item)})
+            return
         if request.method == "POST" and path.endswith("/probe"):
-            route.fulfill(json={"ok": True, "result": _probe_capabilities()}); return
+            route.fulfill(json={"ok": True, "result": _probe_capabilities()})
+            return
         if request.method == "POST" and path.endswith("/recover"):
             calls.append(path)
         route.continue_()
@@ -1088,20 +1486,50 @@ def test_unknown_operation_after_configuration_change_cannot_verify(page, live_s
 @pytest.mark.parametrize("action", ["MARK_SUCCEEDED", "MARK_FAILED"])
 def test_manual_recovery_is_local_and_confirmed(page, live_server_url, action):
     item = _recovery_item("tracking-a", "人工恢复", revision=4)
-    item["available_actions"] = [{"code": action, "label": action, "style": "PRIMARY", "requires_confirmation": True, "target_scopes": []}]
+    item["available_actions"] = [
+        {"code": action, "label": action, "style": "PRIMARY", "requires_confirmation": True, "target_scopes": []}
+    ]
     calls: list[dict] = []
 
     def handler(route, request):
         path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
         if request.method == "GET" and path == "/settings/autobangumi":
-            route.fulfill(json={"ok": True, "result": {"configured": False, "credential_present": False, "connection_ref": None, "configuration_revision": 0, "connection_status": "UNCONFIGURED"}}); return
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "configured": False,
+                        "credential_present": False,
+                        "connection_ref": None,
+                        "configuration_revision": 0,
+                        "connection_status": "UNCONFIGURED",
+                    },
+                }
+            )
+            return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}}); return
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}})
+            return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
-            route.fulfill(json={"ok": True, "result": _detail_payload(item)}); return
+            route.fulfill(json={"ok": True, "result": _detail_payload(item)})
+            return
         if request.method == "POST" and path.endswith("/recover"):
             calls.append(request.post_data_json or {})
-            route.fulfill(json={"ok": True, "result": {"tracking_id": "tracking-a", "action": action, "outcome": "SUCCEEDED", "checked_revision": 4, "next_revision": 5, "needs_manual": False, "tracking": item}}); return
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "tracking_id": "tracking-a",
+                        "action": action,
+                        "outcome": "SUCCEEDED",
+                        "checked_revision": 4,
+                        "next_revision": 5,
+                        "needs_manual": False,
+                        "tracking": item,
+                    },
+                }
+            )
+            return
         if request.method == "POST":
             raise AssertionError(path)
         route.continue_()

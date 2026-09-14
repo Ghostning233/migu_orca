@@ -18,7 +18,6 @@ from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from batch_engine.models import (
     BATCH_ITEM_STATUS_EMPTY,
     BATCH_ITEM_STATUS_FAILED,
-    BATCH_ITEM_STATUS_FOUND,
 )
 from mikan_engine.controllers.mikan_client import create_mikan_client
 from mikan_engine.controllers.mikan_config import MikanConfig
@@ -263,7 +262,6 @@ def test_golden_request_create_success(client: FlaskClient, tmp_path: Path) -> N
         json={
             "title": "芙莉莲",
             "storage_dir": "storage",
-            "save_request": False,
         },
     )
 
@@ -326,7 +324,7 @@ def _issue_preview_draft(
     """Generate an unsaved preview draft; return ``(draft_id, draft_revision)``."""
     response = client.post(
         "/api/v1/requests",
-        json={"title": title, "save_request": False},
+        json={"title": title},
     )
     payload = response.get_json()
     assert response.status_code == 200
@@ -497,7 +495,7 @@ def _issue_save_confirm_payload(
 ) -> tuple[dict[str, object], dict[str, object]]:
     """Generate a draft and return ``(payload_dict, issued_result)``."""
     response = client.post(
-        "/api/v1/requests", json={"title": title, "save_request": False}
+        "/api/v1/requests", json={"title": title}
     )
     result = response.get_json()["result"]
     payload = {
@@ -1025,7 +1023,7 @@ def test_golden_request_create_does_not_trust_client_aliases(
 # ---------------------------------------------------------------------------
 
 
-def test_golden_mikan_candidates_success(
+def test_golden_mikan_candidates_rejects_retired_config(
     client: FlaskClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _fake_mikan_search(monkeypatch)
@@ -1042,25 +1040,10 @@ def test_golden_mikan_candidates_success(
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
-    assert payload["ok"] is True
-    result = payload["result"]
-    assert set(result) >= {"query", "status", "parse_result", "attempted_queries", "candidates"}
-    assert result["status"] == BATCH_ITEM_STATUS_FOUND
-    assert result["candidates"][0]["bangumi_id"] == "2353"
-    # Only the public candidate whitelist is exposed.
-    assert set(result["candidates"][0]) <= {
-        "bangumi_id",
-        "title",
-        "mikan_url",
-        "poster_url",
-        "source_query",
-        "aliases",
-        "recommendation",
-        "total_episodes",
-        "season_evidence",
-        "candidate_context",
-    }
+    assert response.status_code == 400
+    assert payload["ok"] is False
+    assert payload["error_type"] == "data_validation_errors"
+    assert any(e["field"] == "mikan_config" for e in payload["error_data"]["errors"])
 
 
 def test_golden_mikan_candidates_validation_failure(client: FlaskClient) -> None:
@@ -1182,7 +1165,6 @@ def test_golden_batch_parse_rejects_thirty_seven_lines_before_any_seam(
         "apps.migu_orca_web.routes_batches.create_batch_draft",
         "apps.migu_orca_web.routes_batches._batch_title_parsing_provider",
         "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
-        "apps.migu_orca_web.routes_batches._resolve_mikan_config",
         "apps.migu_orca_web.routes_batches._load_preferences_for_batch",
         "apps.migu_orca_web.routes_batches._load_corrections_for_batch",
         "apps.migu_orca_web.routes_batches.load_storage_config",
@@ -1273,7 +1255,7 @@ def _issue_batch_drafts(
     items: list[dict[str, object]] = []
     for index, title in enumerate(titles):
         result = client.post(
-            "/api/v1/requests", json={"title": title, "save_request": False}
+            "/api/v1/requests", json={"title": title}
         ).get_json()["result"]
         items.append(
             {

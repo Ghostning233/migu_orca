@@ -24,6 +24,10 @@ from apps.migu_orca_web.tracking_handoff import ensure_confirmed_request_trackin
 from request_engine.controllers.request_controller import accept_request
 from shared.errors import Stage1Error
 from shared.models import EntryRequest
+from storage_engine.controllers.autobangumi_config_repository import (
+    AutoBangumiConfigRepository,
+    build_stored_autobangumi_config,
+)
 from storage_engine.controllers.request_repository import (
     load_request_snapshot,
     save_request_snapshot,
@@ -57,6 +61,8 @@ AB_CONFIG = {
     "fallback_enabled": False,
 }
 
+SAVED_GENERATION: tuple[str, int] = ("", 0)
+
 
 def _config(tmp_path: Path) -> StorageConfig:
     return load_storage_config(tmp_path / "storage")
@@ -78,6 +84,12 @@ def _accepted_request(
 
 
 def _seed_tracking(tmp_path: Path, request: dict[str, Any]) -> TrackingRecord:
+    global SAVED_GENERATION
+    saved = AutoBangumiConfigRepository(tmp_path / "config").save(
+        build_stored_autobangumi_config({"auth_mode": "password", "base_url": "http://ab.invalid", "username": "u", "password": "p"}),
+        expected_configuration_revision=0,
+    )
+    SAVED_GENERATION = (str(saved.connection_ref), saved.configuration_revision)
     config = _config(tmp_path)
     handoff = ensure_confirmed_request_tracking(
         config=config,
@@ -105,17 +117,18 @@ def _submit_body(record: TrackingRecord, **overrides: Any) -> dict[str, Any]:
         "storage_dir": "storage",
         "confirm": True,
         "idempotency_key": "key-1",
-        "ab_config": AB_CONFIG,
+        "connection_ref": SAVED_GENERATION[0],
+        "configuration_revision": SAVED_GENERATION[1],
     }
     body.update(overrides)
     return body
 
 
 def _patch_ab_factory(monkeypatch: pytest.MonkeyPatch, client: FakeAutoBangumiClient):
-    monkeypatch.setattr(
-        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
-        lambda _config: client,
-    )
+    def submit_one(_request: dict[str, Any], _config: Any) -> dict[str, Any]:
+        client.create_subscription({"fixture": True})
+        return {"success": True, "ab_subscription_id": "fake-ab-subscription", "error": None}
+    monkeypatch.setattr("apps.migu_orca_web.tracking_submission_service.compose_tracking_submit_one", lambda: submit_one)
     return client
 
 
@@ -195,7 +208,7 @@ def test_submit_confirm_false_returns_400_confirmation_required(
         json=_submit_body(record, confirm=False),
     )
     assert response.status_code == 400
-    assert response.get_json()["error_type"] == "tracking_confirmation_required"
+    assert response.get_json()["error_type"] == "data_validation_errors"
 
 
 def test_submit_blocking_issue_returns_needs_reconfirm_without_ab_call(
@@ -287,9 +300,14 @@ def test_submit_unknown_external_outcome_returns_verifying_external(
 
 
 def test_submit_missing_record_is_404(tmp_path: Path, client: FlaskClient) -> None:
+    saved = AutoBangumiConfigRepository(tmp_path / "config").save(
+        build_stored_autobangumi_config({"auth_mode": "password", "base_url": "http://ab.invalid", "username": "u", "password": "p"}),
+        expected_configuration_revision=0,
+    )
     response = client.post(
         "/api/v1/tracking/items/trk_nonexistent0000000000000000000000/submit",
-        json=_submit_body(TrackingRecord(tracking_id="trk_nonexistent0000000000000000000000", revision=1)),
+            json=_submit_body(TrackingRecord(tracking_id="trk_nonexistent0000000000000000000000", revision=1),
+                              connection_ref=str(saved.connection_ref), configuration_revision=saved.configuration_revision),
     )
     assert response.status_code == 404
     assert response.get_json()["error_type"] == "tracking_not_found"

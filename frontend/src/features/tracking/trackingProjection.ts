@@ -46,9 +46,11 @@ export type TrackingRetryResult = NonNullable<
  * the retry endpoint accepts exactly the same revision/key/confirm/credential
  * body and answers with the same persisted-outcome result.
  */
-export type TrackingWriteBody = any
+export type TrackingWriteBody = TrackingSubmitBody | TrackingRetryBody
 export type TrackingWriteResult = TrackingSubmitResult | TrackingRetryResult
-export type TrackingRecoverBody = any
+export type TrackingRecoverBody = NonNullable<
+  operations['recoverTrackingItem']['requestBody']['content']['application/json']
+>
 export type TrackingRecoverResult = NonNullable<
   operations['recoverTrackingItem']['responses']['200']['content']['application/json']['result']
 >
@@ -58,7 +60,10 @@ export type TrackingRecoverResult = NonNullable<
  * body builder normalizes it into the strict recover shape and refuses to send a
  * credential that has no server address at all.
  */
-export type TrackingSessionAbConfig = any
+export interface TrackingSessionAbConfig {
+  connection_ref?: string | null
+  configuration_revision?: number
+}
 
 export const TRACKING_STATUS_GROUPS = [
   'PENDING', 'PROCESSING', 'ACTIVE', 'ATTENTION', 'INACTIVE',

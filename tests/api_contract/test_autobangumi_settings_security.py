@@ -50,6 +50,36 @@ def test_settings_put_restart_get_delete_and_cas(tmp_path: Path, monkeypatch) ->
     assert stale.status_code == 409
 
 
+def test_us338_saved_connection_survives_real_app_rebuild_and_cross_page_reads(tmp_path: Path, monkeypatch) -> None:
+    """US-338: exercise real Flask routes across pages and an actual app rebuild."""
+    config_root = tmp_path / "deployment-config"
+    monkeypatch.setenv("MIGU_ORCA_WEB_CONFIG_ROOT", str(config_root))
+    client = create_app("testing").test_client()
+    secret_values = ("cross-page-user", "cross-page-password", "cross-page-token", "ab.private.invalid")
+    config = {
+        "auth_mode": "password", "base_url": "ab.private.invalid:8080",
+        "username": "cross-page-user", "password": "cross-page-password",
+    }
+    saved = client.put("/api/v1/settings/autobangumi", json={
+        "confirm": True, "expected_configuration_revision": 0, "config": config,
+    })
+    assert saved.status_code == 200
+    ref = saved.get_json()["result"]["connection_ref"]
+
+    # Rebuild the Flask app/repository, then read each real page/API boundary.
+    rebuilt = create_app("testing").test_client()
+    responses = [
+        rebuilt.get("/api/v1/settings/autobangumi"),
+        rebuilt.get("/api/v1/requests"),
+        rebuilt.get("/api/v1/tracking/items"),
+    ]
+    assert all(response.status_code == 200 for response in responses)
+    assert responses[0].get_json()["result"]["connection_ref"] == ref
+    body = "\n".join(response.get_data(as_text=True) for response in responses)
+    assert all(secret not in body for secret in secret_values)
+    assert str(config_root) not in body
+
+
 def test_settings_lease_blocks_both_api_mutations_and_releases(tmp_path: Path, monkeypatch) -> None:
     client = _client(monkeypatch, tmp_path)
     config = {"auth_mode": "api_token", "base_url": "localhost:8080", "token": "canary-token"}

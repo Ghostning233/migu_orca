@@ -223,7 +223,7 @@ class TrackingItemRecoverView(PostView):
         assert isinstance(self.request_validator_model, TrackingRecoverPayload)
         payload = self.request_validator_model
         return run_saved_tracking_recovery(SavedTrackingRecoveryInput.model_validate({
-            **payload.model_dump(mode="json"), "tracking_id": payload.tracking_id,
+            **payload.model_dump(mode="json", exclude_none=True), "tracking_id": payload.tracking_id,
         }))
 
 

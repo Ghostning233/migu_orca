@@ -16,8 +16,8 @@ def _payload(scope: str = "SUBSCRIPTION", **extra: Any) -> dict[str, Any]:
         "tracking_id": "trk_route_test", "target_scope": scope,
         "expected_revision": 1, "idempotency_key": "route-key",
         "confirm": True,
-        "ab_config": {"auth_mode": "password", "base_url": "https://ab.invalid",
-                      "username": "user", "password": "secret", "fallback_enabled": False},
+        "connection_ref": "11111111-1111-4111-8111-111111111111",
+        "configuration_revision": 1,
     }
     value.update(extra)
     return value
