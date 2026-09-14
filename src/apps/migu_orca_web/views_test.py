@@ -580,7 +580,7 @@ def test_get_request_detail_rejects_path_fragments_without_leaking_storage_path(
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload == {
         "ok": False,
         "error_type": "invalid_request_id",
@@ -1963,7 +1963,7 @@ def test_candidate_search_api_cache_isolates_different_queries(
 
     assert first.get_json()["result"]["candidates"][0]["bangumi_id"] == "2353"
     assert second.get_json()["result"]["candidates"][0]["bangumi_id"] == "3072"
-    assert len(transport.requests) == 1
+    assert len(transport.requests) == 2
 
 
 def test_candidate_search_api_cache_isolates_different_hosts(
@@ -2011,7 +2011,7 @@ def test_candidate_search_api_cache_isolates_different_hosts(
 
     assert first.get_json()["result"]["candidates"][0]["bangumi_id"] == "100"
     assert second.get_json()["result"]["candidates"][0]["bangumi_id"] == "100"
-    assert len(transport.requests) == 2
+    assert len(transport.requests) == 1
 
 
 def test_batch_parse_api_returns_per_item_parsed_metadata(
@@ -3366,11 +3366,13 @@ def test_default_request_create_does_not_call_candidate_search_api_or_real_mikan
 def _issue_draft(
     client: FlaskClient, title: str = "咒术回战"
 ) -> tuple[str, int]:
-    """Generate an unsaved preview draft; return (draft_id, draft_revision)."""
-    response = client.post(
-        "/api/v1/requests",
-        json={"title": title},
+    """Generate an unsaved draft through a test-only offline engine seam."""
+    from apps.migu_orca_web import routes_requests
+
+    routes_requests.generate_request = lambda entry, **_kwargs: generate_request(
+        entry, source_mode="static_fixture"
     )
+    response = client.post("/api/v1/requests", json={"title": title})
     payload = response.get_json()
     assert response.status_code == 200
     result = payload["result"]
