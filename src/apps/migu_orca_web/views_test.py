@@ -1194,15 +1194,19 @@ def test_create_request_accepts_request_scoped_mikan_direct_entry(
     storage_dir = tmp_path / "storage"
     transport = _FakeMikanTransport(
         {
-            "https://mikan.example/Home/Bangumi/123": (
+                "https://mikanani.me/Home/Bangumi/123": (
                 '<h1 class="bangumi-title">芙莉莲</h1>'
                 '<a class="mikan-rss" href="/RSS/Bangumi?bangumiId=123">RSS</a>'
                 '<section class="subgroup-section">'
                 '<h2 class="subgroup-name">Loli</h2>'
                 '<a href="/RSS/Bangumi?bangumiId=123&subgroupid=10">RSS</a>'
                 "</section>"
-            ),
-            "https://mikan.example/RSS/Bangumi?bangumiId=123&subgroupid=10": (
+                ),
+                "https://mikanani.me/RSS/Bangumi?bangumiId=123": (
+                    "<rss><channel><item><title>芙莉莲 - 01</title>"
+                    "<link>https://example.invalid/1</link></item></channel></rss>"
+                ),
+                "https://mikanani.me/RSS/Bangumi?bangumiId=123&subgroupid=10": (
                 "<rss><channel><item><title>芙莉莲 - 01</title>"
                 "<link>https://example.invalid/1</link></item></channel></rss>"
             ),
@@ -1221,7 +1225,7 @@ def test_create_request_accepts_request_scoped_mikan_direct_entry(
         "/api/v1/requests",
         json={
             "title": "不会用于搜索",
-            "mikan_bangumi": "123",
+            "mikan_bangumi": "https://mikanani.me/Home/Bangumi/123",
             "storage_dir": _profile(tmp_path, storage_dir.name),
         },
     )
@@ -1231,13 +1235,13 @@ def test_create_request_accepts_request_scoped_mikan_direct_entry(
     assert response.status_code == 200
     assert payload["ok"] is True
     assert transport.requests == [
-        ("https://mikan.example/Home/Bangumi/123", 15.0),
-        ("https://mikan.example/RSS/Bangumi?bangumiId=123&subgroupid=10", 15.0),
+        ("https://mikanani.me/Home/Bangumi/123", 15.0),
+        ("https://mikanani.me/RSS/Bangumi?bangumiId=123&subgroupid=10", 15.0),
     ]
     assert request["source_info"]["matched_bangumi"]["title"] == "芙莉莲"
     assert (
         request["source_info"]["matched_bangumi"]["mikan_url"]
-        == "https://mikan.example/Home/Bangumi/123"
+        == "https://mikanani.me/Home/Bangumi/123"
     )
 
 
