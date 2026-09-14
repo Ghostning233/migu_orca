@@ -23,10 +23,8 @@
 // AB submit context (request_id) is read from the URL query but the
 // credentials themselves never go into the URL.
 import { computed, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
 
 import { api } from '@/api/client'
-import { routeLocation } from '@/app/router/catalog'
 import { useNotificationStore } from '@/app/stores/notification'
 import { useSensitiveFields } from '@/app/composables/useSensitiveFields'
 import ConfirmDialog from '@/components/feedback/ConfirmDialog.vue'
@@ -52,7 +50,6 @@ import {
   type StoragePreferences,
 } from './storagePreferences'
 
-const route = useRoute()
 const notification = useNotificationStore()
 
 // ---------------------------------------------------------------------------
@@ -320,7 +317,7 @@ async function testQbittorrentConnection(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// 4. Auto Bangumi connection test + submit context
+// 4. Auto Bangumi saved deployment connection
 // ---------------------------------------------------------------------------
 
 const ab = useSensitiveFields({
@@ -334,8 +331,10 @@ const abFallbackEnabled = ref(false)
 const abLoading = ref(false)
 const abStatus = ref<{ kind: 'success' | 'error' | 'info' | 'empty'; message: string }>({
   kind: 'empty',
-  message: '可先测试 Auto Bangumi 连接；从已确认订阅方案详情进入后，可提交订阅方案。认证信息不会持久化。',
+  message: '已保存连接只显示安全摘要；秘密不会回显。',
 })
+type ConnectionSummary = { status: string; credential_present: boolean; configuration_revision: number; connection_ref: string | null; probe_status?: string }
+const savedConnection = ref<ConnectionSummary | null>(null)
 
 const abBaseUrl = computed({
   get: () => ab.get('baseUrl'),
@@ -353,12 +352,6 @@ const abToken = computed({
   get: () => ab.get('token'),
   set: (value: string) => ab.set('token', value),
 })
-
-const requestId = computed(() => {
-  const value = route.query.request_id
-  return typeof value === 'string' ? value.trim() : ''
-})
-const hasRequestContext = computed(() => requestId.value.length > 0)
 
 function buildAbConfig(): Record<string, string | boolean> {
   const serviceRoot = validateAutoBangumiServiceRoot(ab.get('baseUrl'))
@@ -401,20 +394,9 @@ async function testAbConnection(): Promise<void> {
   abLoading.value = true
   abStatus.value = { kind: 'info', message: '正在测试 Auto Bangumi 连接...' }
   try {
-    const result = await api.post<{
-      reachable: boolean
-      authenticated: boolean
-      version: string
-      auth_mode: string
-      adapter: string
-      submit_supported: boolean
-    }>('/api/v1/autobangumi/test-connection', {
-      body: { ab_config: buildAbConfig() },
-    })
-    abStatus.value = {
-      kind: 'success',
-      message: `连接成功；版本：${result.version}；认证方式：${result.auth_mode}`,
-    }
+    const result = await api.put<ConnectionSummary>('/api/v1/settings/autobangumi', { body: { confirm: true, expected_configuration_revision: savedConnection.value?.configuration_revision ?? 0, config: buildAbConfig() } })
+    savedConnection.value = result
+    abStatus.value = { kind: 'success', message: 'Auto Bangumi 连接已保存。请点击“测试已保存连接”进行显式探测。' }
     ab.clearAll()
   } catch (error) {
     // 只显示固定中文反馈，绝不把服务端原始错误（可能含凭据）渲染出来。
@@ -427,69 +409,16 @@ async function testAbConnection(): Promise<void> {
     abLoading.value = false
   }
 }
-
-async function submitAb(): Promise<void> {
-  if (!requestId.value) {
-    abStatus.value = { kind: 'error', message: '缺少 request_id，无法提交 Auto Bangumi。' }
-    return
-  }
-  const validation = abValidate()
-  if (validation) {
-    abStatus.value = { kind: 'error', message: validation }
-    return
-  }
-  const confirmed = await confirmDialog.value?.confirm({
-    title: '提交 Auto Bangumi',
-    message: '确认提交此订阅方案到 Auto Bangumi？',
-    confirmLabel: '确认提交',
-    danger: true,
-  })
-  if (!confirmed) return
-
-  abLoading.value = true
-  abStatus.value = { kind: 'info', message: '正在提交 Auto Bangumi...' }
-  try {
-    const result = await api.post<{
-      ab_submit_result: {
-        success: boolean
-        ab_subscription_id: string | null
-        ab_response: Record<string, unknown>
-        fallback_config: Record<string, unknown> | null
-        error: Record<string, unknown> | null
-      }
-    }>('/api/v1/requests/{request_id}/submit-ab', {
-      path: { request_id: requestId.value },
-      query: preferenceQuery(),
-      body: { ab_config: buildAbConfig() },
-    })
-    const submitResult = result.ab_submit_result
-    const subscriptionId = submitResult.ab_subscription_id
-      ? `；ab_subscription_id: ${submitResult.ab_subscription_id}`
-      : ''
-    abStatus.value = {
-      kind: 'success',
-      message: `Auto Bangumi 提交成功；request_id: ${requestId.value}${subscriptionId}`,
-    }
-    notification.success('Auto Bangumi 提交成功', `订阅方案 ${requestId.value}`)
-    ab.clearAll()
-  } catch (error) {
-    // 只显示固定中文反馈，绝不把服务端原始错误（可能含凭据）渲染出来。
-    void error
-    abStatus.value = {
-      kind: 'error',
-      message: 'Auto Bangumi 提交失败。请检查配置与订阅方案状态后重试。',
-    }
-    notification.error('Auto Bangumi 提交失败', '请检查配置与订阅方案状态后重试。')
-  } finally {
-    abLoading.value = false
-  }
-}
+async function loadSavedConnection(): Promise<void> { try { savedConnection.value = await api.get<ConnectionSummary>('/api/v1/settings/autobangumi') } catch { savedConnection.value = null } }
+async function probeSavedConnection(): Promise<void> { if (!savedConnection.value?.connection_ref) return; abLoading.value = true; try { const result = await api.post<ConnectionSummary & { probe_status: string }>('/api/v1/settings/autobangumi/probe', { body: { connection_ref: savedConnection.value.connection_ref, configuration_revision: savedConnection.value.configuration_revision } }); savedConnection.value = { ...savedConnection.value, ...result }; abStatus.value = { kind: 'success', message: `连接探测结果：${result.probe_status}` } } catch { abStatus.value = { kind: 'error', message: '连接探测失败；已保存配置未删除。' } } finally { abLoading.value = false } }
+async function deleteSavedConnection(): Promise<void> { const ok = await confirmDialog.value?.confirm({ title: '清除 Auto Bangumi 连接', message: '确认清除已保存连接？不会影响本地方案或媒体。', confirmLabel: '清除', danger: true }); if (!ok || !savedConnection.value) return; try { savedConnection.value = await api.delete<ConnectionSummary>('/api/v1/settings/autobangumi', { body: { confirm: true, expected_configuration_revision: savedConnection.value.configuration_revision } }); abStatus.value = { kind: 'success', message: '已清除 Auto Bangumi 连接。' } } catch { abStatus.value = { kind: 'error', message: '清除失败，请重新读取后重试。' } } }
 
 const confirmDialog = ref<InstanceType<typeof ConfirmDialog> | null>(null)
 
 onMounted(() => {
   restoreStoragePreferences()
   void loadPreferences()
+  void loadSavedConnection()
 })
 </script>
 
@@ -738,18 +667,11 @@ onMounted(() => {
     <!-- 4. Auto Bangumi -->
     <PanelSection title="Auto Bangumi">
       <div id="settings-ab-context" class="settings-ab-context">
-        <p v-if="hasRequestContext" class="field-help">
-          当前 request_id：<code id="settings-ab-request-id">{{ requestId }}</code>。仅已确认订阅方案可提交。
-        </p>
-        <p v-else class="field-help">
-          可先测试 Auto Bangumi 连接；从已确认订阅方案详情进入后，可提交订阅方案。认证信息不会持久化。
-        </p>
+        <p class="field-help">已保存连接：{{ savedConnection?.credential_present ? '已配置' : '未配置' }}；配置版本 {{ savedConnection?.configuration_revision ?? 0 }}。</p>
       </div>
 
-      <form id="settings-ab-submit-form" class="settings-form" @submit.prevent="submitAb">
-        <p class="field-help">
-          服务地址和认证信息只用于本次请求，不写入浏览器存储、URL 或订阅方案 JSON。
-        </p>
+      <form id="settings-ab-save-form" class="settings-form" @submit.prevent="testAbConnection">
+        <p class="field-help">保存与探测分离；秘密仅提交到服务端保存配置接口，永不回显。</p>
 
         <FormField label="认证方式" inputId="settings-ab-auth-mode">
           <BaseSelect
@@ -822,20 +744,9 @@ onMounted(() => {
         <StatusAlert :kind="abStatus.kind" :message="abStatus.message" />
 
         <div class="settings-actions">
-          <BaseButton id="settings-ab-test-submit" :disabled="abLoading" @click="testAbConnection">
-            测试连接
-          </BaseButton>
-          <BaseButton id="settings-ab-submit" type="submit" variant="primary" :loading="abLoading">
-            提交 Auto Bangumi
-          </BaseButton>
-          <RouterLink
-            v-if="hasRequestContext"
-            id="settings-ab-return-link"
-            class="base-button secondary-button"
-            :to="routeLocation('plans', { request_id: requestId })"
-          >
-            返回订阅方案详情
-          </RouterLink>
+          <BaseButton id="settings-ab-save" type="submit" variant="primary" :loading="abLoading">保存连接</BaseButton>
+          <BaseButton id="settings-ab-probe" type="button" :disabled="abLoading || !savedConnection?.connection_ref" @click="probeSavedConnection">测试已保存连接</BaseButton>
+          <BaseButton id="settings-ab-delete" type="button" variant="danger" :disabled="abLoading || !savedConnection?.credential_present" @click="deleteSavedConnection">清除连接</BaseButton>
         </div>
       </form>
     </PanelSection>

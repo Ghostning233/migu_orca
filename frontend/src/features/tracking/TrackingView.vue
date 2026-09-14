@@ -75,7 +75,6 @@ import {
   type TrackingManagementResult,
 } from './trackingManagement'
 import TrackingInspector from './TrackingInspector.vue'
-import CredentialSessionDialog from './CredentialSessionDialog.vue'
 import {
   BATCH_COMPAT_NOT_LOCATED,
   BATCH_COMPAT_READ_FAILED,
@@ -111,8 +110,6 @@ const searchTerm = ref('')
 const statusFilter = ref<TrackingStatusGroup | ''>('')
 const selectedTrackingId = ref('')
 const listContainer = ref<HTMLElement | null>(null)
-const credentialDialogOpen = ref(false)
-const credentialDialog = ref<InstanceType<typeof CredentialSessionDialog> | null>(null)
 const sessionConfig = ref<ProbeBody['ab_config'] | null>(null)
 const sessionCapabilities = ref<CapabilityResult | null>(null)
 const syncLoading = ref(false)
@@ -239,18 +236,6 @@ function blockIntent(trackingId: string): void {
 
 function blockReplay(trackingId: string): void {
   blockedIntentNotice.value = { trackingId, message: REPLAY_BLOCKED_MESSAGE }
-}
-
-function sameSessionConfig(
-  left: ProbeBody['ab_config'],
-  right: ProbeBody['ab_config'],
-): boolean {
-  return left.auth_mode === right.auth_mode
-    && left.base_url === right.base_url
-    && left.username === right.username
-    && left.password === right.password
-    && left.token === right.token
-    && left.fallback_enabled === right.fallback_enabled
 }
 
 function invalidateWriteReplayOnConnectionChange(): void {
@@ -438,25 +423,12 @@ function clearFilters(): void {
   statusFilter.value = ''
 }
 
-function onConnected(value: { config: ProbeBody['ab_config']; capabilities: CapabilityResult }): void {
-  if (writeConfigSnapshot && !sameSessionConfig(writeConfigSnapshot, value.config)) {
-    invalidateWriteReplayOnConnectionChange()
-  }
-  if (managementConfigSnapshot && !sameSessionConfig(managementConfigSnapshot, value.config)) {
-    invalidateManagementReplayOnConnectionChange()
-  }
-  sessionConfig.value = value.config
-  sessionCapabilities.value = value.capabilities
-  credentialDialogOpen.value = false
-}
-
 /**
  * Clearing the page session destroys credentials while preserving unresolved
  * intents as non-replayable tombstones. The server record remains authoritative
  * and can only be settled through read-only verification or recovery.
  */
 function clearConnection(): void {
-  credentialDialog.value?.clearSession()
   sessionConfig.value = null
   sessionCapabilities.value = null
   cancelSync()
@@ -569,7 +541,7 @@ async function syncTracking(): Promise<void> {
   syncLoading.value = true
   syncMessage.value = ''
   try {
-    const body: SyncBody = { ab_config: config, confirm: true }
+    const body: SyncBody = { connection_ref: (config as any).connection_ref, configuration_revision: (config as any).configuration_revision, confirm: true }
     const result = await api.post<SyncResult>('/api/v1/tracking/sync', { body, signal: controller.signal })
     // Only a newer sync intent or an explicit connection reset can discard this
     // result; list refreshes use their own sequence and revision guard.
@@ -745,7 +717,8 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
       expected_revision: intent.expectedRevision,
       idempotency_key: intent.idempotencyKey,
       confirm: true,
-      ab_config: requestConfig,
+      connection_ref: (requestConfig as any).connection_ref,
+      configuration_revision: (requestConfig as any).configuration_revision,
       ...(storageDir ? { storage_dir: storageDir } : {}),
     }
     const result = await api.post<TrackingWriteResult>(WRITE_ACTION_ENDPOINTS[action], {
@@ -846,7 +819,7 @@ async function runTrackingRecovery(
   const intent = createTrackingRecoveryIntent(payload.item, requested, sessionCapabilities.value)
   if (!intent) return
   const body = createTrackingRecoverBody(
-    intent.action, intent.expectedRevision, sessionConfig.value, storageQuery().storage_dir,
+    intent.action, intent.expectedRevision, sessionConfig.value as any, storageQuery().storage_dir,
   )
   // A body the page cannot build safely (external verification without the live
   // session) is not sent at all.
@@ -997,7 +970,7 @@ async function runTrackingManagement(payload: {
   // patch, no known enable direction) is refused here, before any in-flight
   // session exists: it sends zero requests and converges on a definite failure
   // instead of leaving the panel stuck on "正在提交外部修改，请稍候…".
-  const body = createTrackingManagementBody(intent, requestConfig, storageQuery().storage_dir)
+  const body = createTrackingManagementBody(intent, requestConfig as any, storageQuery().storage_dir)
   if (!body) {
     managementIntent = null
     managementSession.value = createManagementUnbuildableSession(trackingId, action, targetScope)
@@ -1091,7 +1064,6 @@ onBeforeUnmount(() => {
   resetWrite()
   resetRecovery()
   resetManagement()
-  credentialDialog.value?.clearSession()
   sessionConfig.value = null
   sessionCapabilities.value = null
 })
@@ -1101,7 +1073,7 @@ onBeforeUnmount(() => {
   <section id="tracking-overview" class="tracking-overview" aria-labelledby="tracking-heading">
     <PanelSection title="追番管理" class="tracking-header">
       <template #actions>
-        <BaseButton id="tracking-connect" variant="secondary" @click="credentialDialogOpen = true">连接 Auto Bangumi</BaseButton>
+        <BaseButton id="tracking-connect" variant="secondary" @click="router.push(routeLocation('settings'))">前往设置连接</BaseButton>
         <BaseButton v-if="sessionCapabilities" id="tracking-sync" variant="secondary" :loading="syncLoading" :disabled="syncLoading || syncPending" @click="syncTracking">同步 Auto Bangumi</BaseButton>
         <BaseButton id="tracking-refresh" variant="secondary" :loading="loading" @click="loadList()">刷新列表</BaseButton>
       </template>
@@ -1189,7 +1161,6 @@ onBeforeUnmount(() => {
     </section>
     <p v-if="syncMessage" id="tracking-sync-status" class="tracking-sync-status" role="status">{{ syncMessage }}</p>
     <p v-if="syncSummary" class="tracking-sync-summary" role="status">本次安全同步摘要：检查 {{ syncSummary.checked }}，新增 {{ syncSummary.created }}，更新 {{ syncSummary.updated }}，未变化 {{ syncSummary.unchanged }}。</p>
-    <CredentialSessionDialog ref="credentialDialog" v-model:open="credentialDialogOpen" @connected="onConnected" />
     <ConfirmDialog ref="confirmDialog" />
   </section>
 </template>

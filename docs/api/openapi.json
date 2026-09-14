@@ -11700,11 +11700,20 @@
                 "type": "object",
                 "additionalProperties": false,
                 "required": [
-                  "ab_config",
+                  "connection_ref",
+                  "configuration_revision",
                   "confirm"
                 ],
                 "properties": {
-                  "ab_config": {
+                  "connection_ref": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "configuration_revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "_retired_ab_config": {
                     "type": "object",
                     "additionalProperties": false,
                     "x-request-scoped": true,
@@ -11753,6 +11762,8 @@
                 }
               },
               "example": {
+                "connection_ref": "示例",
+                "configuration_revision": 1,
                 "confirm": true
               }
             }
@@ -24882,7 +24893,8 @@
                   "expected_revision",
                   "idempotency_key",
                   "confirm",
-                  "ab_config"
+                  "connection_ref",
+                  "configuration_revision"
                 ],
                 "properties": {
                   "target_scope": {
@@ -24903,42 +24915,13 @@
                   "confirm": {
                     "const": true
                   },
-                  "ab_config": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "x-request-scoped": true,
-                    "properties": {
-                      "auth_mode": {
-                        "type": "string",
-                        "enum": [
-                          "password",
-                          "api_token"
-                        ]
-                      },
-                      "base_url": {
-                        "type": "string",
-                        "x-request-scoped": true
-                      },
-                      "username": {
-                        "type": "string",
-                        "x-request-scoped": true
-                      },
-                      "password": {
-                        "type": "string",
-                        "x-request-scoped": true
-                      },
-                      "token": {
-                        "type": "string",
-                        "x-request-scoped": true
-                      },
-                      "fallback_enabled": {
-                        "type": "boolean"
-                      }
-                    },
-                    "required": [
-                      "auth_mode",
-                      "fallback_enabled"
-                    ]
+                  "connection_ref": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "configuration_revision": {
+                    "type": "integer",
+                    "minimum": 0
                   },
                   "storage_dir": {
                     "type": [
@@ -24951,7 +24934,9 @@
               "example": {
                 "target_scope": "示例",
                 "expected_revision": 1,
-                "confirm": true
+                "confirm": true,
+                "connection_ref": "示例",
+                "configuration_revision": 1
               }
             }
           },
@@ -25588,7 +25573,8 @@
                       "expected_revision",
                       "idempotency_key",
                       "confirm",
-                      "ab_config",
+                      "connection_ref",
+                      "configuration_revision",
                       "patch"
                     ],
                     "properties": {
@@ -25606,42 +25592,13 @@
                       "confirm": {
                         "const": true
                       },
-                      "ab_config": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "x-request-scoped": true,
-                        "properties": {
-                          "auth_mode": {
-                            "type": "string",
-                            "enum": [
-                              "password",
-                              "api_token"
-                            ]
-                          },
-                          "base_url": {
-                            "type": "string",
-                            "x-request-scoped": true
-                          },
-                          "username": {
-                            "type": "string",
-                            "x-request-scoped": true
-                          },
-                          "password": {
-                            "type": "string",
-                            "x-request-scoped": true
-                          },
-                          "token": {
-                            "type": "string",
-                            "x-request-scoped": true
-                          },
-                          "fallback_enabled": {
-                            "type": "boolean"
-                          }
-                        },
-                        "required": [
-                          "auth_mode",
-                          "fallback_enabled"
-                        ]
+                      "connection_ref": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "configuration_revision": {
+                        "type": "integer",
+                        "minimum": 0
                       },
                       "storage_dir": {
                         "type": [
@@ -27197,7 +27154,8 @@
                       "expected_revision",
                       "idempotency_key",
                       "confirm",
-                      "ab_config",
+                      "connection_ref",
+                      "configuration_revision",
                       "patch"
                     ],
                     "properties": {
@@ -27215,42 +27173,13 @@
                       "confirm": {
                         "const": true
                       },
-                      "ab_config": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "x-request-scoped": true,
-                        "properties": {
-                          "auth_mode": {
-                            "type": "string",
-                            "enum": [
-                              "password",
-                              "api_token"
-                            ]
-                          },
-                          "base_url": {
-                            "type": "string",
-                            "x-request-scoped": true
-                          },
-                          "username": {
-                            "type": "string",
-                            "x-request-scoped": true
-                          },
-                          "password": {
-                            "type": "string",
-                            "x-request-scoped": true
-                          },
-                          "token": {
-                            "type": "string",
-                            "x-request-scoped": true
-                          },
-                          "fallback_enabled": {
-                            "type": "boolean"
-                          }
-                        },
-                        "required": [
-                          "auth_mode",
-                          "fallback_enabled"
-                        ]
+                      "connection_ref": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "configuration_revision": {
+                        "type": "integer",
+                        "minimum": 0
                       },
                       "storage_dir": {
                         "type": [
@@ -27986,6 +27915,20 @@
                     "type": "boolean",
                     "description": "人工动作必须为 true；AUTO 忽略该字段。"
                   },
+                  "connection_ref": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "uuid"
+                  },
+                  "configuration_revision": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 0
+                  },
                   "storage_dir": {
                     "type": [
                       "string",
@@ -27993,7 +27936,7 @@
                     ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   },
-                  "ab_config": {
+                  "_retired_ab_config": {
                     "type": "object",
                     "x-request-scoped": true,
                     "description": "仅 VERIFY_EXTERNAL 使用；连接配置只在本次请求内存中存在。",
@@ -28036,7 +27979,9 @@
               "example": {
                 "expected_revision": 1,
                 "action": "示例",
-                "confirm": false
+                "confirm": false,
+                "connection_ref": null,
+                "configuration_revision": null
               }
             }
           },
@@ -28671,7 +28616,8 @@
                   "expected_revision",
                   "idempotency_key",
                   "confirm",
-                  "ab_config"
+                  "connection_ref",
+                  "configuration_revision"
                 ],
                 "properties": {
                   "target_scope": {
@@ -28691,42 +28637,13 @@
                   "confirm": {
                     "const": true
                   },
-                  "ab_config": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "x-request-scoped": true,
-                    "properties": {
-                      "auth_mode": {
-                        "type": "string",
-                        "enum": [
-                          "password",
-                          "api_token"
-                        ]
-                      },
-                      "base_url": {
-                        "type": "string",
-                        "x-request-scoped": true
-                      },
-                      "username": {
-                        "type": "string",
-                        "x-request-scoped": true
-                      },
-                      "password": {
-                        "type": "string",
-                        "x-request-scoped": true
-                      },
-                      "token": {
-                        "type": "string",
-                        "x-request-scoped": true
-                      },
-                      "fallback_enabled": {
-                        "type": "boolean"
-                      }
-                    },
-                    "required": [
-                      "auth_mode",
-                      "fallback_enabled"
-                    ]
+                  "connection_ref": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "configuration_revision": {
+                    "type": "integer",
+                    "minimum": 0
                   },
                   "storage_dir": {
                     "type": [
@@ -28739,7 +28656,9 @@
               "example": {
                 "target_scope": "示例",
                 "expected_revision": 1,
-                "confirm": true
+                "confirm": true,
+                "connection_ref": "示例",
+                "configuration_revision": 1
               }
             }
           },
@@ -30740,7 +30659,8 @@
                   "expected_revision",
                   "idempotency_key",
                   "confirm",
-                  "ab_config",
+                  "connection_ref",
+                  "configuration_revision",
                   "enabled"
                 ],
                 "properties": {
@@ -30762,42 +30682,13 @@
                   "confirm": {
                     "const": true
                   },
-                  "ab_config": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "x-request-scoped": true,
-                    "properties": {
-                      "auth_mode": {
-                        "type": "string",
-                        "enum": [
-                          "password",
-                          "api_token"
-                        ]
-                      },
-                      "base_url": {
-                        "type": "string",
-                        "x-request-scoped": true
-                      },
-                      "username": {
-                        "type": "string",
-                        "x-request-scoped": true
-                      },
-                      "password": {
-                        "type": "string",
-                        "x-request-scoped": true
-                      },
-                      "token": {
-                        "type": "string",
-                        "x-request-scoped": true
-                      },
-                      "fallback_enabled": {
-                        "type": "boolean"
-                      }
-                    },
-                    "required": [
-                      "auth_mode",
-                      "fallback_enabled"
-                    ]
+                  "connection_ref": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "configuration_revision": {
+                    "type": "integer",
+                    "minimum": 0
                   },
                   "storage_dir": {
                     "type": [
@@ -30814,6 +30705,8 @@
                 "target_scope": "示例",
                 "expected_revision": 1,
                 "confirm": true,
+                "connection_ref": "示例",
+                "configuration_revision": 1,
                 "enabled": true
               }
             }
@@ -31511,6 +31404,14 @@
                       "fallback_enabled"
                     ]
                   },
+                  "connection_ref": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "configuration_revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
                   "storage_dir": {
                     "type": [
                       "string",
@@ -31523,7 +31424,9 @@
               "example": {
                 "expected_revision": 1,
                 "idempotency_key": "示例",
-                "confirm": true
+                "confirm": true,
+                "connection_ref": null,
+                "configuration_revision": 1
               }
             }
           },

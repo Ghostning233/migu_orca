@@ -6356,11 +6356,16 @@ export interface operations {
             content: {
                 /**
                  * @example {
+                 *       "connection_ref": "示例",
+                 *       "configuration_revision": 1,
                  *       "confirm": true
                  *     }
                  */
                 "application/json": {
-                    ab_config: {
+                    /** Format: uuid */
+                    connection_ref: string;
+                    configuration_revision: number;
+                    _retired_ab_config?: {
                         /** @enum {string} */
                         auth_mode: "password" | "api_token";
                         base_url?: string;
@@ -13037,7 +13042,9 @@ export interface operations {
                  * @example {
                  *       "target_scope": "示例",
                  *       "expected_revision": 1,
-                 *       "confirm": true
+                 *       "confirm": true,
+                 *       "connection_ref": "示例",
+                 *       "configuration_revision": 1
                  *     }
                  */
                 "application/json": {
@@ -13047,15 +13054,9 @@ export interface operations {
                     idempotency_key: string;
                     /** @constant */
                     confirm: true;
-                    ab_config: {
-                        /** @enum {string} */
-                        auth_mode: "password" | "api_token";
-                        base_url?: string;
-                        username?: string;
-                        password?: string;
-                        token?: string;
-                        fallback_enabled: boolean;
-                    };
+                    /** Format: uuid */
+                    connection_ref: string;
+                    configuration_revision: number;
                     storage_dir?: string | null;
                 };
             };
@@ -13399,15 +13400,9 @@ export interface operations {
                     idempotency_key: string;
                     /** @constant */
                     confirm: true;
-                    ab_config: {
-                        /** @enum {string} */
-                        auth_mode: "password" | "api_token";
-                        base_url?: string;
-                        username?: string;
-                        password?: string;
-                        token?: string;
-                        fallback_enabled: boolean;
-                    };
+                    /** Format: uuid */
+                    connection_ref: string;
+                    configuration_revision: number;
                     storage_dir?: string | null;
                     patch: {
                         title?: string | null;
@@ -13641,15 +13636,9 @@ export interface operations {
                     idempotency_key: string;
                     /** @constant */
                     confirm: true;
-                    ab_config: {
-                        /** @enum {string} */
-                        auth_mode: "password" | "api_token";
-                        base_url?: string;
-                        username?: string;
-                        password?: string;
-                        token?: string;
-                        fallback_enabled: boolean;
-                    };
+                    /** Format: uuid */
+                    connection_ref: string;
+                    configuration_revision: number;
                     storage_dir?: string | null;
                     patch: {
                         name?: string | null;
@@ -14004,7 +13993,9 @@ export interface operations {
                  * @example {
                  *       "expected_revision": 1,
                  *       "action": "示例",
-                 *       "confirm": false
+                 *       "confirm": false,
+                 *       "connection_ref": null,
+                 *       "configuration_revision": null
                  *     }
                  */
                 "application/json": {
@@ -14017,10 +14008,13 @@ export interface operations {
                     action: "AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "VERIFY_EXTERNAL";
                     /** @description 人工动作必须为 true；AUTO 忽略该字段。 */
                     confirm?: boolean;
+                    /** Format: uuid */
+                    connection_ref?: string | null;
+                    configuration_revision?: number | null;
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
                     storage_dir?: string | null;
                     /** @description 仅 VERIFY_EXTERNAL 使用；连接配置只在本次请求内存中存在。 */
-                    ab_config?: {
+                    _retired_ab_config?: {
                         /** @enum {string} */
                         auth_mode: "password" | "api_token";
                         base_url: string;
@@ -14390,7 +14384,9 @@ export interface operations {
                  * @example {
                  *       "target_scope": "示例",
                  *       "expected_revision": 1,
-                 *       "confirm": true
+                 *       "confirm": true,
+                 *       "connection_ref": "示例",
+                 *       "configuration_revision": 1
                  *     }
                  */
                 "application/json": {
@@ -14400,15 +14396,9 @@ export interface operations {
                     idempotency_key: string;
                     /** @constant */
                     confirm: true;
-                    ab_config: {
-                        /** @enum {string} */
-                        auth_mode: "password" | "api_token";
-                        base_url?: string;
-                        username?: string;
-                        password?: string;
-                        token?: string;
-                        fallback_enabled: boolean;
-                    };
+                    /** Format: uuid */
+                    connection_ref: string;
+                    configuration_revision: number;
                     storage_dir?: string | null;
                 };
             };
@@ -15523,6 +15513,8 @@ export interface operations {
                  *       "target_scope": "示例",
                  *       "expected_revision": 1,
                  *       "confirm": true,
+                 *       "connection_ref": "示例",
+                 *       "configuration_revision": 1,
                  *       "enabled": true
                  *     }
                  */
@@ -15533,15 +15525,9 @@ export interface operations {
                     idempotency_key: string;
                     /** @constant */
                     confirm: true;
-                    ab_config: {
-                        /** @enum {string} */
-                        auth_mode: "password" | "api_token";
-                        base_url?: string;
-                        username?: string;
-                        password?: string;
-                        token?: string;
-                        fallback_enabled: boolean;
-                    };
+                    /** Format: uuid */
+                    connection_ref: string;
+                    configuration_revision: number;
                     storage_dir?: string | null;
                     enabled: boolean;
                 };
@@ -15880,7 +15866,9 @@ export interface operations {
                  * @example {
                  *       "expected_revision": 1,
                  *       "idempotency_key": "示例",
-                 *       "confirm": true
+                 *       "confirm": true,
+                 *       "connection_ref": null,
+                 *       "configuration_revision": 1
                  *     }
                  */
                 "application/json": {
@@ -15902,6 +15890,9 @@ export interface operations {
                         token?: string;
                         fallback_enabled: boolean;
                     };
+                    /** Format: uuid */
+                    connection_ref?: string;
+                    configuration_revision?: number;
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
                     storage_dir?: string | null;
                 };

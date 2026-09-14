@@ -288,7 +288,8 @@ _MANAGEMENT_COMMON = {
     "expected_revision": {"type": "integer", "minimum": 1},
     "idempotency_key": {"type": "string", "x-request-scoped": True},
     "confirm": {"const": True},
-    "ab_config": _MANAGEMENT_AB_CONFIG,
+    "connection_ref": {"type": "string", "format": "uuid"},
+    "configuration_revision": {"type": "integer", "minimum": 0},
     "storage_dir": {"type": "string"},
 }
 _MANAGEMENT_ERRORS = {
@@ -327,7 +328,7 @@ def _management_endpoint(operation_id: str, summary: str, *, extra: dict[str, An
     if scope is not None:
         properties["target_scope"] = {"type": "string", "enum": scope}
     properties = {key: value for key, value in properties.items() if key != "tracking_id"}
-    required = ["target_scope", "expected_revision", "idempotency_key", "confirm", "ab_config"] + (required_extra or [])
+    required = ["target_scope", "expected_revision", "idempotency_key", "confirm", "connection_ref", "configuration_revision"] + (required_extra or [])
     return {
         "operationId": operation_id,
         "summary": summary,
@@ -396,7 +397,7 @@ def _modify_request_body() -> dict[str, Any]:
         return {
             "type": "object",
             "additionalProperties": False,
-            "required": ["target_scope", "expected_revision", "idempotency_key", "confirm", "ab_config", "patch"],
+            "required": ["target_scope", "expected_revision", "idempotency_key", "confirm", "connection_ref", "configuration_revision", "patch"],
             "properties": {
                 **common,
                 "target_scope": {"const": scope},
@@ -946,9 +947,11 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "requestBody": {
             "type": "object",
             "additionalProperties": False,
-            "required": ["ab_config", "confirm"],
+            "required": ["connection_ref", "configuration_revision", "confirm"],
             "properties": {
-                "ab_config": {
+                "connection_ref": {"type": "string", "format": "uuid"},
+                "configuration_revision": {"type": "integer", "minimum": 0},
+                "_retired_ab_config": {
                     "type": "object", "additionalProperties": False, "x-request-scoped": True,
                     "properties": {
                         "auth_mode": {"type": "string", "enum": ["password", "api_token"]},
@@ -1098,6 +1101,8 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                     },
                     "required": ["auth_mode", "fallback_enabled"],
                 },
+                "connection_ref": {"type": "string", "format": "uuid"},
+                "configuration_revision": {"type": "integer", "minimum": 0},
                 "storage_dir": {
                     "type": "string",
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
@@ -1228,11 +1233,13 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                     "type": "boolean",
                     "description": "人工动作必须为 true；AUTO 忽略该字段。",
                 },
+                "connection_ref": {"type": ["string", "null"], "format": "uuid"},
+                "configuration_revision": {"type": ["integer", "null"], "minimum": 0},
                 "storage_dir": {
                     "type": "string",
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
                 },
-                "ab_config": {
+                "_retired_ab_config": {
                     "type": "object",
                     "x-request-scoped": True,
                     "description": "仅 VERIFY_EXTERNAL 使用；连接配置只在本次请求内存中存在。",

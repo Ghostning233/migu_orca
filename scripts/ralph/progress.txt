@@ -249,3 +249,9 @@ Started: 2026-09-13
 - 独立审核逐条核对 US-318～US-326 的配置权限与原子写、Host/Origin/JSON 防护、probe snapshot/lease、operation/mapping ref、四类 saved service 严格模型及秘密隔离，未发现 P0/P1，允许 US-326 保持 passes=true。
 - 确认 API contract autouse fixture 在 client 构造前注入临时配置根；browser session fixture 在 Flask app 创建前设置并保持至 live server 结束后恢复。旧业务 HTTP/generated 仍可编译，未提前实现 US-327。
 - 本批次到 US-326 强制停止；未运行完整后端、完整前端、真实 Chromium 或真实 AB，未 push/PR/merge。后续前端与 HTTP 原子迁移从 US-327 开始，需下一批明确启动。
+
+## 2026-09-14 / US-327～US-330（工作包 A 开发交接）
+
+- 范围：设置页改用保存连接摘要/显式 saved probe；追番 submit/retry、sync/recover 与四类 management HTTP 路由切换为 connection_ref + configuration_revision，更新 schema/OpenAPI/generated 与前端 body builders，移除追番页凭据弹窗入口。
+- 验证：saved submit/sync/management/recovery 定向测试 `56 passed`；`uv run migu-orca-openapi`、frontend `npm run api:generate`、`npm run api:check`、`npm run typecheck` 通过；未运行真实 Chromium。
+- 遗留风险：Settings/Tracking 仍有部分旧 capability 类型与兼容代码注释，旧临时 capabilities endpoint 尚未退役；需独立审核补齐 US-327～330 AC、敏感 canary 与浏览器旅程。

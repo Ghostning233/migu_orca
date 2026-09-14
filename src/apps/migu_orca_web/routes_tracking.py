@@ -14,9 +14,6 @@ converges migrated records onto the same deterministic tracking list.  Only
 local storage is read — no external system is ever contacted.
 """
 
-from ab_engine.controllers.ab_config import build_ab_config
-from ab_engine.controllers.ab_http_client import UrlopenAutoBangumiHttpTransport
-from ab_engine.controllers.ab_management_client import create_legacy_31_management_client
 from apps.migu_orca_web.blueprints import api_blueprint
 from apps.migu_orca_web.schemas import (
     TrackingDeleteExternalPayload,
@@ -29,6 +26,8 @@ from apps.migu_orca_web.schemas import (
     TrackingSetEnabledPayload,
     TrackingSubmitPayload,
     TrackingSyncPayload,
+    SavedTrackingSubmitInput, SavedTrackingSyncInput, SavedTrackingRecoveryInput,
+    SavedTrackingManagementInput,
 )
 from apps.migu_orca_web.services import _storage_dir
 from apps.migu_orca_web.tracking_management_service import management_writer, run_tracking_management
@@ -43,7 +42,11 @@ from apps.migu_orca_web.tracking_submission_service import (
     run_tracking_retry,
     run_tracking_submit,
 )
+from apps.migu_orca_web.tracking_submission_service import run_saved_tracking_retry, run_saved_tracking_submit
 from apps.migu_orca_web.tracking_sync_service import run_tracking_sync
+from apps.migu_orca_web.tracking_saved_sync_service import run_saved_tracking_sync
+from apps.migu_orca_web.tracking_saved_recovery_service import run_saved_tracking_recovery
+from apps.migu_orca_web.tracking_saved_management_service import run_saved_tracking_management
 from extensions.flask_api import class_route
 from extensions.flask_api.views import GetView, PostView
 from storage_engine.controllers.operation_repository import load_tracking_operation
@@ -80,8 +83,12 @@ class TrackingSyncView(PostView):
         assert isinstance(self.request_validator_model, TrackingSyncPayload)
         payload = self.request_validator_model
         config = load_storage_config(_storage_dir(payload.storage_dir))
-        ab_config = build_ab_config(payload.ab_config.model_dump(exclude_none=True))
-        result = run_tracking_sync(config=config, ab_config=ab_config)
+        result = run_saved_tracking_sync(SavedTrackingSyncInput.model_validate({
+            "connection_ref": payload.connection_ref,
+            "configuration_revision": payload.configuration_revision,
+            "confirm": payload.confirm,
+            "storage_dir": payload.storage_dir,
+        }))
         listing = list_tracking_items(config)
         warnings = list(result.warnings)
         for warning in listing["warnings"]:
@@ -164,16 +171,7 @@ class TrackingItemSubmitView(PostView):
     def save(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, TrackingSubmitPayload)
         payload = self.request_validator_model
-        config = load_storage_config(_storage_dir(payload.storage_dir))
-        ab_config = build_ab_config(payload.ab_config.model_dump(exclude_none=True))
-        return run_tracking_submit(
-            config,
-            tracking_id=payload.tracking_id,
-            expected_revision=payload.expected_revision,
-            idempotency_key=payload.idempotency_key,
-            confirm=payload.confirm,
-            ab_config=ab_config,
-        )
+        return run_saved_tracking_submit(SavedTrackingSubmitInput.model_validate(payload.model_dump()))
 
 
 @class_route(
@@ -199,16 +197,7 @@ class TrackingItemRetryView(PostView):
     def save(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, TrackingSubmitPayload)
         payload = self.request_validator_model
-        config = load_storage_config(_storage_dir(payload.storage_dir))
-        ab_config = build_ab_config(payload.ab_config.model_dump(exclude_none=True))
-        return run_tracking_retry(
-            config,
-            tracking_id=payload.tracking_id,
-            expected_revision=payload.expected_revision,
-            idempotency_key=payload.idempotency_key,
-            confirm=payload.confirm,
-            ab_config=ab_config,
-        )
+        return run_saved_tracking_retry(SavedTrackingSubmitInput.model_validate(payload.model_dump()))
 
 
 @class_route(
@@ -233,19 +222,9 @@ class TrackingItemRecoverView(PostView):
     def save(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, TrackingRecoverPayload)
         payload = self.request_validator_model
-        config = load_storage_config(_storage_dir(payload.storage_dir))
-        ab_config = None
-        if payload.action == "VERIFY_EXTERNAL":
-            assert payload.ab_config is not None
-            ab_config = build_ab_config(payload.ab_config.model_dump(exclude_none=True))
-        return run_tracking_recover(
-            config,
-            tracking_id=payload.tracking_id,
-            expected_revision=payload.expected_revision,
-            action=payload.action,
-            confirm=payload.confirm,
-            ab_config=ab_config,
-        )
+        return run_saved_tracking_recovery(SavedTrackingRecoveryInput.model_validate({
+            **payload.model_dump(), "tracking_id": payload.tracking_id,
+        }))
 
 
 _management_writer = management_writer
@@ -277,15 +256,11 @@ def _management_result(config, *, tracking_id: str, action: str, result: dict[st
 
 
 def _run_management_route(payload, action: str, patch: dict[str, object] | None = None, enabled: bool | None = None) -> dict[str, object]:
+    saved = SavedTrackingManagementInput.model_validate({
+        **payload.model_dump(), "operation": action, "patch": patch, "enabled": enabled,
+    })
     config = load_storage_config(_storage_dir(payload.storage_dir))
-    ab_config = build_ab_config(payload.ab_config.model_dump(exclude_none=True))
-    client = create_legacy_31_management_client(ab_config, transport=UrlopenAutoBangumiHttpTransport())
-    result = run_tracking_management(
-        config, tracking_id=payload.tracking_id, expected_revision=payload.expected_revision,
-        idempotency_key=payload.idempotency_key, confirm=payload.confirm, operation=action,
-        target_scope=payload.target_scope, ab_config=ab_config, management_client=client,
-        patch=patch, enabled=enabled, write=_management_writer(client, action),
-    )
+    result = run_saved_tracking_management(saved)
     return _management_result(config, tracking_id=payload.tracking_id, action=action, result=result)
 
 

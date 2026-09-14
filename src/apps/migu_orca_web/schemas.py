@@ -419,7 +419,8 @@ class RequestAbConfigPayload(BaseModel):
 
 
 class RequestAbSubmitPayload(RequestActionPayload):
-    ab_config: RequestAbConfigPayload
+    connection_ref: UUID
+    configuration_revision: StrictInt = Field(ge=0)
 
 
 class AutoBangumiTestConnectionPayload(BaseModel):
@@ -579,7 +580,8 @@ class TrackingSyncPayload(BaseModel):
     """Request-scoped read-only external tracking synchronization."""
 
     model_config = ConfigDict(extra="forbid")
-    ab_config: AutoBangumiCapabilitiesConfigPayload
+    connection_ref: UUID
+    configuration_revision: StrictInt = Field(ge=0)
     storage_dir: str | None = None
     confirm: Literal[True]
 
@@ -862,14 +864,15 @@ class TrackingRecoverPayload(BaseModel):
     action: str
     confirm: bool = False
     storage_dir: str | None = None
-    ab_config: RequestAbConfigPayload | None = None
+    connection_ref: UUID | None = None
+    configuration_revision: StrictInt | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _verify_external_requires_config(self) -> TrackingRecoverPayload:
-        if self.action == "VERIFY_EXTERNAL" and self.ab_config is None:
-            raise ValueError("VERIFY_EXTERNAL requires ab_config")
-        if self.action != "VERIFY_EXTERNAL" and self.ab_config is not None:
-            raise ValueError("ab_config is only accepted by VERIFY_EXTERNAL")
+        if self.action == "VERIFY_EXTERNAL" and (self.connection_ref is None or self.configuration_revision is None):
+            raise ValueError("VERIFY_EXTERNAL requires saved connection generation")
+        if self.action != "VERIFY_EXTERNAL" and (self.connection_ref is not None or self.configuration_revision is not None):
+            raise ValueError("local recovery cannot include saved connection generation")
         return self
 
     @field_validator("tracking_id")
@@ -960,7 +963,8 @@ class _TrackingManagementBasePayload(BaseModel):
     expected_revision: StrictInt = Field(ge=1)
     idempotency_key: StrictStr
     confirm: Literal[True]
-    ab_config: AutoBangumiCapabilitiesConfigPayload
+    connection_ref: UUID
+    configuration_revision: StrictInt = Field(ge=0)
     storage_dir: str | None = None
 
     @field_validator("tracking_id")

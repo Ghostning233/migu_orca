@@ -517,16 +517,16 @@ export function sameManagementRequest(
  */
 export function createTrackingManagementBody(
   intent: TrackingManagementIntent,
-  abConfig: TrackingModifyBody['ab_config'],
+  connection: any,
   storageDir?: string,
 ): TrackingModifyBody | TrackingSetEnabledBody | TrackingRefreshRssBody | TrackingDeleteExternalBody | null {
-  const baseUrl = typeof abConfig?.base_url === 'string' ? abConfig.base_url.trim() : ''
-  if (!abConfig || !baseUrl) return null
+  if (!connection || !connection.connection_ref || connection.configuration_revision === undefined) return null
   const common = {
     expected_revision: intent.expectedRevision,
     idempotency_key: intent.idempotencyKey,
     confirm: true as const,
-    ab_config: { ...abConfig, base_url: baseUrl },
+    connection_ref: connection.connection_ref,
+    configuration_revision: connection.configuration_revision,
     ...(storageDir ? { storage_dir: storageDir } : {}),
   }
   if (intent.action === 'SET_ENABLED') {

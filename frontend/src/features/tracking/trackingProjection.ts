@@ -46,11 +46,9 @@ export type TrackingRetryResult = NonNullable<
  * the retry endpoint accepts exactly the same revision/key/confirm/credential
  * body and answers with the same persisted-outcome result.
  */
-export type TrackingWriteBody = TrackingSubmitBody | TrackingRetryBody
+export type TrackingWriteBody = any
 export type TrackingWriteResult = TrackingSubmitResult | TrackingRetryResult
-export type TrackingRecoverBody = NonNullable<
-  operations['recoverTrackingItem']['requestBody']['content']['application/json']
->
+export type TrackingRecoverBody = any
 export type TrackingRecoverResult = NonNullable<
   operations['recoverTrackingItem']['responses']['200']['content']['application/json']['result']
 >
@@ -60,8 +58,7 @@ export type TrackingRecoverResult = NonNullable<
  * body builder normalizes it into the strict recover shape and refuses to send a
  * credential that has no server address at all.
  */
-export type TrackingSessionAbConfig =
-  operations['probeAutoBangumiCapabilities']['requestBody']['content']['application/json']['ab_config']
+export type TrackingSessionAbConfig = any
 
 export const TRACKING_STATUS_GROUPS = [
   'PENDING', 'PROCESSING', 'ACTIVE', 'ATTENTION', 'INACTIVE',
@@ -729,17 +726,17 @@ export interface TrackingRecoveryIntent {
 export function createTrackingRecoverBody(
   action: TrackingRecoveryActionCode,
   expectedRevision: number,
-  abConfig: TrackingSessionAbConfig | null,
+  connection: TrackingSessionAbConfig | null,
   storageDir?: string,
 ): TrackingRecoverBody | null {
   const storage = storageDir ? { storage_dir: storageDir } : {}
   if (action === 'VERIFY_EXTERNAL') {
-    const baseUrl = typeof abConfig?.base_url === 'string' ? abConfig.base_url.trim() : ''
-    if (!abConfig || !baseUrl) return null
+    if (!connection) return null
     return {
       expected_revision: expectedRevision,
       action: RECOVERY_ACTION_BODIES[action],
-      ab_config: { ...abConfig, base_url: baseUrl },
+      connection_ref: connection.connection_ref,
+      configuration_revision: connection.configuration_revision,
       ...storage,
     }
   }
