@@ -15,13 +15,11 @@ def test_retired_batch_queue_write_runtime_has_no_live_wiring() -> None:
     assert "batch_engine.controllers.batch_submit_controller" not in submission
     assert "compose_ab_submit_one" not in submission
 
-    accept = (ROOT / "src/batch_engine/controllers/batch_accept_controller.py").read_text(encoding="utf-8")
-    submit = (ROOT / "src/batch_engine/controllers/batch_submit_controller.py").read_text(encoding="utf-8")
+    accept_path = ROOT / "src/batch_engine/controllers/batch_accept_controller.py"
+    submit_path = ROOT / "src/batch_engine/controllers/batch_submit_controller.py"
     queue_repo = (ROOT / "src/storage_engine/controllers/queue_repository.py").read_text(encoding="utf-8")
-    assert "def accept_batch" not in accept
-    assert "def submit_batch" not in submit
-    assert "def retry_batch" not in submit
-    assert "def recover_batch" not in submit
+    assert not accept_path.exists()
+    assert not submit_path.exists()
     assert "def save_submission_queue" not in queue_repo
 
 

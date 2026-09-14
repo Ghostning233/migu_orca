@@ -52,7 +52,6 @@ from apps.migu_orca_web.contexts import (  # noqa: F401
 )
 from apps.migu_orca_web.routes_app import app_blueprint  # noqa: F401
 
-
 # ---------------------------------------------------------------------------
 # Default Web entry (US-209)
 # ---------------------------------------------------------------------------
