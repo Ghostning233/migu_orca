@@ -927,6 +927,81 @@ def test_generation_switch_does_not_reuse_old_management_intent(page, live_serve
 
 
 @pytest.mark.browser
+def test_submit_unknown_lock_survives_new_generation_refresh(page, live_server_url):
+    ref_a = "11111111-1111-4111-8111-111111111111"
+    ref_b = "22222222-2222-4222-8222-222222222222"
+    generation = 0
+    posts: list[dict] = []
+    item = {**_item("tracking-a", "代际提交"), "available_actions": [{"code": "SUBMIT", "label": "提交", "style": "PRIMARY", "requires_confirmation": True, "target_scopes": []}]}
+
+    def handler(route, request):
+        nonlocal generation
+        path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+        if request.method == "GET" and path == "/settings/autobangumi":
+            generation += 1
+            ref = ref_a if generation == 1 else ref_b
+            route.fulfill(json={"ok": True, "result": {"configured": True, "credential_present": True, "connection_ref": ref, "configuration_revision": generation, "connection_status": "CONFIGURED"}}); return
+        if request.method == "GET" and path == "/tracking/items":
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}}); return
+        if request.method == "GET" and path == "/tracking/items/tracking-a":
+            route.fulfill(json={"ok": True, "result": _detail_payload(item)}); return
+        if request.method == "POST" and path.endswith("/probe"):
+            route.fulfill(json={"ok": True, "result": _probe_capabilities()}); return
+        if request.method == "POST" and path.endswith("/submit"):
+            posts.append(request.post_data_json or {})
+            route.fulfill(json={"ok": True, "result": {"tracking_id": "tracking-a", "action": "SUBMIT", "outcome": "UNKNOWN", "needs_manual": True, "tracking": item}}); return
+        route.continue_()
+
+    page.route("**/api/v1/**", handler)
+    page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+    page.wait_for_selector("#tracking-probe-saved")
+    page.locator("#tracking-probe-saved").click()
+    page.wait_for_selector("#tracking-submit")
+    page.locator("#tracking-submit").click()
+    page.locator(".confirm-dialog .primary-button").click()
+    page.wait_for_timeout(100)
+    assert len(posts) == 1 and posts[0]["connection_ref"] == ref_a
+    page.reload()
+    page.wait_for_selector("#tracking-probe-saved")
+    assert page.locator("#tracking-submit").count() == 0
+
+
+@pytest.mark.browser
+def test_unknown_operation_after_configuration_change_cannot_verify(page, live_server_url):
+    ref_a = "11111111-1111-4111-8111-111111111111"
+    ref_b = "22222222-2222-4222-8222-222222222222"
+    reads = 0
+    calls: list[str] = []
+    item = _recovery_item("tracking-a", "换绑未知", revision=4)
+
+    def handler(route, request):
+        nonlocal reads
+        path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+        if request.method == "GET" and path == "/settings/autobangumi":
+            reads += 1; ref = ref_a if reads == 1 else ref_b
+            route.fulfill(json={"ok": True, "result": {"configured": True, "credential_present": True, "connection_ref": ref, "configuration_revision": reads, "connection_status": "CONFIGURED"}}); return
+        if request.method == "GET" and path == "/tracking/items":
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}}); return
+        if request.method == "GET" and path == "/tracking/items/tracking-a":
+            route.fulfill(json={"ok": True, "result": _detail_payload(item)}); return
+        if request.method == "POST" and path.endswith("/probe"):
+            route.fulfill(json={"ok": True, "result": _probe_capabilities()}); return
+        if request.method == "POST" and path.endswith("/recover"):
+            calls.append(path)
+        route.continue_()
+
+    page.route("**/api/v1/**", handler)
+    page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+    page.wait_for_selector("#tracking-probe-saved")
+    page.locator("#tracking-probe-saved").click()
+    page.wait_for_selector("#tracking-recover-verify")
+    page.reload()
+    page.wait_for_selector("#tracking-probe-saved")
+    assert page.locator("#tracking-recover-verify").count() == 0
+    assert calls == []
+
+
+@pytest.mark.browser
 @pytest.mark.parametrize("action", ["MARK_SUCCEEDED", "MARK_FAILED"])
 def test_manual_recovery_is_local_and_confirmed(page, live_server_url, action):
     item = _recovery_item("tracking-a", "人工恢复", revision=4)

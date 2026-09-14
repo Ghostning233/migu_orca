@@ -359,3 +359,7 @@ Started: 2026-09-13
 ## 2026-09-14 / 工作包 A management unknown 与代际切换 Chromium 补充
 - 新增真实 management UNKNOWN journey：显式 probe、MODIFY 实际写入返回 UNKNOWN 后按钮锁定，未产生第二次写入；新增 summary saved generation 切换后旧 management intent 不可执行且零写。
 - 验证：`npm --prefix frontend run build` 通过；定向新增测试通过，完整 saved-flow suite 已在修正后复跑确认；工作区提交前保持无敏感产物。
+
+## 2026-09-14 / 工作包 A 时间序列锁 Chromium 补充
+- 新增 saved submit UNKNOWN 后刷新换代 journey：旧 ref 的一次提交锁不在新 ref 页面自动重放，刷新后需重新显式 probe；新增 unknown operation 在配置换代后 VERIFY_EXTERNAL 隐藏且零 recover 外调。
+- 验证：`npm --prefix frontend run build` 通过；`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q` → `26 passed`（真实 Chromium）。
