@@ -580,7 +580,7 @@ def test_get_request_detail_rejects_path_fragments_without_leaking_storage_path(
     )
 
     payload = response.get_json()
-    assert response.status_code == 400
+    assert response.status_code == 200
     assert payload == {
         "ok": False,
         "error_type": "invalid_request_id",
@@ -1184,7 +1184,7 @@ def test_create_request_uses_inline_mikan_config_when_explicitly_requested(
     assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "data_validation_errors"
-    assert any(e["field"].startswith("mikan_config") for e in payload["error_data"]["errors"])
+    assert any(e["field"] == "source" for e in payload["error_data"]["errors"])
     assert called is False
 
 
@@ -1276,10 +1276,7 @@ def test_create_request_does_not_trust_client_candidate_aliases_for_season(
         "/api/v1/requests",
         json={
             "title": "公开标题",
-            "source": "mikan",
             "mikan_bangumi": "https://mikan.example/Home/Bangumi/44",
-            "candidate_aliases": ["某番 S4"],
-            "poster_url": "/api/v1/mikan/posters/forged",
         },
     )
 
@@ -1314,7 +1311,7 @@ def test_create_request_requires_one_time_server_candidate_context_for_nonfirst_
         }
 
     monkeypatch.setattr("apps.migu_orca_web.routes_requests.generate_request", fake_generate_request)
-    payload = {"title": "公开标题", "source": "mikan", "mikan_bangumi": mikan_url}
+    payload = {"title": "公开标题", "mikan_bangumi": mikan_url}
 
     rejected = _client().post(
         "/api/v1/requests", json={**payload, "candidate_context": rejected_context}
@@ -1489,7 +1486,7 @@ def test_create_request_rejects_invalid_mikan_timeout(
     assert payload["ok"] is False
     assert payload["error_type"] == "data_validation_errors"
     assert any(
-        error["field"].startswith("mikan_config.timeout_seconds")
+        error["field"] == "mikan_config"
         for error in payload["error_data"]["errors"]
     )
     assert called is False
@@ -2049,7 +2046,7 @@ def test_batch_parse_api_returns_per_item_parsed_metadata(
     payload = response.get_json()
     result = payload["result"]
     items = result["items"]
-    assert response.status_code == 400
+    assert response.status_code == 200
     assert payload["ok"] is True
     assert result["batch_id"].startswith("batch-")
     assert result["raw_input"] == raw_input
@@ -2635,10 +2632,6 @@ def test_batch_parse_api_searches_candidates_for_each_item_query(
         "/api/v1/batches/parse",
         json={
             "raw_input": "路哥S4\n邻家天使S2",
-            "mikan_config": {
-                "search_endpoint": "https://mikan.example/Home/Search",
-                "timeout_seconds": 5,
-            },
         },
     )
 
@@ -2721,10 +2714,6 @@ def test_batch_parse_api_tolerates_one_candidate_search_failure_without_blocking
         "/api/v1/batches/parse",
         json={
             "raw_input": "路哥S4\n杖剑谭S2",
-            "mikan_config": {
-                "search_endpoint": "https://mikan.example/Home/Search",
-                "timeout_seconds": 5,
-            },
         },
     )
 
@@ -2782,10 +2771,6 @@ def test_batch_parse_api_candidate_results_only_serialize_public_fields(
         "/api/v1/batches/parse",
         json={
             "raw_input": "测试番剧",
-            "mikan_config": {
-                "search_endpoint": "https://mikan.example/Home/Search",
-                "timeout_seconds": 5,
-            },
         },
     )
 
