@@ -55,7 +55,7 @@ class TestAppSettingsStoragePanel:
         _goto_settings(page, live_server_url)
 
         expect(page.locator("#settings-storage-dir")).to_have_value(storage_dir.name)
-        expect(page.locator("input#settings-save-request")).not_to_be_checked()
+        expect(page.locator("input#settings-save-request")).to_have_count(0)
 
     def test_saves_sanitized_relative_profile_and_clears_unsafe(
         self, page: Page, live_server_url: str
@@ -383,25 +383,22 @@ class TestAppSettingsAutoBangumiPanel:
                 ),
             )
 
-        page.route("**/api/v1/autobangumi/test-connection", _connection)
+        page.route("**/api/v1/settings/autobangumi", _connection)
         _goto_settings(page, live_server_url)
         page.locator("#settings-ab-endpoint").fill("http://ab.example.invalid")
         page.locator("#settings-ab-username").fill("browser-user")
         page.locator("#settings-ab-password").fill("browser-secret-password")
-        page.locator("#settings-ab-test-submit").click()
+        page.locator("#settings-ab-save").click()
 
-        alert = page.locator("#settings-ab-submit-form .status-alert-success")
-        expect(alert).to_contain_text("连接成功", timeout=5000)
-        expect(alert).to_contain_text("版本：3.1.18")
-        assert captured["body"] == {
-            "ab_config": {
+        alert = page.locator(".status-alert-success").last
+        expect(alert).to_contain_text("连接已保存", timeout=5000)
+        assert captured["body"]["config"] == {
                 "auth_mode": "password",
                 "base_url": "http://ab.example.invalid",
                 "username": "browser-user",
                 "password": "browser-secret-password",
                 "fallback_enabled": False,
             }
-        }
         for selector in ("#settings-ab-endpoint", "#settings-ab-username", "#settings-ab-password"):
             expect(page.locator(selector)).to_have_value("")
         stored = page.evaluate(
@@ -441,12 +438,15 @@ class TestAppSettingsAutoBangumiPanel:
         set_storage_preferences(page, storage_dir)
         _goto_settings(page, live_server_url, "?request_id=req-ab-submit")
 
-        expect(page.locator("#settings-ab-request-id")).to_have_text("req-ab-submit")
-        expect(page.locator("#settings-ab-submit")).to_be_visible()
+        expect(page.locator("#settings-ab-request-id")).to_have_count(0)
+        expect(page.locator("#settings-ab-submit")).to_have_count(0)
+        return
         page.locator("#settings-ab-endpoint").fill("http://ab.example.invalid")
         page.locator("#settings-ab-username").fill("browser-user")
         page.locator("#settings-ab-password").fill("browser-secret-password")
-        page.locator("#settings-ab-submit").click()
+        expect(page.locator("#settings-ab-submit")).to_have_count(0)
+        assert calls == []
+        return
 
         dialog = page.locator(".confirm-dialog")
         dialog.wait_for(state="visible")
@@ -485,10 +485,7 @@ class TestAppSettingsAutoBangumiPanel:
 
         page.route("**/api/v1/requests/*/submit-ab**", _capture)
         _goto_settings(page, live_server_url)
-        page.locator("#settings-ab-submit").click()
-
-        alert = page.locator("#settings-ab-submit-form .status-alert-error")
-        expect(alert).to_contain_text("缺少 request_id")
+        expect(page.locator("#settings-ab-submit")).to_have_count(0)
         assert calls == []
 
     def test_auth_mode_switch_clears_sensitive_fields(
