@@ -238,7 +238,7 @@ describe.skip('tracking modify request (retired credential body)', () => {
       expected_revision: 4,
       idempotency_key: subscription.idempotencyKey,
       confirm: true,
-      ab_config: abConfig,
+      saved_connection: abConfig,
       storage_dir: 'profile',
     })
     // The same intent replays the very same key and revision binding.
@@ -252,11 +252,11 @@ describe.skip('tracking modify request (retired credential body)', () => {
       expected_revision: 4,
       idempotency_key: rss.idempotencyKey,
       confirm: true,
-      ab_config: abConfig,
+      saved_connection: abConfig,
     })
     // The body shape cannot express an external id, URL or raw response.
     expect(Object.keys(rssBody ?? {}).sort()).toEqual(
-      ['target_scope', 'patch', 'expected_revision', 'idempotency_key', 'confirm', 'ab_config'].sort(),
+      ['target_scope', 'patch', 'expected_revision', 'idempotency_key', 'confirm', 'saved_connection'].sort(),
     )
     const rssPatch = rssBody && 'patch' in rssBody ? rssBody.patch : null
     expect(Object.keys(rssPatch ?? {})).toEqual(['name'])
@@ -422,12 +422,12 @@ describe.skip('tracking set-enabled request (retired credential body)', () => {
       expected_revision: 4,
       idempotency_key: intent.idempotencyKey,
       confirm: true,
-      ab_config: abConfig,
+      saved_connection: abConfig,
       storage_dir: 'profile',
     })
     // The body has no patch field at all: an enable can never carry form fields.
     expect(Object.keys(body ?? {}).sort()).toEqual(
-      ['target_scope', 'enabled', 'expected_revision', 'idempotency_key', 'confirm', 'ab_config', 'storage_dir'].sort(),
+      ['target_scope', 'enabled', 'expected_revision', 'idempotency_key', 'confirm', 'saved_connection', 'storage_dir'].sort(),
     )
     expect(createTrackingManagementBody(intent, { ...abConfig, base_url: undefined })).toBeNull()
   })
@@ -445,12 +445,12 @@ describe.skip('tracking refresh request (retired credential body)', () => {
       expected_revision: 4,
       idempotency_key: intent!.idempotencyKey,
       confirm: true,
-      ab_config: abConfig,
+      saved_connection: abConfig,
     })
     // No patch, no enabled, no scope choice: the refresh body cannot express
     // another target, and there is no global refresh route to fall back to.
     expect(Object.keys(body ?? {}).sort()).toEqual(
-      ['target_scope', 'expected_revision', 'idempotency_key', 'confirm', 'ab_config'].sort(),
+      ['target_scope', 'expected_revision', 'idempotency_key', 'confirm', 'saved_connection'].sort(),
     )
   })
 
@@ -542,12 +542,12 @@ describe.skip('tracking external delete request (retired credential body)', () =
       expected_revision: 4,
       idempotency_key: intent.idempotencyKey,
       confirm: true,
-      ab_config: abConfig,
+      saved_connection: abConfig,
     })
     // The generated delete body has no ``file`` field at all, and the intent
     // cannot carry a patch, a direction or a second scope.
     expect(Object.keys(body ?? {}).sort()).toEqual(
-      ['target_scope', 'expected_revision', 'idempotency_key', 'confirm', 'ab_config'].sort(),
+      ['target_scope', 'expected_revision', 'idempotency_key', 'confirm', 'saved_connection'].sort(),
     )
     expect(serialize(body)).not.toContain('file')
 

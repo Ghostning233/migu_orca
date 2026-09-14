@@ -157,8 +157,8 @@ class TrackingItemRevalidateView(PostView):
 class TrackingItemSubmitView(PostView):
     """Run the unified reliable submit for one tracking item (US-225).
 
-    ``confirm`` must be strictly true and ``ab_config`` lives only in this
-    request's memory.  The service re-reads the latest local Request and runs
+    ``confirm`` must be strictly true; the saved connection lease and immutable
+    snapshot are resolved for the submitted generation. The service re-reads the latest local Request and runs
     the complete local revalidation before any Auto Bangumi call; a persisted
     business outcome (``NEEDS_RECONFIRM``/``SUBMIT_FAILED``/
     ``VERIFYING_EXTERNAL``/``RECOVERY_REQUIRED``/``ACTIVE``) is HTTP 200.  Only
@@ -185,7 +185,7 @@ class TrackingItemRetryView(PostView):
     Only ``SUBMIT_FAILED`` records are retryable — an unknown/incomplete outcome
     (``VERIFYING_EXTERNAL``/``RECOVERY_REQUIRED``) must be recovered first.  The
     request shape is identical to ``submit`` (``confirm`` strictly true,
-    request-scoped ``ab_config``, an opaque idempotency key); the unified
+    saved connection generation and opaque idempotency key); the unified
     service re-reads the latest Request and revalidates before creating a fresh
     operation and calling Auto Bangumi once.  A persisted business outcome is
     HTTP 200; only preconditions (missing record, stale revision,

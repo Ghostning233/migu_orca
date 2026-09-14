@@ -312,3 +312,8 @@ Started: 2026-09-13
 - `openapi_gen` 对正式 tracking sync/submit/retry/management/recover operation 做 saved-generation 契约清洗，移除 `legacy_credentials`、`ab_config` 及 request-scoped 描述，重新生成 `docs/api/openapi.json` 与 `frontend/src/api/generated/api.ts`；generated path 测试同步移除退役 capabilities path。
 - 新增 tracking schema residual contract：`uv run pytest tests/api_contract/test_stage39_tracking_schema_residual_red.py -q` → `1 passed`；OpenAPI `--check`、frontend `api:check`、typecheck、Settings/Tracking Vitest `21 passed`、saved browser suite `9 passed`、build 均通过。
 - 遗留风险：历史 `tests/browser/test_app_tracking.py` 仍保留大量 Stage 38 request-scoped fixture/断言，尚未逐项迁移为 saved-flow；其余非 tracking OpenAPI 旧端点仍可能含历史兼容字段，未扩大本轮范围。
+
+## 2026-09-14 / 工作包 A P1 源残留审计补充
+- 删除 tracking 未使用 `TrackingSubmitPayload` 旧定义，更新 submit/retry/recovery 路由与 TrackingView 的过时 request-scoped 注释；移除输出后处理清洗器，tracking OpenAPI 描述与属性直接由源定义生成。
+- 退役旧 tracking browser 模块替换为 saved-flow 独立覆盖，tracking source residual contract `2 passed`；management/projection 既有测试完成旧字段断言迁移（仍有历史非关键 skip 组，未伪称零 skip）。
+- 重新生成 OpenAPI/generated client；`openapi --check`、api generate/check、typecheck、build、saved browser suite `9 passed`、tracking residual contract `3 passed`、Settings/Tracking Vitest `21 passed` 均通过。

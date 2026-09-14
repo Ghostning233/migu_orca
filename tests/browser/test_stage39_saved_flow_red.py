@@ -2,9 +2,15 @@
 
 import pytest
 from playwright.sync_api import expect
-from tests.browser.test_app_tracking import (
-    _delete_detail, _detail_payload, _item, _management_actions, _modify_actions,
-    _probe_capabilities, _recovery_item,
+
+from tests.browser.saved_tracking_fixtures import (
+    _delete_detail,
+    _detail_payload,
+    _item,
+    _management_actions,
+    _modify_actions,
+    _probe_capabilities,
+    _recovery_item,
 )
 
 

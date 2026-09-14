@@ -789,7 +789,7 @@ class TrackingRevalidatePayload(BaseModel):
 _IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-:=]{0,199}$")
 
 
-class TrackingSubmitPayload(BaseModel):
+class _RetiredTrackingSubmitPayload(BaseModel):
     """Body for ``POST /api/v1/tracking/items/{tracking_id}/submit`` (US-225).
 
     ``confirm`` must be strictly true and ``ab_config`` is request-scoped memory

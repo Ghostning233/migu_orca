@@ -778,7 +778,7 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
  * call.  ``MARK_SUCCEEDED``/``MARK_FAILED`` are the user's manual conclusion and
  * are always confirmed a second time (the dialog defaults to cancel and states
  * that the user must have checked Auto Bangumi first).  ``VERIFY_EXTERNAL`` is
- * the read-only external check: it uses the live page session's ``ab_config``
+ * the read-only external check: it uses the saved connection generation
  * for one verification of the record's own operation and can never create an
  * external write.  Every path converges on the returned tracking and never
  * resends by itself.

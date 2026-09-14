@@ -839,7 +839,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             "type": "object",
             "required": ["ab_config"],
             "properties": {
-                "legacy_credentials": {
+                "legacy_config": {
                     "type": "object",
                     "x-legacy": True,
                     "properties": {
@@ -943,7 +943,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     "POST /api/v1/tracking/sync": {
         "operationId": "syncTrackingItems",
         "summary": "同步外部追番安全投影",
-        "description": "US-233：使用 request-scoped Auto Bangumi 配置执行一次只读同步。confirm 必须为 true；响应只返回能力、安全计数与 TrackingItemDTO，不返回上游对象、外部 ID、URL 或凭据。",
+        "description": "US-233：使用已保存连接 generation 执行一次只读同步。confirm 必须为 true；响应只返回能力、安全计数与 TrackingItemDTO，不返回上游对象、外部 ID、URL 或凭据。",
         "requestBody": {
             "type": "object",
             "additionalProperties": False,
@@ -1042,7 +1042,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     "POST /api/v1/tracking/items/<path:tracking_id>/submit": {
         "operationId": "submitTrackingItem",
         "summary": "提交统一追番方案到 Auto Bangumi（可靠顺序）",
-        "description": "US-225：对单条统一追番记录执行可靠提交流程。confirm 必须严格为 true，ab_config 只在单次请求内存中存在（绝不进入 storage/URL/日志/trace）。服务端重新读取最新本地 Request 并执行完整本地复核（纯本地，不信任浏览器 fingerprint）；复核不通过时不访问 Auto Bangumi，已落盘业务结果仍返回 HTTP 200，outcome 为 NEEDS_RECONFIRM/SUBMIT_FAILED/VERIFYING_EXTERNAL/RECOVERY_REQUIRED/ACTIVE。仅 Request fingerprint 变化且其余复核通过时，confirm=true 表示采纳最新方案并继续同一次提交。外部调用前先持久化 TrackingRecord=SUBMITTING 与 operation=IN_PROGRESS 作为外部可能发生的持久化边界；同 idempotency_key 重放复用原 operation，并发同键只允许一次外部调用。expected_revision 过期 → 409 tracking_revision_conflict；confirm=false → 400 tracking_confirmation_required；同键不同绑定 → 409 tracking_idempotency_conflict；进行中的提交操作 → 409 tracking_operation_in_progress。",
+        "description": "US-225：对单条统一追番记录执行可靠提交流程。confirm 必须严格为 true，连接通过已保存 generation 引用。服务端重新读取最新本地 Request 并执行完整本地复核；复核不通过时不访问 Auto Bangumi，已落盘业务结果仍返回 HTTP 200。外部调用前先持久化 TrackingRecord 与 operation；同 idempotency_key 重放复用原 operation。expected_revision 过期或绑定冲突时返回 409；confirm=false 返回 400。",
         "requestBody": {
             "type": "object",
             "required": ["expected_revision", "idempotency_key", "confirm", "connection_ref", "configuration_revision"],
@@ -1063,7 +1063,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 },
                 "connection_ref": {"type": "string", "format": "uuid"},
                 "configuration_revision": {"type": "integer", "minimum": 0},
-                "legacy_credentials": {
+                "legacy_config": {
                     "type": "object",
                     "x-legacy": True,
                     "properties": {
@@ -1123,7 +1123,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     "POST /api/v1/tracking/items/<path:tracking_id>/retry": {
         "operationId": "retryTrackingItem",
         "summary": "重试明确失败的统一追番提交（可靠顺序）",
-        "description": "US-226：只允许从 SUBMIT_FAILED 重试；VERIFYING_EXTERNAL/RECOVERY_REQUIRED 必须先 recover 再 retry。请求 shape 与 submit 相同（confirm 严格 true、ab_config 只在单次请求内存、opaque idempotency_key）。服务复用统一提交序列：重新读取最新本地 Request 并复核、bind 新 operation=PREPARED、持久化 TrackingRecord=SUBMITTING、operation=IN_PROGRESS 作为外部边界、单次 Auto Bangumi 调用、结果分类与落盘。同 idempotency_key 网络重放复用原 operation。expected_revision 过期 → 409 tracking_revision_conflict；非 SUBMIT_FAILED → 409 tracking_state_conflict；confirm=false → 400 tracking_confirmation_required；同键不同绑定 → 409 tracking_idempotency_conflict。",
+        "description": "US-226：只允许从 SUBMIT_FAILED 重试；VERIFYING_EXTERNAL/RECOVERY_REQUIRED 必须先 recover 再 retry。请求使用已保存连接 generation 与 opaque idempotency_key。服务复用统一提交序列并在外部边界前持久化 operation；同键网络重放复用原 operation。expected_revision 过期、状态冲突或绑定冲突返回 409；confirm=false 返回 400。",
         "requestBody": {
             "type": "object",
             "required": ["expected_revision", "idempotency_key", "confirm", "connection_ref", "configuration_revision"],
@@ -1142,7 +1142,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                     "enum": [True],
                     "description": "必须为 true：用户显式确认重试提交最新方案。",
                 },
-                "legacy_credentials": {
+                "legacy_config": {
                     "type": "object",
                     "x-legacy": True,
                     "properties": {
@@ -1551,7 +1551,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             "type": "object",
             "required": ["batch_id", "confirm"],
             "properties": {
-                "legacy_credentials": {
+                "legacy_config": {
                     "type": "object",
                     "x-request-scoped": True,
                     "description": "Auto Bangumi 凭据（request-scoped，绝不落盘）。",
@@ -1783,41 +1783,8 @@ def _build_openapi() -> dict[str, Any]:
             }
         },
     }
-    _strip_retired_tracking_credentials(document)
     _make_storage_dir_nullable(document)
     return document
-
-
-_SAVED_TRACKING_OPERATION_IDS = frozenset({
-    "syncTrackingItems", "submitTrackingItem", "retryTrackingItem",
-    "modifyTrackingItem", "setEnabledTrackingItem", "deleteExternalTrackingItem",
-    "refreshTrackingItem", "recoverTrackingItem",
-})
-
-
-def _strip_retired_tracking_credentials(document: dict[str, Any]) -> None:
-    """Keep the formal tracking contract on saved connection generations only."""
-    def clean(value: Any) -> Any:
-        if isinstance(value, dict):
-            return {
-                key: clean(item)
-                for key, item in value.items()
-                if key not in {"ab_config", "legacy_credentials"}
-            }
-        if isinstance(value, list):
-            return [clean(item) for item in value]
-        if isinstance(value, str):
-            return value.replace("request-scoped Auto Bangumi 配置", "已保存连接 generation") \
-                .replace("request-scoped 凭据", "已保存连接 generation") \
-                .replace("ab_config", "saved connection")
-        return value
-
-    for methods in document["paths"].values():
-        for operation in methods.values():
-            if operation.get("operationId") in _SAVED_TRACKING_OPERATION_IDS:
-                cleaned = clean(operation)
-                operation.clear()
-                operation.update(cleaned)
 
 
 def _path_sort_key(path: str) -> tuple[int, str]:

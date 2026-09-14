@@ -470,14 +470,14 @@ describe.skip('tracking recovery projection (retired credential body)', () => {
     })
     // The body shape itself cannot express an external id/URL/raw result/note.
     const serialized = JSON.stringify(createTrackingRecoverBody('MARK_SUCCEEDED', 7, sessionConfig))
-    for (const leaked of ['external_id', 'external_url', 'raw', 'note', 'ab_config']) {
+    for (const leaked of ['external_id', 'external_url', 'raw', 'note', 'saved_connection']) {
       expect(serialized).not.toContain(leaked)
     }
   })
 
   it('sends the credential only for VERIFY_EXTERNAL, and never without a base url', () => {
     expect(createTrackingRecoverBody('VERIFY_EXTERNAL', 2, sessionConfig)).toEqual({
-      expected_revision: 2, action: 'VERIFY_EXTERNAL', ab_config: sessionConfig,
+      expected_revision: 2, action: 'VERIFY_EXTERNAL', saved_connection: sessionConfig,
     })
     // Without the live page session (or without a server address) the read-only
     // external verification is not sent at all.
@@ -486,7 +486,7 @@ describe.skip('tracking recovery projection (retired credential body)', () => {
     expect(createTrackingRecoverBody('VERIFY_EXTERNAL', 2, { ...sessionConfig, base_url: undefined })).toBeNull()
     // A base url is normalized, and the other actions never carry a credential.
     expect(createTrackingRecoverBody('VERIFY_EXTERNAL', 2, { ...sessionConfig, base_url: ' https://ab.invalid ' }))
-      .toMatchObject({ ab_config: { base_url: 'https://ab.invalid' } })
+      .toMatchObject({ saved_connection: { base_url: 'https://ab.invalid' } })
   })
 
   it('accepts only a recovery action the server actually offers for the record', () => {

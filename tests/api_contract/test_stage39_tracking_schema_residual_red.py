@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from apps.migu_orca_web.openapi_gen import generate_openapi
 
-
 TRACKING_OPS = {
     "submitTrackingItem", "retryTrackingItem", "syncTrackingItems",
     "modifyTrackingItem", "setTrackingItemEnabled", "refreshTrackingRss",
