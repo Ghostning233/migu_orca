@@ -79,18 +79,6 @@
                                 "default": null,
                                 "title": "Status"
                               },
-                              "queue_status": {
-                                "anyOf": [
-                                  {
-                                    "type": "string"
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ],
-                                "default": null,
-                                "title": "Queue Status"
-                              },
                               "canonical_title_candidates": {
                                 "default": [],
                                 "items": {
@@ -920,7 +908,6 @@
                         "item_id": null,
                         "raw_title": null,
                         "status": null,
-                        "queue_status": null,
                         "canonical_title_candidates": [],
                         "season_hint": null,
                         "search_queries": [],

@@ -6,16 +6,16 @@ from copy import deepcopy
 import pytest
 
 from batch_engine.controllers.batch_queue_controller import (
-    complete_queue_item_submit,
-    create_submission_queue,
-    enqueue_item,
-    mark_queue_item_failed,
-    mark_queue_item_retry_failed,
+    legacy_complete_queue_item_submit,
+    legacy_create_queue,
+    legacy_enqueue_item,
+    legacy_mark_queue_item_failed,
+    legacy_mark_queue_item_retry_failed,
     queue_item_from_storage_dict,
     sanitize_queue_summary,
     serialize_queue,
     serialize_queue_item,
-    start_queue_item_submit,
+    legacy_start_queue_item_submit,
 )
 from batch_engine.models import (
     BATCH_QUEUE_STATUS_FAILED,
@@ -85,7 +85,7 @@ def _queue_with(item: BatchQueueItem) -> BatchSubmissionQueue:
 
 class TestCreateSubmissionQueue:
     def test_creates_empty_queue_with_generated_id(self) -> None:
-        queue = create_submission_queue(
+        queue = legacy_create_queue(
             "batch-1",
             queue_id_factory=_id_factory(["queue-abc"]),
             now_factory=_now_factory(["2026-08-19T00:00:00+00:00"]),
@@ -98,19 +98,19 @@ class TestCreateSubmissionQueue:
         assert queue.updated_at == "2026-08-19T00:00:00+00:00"
 
     def test_creates_default_uuid_queue_id(self) -> None:
-        queue = create_submission_queue("batch-1")
+        queue = legacy_create_queue("batch-1")
 
         assert queue.queue_id.startswith("queue-")
         assert queue.items == []
 
     def test_rejects_empty_batch_id(self) -> None:
         with pytest.raises(ValueError, match="batch_id"):
-            create_submission_queue("   ")
+            legacy_create_queue("   ")
 
 
 class TestEnqueueItem:
     def test_adds_ready_item_to_queue(self) -> None:
-        queue = enqueue_item(
+        queue = legacy_enqueue_item(
             _queue(),
             item_id="item-1",
             request_id="req-1",
@@ -134,13 +134,13 @@ class TestEnqueueItem:
         assert queue.updated_at == "2026-08-19T01:00:00+00:00"
 
     def test_enqueue_is_idempotent_by_request_id(self) -> None:
-        base = enqueue_item(
+        base = legacy_enqueue_item(
             _queue(),
             item_id="item-1",
             request_id="req-1",
             title="葬送的芙莉莲",
         )
-        repeated = enqueue_item(
+        repeated = legacy_enqueue_item(
             base,
             item_id="item-1",
             request_id="req-1",
@@ -151,13 +151,13 @@ class TestEnqueueItem:
         assert repeated == base
 
     def test_enqueue_adds_distinct_items_for_distinct_request_ids(self) -> None:
-        queue = enqueue_item(
+        queue = legacy_enqueue_item(
             _queue(),
             item_id="item-1",
             request_id="req-1",
             title="葬送的芙莉莲",
         )
-        queue = enqueue_item(
+        queue = legacy_enqueue_item(
             queue,
             item_id="item-2",
             request_id="req-2",
@@ -168,7 +168,7 @@ class TestEnqueueItem:
 
     def test_rejects_empty_item_id(self) -> None:
         with pytest.raises(ValueError, match="item_id"):
-            enqueue_item(
+            legacy_enqueue_item(
                 _queue(),
                 item_id="  ",
                 request_id="req-1",
@@ -177,7 +177,7 @@ class TestEnqueueItem:
 
     def test_rejects_empty_request_id(self) -> None:
         with pytest.raises(ValueError, match="request_id"):
-            enqueue_item(
+            legacy_enqueue_item(
                 _queue(),
                 item_id="item-1",
                 request_id=" ",
@@ -186,7 +186,7 @@ class TestEnqueueItem:
 
     def test_rejects_empty_title(self) -> None:
         with pytest.raises(ValueError, match="title"):
-            enqueue_item(
+            legacy_enqueue_item(
                 _queue(),
                 item_id="item-1",
                 request_id="req-1",
@@ -196,7 +196,7 @@ class TestEnqueueItem:
 
 class TestStatusTransitions:
     def test_start_submit_moves_ready_item_to_submitting_and_increments_attempts(self) -> None:
-        queue = start_queue_item_submit(
+        queue = legacy_start_queue_item_submit(
             _queue_with(_item(request_id="req-1")),
             "req-1",
             now_factory=_now_factory(["2026-08-19T02:00:00+00:00"]),
@@ -212,7 +212,7 @@ class TestStatusTransitions:
             base = _queue_with(
                 _item(request_id="req-1", status=status, attempts=1)
             )
-            queue = start_queue_item_submit(base, "req-1")
+            queue = legacy_start_queue_item_submit(base, "req-1")
 
             assert queue.items[0].status == BATCH_QUEUE_STATUS_SUBMITTING
             assert queue.items[0].attempts == 2
@@ -223,17 +223,17 @@ class TestStatusTransitions:
         )
 
         with pytest.raises(ValueError, match="invalid queue transition"):
-            start_queue_item_submit(base, "req-1")
+            legacy_start_queue_item_submit(base, "req-1")
 
     def test_start_submit_unknown_request_id_raises(self) -> None:
         with pytest.raises(ValueError, match="unknown request_id"):
-            start_queue_item_submit(_queue(), "req-missing")
+            legacy_start_queue_item_submit(_queue(), "req-missing")
 
     def test_complete_submit_success_stores_sanitized_summary(self) -> None:
         base = _queue_with(
             _item(request_id="req-1", status=BATCH_QUEUE_STATUS_SUBMITTING, attempts=1)
         )
-        queue = complete_queue_item_submit(
+        queue = legacy_complete_queue_item_submit(
             base,
             "req-1",
             BATCH_QUEUE_STATUS_SUCCEEDED,
@@ -253,7 +253,7 @@ class TestStatusTransitions:
             base = _queue_with(
                 _item(request_id="req-1", status=BATCH_QUEUE_STATUS_SUBMITTING, attempts=1)
             )
-            queue = complete_queue_item_submit(
+            queue = legacy_complete_queue_item_submit(
                 base,
                 "req-1",
                 status,
@@ -271,13 +271,13 @@ class TestStatusTransitions:
         )
 
         with pytest.raises(ValueError, match="invalid queue result status"):
-            complete_queue_item_submit(base, "req-1", BATCH_QUEUE_STATUS_READY_TO_SUBMIT)
+            legacy_complete_queue_item_submit(base, "req-1", BATCH_QUEUE_STATUS_READY_TO_SUBMIT)
 
     def test_complete_submit_rejects_non_submitting_item(self) -> None:
         base = _queue_with(_item(request_id="req-1"))
 
         with pytest.raises(ValueError, match="invalid queue transition"):
-            complete_queue_item_submit(base, "req-1", BATCH_QUEUE_STATUS_SUCCEEDED)
+            legacy_complete_queue_item_submit(base, "req-1", BATCH_QUEUE_STATUS_SUCCEEDED)
 
     def test_complete_submit_rejects_succeeded_terminal_item(self) -> None:
         base = _queue_with(
@@ -285,11 +285,11 @@ class TestStatusTransitions:
         )
 
         with pytest.raises(ValueError, match="invalid queue transition"):
-            complete_queue_item_submit(base, "req-1", BATCH_QUEUE_STATUS_SUCCEEDED)
+            legacy_complete_queue_item_submit(base, "req-1", BATCH_QUEUE_STATUS_SUCCEEDED)
 
-    def test_mark_queue_item_failed_marks_ready_item_without_attempt(self) -> None:
+    def test_legacy_mark_queue_item_failed_marks_ready_item_without_attempt(self) -> None:
         base = _queue_with(_item(request_id="req-1"))
-        queue = mark_queue_item_failed(
+        queue = legacy_mark_queue_item_failed(
             base,
             "req-1",
             status=BATCH_QUEUE_STATUS_RETRYABLE,
@@ -302,28 +302,28 @@ class TestStatusTransitions:
         assert item.last_error == "category=not_accepted"
         assert item.ab_result_summary is None
 
-    def test_mark_queue_item_failed_defaults_to_failed_status(self) -> None:
+    def test_legacy_mark_queue_item_failed_defaults_to_failed_status(self) -> None:
         base = _queue_with(_item(request_id="req-1"))
-        queue = mark_queue_item_failed(base, "req-1", last_error="已取消")
+        queue = legacy_mark_queue_item_failed(base, "req-1", last_error="已取消")
 
         assert queue.items[0].status == BATCH_QUEUE_STATUS_FAILED
         assert queue.items[0].last_error == "已取消"
 
-    def test_mark_queue_item_failed_rejects_succeeded_items(self) -> None:
+    def test_legacy_mark_queue_item_failed_rejects_succeeded_items(self) -> None:
         base = _queue_with(
             _item(request_id="req-1", status=BATCH_QUEUE_STATUS_SUCCEEDED)
         )
 
         with pytest.raises(ValueError, match="only READY_TO_SUBMIT"):
-            mark_queue_item_failed(base, "req-1")
+            legacy_mark_queue_item_failed(base, "req-1")
 
-    def test_mark_queue_item_failed_rejects_submitting_items(self) -> None:
+    def test_legacy_mark_queue_item_failed_rejects_submitting_items(self) -> None:
         base = _queue_with(
             _item(request_id="req-1", status=BATCH_QUEUE_STATUS_SUBMITTING)
         )
 
         with pytest.raises(ValueError, match="only READY_TO_SUBMIT"):
-            mark_queue_item_failed(base, "req-1")
+            legacy_mark_queue_item_failed(base, "req-1")
 
 
 class TestMarkQueueItemRetryFailed:
@@ -331,7 +331,7 @@ class TestMarkQueueItemRetryFailed:
         base = _queue_with(
             _item(request_id="req-1", status=BATCH_QUEUE_STATUS_FAILED, attempts=2)
         )
-        queue = mark_queue_item_retry_failed(
+        queue = legacy_mark_queue_item_retry_failed(
             base,
             "req-1",
             status=BATCH_QUEUE_STATUS_RETRYABLE,
@@ -350,7 +350,7 @@ class TestMarkQueueItemRetryFailed:
         base = _queue_with(
             _item(request_id="req-1", status=BATCH_QUEUE_STATUS_RETRYABLE, attempts=1)
         )
-        queue = mark_queue_item_retry_failed(base, "req-1", last_error="已取消")
+        queue = legacy_mark_queue_item_retry_failed(base, "req-1", last_error="已取消")
 
         assert queue.items[0].status == BATCH_QUEUE_STATUS_FAILED
         assert queue.items[0].attempts == 1
@@ -360,7 +360,7 @@ class TestMarkQueueItemRetryFailed:
         base = _queue_with(
             _item(request_id="req-1", status=BATCH_QUEUE_STATUS_FAILED, attempts=1)
         )
-        queue = mark_queue_item_retry_failed(
+        queue = legacy_mark_queue_item_retry_failed(
             base,
             "req-1",
             last_error={
@@ -428,7 +428,7 @@ class TestMarkQueueItemRetryFailed:
         base = _queue_with(_item(request_id="req-1"))
 
         with pytest.raises(ValueError, match="only FAILED/RETRYABLE"):
-            mark_queue_item_retry_failed(base, "req-1")
+            legacy_mark_queue_item_retry_failed(base, "req-1")
 
     def test_rejects_submitting_items(self) -> None:
         base = _queue_with(
@@ -436,7 +436,7 @@ class TestMarkQueueItemRetryFailed:
         )
 
         with pytest.raises(ValueError, match="only FAILED/RETRYABLE"):
-            mark_queue_item_retry_failed(base, "req-1")
+            legacy_mark_queue_item_retry_failed(base, "req-1")
 
     def test_rejects_succeeded_items(self) -> None:
         base = _queue_with(
@@ -444,7 +444,7 @@ class TestMarkQueueItemRetryFailed:
         )
 
         with pytest.raises(ValueError, match="only FAILED/RETRYABLE"):
-            mark_queue_item_retry_failed(base, "req-1")
+            legacy_mark_queue_item_retry_failed(base, "req-1")
 
     def test_rejects_invalid_target_status(self) -> None:
         base = _queue_with(
@@ -452,34 +452,34 @@ class TestMarkQueueItemRetryFailed:
         )
 
         with pytest.raises(ValueError, match="invalid retry failure status"):
-            mark_queue_item_retry_failed(base, "req-1", status=BATCH_QUEUE_STATUS_SUCCEEDED)
+            legacy_mark_queue_item_retry_failed(base, "req-1", status=BATCH_QUEUE_STATUS_SUCCEEDED)
 
     def test_unknown_request_id_raises(self) -> None:
         with pytest.raises(ValueError, match="unknown request_id"):
-            mark_queue_item_retry_failed(_queue(), "req-missing")
+            legacy_mark_queue_item_retry_failed(_queue(), "req-missing")
 
     def test_only_target_item_changes(self) -> None:
-        base = enqueue_item(
+        base = legacy_enqueue_item(
             _queue(),
             item_id="item-1",
             request_id="req-1",
             title="葬送的芙莉莲",
         )
-        base = enqueue_item(
+        base = legacy_enqueue_item(
             base,
             item_id="item-2",
             request_id="req-2",
             title="咒术回战 第三季",
         )
-        base = start_queue_item_submit(base, "req-1")
-        base = complete_queue_item_submit(
+        base = legacy_start_queue_item_submit(base, "req-1")
+        base = legacy_complete_queue_item_submit(
             base,
             "req-1",
             BATCH_QUEUE_STATUS_FAILED,
             last_error={"category": "timeout"},
         )
 
-        queue = mark_queue_item_retry_failed(base, "req-1", last_error="request_not_found")
+        queue = legacy_mark_queue_item_retry_failed(base, "req-1", last_error="request_not_found")
 
         assert queue.items[0].status == BATCH_QUEUE_STATUS_FAILED
         assert queue.items[0].last_error == "request_not_found"
@@ -607,14 +607,14 @@ class TestSanitizeQueueSummary:
 
 class TestSerializationBoundary:
     def test_serialize_queue_contains_only_safe_fields(self) -> None:
-        queue = enqueue_item(
+        queue = legacy_enqueue_item(
             _queue(),
             item_id="item-1",
             request_id="req-1",
             title="葬送的芙莉莲",
         )
-        queue = start_queue_item_submit(queue, "req-1")
-        queue = complete_queue_item_submit(
+        queue = legacy_start_queue_item_submit(queue, "req-1")
+        queue = legacy_complete_queue_item_submit(
             queue,
             "req-1",
             BATCH_QUEUE_STATUS_SUCCEEDED,
@@ -690,7 +690,7 @@ class TestSerializationBoundary:
         assert "magnet" not in joined
 
     def test_serialized_item_never_contains_sensitive_keywords(self) -> None:
-        queue = enqueue_item(
+        queue = legacy_enqueue_item(
             _queue(),
             item_id="item-1",
             request_id="req-1",
@@ -716,13 +716,13 @@ class TestSerializationBoundary:
 
     def test_original_queue_item_is_unchanged_by_transitions(self) -> None:
         base = _queue_with(_item(request_id="req-1"))
-        started = start_queue_item_submit(base, "req-1")
+        started = legacy_start_queue_item_submit(base, "req-1")
 
         assert base.items[0].status == BATCH_QUEUE_STATUS_READY_TO_SUBMIT
         assert started.items[0].status == BATCH_QUEUE_STATUS_SUBMITTING
 
     def test_deep_copy_helpers_do_not_share_mutable_items(self) -> None:
-        queue = enqueue_item(
+        queue = legacy_enqueue_item(
             _queue(),
             item_id="item-1",
             request_id="req-1",

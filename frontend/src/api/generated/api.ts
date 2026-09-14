@@ -626,7 +626,6 @@ export interface operations {
                      *             "item_id": null,
                      *             "raw_title": null,
                      *             "status": null,
-                     *             "queue_status": null,
                      *             "canonical_title_candidates": [],
                      *             "season_hint": null,
                      *             "search_queries": [],
@@ -676,11 +675,6 @@ export interface operations {
                                  * @default null
                                  */
                                 status: string | null;
-                                /**
-                                 * Queue Status
-                                 * @default null
-                                 */
-                                queue_status: string | null;
                                 /**
                                  * Canonical Title Candidates
                                  * @default []

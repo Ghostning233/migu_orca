@@ -11,10 +11,10 @@ from apps.base import create_app
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from batch_engine.controllers.anime_title_parser import FakeAnimeTitleParsingProvider
 from batch_engine.controllers.batch_queue_controller import (
-    complete_queue_item_submit,
-    create_submission_queue,
-    enqueue_item,
-    start_queue_item_submit,
+    legacy_complete_queue_item_submit,
+    legacy_create_queue,
+    legacy_enqueue_item,
+    legacy_start_queue_item_submit,
 )
 from batch_engine.models import (
     BATCH_ITEM_STATUS_EMPTY,
@@ -3930,19 +3930,19 @@ def _submitting_queue_json(
     title: str = "芙莉莲",
 ) -> None:
     """Persist a queue whose item is stuck SUBMITTING (as after an interrupt)."""
-    queue = create_submission_queue(
+    queue = legacy_create_queue(
         batch_id,
         queue_id_factory=lambda: "queue-1",
         now_factory=lambda: "2026-08-19T00:00:00+00:00",
     )
-    queue = enqueue_item(
+    queue = legacy_enqueue_item(
         queue,
         item_id=item_id,
         request_id=request_id,
         title=title,
         now_factory=lambda: "2026-08-19T00:00:00+00:00",
     )
-    queue = start_queue_item_submit(
+    queue = legacy_start_queue_item_submit(
         queue,
         request_id,
         now_factory=lambda: "2026-08-19T00:01:00+00:00",
@@ -3959,24 +3959,24 @@ def _result_persist_failed_queue_json(
     title: str = "芙莉莲",
 ) -> None:
     """Persist a queue whose item is stuck RESULT_PERSIST_FAILED."""
-    queue = create_submission_queue(
+    queue = legacy_create_queue(
         batch_id,
         queue_id_factory=lambda: "queue-1",
         now_factory=lambda: "2026-08-19T00:00:00+00:00",
     )
-    queue = enqueue_item(
+    queue = legacy_enqueue_item(
         queue,
         item_id=item_id,
         request_id=request_id,
         title=title,
         now_factory=lambda: "2026-08-19T00:00:00+00:00",
     )
-    queue = start_queue_item_submit(
+    queue = legacy_start_queue_item_submit(
         queue,
         request_id,
         now_factory=lambda: "2026-08-19T00:01:00+00:00",
     )
-    queue = complete_queue_item_submit(
+    queue = legacy_complete_queue_item_submit(
         queue,
         request_id,
         "RESULT_PERSIST_FAILED",

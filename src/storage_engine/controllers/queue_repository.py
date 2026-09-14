@@ -4,17 +4,14 @@ import json
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from batch_engine.controllers.batch_queue_controller import (
     queue_from_storage_dict,
-    queue_to_storage_dict,
 )
 from batch_engine.models import BatchSubmissionQueue
 from shared.errors import Stage1Error
 from storage_engine.controllers.storage_config import (
     StorageConfig,
-    ensure_storage_layout,
 )
 
 
@@ -28,42 +25,6 @@ class QueueListResult:
     @property
     def unreadable_count(self) -> int:
         return len(self.damaged_batch_ids)
-
-
-def write_legacy_queue_fixture(
-    config: StorageConfig,
-    queue: BatchSubmissionQueue,
-) -> dict[str, Any]:
-    """Persist a batch pre-submission queue as JSON keyed by ``batch_id``.
-
-    The queue only holds non-sensitive public fields (summaries were already
-    sanitized on write), so storing the full queue never persists Auto Bangumi
-    secrets, raw response bodies, full RSS URLs, magnets, or local paths.
-    """
-    batch_id = _extract_batch_id(queue, "write_legacy_queue_fixture")
-    queue_path = _queue_path(config, batch_id, "write_legacy_queue_fixture")
-    ensure_storage_layout(config)
-
-    try:
-        queue_path.write_text(
-            json.dumps(queue_to_storage_dict(queue), ensure_ascii=False, indent=2)
-            + "\n",
-            encoding="utf-8",
-        )
-    except OSError as exc:
-        raise Stage1Error(
-            "storage_error",
-            "保存提交队列 JSON 失败",
-            "write_legacy_queue_fixture",
-            {"batch_id": batch_id, "directory": config.queue_dir.name},
-        ) from exc
-
-    return {
-        "batch_id": batch_id,
-        "storage": "local_json",
-        "directory": config.queue_dir.name,
-        "filename": queue_path.name,
-    }
 
 
 def load_submission_queue(
@@ -200,5 +161,4 @@ __all__ = [
     "QueueListResult",
     "list_submission_queues_tolerant",
     "load_submission_queue",
-    "write_legacy_queue_fixture",
 ]

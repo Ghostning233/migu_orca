@@ -25,7 +25,6 @@ from batch_engine.models.queue import (
 )
 from request_engine.controllers.request_controller import ACCEPTED, PENDING_CONFIRM
 from storage_engine.controllers.ab_result_repository import save_ab_submit_result
-from storage_engine.controllers.queue_repository import write_legacy_queue_fixture
 from storage_engine.controllers.request_repository import save_request_snapshot
 from storage_engine.controllers.storage_config import (
     StorageConfig,
@@ -35,6 +34,7 @@ from storage_engine.controllers.tracking_repository import (
     list_tracking_records,
     load_tracking_record,
 )
+from tests.legacy_queue_fixture import write_legacy_queue_fixture
 from tracking_engine.controllers.migration import MIGRATION_REASON_MULTIPLE_QUEUE_SOURCES
 from tracking_engine.models.migration import MIGRATION_STATE_COMPLETE, MIGRATION_STATE_PARTIAL
 from tracking_engine.models.tracking import (

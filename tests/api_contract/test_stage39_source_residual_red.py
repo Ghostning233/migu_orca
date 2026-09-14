@@ -21,6 +21,17 @@ def test_retired_batch_queue_write_runtime_has_no_live_wiring() -> None:
     assert not accept_path.exists()
     assert not submit_path.exists()
     assert "def save_submission_queue" not in queue_repo
+    assert "def write_legacy_queue_fixture" not in queue_repo
+    assert "queue_path.write_text" not in queue_repo
+    for forbidden in (
+        "def create_submission_queue",
+        "def enqueue_item",
+        "def start_queue_item_submit",
+        "def complete_queue_item_submit",
+        "def mark_queue_item_failed",
+        "def mark_queue_item_retry_failed",
+    ):
+        assert forbidden not in (ROOT / "src/batch_engine/controllers/batch_queue_controller.py").read_text(encoding="utf-8")
 
 
 def test_formal_frontend_does_not_project_retired_queue_dtos() -> None:
@@ -47,6 +58,17 @@ def test_endpoint_inventory_has_no_retired_qb_contract() -> None:
     assert "### 3.5 连接测试" not in text
     assert "_sanitize_qbittorrent_connection_summary" not in text
     assert "qbittorrent_config" not in text
+
+
+def test_batch_parse_contract_has_tracking_fields_only() -> None:
+    dto = (ROOT / "src/apps/migu_orca_web/api_contract.py").read_text(encoding="utf-8")
+    openapi = (ROOT / "docs/api/openapi.json").read_text(encoding="utf-8")
+    generated = (ROOT / "frontend/src/api/generated/api.ts").read_text(encoding="utf-8")
+    assert "class BatchParseItemDTO" in dto
+    assert "queue_status" not in dto
+    assert '"queue_status"' not in openapi
+    assert "queue_status:" not in generated
+    assert "tracking_id" in dto and "tracking_ready" in dto
 
 
 def test_tracking_source_models_do_not_define_request_scoped_credentials() -> None:

@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 
 from batch_engine.controllers.batch_queue_controller import (
-    create_submission_queue,
-    enqueue_item,
+    legacy_create_queue,
+    legacy_enqueue_item,
 )
 from batch_engine.models import (
     BATCH_QUEUE_STATUS_READY_TO_SUBMIT,
@@ -16,18 +16,18 @@ from batch_engine.models import (
 from shared.errors import Stage1Error
 from storage_engine.controllers.queue_repository import (
     load_submission_queue,
-    write_legacy_queue_fixture,
 )
 from storage_engine.controllers.storage_config import load_storage_config
+from tests.legacy_queue_fixture import write_legacy_queue_fixture
 
 
 def _queue(batch_id: str = "batch-1") -> BatchSubmissionQueue:
-    queue = create_submission_queue(
+    queue = legacy_create_queue(
         batch_id,
         queue_id_factory=lambda: "queue-1",
         now_factory=lambda: "2026-08-19T00:00:00+00:00",
     )
-    queue = enqueue_item(
+    queue = legacy_enqueue_item(
         queue,
         item_id="item-1",
         request_id="req-1",
@@ -102,18 +102,18 @@ def test_load_submission_queue_preserves_status_and_sanitized_summaries(
     tmp_path: Path,
 ) -> None:
     from batch_engine.controllers.batch_queue_controller import (
-        complete_queue_item_submit,
-        start_queue_item_submit,
+        legacy_complete_queue_item_submit,
+        legacy_start_queue_item_submit,
     )
 
     config = load_storage_config(tmp_path / "migu-state")
     queue = _queue()
-    queue = start_queue_item_submit(
+    queue = legacy_start_queue_item_submit(
         queue,
         "req-1",
         now_factory=lambda: "2026-08-19T00:01:00+00:00",
     )
-    queue = complete_queue_item_submit(
+    queue = legacy_complete_queue_item_submit(
         queue,
         "req-1",
         BATCH_QUEUE_STATUS_SUCCEEDED,
@@ -162,29 +162,29 @@ def test_load_submission_queue_invalid_shape_returns_storage_error(
 
 def test_persisted_queue_serializes_without_sensitive_fields(tmp_path: Path) -> None:
     from batch_engine.controllers.batch_queue_controller import (
-        complete_queue_item_submit,
-        start_queue_item_submit,
+        legacy_complete_queue_item_submit,
+        legacy_start_queue_item_submit,
     )
 
     config = load_storage_config(tmp_path / "migu-state")
-    queue = create_submission_queue(
+    queue = legacy_create_queue(
         "batch-1",
         queue_id_factory=lambda: "queue-1",
         now_factory=lambda: "2026-08-19T00:00:00+00:00",
     )
-    queue = enqueue_item(
+    queue = legacy_enqueue_item(
         queue,
         item_id="item-1",
         request_id="req-1",
         title="葬送的芙莉莲",
         now_factory=lambda: "2026-08-19T00:00:00+00:00",
     )
-    queue = start_queue_item_submit(
+    queue = legacy_start_queue_item_submit(
         queue,
         "req-1",
         now_factory=lambda: "2026-08-19T00:01:00+00:00",
     )
-    queue = complete_queue_item_submit(
+    queue = legacy_complete_queue_item_submit(
         queue,
         "req-1",
         BATCH_QUEUE_STATUS_SUCCEEDED,

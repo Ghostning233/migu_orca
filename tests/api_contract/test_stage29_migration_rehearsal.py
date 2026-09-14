@@ -34,10 +34,6 @@ from apps.migu_orca_web.tracking_migration_service import (
     MIGRATION_PARTIAL_WARNING,
     run_tracking_migration,
 )
-from apps.migu_orca_web.tracking_queue_compat import (
-    reflect_ab_result_into_tracking,
-    reflect_queue_outcome_into_tracking,
-)
 from apps.migu_orca_web.tracking_recovery_service import run_tracking_recover
 from apps.migu_orca_web.tracking_submission_service import run_tracking_submit
 from batch_engine.models import (
@@ -56,7 +52,6 @@ from storage_engine.controllers.operation_repository import (
     compare_and_swap_tracking_operation,
     load_tracking_operation,
 )
-from storage_engine.controllers.queue_repository import save_submission_queue
 from storage_engine.controllers.request_repository import (
     load_request_snapshot,
     save_request_snapshot,
@@ -70,6 +65,7 @@ from storage_engine.controllers.tracking_repository import (
     list_tracking_records,
     load_tracking_record,
 )
+from tests.legacy_queue_fixture import write_legacy_queue_fixture
 from tracking_engine.models.operation import (
     TRACKING_OPERATION_KIND_SUBMIT,
     TRACKING_OPERATION_STATE_IN_PROGRESS,
@@ -147,7 +143,7 @@ def _save_queue(
         )
         for index, (request_id, status) in enumerate(entries)
     ]
-    save_submission_queue(
+    write_legacy_queue_fixture(
         config,
         BatchSubmissionQueue(
             queue_id=f"queue-{batch_id}",
@@ -468,60 +464,8 @@ def test_rehearsal_unresolved_recovery_required_cannot_be_blindly_retried(
 # ---------------------------------------------------------------------------
 
 
-def test_rehearsal_legacy_queue_outcome_projects_but_never_downgrades_success(
-    tmp_path: Path,
-) -> None:
-    root = "legacy-queue"
-    request = _accepted_request(tmp_path, "req-1", root=root)
-    record = _ensure_tracking(tmp_path, request, root=root)
-    config = _config(tmp_path, root)
-    _save_queue(
-        config,
-        "batch-1",
-        [("req-1", BATCH_QUEUE_STATUS_READY_TO_SUBMIT)],
-    )
-    assert record.status == TRACKING_STATUS_PENDING_SUBMIT
-
-    # Old batch submit reports SUCCEEDED -> tracking advances to ACTIVE.
-    reflect_queue_outcome_into_tracking(
-        config,
-        request_id="req-1",
-        queue_status=BATCH_QUEUE_STATUS_SUCCEEDED,
-        now=NOW,
-    )
-    assert load_tracking_record(config, record.tracking_id).status == TRACKING_STATUS_ACTIVE
-
-    # A stale/desynced FAILED queue item must never roll back the durable
-    # success (§13.3 post-call failure never overwrites success): the record
-    # stays ACTIVE and no extra audit event is appended.
-    active_audit_len = len(load_tracking_record(config, record.tracking_id).audit_events)
-    reflect_queue_outcome_into_tracking(
-        config,
-        request_id="req-1",
-        queue_status=BATCH_QUEUE_STATUS_FAILED,
-        now=NOW,
-    )
-    after = load_tracking_record(config, record.tracking_id)
-    assert after.status == TRACKING_STATUS_ACTIVE
-    assert len(after.audit_events) == active_audit_len
 
 
-def test_rehearsal_legacy_submit_ab_outcome_projects_into_tracking(
-    tmp_path: Path,
-) -> None:
-    root = "legacy-ab"
-    request = _accepted_request(tmp_path, "req-ab", root=root)
-    record = _ensure_tracking(tmp_path, request, root=root)
-    config = _config(tmp_path, root)
-
-    reflect_ab_result_into_tracking(
-        config,
-        request_id="req-ab",
-        ab_result=_ab_success(),
-        now=NOW,
-    )
-
-    assert load_tracking_record(config, record.tracking_id).status == TRACKING_STATUS_ACTIVE
 
 
 def test_rehearsal_same_key_terminal_replay_returns_same_outcome_no_second_call(

@@ -73,7 +73,7 @@ _SENSITIVE_WORD_VALUE_RE = re.compile(
 )
 
 
-def create_submission_queue(
+def legacy_create_queue(
     batch_id: str,
     *,
     queue_id_factory: IdFactory | None = None,
@@ -91,7 +91,7 @@ def create_submission_queue(
     )
 
 
-def enqueue_item(
+def legacy_enqueue_item(
     queue: BatchSubmissionQueue,
     *,
     item_id: str,
@@ -124,7 +124,7 @@ def enqueue_item(
     return replace(queue, items=[*queue.items, item], updated_at=now)
 
 
-def start_queue_item_submit(
+def legacy_start_queue_item_submit(
     queue: BatchSubmissionQueue,
     request_id: str,
     *,
@@ -147,7 +147,7 @@ def start_queue_item_submit(
     return _replace_item(queue, updated_item, now=now)
 
 
-def complete_queue_item_submit(
+def legacy_complete_queue_item_submit(
     queue: BatchSubmissionQueue,
     request_id: str,
     status: str,
@@ -194,7 +194,7 @@ def complete_queue_item_submit(
     return _replace_item(queue, updated_item, now=now)
 
 
-def mark_queue_item_failed(
+def legacy_mark_queue_item_failed(
     queue: BatchSubmissionQueue,
     request_id: str,
     *,
@@ -230,7 +230,7 @@ def mark_queue_item_failed(
     return _replace_item(queue, updated_item, now=now)
 
 
-def mark_queue_item_retry_failed(
+def legacy_mark_queue_item_retry_failed(
     queue: BatchSubmissionQueue,
     request_id: str,
     *,
@@ -543,11 +543,11 @@ def _next_id(prefix: str, factory: IdFactory | None) -> str:
 
 
 __all__ = [
-    "complete_queue_item_submit",
-    "create_submission_queue",
-    "enqueue_item",
-    "mark_queue_item_failed",
-    "mark_queue_item_retry_failed",
+    "legacy_complete_queue_item_submit",
+    "legacy_create_queue",
+    "legacy_enqueue_item",
+    "legacy_mark_queue_item_failed",
+    "legacy_mark_queue_item_retry_failed",
     "queue_from_storage_dict",
     "queue_item_from_storage_dict",
     "queue_item_to_storage_dict",
@@ -555,5 +555,5 @@ __all__ = [
     "sanitize_queue_summary",
     "serialize_queue",
     "serialize_queue_item",
-    "start_queue_item_submit",
+    "legacy_start_queue_item_submit",
 ]

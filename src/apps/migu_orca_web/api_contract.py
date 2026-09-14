@@ -558,7 +558,6 @@ class BatchParseItemDTO(_SnapshotBase):
     item_id: str | None = None
     raw_title: str | None = None
     status: str | None = None
-    queue_status: str | None = None
     canonical_title_candidates: list[str] = []
     season_hint: str | None = None
     search_queries: list[str] = []
