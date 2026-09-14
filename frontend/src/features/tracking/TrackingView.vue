@@ -14,6 +14,7 @@ import BaseInput from '@/components/forms/BaseInput.vue'
 import BaseSelect from '@/components/forms/BaseSelect.vue'
 import PanelSection from '@/components/layout/PanelSection.vue'
 import { routeLocation } from '@/app/router/catalog'
+import { refreshConnectionStatus } from '@/app/stores/connectionStatus'
 import { storageQuery } from '@/features/requests/requestStorage'
 import {
   capabilityStateLabel,
@@ -412,6 +413,7 @@ function applyReturnedTracking(tracking: TrackingItem): void {
   const next = items.value.slice()
   next[index] = tracking
   items.value = next
+  refreshConnectionStatus()
 }
 
 function selectItem(trackingId: string): void {
@@ -549,6 +551,7 @@ async function syncTracking(): Promise<void> {
     const incomplete = result.sync_status !== 'COMPLETE'
     const degraded = incomplete || hasUnknownCapability(result.capabilities)
     syncSummary.value = result.summary
+    refreshConnectionStatus()
     if (!degraded && result.items) {
       // Writing the synced revision invalidates list responses already in flight.
       writeGeneration += 1

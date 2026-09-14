@@ -27,6 +27,7 @@ import { computed, onMounted, ref } from 'vue'
 import { api } from '@/api/client'
 import type { operations } from '@/api/generated/api'
 import { useNotificationStore } from '@/app/stores/notification'
+import { refreshConnectionStatus } from '@/app/stores/connectionStatus'
 import { useSensitiveFields } from '@/app/composables/useSensitiveFields'
 import ConfirmDialog from '@/components/feedback/ConfirmDialog.vue'
 import StatusAlert from '@/components/feedback/StatusAlert.vue'
@@ -75,6 +76,7 @@ function persistStoragePreferences(): void {
   const rawDir = storageForm.value.storageDir
   const safeDir = sanitizeStorageProfile(rawDir)
   saveStoragePreferences({ storageDir: safeDir })
+  refreshConnectionStatus()
   storageForm.value.storageDir = safeDir
   const migrationNote =
     safeDir !== rawDir.trim() && rawDir.trim() !== ''
@@ -85,6 +87,7 @@ function persistStoragePreferences(): void {
 
 function clearStorage(): void {
   clearStoragePreferences()
+  refreshConnectionStatus()
   storageForm.value = { storageDir: '' }
   storageStatus.value = {
     kind: 'info',
@@ -340,6 +343,7 @@ async function testAbConnection(): Promise<void> {
     const body: SaveConnectionBody = { confirm: true, expected_configuration_revision: savedConnection.value?.configuration_revision ?? 0, config: buildAbConfig() as SaveConnectionBody['config'] }
     const result = await api.put<ConnectionSummary>('/api/v1/settings/autobangumi', { body })
     savedConnection.value = result
+    refreshConnectionStatus()
     abStatus.value = { kind: 'success', message: 'Auto Bangumi 连接已保存。请点击“测试已保存连接”进行显式探测。' }
     ab.clearAll()
   } catch (error) {
@@ -359,8 +363,8 @@ async function testAbConnection(): Promise<void> {
   }
 }
 async function loadSavedConnection(): Promise<void> { try { savedConnection.value = await api.get<ConnectionSummary>('/api/v1/settings/autobangumi') } catch { savedConnection.value = null } }
-async function probeSavedConnection(): Promise<void> { if (!savedConnection.value?.connection_ref) return; abLoading.value = true; try { const result = await api.post<ProbeResult>('/api/v1/settings/autobangumi/probe', { body: { connection_ref: savedConnection.value.connection_ref, configuration_revision: savedConnection.value.configuration_revision } }); abStatus.value = { kind: 'success', message: `连接探测结果：${result.probe_status}` } } catch { abStatus.value = { kind: 'error', message: '连接探测失败；已保存配置未删除。' } } finally { abLoading.value = false } }
-async function deleteSavedConnection(): Promise<void> { const ok = await confirmDialog.value?.confirm({ title: '清除 Auto Bangumi 连接', message: '确认清除已保存连接？不会影响本地方案或媒体。', confirmLabel: '清除', danger: true }); if (!ok || !savedConnection.value) return; try { savedConnection.value = await api.delete<ConnectionSummary>('/api/v1/settings/autobangumi', { body: { confirm: true, expected_configuration_revision: savedConnection.value.configuration_revision } }); abStatus.value = { kind: 'success', message: '已清除 Auto Bangumi 连接。' } } catch { abStatus.value = { kind: 'error', message: '清除失败，请重新读取后重试。' } } }
+async function probeSavedConnection(): Promise<void> { if (!savedConnection.value?.connection_ref) return; abLoading.value = true; try { const result = await api.post<ProbeResult>('/api/v1/settings/autobangumi/probe', { body: { connection_ref: savedConnection.value.connection_ref, configuration_revision: savedConnection.value.configuration_revision } }); abStatus.value = { kind: 'success', message: `连接探测结果：${result.probe_status}` }; refreshConnectionStatus() } catch { abStatus.value = { kind: 'error', message: '连接探测失败；已保存配置未删除。' } } finally { abLoading.value = false } }
+async function deleteSavedConnection(): Promise<void> { const ok = await confirmDialog.value?.confirm({ title: '清除 Auto Bangumi 连接', message: '确认清除已保存连接？不会影响本地方案或媒体。', confirmLabel: '清除', danger: true }); if (!ok || !savedConnection.value) return; try { savedConnection.value = await api.delete<ConnectionSummary>('/api/v1/settings/autobangumi', { body: { confirm: true, expected_configuration_revision: savedConnection.value.configuration_revision } }); abStatus.value = { kind: 'success', message: '已清除 Auto Bangumi 连接。' }; refreshConnectionStatus() } catch { abStatus.value = { kind: 'error', message: '清除失败，请重新读取后重试。' } } }
 
 const confirmDialog = ref<InstanceType<typeof ConfirmDialog> | null>(null)
 

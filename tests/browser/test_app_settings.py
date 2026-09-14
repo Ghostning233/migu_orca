@@ -372,6 +372,9 @@ class TestAppSettingsAutoBangumiPanel:
         captured: dict[str, Any] = {}
 
         def _connection(route: Any, request: Any) -> None:
+            if request.method != "PUT":
+                route.continue_()
+                return
             captured["body"] = request.post_data_json
             route.fulfill(
                 status=200,

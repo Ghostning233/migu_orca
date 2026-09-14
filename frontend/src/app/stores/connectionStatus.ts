@@ -65,3 +65,8 @@ export function useConnectionStatus() {
 
   return { summary, state, summaryLoading, pendingCount, loadSummary, loadPending, invalidate }
 }
+
+/** Controlled non-persistent refresh used after server-confirmed convergence. */
+export function refreshConnectionStatus(): void {
+  useConnectionStatus().invalidate()
+}

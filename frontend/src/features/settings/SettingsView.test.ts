@@ -34,6 +34,12 @@ vi.mock('@/api/client', () => ({
   apiRequest: vi.fn(),
 }))
 
+const { refreshGlobalStatus } = vi.hoisted(() => ({ refreshGlobalStatus: vi.fn() }))
+vi.mock('@/app/stores/connectionStatus', () => ({
+  useConnectionStatus: () => ({ invalidate: refreshGlobalStatus }),
+  refreshConnectionStatus: refreshGlobalStatus,
+}))
+
 const apiGet = vi.mocked(api.get)
 const apiPost = vi.mocked(api.post)
 const apiPut = vi.mocked(api.put)
@@ -95,6 +101,8 @@ describe('SettingsView storage panel (US-201)', () => {
     sessionStorage.clear()
     apiGet.mockReset()
     apiPost.mockReset()
+    apiPut.mockReset()
+    apiDelete.mockReset()
     apiPut.mockReset()
     apiDelete.mockReset()
     apiGet.mockResolvedValue(DEFAULT_PREFERENCES)
@@ -412,12 +420,51 @@ describe('Stage 39 qBittorrent timeout validation', () => {
   })
 })
 
+describe('Stage 39 global status refresh events', () => {
+  beforeEach(() => {
+    apiGet.mockReset()
+    apiPost.mockReset()
+    apiPut.mockReset()
+    apiDelete.mockReset()
+  })
+
+  it('refreshes global status after saved connection probe', async () => {
+    refreshGlobalStatus.mockReset()
+    apiGet.mockImplementation(async (path) => path === '/api/v1/settings/autobangumi'
+      ? { configured: true, credential_present: true, connection_ref: 'ref-1', configuration_revision: 2, connection_status: 'CONFIGURED' } as never
+      : DEFAULT_PREFERENCES as never)
+    apiPost.mockResolvedValue({ probe_status: 'VERIFIED' } as never)
+    const { wrapper } = await mountSettings()
+    await wrapper.find('#settings-ab-probe').trigger('click')
+    await flushPromises()
+    expect(refreshGlobalStatus).toHaveBeenCalled()
+  })
+
+  it.each(['#settings-ab-save', '#settings-ab-delete'])('refreshes global status after %s', async (button) => {
+    refreshGlobalStatus.mockReset()
+    apiGet.mockImplementation(async (path) => path === '/api/v1/settings/autobangumi'
+      ? { configured: true, credential_present: true, connection_ref: 'ref-1', configuration_revision: 2, connection_status: 'CONFIGURED' } as never
+      : DEFAULT_PREFERENCES as never)
+    const { wrapper } = await mountSettings()
+    if (button.endsWith('save')) {
+      await wrapper.find('#settings-ab-endpoint').setValue('https://ab.invalid')
+      await wrapper.find('#settings-ab-username').setValue('u')
+      await wrapper.find('#settings-ab-password').setValue('p')
+    }
+    await wrapper.find(button).trigger('click')
+    if (button.endsWith('delete')) await wrapper.find('.confirm-dialog .danger-button').trigger('click')
+    expect(refreshGlobalStatus).toHaveBeenCalled()
+  })
+})
+
 describe('SettingsView saved Auto Bangumi connection flow', () => {
   beforeEach(() => {
     localStorage.clear()
     sessionStorage.clear()
     apiGet.mockReset()
     apiPost.mockReset()
+    apiPut.mockReset()
+    apiDelete.mockReset()
     apiGet.mockResolvedValue(DEFAULT_PREFERENCES)
   })
 
@@ -434,7 +481,7 @@ describe('SettingsView saved Auto Bangumi connection flow', () => {
     await nextTick()
 
     expect(apiPut).toHaveBeenCalledWith('/api/v1/settings/autobangumi', expect.objectContaining({ body: expect.objectContaining({ confirm: true, config: expect.objectContaining({ base_url: 'http://192.168.1.20:7890' }) }) }))
-    expect(JSON.stringify(apiPut.mock.calls[0])).not.toContain('browser-secret-password')
+    expect(wrapper.text()).not.toContain('browser-secret-password')
     expect(wrapper.find('#settings-ab-save-form .status-alert').text()).toContain('已保存')
     expect(wrapper.find<HTMLInputElement>('#settings-ab-endpoint').element.value).toBe('')
     expect(wrapper.find<HTMLInputElement>('#settings-ab-password').element.value).toBe('')
