@@ -187,10 +187,14 @@ def test_profile_change_while_app_is_mounted_invalidates_held_old_list(page: Pag
     page.route("**/api/v1/settings/autobangumi", handle)
     page.route("**/api/v1/tracking/items**", handle)
     page.route("**/api/v1/preferences", handle)
-    page.goto(f"{live_server_url}/app/tracking")
+    # Load the shell on a route without its own tracking-list request first.
+    # This makes the first profile-a response unambiguously belong to the
+    # global badge; the tracking route then supplies the held old request.
+    page.goto(f"{live_server_url}/app/add")
     page.evaluate("localStorage.setItem('miguOrca.web.storageDir', 'profile-a')")
     page.reload()
     expect(page.locator(".pending-badge")).to_have_text("2")
+    page.goto(f"{live_server_url}/app/tracking")
 
     # Change the profile through the real Settings form while keeping the SPA alive.
     page.locator(".workspace-status").press("Enter")
