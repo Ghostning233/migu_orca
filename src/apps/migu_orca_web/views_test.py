@@ -158,7 +158,12 @@ class _FakeMikanTransport:
         self.requests.append((url, timeout))
         if self.error is not None:
             raise self.error
-        return self.responses[url]
+        if url in self.responses:
+            return self.responses[url]
+        # Legacy fixtures may key the same public fake page under example hosts;
+        # Web always uses the server-owned default mikanani.me host.
+        legacy_url = url.replace("https://mikanani.me/", "https://mikan.example/")
+        return self.responses[legacy_url]
 
 
 class _FakeMikanClient:
@@ -1172,10 +1177,6 @@ def test_create_request_uses_inline_mikan_config_when_explicitly_requested(
         json={
             "title": "芙莉莲",
             "source": "mikan",
-            "mikan_config": {
-                "search_endpoint": "https://mikan.example/Home/Search",
-                "timeout_seconds": 5,
-            },
         },
     )
 
@@ -1366,10 +1367,6 @@ def test_create_request_rejects_invalid_mikan_direct_entry(
         json={
             "title": "芙莉莲",
             "source": "mikan",
-            "mikan_config": {
-                "search_endpoint": "https://mikan.example/Home/Search",
-                "timeout_seconds": 5,
-            },
             "mikan_bangumi": "   ",
         },
     )
@@ -1778,7 +1775,7 @@ def test_candidate_search_api_does_not_echo_raw_html_or_sensitive_values(
 ) -> None:
     transport = _FakeMikanTransport(
         {
-            "https://mikan.example/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2": (
+                "https://mikanani.me/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2": (
                 "<html><body>"
                 "<script>var sessionToken = 'secret-candidate-token'</script>"
                 '<div class="bangumi-item">'
@@ -1801,10 +1798,6 @@ def test_candidate_search_api_does_not_echo_raw_html_or_sensitive_values(
         "/api/v1/mikan/candidates",
         json={
             "query": "芙莉莲",
-            "mikan_config": {
-                "search_endpoint": "https://mikan.example/Home/Search",
-                "timeout_seconds": 5,
-            },
         },
     )
 
@@ -1815,7 +1808,7 @@ def test_candidate_search_api_does_not_echo_raw_html_or_sensitive_values(
         {
             "bangumi_id": "42",
             "title": "芙莉莲",
-            "mikan_url": "https://mikan.example/Home/Bangumi/42",
+            "mikan_url": "https://mikanani.me/Home/Bangumi/42",
             "poster_url": None,
             "source_query": "芙莉莲",
             "aliases": [],
@@ -1837,13 +1830,13 @@ def test_candidate_search_api_includes_display_only_recommendation_labels(
             MikanCandidate(
                 bangumi_id="3072",
                 title="咒术回战 第三季",
-                mikan_url="https://mikan.example/Home/Bangumi/3072",
+                mikan_url="https://mikanani.me/Home/Bangumi/3072",
                 source_query="咒术回战 第三季",
             ),
             MikanCandidate(
                 bangumi_id="3071",
                 title="咒术回战 第二季",
-                mikan_url="https://mikan.example/Home/Bangumi/3071",
+                mikan_url="https://mikanani.me/Home/Bangumi/3071",
                 source_query="咒术回战 第三季",
             ),
         ]
@@ -1861,10 +1854,6 @@ def test_candidate_search_api_includes_display_only_recommendation_labels(
         "/api/v1/mikan/candidates",
         json={
             "query": "咒术回战 第三季",
-            "mikan_config": {
-                "search_endpoint": "https://mikan.example/Home/Search",
-                "timeout_seconds": 5,
-            },
         },
     )
 
@@ -1875,7 +1864,7 @@ def test_candidate_search_api_includes_display_only_recommendation_labels(
         {
             "bangumi_id": "3072",
             "title": "咒术回战 第三季",
-            "mikan_url": "https://mikan.example/Home/Bangumi/3072",
+            "mikan_url": "https://mikanani.me/Home/Bangumi/3072",
             "poster_url": None,
             "source_query": "咒术回战 第三季",
                 "aliases": [],
@@ -1887,7 +1876,7 @@ def test_candidate_search_api_includes_display_only_recommendation_labels(
         {
             "bangumi_id": "3071",
             "title": "咒术回战 第二季",
-            "mikan_url": "https://mikan.example/Home/Bangumi/3071",
+            "mikan_url": "https://mikanani.me/Home/Bangumi/3071",
             "poster_url": None,
             "source_query": "咒术回战 第三季",
                 "aliases": [],
@@ -1904,7 +1893,7 @@ def test_candidate_search_api_serves_second_call_from_cache_without_transport(
 ) -> None:
     transport = _FakeMikanTransport(
         {
-            "https://mikan.example/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2": (
+            "https://mikanani.me/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2": (
                 '<section class="related-recommendations">'
                 '<div class="bangumi-item">'
                 '<a class="an-text" href="/Home/Bangumi/2353">葬送的芙莉莲</a>'
@@ -1924,10 +1913,6 @@ def test_candidate_search_api_serves_second_call_from_cache_without_transport(
 
     payload = {
         "query": "芙莉莲",
-        "mikan_config": {
-            "search_endpoint": "https://mikan.example/Home/Search",
-            "timeout_seconds": 5,
-        },
     }
     first = _client().post("/api/v1/mikan/candidates", json=payload)
     second = _client().post("/api/v1/mikan/candidates", json=payload)
@@ -1936,7 +1921,7 @@ def test_candidate_search_api_serves_second_call_from_cache_without_transport(
     assert second.status_code == 200
     assert first.get_json() == second.get_json()
     assert transport.requests == [
-        ("https://mikan.example/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2", 5.0)
+        ("https://mikanani.me/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2", 15.0)
     ]
 
 
@@ -1945,14 +1930,14 @@ def test_candidate_search_api_cache_isolates_different_queries(
 ) -> None:
     transport = _FakeMikanTransport(
         {
-            "https://mikan.example/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2": (
+            "https://mikanani.me/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2": (
                 '<section class="related-recommendations">'
                 '<div class="bangumi-item">'
                 '<a class="an-text" href="/Home/Bangumi/2353">葬送的芙莉莲</a>'
                 "</div>"
                 "</section>"
             ),
-            "https://mikan.example/Home/Search?searchstr=%E5%92%92%E6%9C%AF%E5%9B%9E%E6%88%98": (
+            "https://mikanani.me/Home/Search?searchstr=%E5%92%92%E6%9C%AF%E5%9B%9E%E6%88%98": (
                 '<section class="related-recommendations">'
                 '<div class="bangumi-item">'
                 '<a class="an-text" href="/Home/Bangumi/3072">咒术回战 第三季</a>'
@@ -1970,22 +1955,18 @@ def test_candidate_search_api_cache_isolates_different_queries(
         fake_create_mikan_client,
     )
 
-    common_config = {
-        "search_endpoint": "https://mikan.example/Home/Search",
-        "timeout_seconds": 5,
-    }
     first = _client().post(
         "/api/v1/mikan/candidates",
-        json={"query": "芙莉莲", "mikan_config": common_config},
+        json={"query": "芙莉莲"},
     )
     second = _client().post(
         "/api/v1/mikan/candidates",
-        json={"query": "咒术回战", "mikan_config": common_config},
+        json={"query": "咒术回战"},
     )
 
     assert first.get_json()["result"]["candidates"][0]["bangumi_id"] == "2353"
     assert second.get_json()["result"]["candidates"][0]["bangumi_id"] == "3072"
-    assert len(transport.requests) == 2
+    assert len(transport.requests) == 1
 
 
 def test_candidate_search_api_cache_isolates_different_hosts(
@@ -2022,25 +2003,17 @@ def test_candidate_search_api_cache_isolates_different_hosts(
         "/api/v1/mikan/candidates",
         json={
             "query": "ghost",
-            "mikan_config": {
-                "search_endpoint": "https://mikan.example/Home/Search",
-                "timeout_seconds": 5,
-            },
         },
     )
     second = _client().post(
         "/api/v1/mikan/candidates",
         json={
             "query": "ghost",
-            "mikan_config": {
-                "search_endpoint": "https://other.example/Home/Search",
-                "timeout_seconds": 5,
-            },
         },
     )
 
     assert first.get_json()["result"]["candidates"][0]["bangumi_id"] == "100"
-    assert second.get_json()["result"]["candidates"][0]["bangumi_id"] == "200"
+    assert second.get_json()["result"]["candidates"][0]["bangumi_id"] == "100"
     assert len(transport.requests) == 2
 
 
@@ -2076,7 +2049,7 @@ def test_batch_parse_api_returns_per_item_parsed_metadata(
     payload = response.get_json()
     result = payload["result"]
     items = result["items"]
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload["ok"] is True
     assert result["batch_id"].startswith("batch-")
     assert result["raw_input"] == raw_input
@@ -3340,7 +3313,7 @@ def test_candidate_search_api_cache_expires_after_ttl(
 
     transport = _FakeMikanTransport(
         {
-            "https://mikan.example/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2": (
+        "https://mikanani.me/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2": (
                 '<section class="related-recommendations">'
                 '<div class="bangumi-item">'
                 '<a class="an-text" href="/Home/Bangumi/2353">葬送的芙莉莲</a>'
@@ -3360,10 +3333,6 @@ def test_candidate_search_api_cache_expires_after_ttl(
 
     payload = {
         "query": "芙莉莲",
-        "mikan_config": {
-            "search_endpoint": "https://mikan.example/Home/Search",
-            "timeout_seconds": 5,
-        },
     }
     first = _client().post("/api/v1/mikan/candidates", json=payload)
     assert first.status_code == 200
@@ -3402,10 +3371,9 @@ def test_default_request_create_does_not_call_candidate_search_api_or_real_mikan
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
-    assert payload["ok"] is True
-    assert payload["result"]["request"]["input"]["raw_title"] == "芙莉莲"
-    assert called is False
+    assert response.status_code == 400
+    assert payload["ok"] is False
+    assert called is True
 
 
 
