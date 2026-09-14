@@ -347,3 +347,7 @@ Started: 2026-09-13
 - 新增真实 settings journey：导航离开保存表单时零 PUT；裸 `192.168.1.20:7890` 保存请求规范化为 `http://192.168.1.20:7890`，并执行敏感 canary 检查。
 - 新增未配置/未绑定 tracking journey：VERIFY_EXTERNAL 不可见且无 probe/外部调用；保留已有 AUTO、REVALIDATE、submit/retry、管理、sync、unknown recovery 与 CAS 真实 route-envelope 测试。
 - 验证：`npm --prefix frontend run build` 通过；`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q` → `18 passed`（真实 Chromium）；`git diff --check` 通过。
+
+## 2026-09-14 / 工作包 A 确认删除与人工恢复 Chromium 补充
+- 新增真实 Settings 删除确认 journey：取消确认保持零 DELETE，确认后恰好一次 DELETE，随后 Tracking 读取未配置摘要并禁用 probe；新增 MARK_SUCCEEDED/MARK_FAILED 确认恢复 journey，recover body 仅 expected_revision/action/confirm，无 ref、probe 或秘密。
+- 验证：`npm --prefix frontend run build` 通过；`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q` → `21 passed`（真实 Chromium）。

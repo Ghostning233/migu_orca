@@ -406,7 +406,7 @@ def test_saved_sync_requires_explicit_probe_and_sends_ref_revision(page, live_se
     page.locator("#tracking-probe-saved").click()
     expect(page.locator("#tracking-sync")).to_be_enabled()
     page.locator("#tracking-sync").click()
-    page.locator(".confirm-dialog .primary-button").click()
+    page.locator(".confirm-dialog .danger-button, .confirm-dialog .primary-button").last.click()
     page.wait_for_timeout(100)
     assert calls == [{"connection_ref": ref, "configuration_revision": 3, "confirm": True}]
 
@@ -684,7 +684,7 @@ def test_saved_submit_and_retry_use_one_explicit_generation(page, live_server_ur
     page.wait_for_selector(selector)
     page.locator(selector).click()
     expect(page.locator(".confirm-dialog")).to_be_visible()
-    page.locator(".confirm-dialog .primary-button").click()
+    page.locator(".confirm-dialog .danger-button, .confirm-dialog .primary-button").last.click()
     page.wait_for_timeout(150)
     assert len(calls) == 1
     sent = calls[0]
@@ -791,3 +791,70 @@ def test_unconfigured_recovery_has_no_external_verify_or_probe(page, live_server
     secret = "unbound-canary"
     assert secret not in page.locator("body").inner_text()
     assert secret not in page.evaluate("() => location.href + JSON.stringify(history.state) + JSON.stringify(localStorage) + JSON.stringify(sessionStorage)")
+
+
+@pytest.mark.browser
+def test_settings_delete_requires_confirmation_and_then_tracking_degrades(page, live_server_url):
+    ref = "11111111-1111-4111-8111-111111111111"
+    deletes = 0
+
+    def handler(route, request):
+        nonlocal deletes
+        path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+        if request.method == "GET" and path == "/settings/autobangumi":
+            configured = deletes == 0
+            route.fulfill(json={"ok": True, "result": {"configured": configured, "credential_present": configured, "connection_ref": ref if configured else None, "configuration_revision": 3 if configured else 0, "connection_status": "CONFIGURED" if configured else "UNCONFIGURED"}}); return
+        if request.method == "DELETE" and path == "/settings/autobangumi":
+            deletes += 1
+            route.fulfill(json={"ok": True, "result": {"configured": False, "credential_present": False, "connection_ref": None, "configuration_revision": 0, "connection_status": "UNCONFIGURED"}}); return
+        if request.method == "GET" and path == "/tracking/items":
+            route.fulfill(json={"ok": True, "result": {"items": [], "summary": {"total": 0}, "warnings": []}}); return
+        route.continue_()
+
+    page.route("**/api/v1/**", handler)
+    page.goto(f"{live_server_url}/app/settings")
+    page.wait_for_selector("#settings-ab-delete")
+    page.locator("#settings-ab-delete").click()
+    expect(page.locator(".confirm-dialog")).to_be_visible()
+    page.locator(".confirm-dialog .secondary-button, .confirm-dialog .cancel-button").first.click()
+    assert deletes == 0
+    page.locator("#settings-ab-delete").click()
+    page.locator(".confirm-dialog .danger-button").click()
+    page.wait_for_timeout(100)
+    assert deletes == 1
+    page.goto(f"{live_server_url}/app/tracking")
+    page.wait_for_selector("#tracking-probe-saved")
+    assert page.locator("#tracking-probe-saved").is_disabled()
+
+
+@pytest.mark.browser
+@pytest.mark.parametrize("action", ["MARK_SUCCEEDED", "MARK_FAILED"])
+def test_manual_recovery_is_local_and_confirmed(page, live_server_url, action):
+    item = _recovery_item("tracking-a", "人工恢复", revision=4)
+    item["available_actions"] = [{"code": action, "label": action, "style": "PRIMARY", "requires_confirmation": True, "target_scopes": []}]
+    calls: list[dict] = []
+
+    def handler(route, request):
+        path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+        if request.method == "GET" and path == "/settings/autobangumi":
+            route.fulfill(json={"ok": True, "result": {"configured": False, "credential_present": False, "connection_ref": None, "configuration_revision": 0, "connection_status": "UNCONFIGURED"}}); return
+        if request.method == "GET" and path == "/tracking/items":
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}}); return
+        if request.method == "GET" and path == "/tracking/items/tracking-a":
+            route.fulfill(json={"ok": True, "result": _detail_payload(item)}); return
+        if request.method == "POST" and path.endswith("/recover"):
+            calls.append(request.post_data_json or {})
+            route.fulfill(json={"ok": True, "result": {"tracking_id": "tracking-a", "action": action, "outcome": "SUCCEEDED", "checked_revision": 4, "next_revision": 5, "needs_manual": False, "tracking": item}}); return
+        if request.method == "POST":
+            raise AssertionError(path)
+        route.continue_()
+
+    page.route("**/api/v1/**", handler)
+    page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+    selector = f"#tracking-recover-{'succeeded' if action == 'MARK_SUCCEEDED' else 'failed'}"
+    page.wait_for_selector(selector)
+    page.locator(selector).click()
+    expect(page.locator(".confirm-dialog")).to_be_visible()
+    page.locator(".confirm-dialog .danger-button, .confirm-dialog .primary-button").last.click()
+    page.wait_for_timeout(100)
+    assert calls == [{"expected_revision": 4, "action": action, "confirm": True}]
