@@ -75,7 +75,7 @@ describe('generated contract consumer fixture (US-249)', () => {
       | 'DELETE_EXTERNAL'
     >()
 
-    type CapabilityResult = JsonResult<'probeAutoBangumiCapabilities'>
+    type CapabilityResult = JsonResult<'probeSavedAutoBangumiCapabilities'>
     expectTypeOf<CapabilityResult['probe_status']>().toEqualTypeOf<
       'VERIFIED' | 'PARTIAL' | 'FAILED'
     >()

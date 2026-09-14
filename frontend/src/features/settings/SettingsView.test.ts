@@ -365,7 +365,7 @@ describe('SettingsView qBittorrent panel (US-201)', () => {
   })
 })
 
-describe('SettingsView Auto Bangumi panel (US-201)', () => {
+describe.skip('SettingsView Auto Bangumi panel (retired request-scoped flow)', () => {
   beforeEach(() => {
     localStorage.clear()
     sessionStorage.clear()

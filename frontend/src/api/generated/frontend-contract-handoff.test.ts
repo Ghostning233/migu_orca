@@ -51,10 +51,10 @@ describe('versioned frontend contract handoff (US-255)', () => {
     expectTypeOf<JsonBody<'retryTrackingItem'>>().toHaveProperty('expected_revision')
     expectTypeOf<JsonBody<'recoverTrackingItem'>>().toHaveProperty('action')
     expectTypeOf<JsonBody<'syncTrackingItems'>>().toMatchTypeOf<{ confirm: true }>()
-    expectTypeOf<JsonResult<'probeAutoBangumiCapabilities'>['probe_status']>().toEqualTypeOf<
+    expectTypeOf<JsonResult<'probeSavedAutoBangumiCapabilities'>['probe_status']>().toEqualTypeOf<
       'VERIFIED' | 'PARTIAL' | 'FAILED'
     >()
-    expectTypeOf<JsonResult<'probeAutoBangumiCapabilities'>['subscription_submit']>().toEqualTypeOf<
+    expectTypeOf<JsonResult<'probeSavedAutoBangumiCapabilities'>['subscription_submit']>().toEqualTypeOf<
       'SUPPORTED' | 'UNSUPPORTED' | 'UNKNOWN'
     >()
     // The generated union must reject a write with no allowed patch field.

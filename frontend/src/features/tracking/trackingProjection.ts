@@ -19,7 +19,7 @@ export type TrackingActionCode = TrackingAction['code']
 export type TrackingActionStyle = TrackingAction['style']
 export type TrackingScope = NonNullable<TrackingAction['target_scopes']>[number]
 export type CapabilityResult = NonNullable<
-  operations['probeAutoBangumiCapabilities']['responses']['200']['content']['application/json']['result']
+  operations['probeSavedAutoBangumiCapabilities']['responses']['200']['content']['application/json']['result']
 >
 export type CapabilityState = CapabilityResult['subscription_modify']
 export type TrackingRevalidateBody = NonNullable<
@@ -354,7 +354,7 @@ export function capabilityState(value: unknown): CapabilityState {
 }
 
 export function capabilityStateLabel(value: unknown): string {
-  return CAPABILITY_STATE_LABELS[capabilityState(value)]
+  return CAPABILITY_STATE_LABELS[capabilityState(value)] ?? '未知'
 }
 
 export function probeStatusLabel(status: string): string {

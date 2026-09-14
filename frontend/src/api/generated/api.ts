@@ -4,26 +4,6 @@
  */
 
 export interface paths {
-    "/api/v1/autobangumi/capabilities": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 探测 Auto Bangumi 只读能力
-         * @description ab_config 仅为 request-scoped 凭据；响应严格白名单，未知能力 fail closed。
-         */
-        post: operations["probeAutoBangumiCapabilities"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/autobangumi/test-connection": {
         parameters: {
             query?: never;
@@ -618,7 +598,7 @@ export interface paths {
         put?: never;
         /**
          * 恢复统一追番记录（AUTO 纯本地或人工核验）
-         * @description US-234：解决外部结果未知（VERIFYING_EXTERNAL）、本地结果落盘失败（RECOVERY_REQUIRED）或状态未知（UNKNOWN）的追番记录。action 允许 AUTO/MARK_SUCCEEDED/MARK_FAILED/VERIFY_EXTERNAL：AUTO 纯本地；VERIFY_EXTERNAL 仅在本次请求内接收 ab_config 并调用 3.1.18 只读管理读取，能力未知、无匹配或多匹配保持 RECOVERY_REQUIRED；人工动作必须 confirm=true。绝不接收外部 ID/URL/原始结果或调用管理写操作。
+         * @description US-330：恢复追番记录；AUTO/人工动作纯本地，VERIFY_EXTERNAL 仅使用已保存连接的 connection_ref + configuration_revision 执行 3.1.18 只读核验。
          */
         post: operations["recoverTrackingItem"];
         delete?: never;
@@ -764,193 +744,6 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    probeAutoBangumiCapabilities: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** @description 探测 Auto Bangumi 只读能力 */
-        requestBody: {
-            content: {
-                /** @example {} */
-                "application/json": {
-                    ab_config: {
-                        /** @enum {string} */
-                        auth_mode: "password" | "api_token";
-                        base_url?: string;
-                        username?: string;
-                        password?: string;
-                        token?: string;
-                        fallback_enabled: boolean;
-                    };
-                };
-            };
-        };
-        responses: {
-            /** @description 成功 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": true,
-                     *       "result": {
-                     *         "probe_status": "示例",
-                     *         "version": "示例",
-                     *         "adapter": "示例",
-                     *         "subscription_list": "示例",
-                     *         "subscription_detail": "示例",
-                     *         "subscription_submit": "示例",
-                     *         "subscription_modify": "示例",
-                     *         "subscription_enable": "示例",
-                     *         "subscription_disable": "示例",
-                     *         "subscription_delete": "示例",
-                     *         "rss_list": "示例",
-                     *         "rss_modify": "示例",
-                     *         "rss_enable": "示例",
-                     *         "rss_disable": "示例",
-                     *         "rss_delete": "示例",
-                     *         "rss_refresh": "示例",
-                     *         "external_verify": "示例",
-                     *         "checked_at": "示例",
-                     *         "safe_message": "示例"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /** @constant */
-                        ok: true;
-                        /** AutoBangumiCapabilitiesDTO */
-                        result: {
-                            /**
-                             * Probe Status
-                             * @enum {string}
-                             */
-                            probe_status: "VERIFIED" | "PARTIAL" | "FAILED";
-                            /** Version */
-                            version: string | null;
-                            /** Adapter */
-                            adapter: ("legacy_3_1" | "api_token") | null;
-                            /**
-                             * Subscription List
-                             * @enum {string}
-                             */
-                            subscription_list: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /**
-                             * Subscription Detail
-                             * @enum {string}
-                             */
-                            subscription_detail: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /**
-                             * Subscription Submit
-                             * @enum {string}
-                             */
-                            subscription_submit: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /**
-                             * Subscription Modify
-                             * @enum {string}
-                             */
-                            subscription_modify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /**
-                             * Subscription Enable
-                             * @enum {string}
-                             */
-                            subscription_enable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /**
-                             * Subscription Disable
-                             * @enum {string}
-                             */
-                            subscription_disable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /**
-                             * Subscription Delete
-                             * @enum {string}
-                             */
-                            subscription_delete: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /**
-                             * Rss List
-                             * @enum {string}
-                             */
-                            rss_list: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /**
-                             * Rss Modify
-                             * @enum {string}
-                             */
-                            rss_modify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /**
-                             * Rss Enable
-                             * @enum {string}
-                             */
-                            rss_enable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /**
-                             * Rss Disable
-                             * @enum {string}
-                             */
-                            rss_disable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /**
-                             * Rss Delete
-                             * @enum {string}
-                             */
-                            rss_delete: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /**
-                             * Rss Refresh
-                             * @enum {string}
-                             */
-                            rss_refresh: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /**
-                             * External Verify
-                             * @enum {string}
-                             */
-                            external_verify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
-                            /** Checked At */
-                            checked_at: string | null;
-                            /** Safe Message */
-                            safe_message: string | null;
-                        };
-                    };
-                };
-            };
-            /** @description config_error: Auto Bangumi 配置无效 */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "config_error",
-                     *       "error_message": "Auto Bangumi 配置无效",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-        };
-    };
     testAutoBangumiConnection: {
         parameters: {
             query?: never;
@@ -2854,9 +2647,11 @@ export interface operations {
                  *       "source": "static-fixture",
                  *       "save_request": false,
                  *       "season_confirmation": 1,
+                 *       "candidate_context": null,
                  *       "mikan_config": {
                  *         "timeout_seconds": 1
-                 *       }
+                 *       },
+                 *       "mikan_bangumi": null
                  *     }
                  */
                 "application/json": {
@@ -3574,6 +3369,7 @@ export interface operations {
             content: {
                 /**
                  * @example {
+                 *       "draft_id": "示例",
                  *       "base_revision": 1,
                  *       "patch": {
                  *         "filter_rule": {
@@ -4018,6 +3814,7 @@ export interface operations {
             content: {
                 /**
                  * @example {
+                 *       "draft_id": "示例",
                  *       "base_revision": 1
                  *     }
                  */
@@ -6365,15 +6162,6 @@ export interface operations {
                     /** Format: uuid */
                     connection_ref: string;
                     configuration_revision: number;
-                    _retired_ab_config?: {
-                        /** @enum {string} */
-                        auth_mode: "password" | "api_token";
-                        base_url?: string;
-                        username?: string;
-                        password?: string;
-                        token?: string;
-                        fallback_enabled: boolean;
-                    };
                     storage_dir?: string | null;
                     /** @constant */
                     confirm: true;
@@ -8062,7 +7850,7 @@ export interface operations {
                  */
                 "application/json": {
                     /** @description Auto Bangumi 凭据（request-scoped，绝不落盘）。 */
-                    ab_config?: {
+                    legacy_credentials?: {
                         /** @enum {string} */
                         auth_mode: "password" | "api_token";
                         base_url?: string;
@@ -11554,9 +11342,20 @@ export interface operations {
         /** @description 提交订阅方案到 Auto Bangumi */
         requestBody: {
             content: {
-                /** @example {} */
+                /**
+                 * @example {
+                 *       "legacy_credentials": {
+                 *         "auth_mode": "示例",
+                 *         "base_url": null,
+                 *         "username": null,
+                 *         "password": null,
+                 *         "token": null,
+                 *         "fallback_enabled": true
+                 *       }
+                 *     }
+                 */
                 "application/json": {
-                    ab_config: {
+                    legacy_credentials?: {
                         /** @enum {string} */
                         auth_mode: "password" | "api_token";
                         base_url?: string;
@@ -13042,6 +12841,7 @@ export interface operations {
                  * @example {
                  *       "target_scope": "示例",
                  *       "expected_revision": 1,
+                 *       "idempotency_key": "示例",
                  *       "confirm": true,
                  *       "connection_ref": "示例",
                  *       "configuration_revision": 1
@@ -14002,7 +13802,7 @@ export interface operations {
                     /** @description 客户端最后观察到的追番记录 revision（revision-aware 恢复）。 */
                     expected_revision: number;
                     /**
-                     * @description 恢复动作：AUTO=纯本地；VERIFY_EXTERNAL=只读外部核验（需 request-scoped ab_config）；MARK_SUCCEEDED/MARK_FAILED=人工核验（需 confirm=true）。
+                     * @description 恢复动作：AUTO=纯本地；VERIFY_EXTERNAL=只读外部核验（需 saved connection generation）；MARK_SUCCEEDED/MARK_FAILED=人工核验（需 confirm=true）。
                      * @enum {string}
                      */
                     action: "AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "VERIFY_EXTERNAL";
@@ -14013,16 +13813,6 @@ export interface operations {
                     configuration_revision?: number | null;
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
                     storage_dir?: string | null;
-                    /** @description 仅 VERIFY_EXTERNAL 使用；连接配置只在本次请求内存中存在。 */
-                    _retired_ab_config?: {
-                        /** @enum {string} */
-                        auth_mode: "password" | "api_token";
-                        base_url: string;
-                        username?: string;
-                        password?: string;
-                        token?: string;
-                        fallback_enabled: boolean;
-                    };
                 };
             };
         };
@@ -14384,6 +14174,7 @@ export interface operations {
                  * @example {
                  *       "target_scope": "示例",
                  *       "expected_revision": 1,
+                 *       "idempotency_key": "示例",
                  *       "confirm": true,
                  *       "connection_ref": "示例",
                  *       "configuration_revision": 1
@@ -14736,7 +14527,15 @@ export interface operations {
                  * @example {
                  *       "expected_revision": 1,
                  *       "idempotency_key": "示例",
-                 *       "confirm": true
+                 *       "confirm": true,
+                 *       "legacy_credentials": {
+                 *         "auth_mode": "示例",
+                 *         "base_url": null,
+                 *         "username": null,
+                 *         "password": null,
+                 *         "token": null,
+                 *         "fallback_enabled": true
+                 *       }
                  *     }
                  */
                 "application/json": {
@@ -14749,7 +14548,7 @@ export interface operations {
                      * @enum {boolean}
                      */
                     confirm: true;
-                    ab_config: {
+                    legacy_credentials?: {
                         /** @enum {string} */
                         auth_mode: "password" | "api_token";
                         base_url?: string;
@@ -15512,6 +15311,7 @@ export interface operations {
                  * @example {
                  *       "target_scope": "示例",
                  *       "expected_revision": 1,
+                 *       "idempotency_key": "示例",
                  *       "confirm": true,
                  *       "connection_ref": "示例",
                  *       "configuration_revision": 1,
@@ -15867,8 +15667,16 @@ export interface operations {
                  *       "expected_revision": 1,
                  *       "idempotency_key": "示例",
                  *       "confirm": true,
-                 *       "connection_ref": null,
-                 *       "configuration_revision": 1
+                 *       "connection_ref": "示例",
+                 *       "configuration_revision": 1,
+                 *       "legacy_credentials": {
+                 *         "auth_mode": "示例",
+                 *         "base_url": null,
+                 *         "username": null,
+                 *         "password": null,
+                 *         "token": null,
+                 *         "fallback_enabled": true
+                 *       }
                  *     }
                  */
                 "application/json": {
@@ -15881,7 +15689,10 @@ export interface operations {
                      * @enum {boolean}
                      */
                     confirm: true;
-                    ab_config: {
+                    /** Format: uuid */
+                    connection_ref: string;
+                    configuration_revision: number;
+                    legacy_credentials?: {
                         /** @enum {string} */
                         auth_mode: "password" | "api_token";
                         base_url?: string;
@@ -15890,9 +15701,6 @@ export interface operations {
                         token?: string;
                         fallback_enabled: boolean;
                     };
-                    /** Format: uuid */
-                    connection_ref?: string;
-                    configuration_revision?: number;
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
                     storage_dir?: string | null;
                 };

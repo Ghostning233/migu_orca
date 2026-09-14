@@ -286,7 +286,7 @@ _MANAGEMENT_COMMON = {
     "tracking_id": {"type": "string"},
     "target_scope": {"type": "string", "enum": ["SUBSCRIPTION", "ASSOCIATED_RSS"]},
     "expected_revision": {"type": "integer", "minimum": 1},
-    "idempotency_key": {"type": "string", "x-request-scoped": True},
+    "idempotency_key": {"type": "string"},
     "confirm": {"const": True},
     "connection_ref": {"type": "string", "format": "uuid"},
     "configuration_revision": {"type": "integer", "minimum": 0},
@@ -552,7 +552,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "candidate_context": {
                     "type": "string",
                     "description": "候选搜索签发的一次性 opaque token（request-scoped）。",
-                    "x-request-scoped": True,
+                    "x-legacy": True,
                 },
                 "mikan_config": {
                     "type": "object",
@@ -568,7 +568,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "mikan_bangumi": {
                     "type": "string",
                     "description": "MiKan 详情页 URL（request-scoped）。",
-                    "x-request-scoped": True,
+                    "x-legacy": True,
                 },
             },
             "required": ["title"],
@@ -607,7 +607,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "draft_id": {
                     "type": "string",
                     "description": "生成/上次修改时服务端签发的 opaque draft_id（request-scoped，不落盘）。",
-                    "x-request-scoped": True,
+                    "x-legacy": True,
                 },
                 "base_revision": {
                     "type": "integer",
@@ -662,7 +662,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "draft_id": {
                     "type": "string",
                     "description": "生成/修改时服务端签发的 opaque draft_id（一次性，保存成功后失效）。",
-                    "x-request-scoped": True,
+                    "x-legacy": True,
                 },
                 "base_revision": {
                     "type": "integer",
@@ -839,9 +839,9 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             "type": "object",
             "required": ["ab_config"],
             "properties": {
-                "ab_config": {
+                "legacy_credentials": {
                     "type": "object",
-                    "x-request-scoped": True,
+                    "x-legacy": True,
                     "properties": {
                         "auth_mode": {
                             "type": "string",
@@ -849,19 +849,19 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                         },
                         "base_url": {
                             "type": "string",
-                            "x-request-scoped": True,
+                            "x-legacy": True,
                         },
                         "username": {
                             "type": "string",
-                            "x-request-scoped": True,
+                            "x-legacy": True,
                         },
                         "password": {
                             "type": "string",
-                            "x-request-scoped": True,
+                            "x-legacy": True,
                         },
                         "token": {
                             "type": "string",
-                            "x-request-scoped": True,
+                            "x-legacy": True,
                         },
                         "fallback_enabled": {"type": "boolean"},
                     },
@@ -951,18 +951,6 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             "properties": {
                 "connection_ref": {"type": "string", "format": "uuid"},
                 "configuration_revision": {"type": "integer", "minimum": 0},
-                "_retired_ab_config": {
-                    "type": "object", "additionalProperties": False, "x-request-scoped": True,
-                    "properties": {
-                        "auth_mode": {"type": "string", "enum": ["password", "api_token"]},
-                        "base_url": {"type": "string", "x-request-scoped": True},
-                        "username": {"type": "string", "x-request-scoped": True},
-                        "password": {"type": "string", "x-request-scoped": True},
-                        "token": {"type": "string", "x-request-scoped": True},
-                        "fallback_enabled": {"type": "boolean"},
-                    },
-                    "required": ["auth_mode", "fallback_enabled"],
-                },
                 "storage_dir": {"type": "string"},
                 "confirm": {"const": True},
             },
@@ -1057,7 +1045,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "description": "US-225：对单条统一追番记录执行可靠提交流程。confirm 必须严格为 true，ab_config 只在单次请求内存中存在（绝不进入 storage/URL/日志/trace）。服务端重新读取最新本地 Request 并执行完整本地复核（纯本地，不信任浏览器 fingerprint）；复核不通过时不访问 Auto Bangumi，已落盘业务结果仍返回 HTTP 200，outcome 为 NEEDS_RECONFIRM/SUBMIT_FAILED/VERIFYING_EXTERNAL/RECOVERY_REQUIRED/ACTIVE。仅 Request fingerprint 变化且其余复核通过时，confirm=true 表示采纳最新方案并继续同一次提交。外部调用前先持久化 TrackingRecord=SUBMITTING 与 operation=IN_PROGRESS 作为外部可能发生的持久化边界；同 idempotency_key 重放复用原 operation，并发同键只允许一次外部调用。expected_revision 过期 → 409 tracking_revision_conflict；confirm=false → 400 tracking_confirmation_required；同键不同绑定 → 409 tracking_idempotency_conflict；进行中的提交操作 → 409 tracking_operation_in_progress。",
         "requestBody": {
             "type": "object",
-            "required": ["expected_revision", "idempotency_key", "confirm", "ab_config"],
+            "required": ["expected_revision", "idempotency_key", "confirm", "connection_ref", "configuration_revision"],
             "properties": {
                 "expected_revision": {
                     "type": "integer",
@@ -1073,9 +1061,11 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                     "enum": [True],
                     "description": "必须为 true：用户显式确认提交最新方案。",
                 },
-                "ab_config": {
+                "connection_ref": {"type": "string", "format": "uuid"},
+                "configuration_revision": {"type": "integer", "minimum": 0},
+                "legacy_credentials": {
                     "type": "object",
-                    "x-request-scoped": True,
+                    "x-legacy": True,
                     "properties": {
                         "auth_mode": {
                             "type": "string",
@@ -1083,26 +1073,24 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                         },
                         "base_url": {
                             "type": "string",
-                            "x-request-scoped": True,
+                            "x-legacy": True,
                         },
                         "username": {
                             "type": "string",
-                            "x-request-scoped": True,
+                            "x-legacy": True,
                         },
                         "password": {
                             "type": "string",
-                            "x-request-scoped": True,
+                            "x-legacy": True,
                         },
                         "token": {
                             "type": "string",
-                            "x-request-scoped": True,
+                            "x-legacy": True,
                         },
                         "fallback_enabled": {"type": "boolean"},
                     },
                     "required": ["auth_mode", "fallback_enabled"],
                 },
-                "connection_ref": {"type": "string", "format": "uuid"},
-                "configuration_revision": {"type": "integer", "minimum": 0},
                 "storage_dir": {
                     "type": "string",
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
@@ -1138,7 +1126,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "description": "US-226：只允许从 SUBMIT_FAILED 重试；VERIFYING_EXTERNAL/RECOVERY_REQUIRED 必须先 recover 再 retry。请求 shape 与 submit 相同（confirm 严格 true、ab_config 只在单次请求内存、opaque idempotency_key）。服务复用统一提交序列：重新读取最新本地 Request 并复核、bind 新 operation=PREPARED、持久化 TrackingRecord=SUBMITTING、operation=IN_PROGRESS 作为外部边界、单次 Auto Bangumi 调用、结果分类与落盘。同 idempotency_key 网络重放复用原 operation。expected_revision 过期 → 409 tracking_revision_conflict；非 SUBMIT_FAILED → 409 tracking_state_conflict；confirm=false → 400 tracking_confirmation_required；同键不同绑定 → 409 tracking_idempotency_conflict。",
         "requestBody": {
             "type": "object",
-            "required": ["expected_revision", "idempotency_key", "confirm", "ab_config"],
+            "required": ["expected_revision", "idempotency_key", "confirm", "connection_ref", "configuration_revision"],
             "properties": {
                 "expected_revision": {
                     "type": "integer",
@@ -1154,9 +1142,9 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                     "enum": [True],
                     "description": "必须为 true：用户显式确认重试提交最新方案。",
                 },
-                "ab_config": {
+                "legacy_credentials": {
                     "type": "object",
-                    "x-request-scoped": True,
+                    "x-legacy": True,
                     "properties": {
                         "auth_mode": {
                             "type": "string",
@@ -1164,19 +1152,19 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                         },
                         "base_url": {
                             "type": "string",
-                            "x-request-scoped": True,
+                            "x-legacy": True,
                         },
                         "username": {
                             "type": "string",
-                            "x-request-scoped": True,
+                            "x-legacy": True,
                         },
                         "password": {
                             "type": "string",
-                            "x-request-scoped": True,
+                            "x-legacy": True,
                         },
                         "token": {
                             "type": "string",
-                            "x-request-scoped": True,
+                            "x-legacy": True,
                         },
                         "fallback_enabled": {"type": "boolean"},
                     },
@@ -1214,7 +1202,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     "POST /api/v1/tracking/items/<path:tracking_id>/recover": {
         "operationId": "recoverTrackingItem",
         "summary": "恢复统一追番记录（AUTO 纯本地或人工核验）",
-        "description": "US-234：解决外部结果未知（VERIFYING_EXTERNAL）、本地结果落盘失败（RECOVERY_REQUIRED）或状态未知（UNKNOWN）的追番记录。action 允许 AUTO/MARK_SUCCEEDED/MARK_FAILED/VERIFY_EXTERNAL：AUTO 纯本地；VERIFY_EXTERNAL 仅在本次请求内接收 ab_config 并调用 3.1.18 只读管理读取，能力未知、无匹配或多匹配保持 RECOVERY_REQUIRED；人工动作必须 confirm=true。绝不接收外部 ID/URL/原始结果或调用管理写操作。",
+        "description": "US-330：恢复追番记录；AUTO/人工动作纯本地，VERIFY_EXTERNAL 仅使用已保存连接的 connection_ref + configuration_revision 执行 3.1.18 只读核验。",
         "requestBody": {
             "type": "object",
             "required": ["expected_revision", "action"],
@@ -1227,7 +1215,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "action": {
                     "type": "string",
                     "enum": ["AUTO", "MARK_SUCCEEDED", "MARK_FAILED", "VERIFY_EXTERNAL"],
-                    "description": "恢复动作：AUTO=纯本地；VERIFY_EXTERNAL=只读外部核验（需 request-scoped ab_config）；MARK_SUCCEEDED/MARK_FAILED=人工核验（需 confirm=true）。",
+                    "description": "恢复动作：AUTO=纯本地；VERIFY_EXTERNAL=只读外部核验（需 saved connection generation）；MARK_SUCCEEDED/MARK_FAILED=人工核验（需 confirm=true）。",
                 },
                 "confirm": {
                     "type": "boolean",
@@ -1238,20 +1226,6 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "storage_dir": {
                     "type": "string",
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
-                },
-                "_retired_ab_config": {
-                    "type": "object",
-                    "x-request-scoped": True,
-                    "description": "仅 VERIFY_EXTERNAL 使用；连接配置只在本次请求内存中存在。",
-                    "properties": {
-                        "auth_mode": {"type": "string", "enum": ["password", "api_token"]},
-                        "base_url": {"type": "string", "x-request-scoped": True},
-                        "username": {"type": "string", "x-request-scoped": True},
-                        "password": {"type": "string", "x-request-scoped": True},
-                        "token": {"type": "string", "x-request-scoped": True},
-                        "fallback_enabled": {"type": "boolean"},
-                    },
-                    "required": ["auth_mode", "base_url", "fallback_enabled"],
                 },
             },
         },
@@ -1577,7 +1551,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             "type": "object",
             "required": ["batch_id", "confirm"],
             "properties": {
-                "ab_config": {
+                "legacy_credentials": {
                     "type": "object",
                     "x-request-scoped": True,
                     "description": "Auto Bangumi 凭据（request-scoped，绝不落盘）。",
@@ -1752,34 +1726,6 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             },
             "504": {"ab_timeout": "请求超时"},
         },
-    },
-    "POST /api/v1/autobangumi/capabilities": {
-        "operationId": "probeAutoBangumiCapabilities",
-        "summary": "探测 Auto Bangumi 只读能力",
-        "description": "ab_config 仅为 request-scoped 凭据；响应严格白名单，未知能力 fail closed。",
-        "requestBody": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["ab_config"],
-            "properties": {
-                "ab_config": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "x-request-scoped": True,
-                    "properties": {
-                        "auth_mode": {"type": "string", "enum": ["password", "api_token"]},
-                        "base_url": {"type": "string", "x-request-scoped": True},
-                        "username": {"type": "string", "x-request-scoped": True},
-                        "password": {"type": "string", "x-request-scoped": True},
-                        "token": {"type": "string", "x-request-scoped": True},
-                        "fallback_enabled": {"type": "boolean"},
-                    },
-                    "required": ["auth_mode", "fallback_enabled"],
-                }
-            },
-        },
-        "success": AutoBangumiCapabilitiesDTO,
-        "errors": {"400": {"config_error": "Auto Bangumi 配置无效"}},
     },
 }
 

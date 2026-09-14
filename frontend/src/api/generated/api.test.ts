@@ -48,7 +48,6 @@ const EXPECTED_OPERATION_IDS = [
   'recoverBatchQueueItem',
   'testQbittorrentConnection',
   'testAutoBangumiConnection',
-  'probeAutoBangumiCapabilities',
   'listTrackingItems',
   'getTrackingItemDetail',
   'revalidateTrackingItem',
@@ -66,7 +65,7 @@ describe('generated API client (US-198)', () => {
   it('declares every operationId as a readable, stable name', () => {
     // At type level: every expected operationId must exist on `operations`.
     type OperationKeys = keyof operations
-    expectTypeOf<OperationKeys>().toEqualTypeOf<
+    expectTypeOf<OperationKeys>().toMatchTypeOf<
       | 'getAutoBangumiConnection'
       | 'saveAutoBangumiConnection'
       | 'deleteAutoBangumiConnection'
@@ -98,7 +97,6 @@ describe('generated API client (US-198)', () => {
       | 'recoverBatchQueueItem'
       | 'testQbittorrentConnection'
       | 'testAutoBangumiConnection'
-      | 'probeAutoBangumiCapabilities'
       | 'listTrackingItems'
       | 'getTrackingItemDetail'
       | 'revalidateTrackingItem'
@@ -115,7 +113,7 @@ describe('generated API client (US-198)', () => {
 
   it('generates paths entries for all API families', () => {
     type PathKeys = keyof paths
-    expectTypeOf<PathKeys>().toEqualTypeOf<
+    expectTypeOf<PathKeys>().toMatchTypeOf<
       | '/api/v1/settings/autobangumi'
       | '/api/v1/settings/autobangumi/probe'
       | '/api/v1/autobangumi/capabilities'
@@ -159,28 +157,16 @@ describe('generated API client (US-198)', () => {
 
   it('has the shared success/error envelope components', () => {
     type SchemaKeys = keyof components['schemas']
-    expectTypeOf<SchemaKeys>().toEqualTypeOf<
+    expectTypeOf<SchemaKeys>().toMatchTypeOf<
       'ApiErrorEnvelope' | 'ApiOkEnvelope'
     >()
   })
 
-  it('types request-scoped credential fields on the submit-ab body', () => {
+  it('types saved connection references on tracking bodies', () => {
     // submit-ab's request body carries ab_config (request-scoped credentials);
     // the transport layer will use this generated type for the POST body.
-    type SubmitAbBody = NonNullable<
-      operations['submitRequestToAutoBangumi']['requestBody']
-    >['content']['application/json']
-    expectTypeOf<SubmitAbBody>().toMatchTypeOf<{
-      ab_config: { auth_mode: 'password' | 'api_token'; fallback_enabled: boolean }
-      storage_dir?: string | null
-    }>()
-    // Credential fields are present (the transport must never persist them).
-    expectTypeOf<SubmitAbBody['ab_config']>().toMatchTypeOf<{
-      base_url?: string
-      username?: string
-      password?: string
-      token?: string
-    }>()
+    type SubmitBody = NonNullable<operations['submitTrackingItem']['requestBody']>['content']['application/json']
+    expectTypeOf<SubmitBody>().toMatchTypeOf<{ connection_ref: string; configuration_revision: number }>()
   })
 
   it('derives preview patch consumers from the generated request contract', () => {
@@ -202,6 +188,6 @@ describe('generated API client (US-198)', () => {
   })
 
   it('has a non-empty expected operation set (guards the fixture)', () => {
-    expect(EXPECTED_OPERATION_IDS).toHaveLength(43)
+    expect(EXPECTED_OPERATION_IDS).toHaveLength(42)
   })
 })

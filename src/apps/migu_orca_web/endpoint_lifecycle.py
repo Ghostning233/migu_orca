@@ -31,11 +31,6 @@ ENDPOINT_LIFECYCLE: Final[dict[tuple[str, str], EndpointLifecycle]] = {
         "使用已保存连接执行显式只读能力探测；结果仅绑定当前 ref/revision",
         "Capability probe cache",
     ),
-    ("POST", "/api/v1/autobangumi/capabilities"): _entry(
-        _PRIMARY,
-        "只读能力探测；管理写入时重新探测；`subscription_submit` 仅由已验证的 3.1.18 password/legacy probe 支持",
-        "Capability probe",
-    ),
     ("POST", "/api/v1/autobangumi/test-connection"): _entry(_PRIMARY, "连接诊断，不替代管理写入校验", "Request-scoped probe"),
     ("POST", "/api/v1/qbittorrent/test-connection"): _entry(_PRIMARY, "连接诊断", "Request-scoped probe"),
     ("GET", "/api/v1/preferences"): _entry(_PRIMARY, "偏好读取", "Preference store"),

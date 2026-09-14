@@ -399,6 +399,11 @@ async function testAbConnection(): Promise<void> {
     abStatus.value = { kind: 'success', message: 'Auto Bangumi 连接已保存。请点击“测试已保存连接”进行显式探测。' }
     ab.clearAll()
   } catch (error) {
+    if (typeof error === 'object' && error !== null && 'status' in error && error.status === 409) {
+      await loadSavedConnection()
+      abStatus.value = { kind: 'error', message: '配置已变化，已重新读取摘要；请重新确认后再保存。' }
+      return
+    }
     // 只显示固定中文反馈，绝不把服务端原始错误（可能含凭据）渲染出来。
     void error
     abStatus.value = {

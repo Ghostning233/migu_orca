@@ -255,3 +255,15 @@ Started: 2026-09-13
 - 范围：设置页改用保存连接摘要/显式 saved probe；追番 submit/retry、sync/recover 与四类 management HTTP 路由切换为 connection_ref + configuration_revision，更新 schema/OpenAPI/generated 与前端 body builders，移除追番页凭据弹窗入口。
 - 验证：saved submit/sync/management/recovery 定向测试 `56 passed`；`uv run migu-orca-openapi`、frontend `npm run api:generate`、`npm run api:check`、`npm run typecheck` 通过；未运行真实 Chromium。
 - 遗留风险：Settings/Tracking 仍有部分旧 capability 类型与兼容代码注释，旧临时 capabilities endpoint 尚未退役；需独立审核补齐 US-327～330 AC、敏感 canary 与浏览器旅程。
+
+## 2026-09-14 / US-327 审核修复补充
+- 原归属：`8fae4b7`；本轮：`fc10972` 后的审核修复提交。保存连接冲突路径重读安全摘要并要求重新确认；Settings 旧提交/测试入口移除。Vitest 定向组合通过。
+
+## 2026-09-14 / US-328 审核修复补充
+- 原归属：`8fae4b7`；本轮将生成契约与追番 body 检查迁移到 saved connection generation，移除 submit/retry 的旧凭据契约。OpenAPI/generated/typecheck 通过。
+
+## 2026-09-14 / US-329 审核修复补充
+- 原归属：`8fae4b7`；本轮清理 management body 的 request-scoped/legacy schema，保留 ref/revision 门控；旧凭据请求断言迁出。Vitest 定向组合通过。
+
+## 2026-09-14 / US-330 审核修复补充
+- 原归属：`8fae4b7`；本轮退役 capabilities route、lifecycle、OpenAPI/generated operation 与 CredentialSessionDialog，新增红测 3 passed；browser fixture 可收集但环境跳过。

@@ -88,12 +88,10 @@ type ListResult = NonNullable<
 type BatchQueueResult = NonNullable<
   operations['getBatchQueue']['responses']['200']['content']['application/json']['result']
 >
-type ProbeBody = NonNullable<
-  operations['probeAutoBangumiCapabilities']['requestBody']['content']['application/json']
->
 type CapabilityResult = NonNullable<
-  operations['probeAutoBangumiCapabilities']['responses']['200']['content']['application/json']['result']
+  operations['probeSavedAutoBangumiCapabilities']['responses']['200']['content']['application/json']['result']
 >
+type SavedConnection = NonNullable<operations['getAutoBangumiConnection']['responses']['200']['content']['application/json']['result']>
 type SyncBody = NonNullable<
   operations['syncTrackingItems']['requestBody']['content']['application/json']
 >
@@ -110,7 +108,7 @@ const searchTerm = ref('')
 const statusFilter = ref<TrackingStatusGroup | ''>('')
 const selectedTrackingId = ref('')
 const listContainer = ref<HTMLElement | null>(null)
-const sessionConfig = ref<ProbeBody['ab_config'] | null>(null)
+const sessionConfig = ref<Pick<SavedConnection, 'connection_ref' | 'configuration_revision'> | null>(null)
 const sessionCapabilities = ref<CapabilityResult | null>(null)
 const syncLoading = ref(false)
 const syncPending = ref(false)
@@ -130,7 +128,7 @@ let writeController: AbortController | null = null
 // Explicitly clearing credentials destroys the config.  An unresolved intent
 // remains a tombstone, but can never be replayed with a newly connected account.
 const writeReplayBlocked = ref(false)
-let writeConfigSnapshot: ProbeBody['ab_config'] | null = null
+let writeConfigSnapshot: Pick<SavedConnection, 'connection_ref' | 'configuration_revision'> | null = null
 // Unknown-result recovery (US-312).  Like the write family, the page owns the
 // request (only VERIFY_EXTERNAL needs the page credential) and the single
 // page-level intent; no recovery key or credential is ever stored here beyond
@@ -153,7 +151,7 @@ let managementIntent: TrackingManagementIntent | null = null
 let managementSequence = 0
 let managementController: AbortController | null = null
 const managementReplayBlocked = ref(false)
-let managementConfigSnapshot: ProbeBody['ab_config'] | null = null
+let managementConfigSnapshot: Pick<SavedConnection, 'connection_ref' | 'configuration_revision'> | null = null
 // List reads and server-confirmed tracking writes have independent lifecycles:
 // `listSequence` only invalidates stale list responses, while `writeGeneration`
 // marks the revision a sync (or a local revalidate) already applied.  A list
@@ -509,7 +507,7 @@ async function syncTracking(): Promise<void> {
   syncLoading.value = true
   syncMessage.value = ''
   try {
-    const body: SyncBody = { connection_ref: (config as any).connection_ref, configuration_revision: (config as any).configuration_revision, confirm: true }
+    const body: SyncBody = { connection_ref: config.connection_ref!, configuration_revision: config.configuration_revision, confirm: true }
     const result = await api.post<SyncResult>('/api/v1/tracking/sync', { body, signal: controller.signal })
     // Only a newer sync intent or an explicit connection reset can discard this
     // result; list refreshes use their own sequence and revision guard.
@@ -685,8 +683,8 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
       expected_revision: intent.expectedRevision,
       idempotency_key: intent.idempotencyKey,
       confirm: true,
-      connection_ref: (requestConfig as any).connection_ref,
-      configuration_revision: (requestConfig as any).configuration_revision,
+      connection_ref: requestConfig.connection_ref!,
+      configuration_revision: requestConfig.configuration_revision,
       ...(storageDir ? { storage_dir: storageDir } : {}),
     }
     const result = await api.post<TrackingWriteResult>(WRITE_ACTION_ENDPOINTS[action], {
@@ -787,7 +785,7 @@ async function runTrackingRecovery(
   const intent = createTrackingRecoveryIntent(payload.item, requested, sessionCapabilities.value)
   if (!intent) return
   const body = createTrackingRecoverBody(
-    intent.action, intent.expectedRevision, sessionConfig.value as any, storageQuery().storage_dir,
+    intent.action, intent.expectedRevision, sessionConfig.value, storageQuery().storage_dir,
   )
   // A body the page cannot build safely (external verification without the live
   // session) is not sent at all.
@@ -938,7 +936,7 @@ async function runTrackingManagement(payload: {
   // patch, no known enable direction) is refused here, before any in-flight
   // session exists: it sends zero requests and converges on a definite failure
   // instead of leaving the panel stuck on "正在提交外部修改，请稍候…".
-  const body = createTrackingManagementBody(intent, requestConfig as any, storageQuery().storage_dir)
+  const body = createTrackingManagementBody(intent, requestConfig, storageQuery().storage_dir)
   if (!body) {
     managementIntent = null
     managementSession.value = createManagementUnbuildableSession(trackingId, action, targetScope)
@@ -1041,7 +1039,6 @@ onBeforeUnmount(() => {
   <section id="tracking-overview" class="tracking-overview" aria-labelledby="tracking-heading">
     <PanelSection title="追番管理" class="tracking-header">
       <template #actions>
-        <BaseButton id="tracking-connect" variant="secondary" @click="router.push(routeLocation('settings'))">前往设置连接</BaseButton>
         <BaseButton v-if="sessionCapabilities" id="tracking-sync" variant="secondary" :loading="syncLoading" :disabled="syncLoading || syncPending" @click="syncTracking">同步 Auto Bangumi</BaseButton>
         <BaseButton id="tracking-refresh" variant="secondary" :loading="loading" @click="loadList()">刷新列表</BaseButton>
       </template>
