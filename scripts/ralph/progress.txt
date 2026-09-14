@@ -267,3 +267,9 @@ Started: 2026-09-13
 
 ## 2026-09-14 / US-330 审核修复补充
 - 原归属：`8fae4b7`；本轮退役 capabilities route、lifecycle、OpenAPI/generated operation 与 CredentialSessionDialog，新增红测 3 passed；browser fixture 可收集但环境跳过。
+
+## 2026-09-14 / 工作包 A 第四轮集中修复
+- TrackingView 改为 saved summary + 显式 probe 状态：页面加载只读摘要，probe 成功后才写入 ref/revision/capabilities；增加显式“测试已保存连接”入口，移除旧 session 命名/凭据语义与 cast。
+- 完整清理 tracking legacy credentials 契约并修正 submit/retry saved HTTP handoff；保留测试 Agent 红测并补充真实 Flask route 适配。
+- 验证：API contract 与 saved service 组合 `61 passed`；frontend build、api generate/check、typecheck、saved-flow Vitest 通过；真实 Chromium browser 红测 `2 passed`；Ruff 与 diff check 通过。
+- 遗留风险：尚未扩展完整 settings/tracking 真实 Chromium 多动作旅程；旧历史 Vitest 中部分 retired request-scoped 场景仍为 skipped，需后续独立审核确认替代覆盖。

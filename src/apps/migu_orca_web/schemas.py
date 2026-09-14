@@ -571,13 +571,6 @@ class AutoBangumiCapabilitiesConfigPayload(BaseModel):
     fallback_enabled: bool
 
 
-class AutoBangumiCapabilitiesPayload(BaseModel):
-    """Request-scoped credentials for the read-only capability probe."""
-
-    model_config = ConfigDict(extra="forbid")
-    ab_config: AutoBangumiCapabilitiesConfigPayload
-
-
 class TrackingSyncPayload(BaseModel):
     """Request-scoped read-only external tracking synchronization."""
 

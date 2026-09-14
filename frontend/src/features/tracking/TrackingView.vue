@@ -108,8 +108,9 @@ const searchTerm = ref('')
 const statusFilter = ref<TrackingStatusGroup | ''>('')
 const selectedTrackingId = ref('')
 const listContainer = ref<HTMLElement | null>(null)
-const sessionConfig = ref<Pick<SavedConnection, 'connection_ref' | 'configuration_revision'> | null>(null)
-const sessionCapabilities = ref<CapabilityResult | null>(null)
+type SavedConnectionState = Pick<SavedConnection, 'connection_ref' | 'configuration_revision'> & { capabilities: CapabilityResult }
+const savedConnection = ref<SavedConnection | null>(null)
+const savedState = ref<SavedConnectionState | null>(null)
 const syncLoading = ref(false)
 const syncPending = ref(false)
 const syncMessage = ref('')
@@ -166,13 +167,42 @@ let syncController: AbortController | null = null
 const compatNotice = ref('')
 let compatSequence = 0
 
+async function loadSavedConnection(): Promise<void> {
+  try {
+    const summary = await api.get<SavedConnection>('/api/v1/settings/autobangumi')
+    const changed = savedState.value && (savedState.value.connection_ref !== summary.connection_ref
+      || savedState.value.configuration_revision !== summary.configuration_revision)
+    savedConnection.value = summary
+    if (changed) savedState.value = null
+  } catch {
+    savedConnection.value = null
+    savedState.value = null
+  }
+}
+
+async function probeSavedConnection(): Promise<void> {
+  const summary = savedConnection.value
+  if (!summary?.connection_ref) return
+  try {
+    const capabilities = await api.post<CapabilityResult>('/api/v1/settings/autobangumi/probe', {
+      body: { connection_ref: summary.connection_ref, configuration_revision: summary.configuration_revision },
+    })
+    if (savedConnection.value?.connection_ref === summary.connection_ref
+      && savedConnection.value.configuration_revision === summary.configuration_revision) {
+      savedState.value = { connection_ref: summary.connection_ref, configuration_revision: summary.configuration_revision, capabilities }
+    }
+  } catch {
+    savedState.value = null
+  }
+}
+
 const statusLabels: Record<TrackingStatusGroup, string> = {
   PENDING: '待处理', PROCESSING: '处理中', ACTIVE: '追番中',
   ATTENTION: '需处理', INACTIVE: '已停用/已删除',
 }
 const overview = computed(() => projectTrackingOverview(items.value))
 const capabilitySummary = computed(() => (
-  sessionCapabilities.value ? projectCapabilitySummary(sessionCapabilities.value) : []
+  savedState.value ? projectCapabilitySummary(savedState.value.capabilities) : []
 ))
 const filteredItems = computed(() => sortTrackingItems(filterTrackingItems(items.value, {
   query: searchTerm.value, statusGroup: statusFilter.value,
@@ -395,8 +425,7 @@ function clearFilters(): void {
  * and can only be settled through read-only verification or recovery.
  */
 function clearConnection(): void {
-  sessionConfig.value = null
-  sessionCapabilities.value = null
+  savedState.value = null
   cancelSync()
   preserveWriteLockAfterClear()
   preserveRecoveryLockAfterClear()
@@ -484,7 +513,7 @@ async function syncTracking(): Promise<void> {
   // One sync intent at a time: the guard is taken before the confirmation
   // dialog opens so a second click cannot supersede a pending intent.
   if (syncPending.value || syncLoading.value) return
-  if (!sessionConfig.value || !sessionCapabilities.value) return
+  if (!savedState.value) return
   syncPending.value = true
   let confirmed = false
   try {
@@ -497,8 +526,8 @@ async function syncTracking(): Promise<void> {
   } finally {
     syncPending.value = false
   }
-  if (!confirmed || !sessionConfig.value || !sessionCapabilities.value) return
-  const config = sessionConfig.value
+  if (!confirmed || !savedState.value) return
+  const config = savedState.value
   const sequence = ++syncSequence
   const controller = new AbortController()
   syncController?.abort()
@@ -529,7 +558,7 @@ async function syncTracking(): Promise<void> {
     } else {
       syncMessage.value = '同步已完成，但当前连接能力未知，已降级为只读并保留原有本地列表；可重新探测或再次同步。'
     }
-    sessionCapabilities.value = result.capabilities
+    savedState.value = { ...config, capabilities: result.capabilities }
   } catch (error) {
     if (sequence !== syncSequence) return
     syncMessage.value = '同步 Auto Bangumi 失败，已保留原有本地列表；可重连或再次同步。'
@@ -610,8 +639,8 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
     blockReplay(trackingId)
     return
   }
-  const config = sessionConfig.value
-  const capabilities = sessionCapabilities.value
+  const config = savedState.value
+  const capabilities = savedState.value?.capabilities
   // No page credential session means no external write at all.
   if (!config || !capabilities) return
   const sameItemRecovery = recoverySession.value?.trackingId === trackingId
@@ -656,15 +685,15 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
     writePending.value = false
   }
   // Cancelling the impact confirmation sends zero requests.
-  if (!confirmed || !sessionConfig.value || !sessionCapabilities.value) return
+  if (!confirmed || !savedState.value) return
 
   // One opaque key per confirmation.  Only an indeterminate earlier result keeps
   // its locked intent, so a transport retry reuses the very same key (and the
   // very same revision binding) instead of risking a second external
   // subscription; a definite failure always mints a fresh one.
-  const intent = locked ?? createTrackingActionIntent(payload.item, payload.action, undefined, sessionCapabilities.value)
+  const intent = locked ?? createTrackingActionIntent(payload.item, payload.action, undefined, savedState.value.capabilities)
   if (!intent) return
-  const requestConfig = locked ? writeConfigSnapshot : sessionConfig.value
+  const requestConfig = locked ? writeConfigSnapshot : savedState.value
   if (!requestConfig) {
     blockReplay(trackingId)
     return
@@ -782,10 +811,10 @@ async function runTrackingRecovery(
   }
   // Read the live session *after* the confirmation: a session cleared while the
   // dialog was open must not be used (and the local actions never need one).
-  const intent = createTrackingRecoveryIntent(payload.item, requested, sessionCapabilities.value)
+  const intent = createTrackingRecoveryIntent(payload.item, requested, savedState.value?.capabilities ?? null)
   if (!intent) return
   const body = createTrackingRecoverBody(
-    intent.action, intent.expectedRevision, sessionConfig.value, storageQuery().storage_dir,
+    intent.action, intent.expectedRevision, savedState.value, storageQuery().storage_dir,
   )
   // A body the page cannot build safely (external verification without the live
   // session) is not sent at all.
@@ -863,8 +892,8 @@ async function runTrackingManagement(payload: {
     blockReplay(trackingId)
     return
   }
-  const config = sessionConfig.value
-  const capabilities = sessionCapabilities.value
+  const config = savedState.value
+  const capabilities = savedState.value?.capabilities
   // No page credential session means no external management write at all.
   if (!config || !capabilities) return
   const requested = payload.action.code
@@ -923,9 +952,9 @@ async function runTrackingManagement(payload: {
     managementPending.value = false
   }
   // Cancelling the impact confirmation sends zero requests.
-  if (!confirmed || !sessionConfig.value || !sessionCapabilities.value) return
+  if (!confirmed || !savedState.value) return
 
-  const requestConfig = locked ? managementConfigSnapshot : sessionConfig.value
+  const requestConfig = locked ? managementConfigSnapshot : savedState.value
   if (!requestConfig) {
     blockReplay(trackingId)
     return
@@ -1000,6 +1029,7 @@ async function runTrackingManagement(payload: {
 }
 
 onMounted(() => {
+  void loadSavedConnection()
   void loadList().then(() => {
     // A legacy batch link is located against the freshly read local list, so the
     // compat read never races the tracking list it maps onto.
@@ -1030,8 +1060,7 @@ onBeforeUnmount(() => {
   resetWrite()
   resetRecovery()
   resetManagement()
-  sessionConfig.value = null
-  sessionCapabilities.value = null
+  savedState.value = null
 })
 </script>
 
@@ -1039,7 +1068,8 @@ onBeforeUnmount(() => {
   <section id="tracking-overview" class="tracking-overview" aria-labelledby="tracking-heading">
     <PanelSection title="追番管理" class="tracking-header">
       <template #actions>
-        <BaseButton v-if="sessionCapabilities" id="tracking-sync" variant="secondary" :loading="syncLoading" :disabled="syncLoading || syncPending" @click="syncTracking">同步 Auto Bangumi</BaseButton>
+        <BaseButton id="tracking-probe-saved" variant="secondary" :disabled="!savedConnection?.connection_ref" @click="probeSavedConnection">测试已保存连接</BaseButton>
+        <BaseButton v-if="savedState" id="tracking-sync" variant="secondary" :loading="syncLoading" :disabled="syncLoading || syncPending" @click="syncTracking">同步 Auto Bangumi</BaseButton>
         <BaseButton id="tracking-refresh" variant="secondary" :loading="loading" @click="loadList()">刷新列表</BaseButton>
       </template>
       <p id="tracking-heading" class="tracking-lede">查看本地追番状态。选择单条记录后，右侧将显示检查器入口。</p>
@@ -1091,8 +1121,8 @@ onBeforeUnmount(() => {
           ref="inspector"
           :key="`${selectedItem.tracking_id}:${detailRevision}`"
           :tracking-id="selectedItem.tracking_id"
-          :capabilities="sessionCapabilities"
-          :credential-ready="Boolean(sessionConfig)"
+          :capabilities="savedState?.capabilities ?? null"
+          :credential-ready="Boolean(savedState)"
           :write-session="writeSession"
           :recovery-session="recoverySession"
           :management-session="managementSession"
@@ -1109,15 +1139,15 @@ onBeforeUnmount(() => {
         </template>
       </aside>
     </section>
-    <section v-if="sessionCapabilities" class="tracking-connection-status" aria-labelledby="tracking-connection-heading">
+    <section v-if="savedState" class="tracking-connection-status" aria-labelledby="tracking-connection-heading">
       <h2 id="tracking-connection-heading">Auto Bangumi 页面连接</h2>
       <p role="status">
-        当前页面已连接 Auto Bangumi（{{ probeStatusLabel(sessionCapabilities.probe_status) }}），仅在用户明确操作时使用。
+        当前页面已连接 Auto Bangumi（{{ probeStatusLabel(savedState.capabilities.probe_status) }}），仅在用户明确操作时使用。
         <button type="button" class="tracking-clear-connection" @click="clearConnection">清除连接</button>
       </p>
       <dl id="tracking-capability-summary" class="tracking-capability-summary">
-        <div><dt>版本</dt><dd>{{ capabilityVersionLabel(sessionCapabilities) }}</dd></div>
-        <div><dt>探测状态</dt><dd>{{ probeStatusLabel(sessionCapabilities.probe_status) }}</dd></div>
+        <div><dt>版本</dt><dd>{{ capabilityVersionLabel(savedState.capabilities) }}</dd></div>
+        <div><dt>探测状态</dt><dd>{{ probeStatusLabel(savedState.capabilities.probe_status) }}</dd></div>
         <div v-for="entry in capabilitySummary" :key="entry.key">
           <dt>{{ entry.label }}</dt><dd>{{ capabilityStateLabel(entry.state) }}</dd>
         </div>

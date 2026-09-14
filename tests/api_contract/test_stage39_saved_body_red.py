@@ -24,7 +24,7 @@ def test_submit_saved_connection_shape_reaches_saved_service(client: FlaskClient
     )
     # A missing tracking/ref may safely be rejected, but the legacy payload
     # validator must not reject this public shape for missing ``ab_config``.
-    assert response.status_code != 400
+    assert response.json.get("error_type") != "data_validation_errors"
     assert "ab_config" not in response.get_data(as_text=True)
 
 
