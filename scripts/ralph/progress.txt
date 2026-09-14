@@ -371,3 +371,10 @@ Started: 2026-09-13
 ## 2026-09-14 / 工作包 A submit/retry 单飞时间序列旅程
 - 新增参数化真实 Chromium journey（PENDING_SUBMIT、SUBMIT_FAILED/RETRY）：saved refA 显式 probe 后确认请求，route 延迟返回 RECOVERY_REQUIRED，重复点击期间仅捕获一次 POST/key/refA/revision；刷新读取新 generation 不重放旧意图。
 - 验证：`npm --prefix frontend run build` 通过；完整 saved suite `29 passed`（真实 Chromium）。
+
+## 2026-09-14 / 工作包 B US-331～US-332
+- US-331：新增非持久内存 connectionStatus store；顶部仅消费 generated Auto Bangumi 安全摘要，显式探测结果映射为四种中文状态；追番徽标仅按当前 profile 的 listTrackingItems.items 中 PENDING_SUBMIT/SUBMIT_FAILED 计数，失败保持未知不显示，代际与 profile 校验阻止旧响应覆盖。
+- US-332：移除设置页默认保存方案控件与写入；读取旧 `miguOrca.web.saveRequest` 时只删除该键；storage profile 保持相对路径；偏好 UserPreferences 改为 generated getPreferences 结果类型；增加默认折叠高级诊断中文说明。
+- 提交：US-331 `fa5a56a`；US-332 待本记录提交。
+- 验证：`npm run test:unit -- --run src/features/settings/storagePreferences.test.ts src/features/settings/preferences.test.ts` → 17 passed；`npm run build` → 通过；`npm run typecheck` → 通过。全 Settings 旧测试仍包含待后续 qB 退役故事的旧断言，本工作包未运行其失败集合；lint 仍有既有 tracking 文件 4 个 `no-explicit-any`。
+- 风险：本轮未执行真实 Chromium；US-331/332 的新增浏览器矩阵待工作包审核阶段补齐；未访问真实 Auto Bangumi。

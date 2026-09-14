@@ -18,11 +18,13 @@
  *   credentials (endpoint/token/password/cookie) are never stored here.
  */
 export const STORAGE_DIR_KEY = 'miguOrca.web.storageDir'
+/** Legacy key retained as a named migration target; never written. */
 export const SAVE_REQUEST_KEY = 'miguOrca.web.saveRequest'
 
 export interface StoragePreferences {
   storageDir: string
-  saveRequest: boolean
+  /** @deprecated Removed UI switch; accepted only for source compatibility and never persisted. */
+  saveRequest?: boolean
 }
 
 /** True when the value looks like a legacy absolute path (Unix or Windows). */
@@ -83,9 +85,7 @@ function removeKey(key: string): void {
  */
 export function loadStoragePreferences(): StoragePreferences {
   const savedDir = readKey(STORAGE_DIR_KEY)
-  const savedSave = readKey(SAVE_REQUEST_KEY)
   const storageDir = sanitizeStorageProfile(savedDir ?? '')
-  const saveRequest = savedSave === null ? true : savedSave === 'true'
 
   if (savedDir !== null && savedDir !== storageDir) {
     if (storageDir) {
@@ -94,7 +94,10 @@ export function loadStoragePreferences(): StoragePreferences {
       removeKey(STORAGE_DIR_KEY)
     }
   }
-  return { storageDir, saveRequest }
+  // One-time migration: this key represented a removed, non-functional
+  // browser switch. Do not touch any other localStorage entry.
+  removeKey(SAVE_REQUEST_KEY)
+  return { storageDir }
 }
 
 /** Persist the storage preferences (only safe relative profiles are saved). */
@@ -105,7 +108,6 @@ export function saveStoragePreferences(preferences: StoragePreferences): void {
   } else {
     removeKey(STORAGE_DIR_KEY)
   }
-  writeKey(SAVE_REQUEST_KEY, String(Boolean(preferences.saveRequest)))
 }
 
 /** Clear the storage preferences, falling back to server defaults. */
