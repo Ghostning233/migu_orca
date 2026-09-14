@@ -273,3 +273,7 @@ Started: 2026-09-13
 - 完整清理 tracking legacy credentials 契约并修正 submit/retry saved HTTP handoff；保留测试 Agent 红测并补充真实 Flask route 适配。
 - 验证：API contract 与 saved service 组合 `61 passed`；frontend build、api generate/check、typecheck、saved-flow Vitest 通过；真实 Chromium browser 红测 `2 passed`；Ruff 与 diff check 通过。
 - 遗留风险：尚未扩展完整 settings/tracking 真实 Chromium 多动作旅程；旧历史 Vitest 中部分 retired request-scoped 场景仍为 skipped，需后续独立审核确认替代覆盖。
+
+## 2026-09-14 / TrackingView 测试夹具迁移补充
+- 重构 TrackingView mount 夹具为 saved summary + explicit probe，覆盖未自动外调、显式 probe ref/revision、UNKNOWN 降级与代际变化清除。旧 71 个凭据流程用例以等价 saved-flow 核心行为替代。
+- 验证：SettingsView/TrackingView Vitest `18 passed`（4 个历史设置兼容场景 skipped）；真实 Chromium saved-flow `2 passed`；build、typecheck、api check、OpenAPI drift、Ruff、diff check 通过。

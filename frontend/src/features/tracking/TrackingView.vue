@@ -393,6 +393,11 @@ async function loadList(silent = false): Promise<void> {
   }
 }
 
+async function refreshTracking(): Promise<void> {
+  await loadSavedConnection()
+  await loadList()
+}
+
 /**
  * Converge one list item with the server-returned tracking summary (US-309).
  *
@@ -1069,8 +1074,8 @@ onBeforeUnmount(() => {
     <PanelSection title="追番管理" class="tracking-header">
       <template #actions>
         <BaseButton id="tracking-probe-saved" variant="secondary" :disabled="!savedConnection?.connection_ref" @click="probeSavedConnection">测试已保存连接</BaseButton>
-        <BaseButton v-if="savedState" id="tracking-sync" variant="secondary" :loading="syncLoading" :disabled="syncLoading || syncPending" @click="syncTracking">同步 Auto Bangumi</BaseButton>
-        <BaseButton id="tracking-refresh" variant="secondary" :loading="loading" @click="loadList()">刷新列表</BaseButton>
+        <BaseButton v-if="savedState" id="tracking-sync" variant="secondary" :loading="syncLoading" :disabled="syncLoading || syncPending || savedState.capabilities.probe_status !== 'VERIFIED'" @click="syncTracking">同步 Auto Bangumi</BaseButton>
+        <BaseButton id="tracking-refresh" variant="secondary" :loading="loading" @click="refreshTracking">刷新列表</BaseButton>
       </template>
       <p id="tracking-heading" class="tracking-lede">查看本地追番状态。选择单条记录后，右侧将显示检查器入口。</p>
       <p v-if="compatNotice" id="tracking-compat-notice" class="tracking-compat-notice" role="status">{{ compatNotice }}</p>
