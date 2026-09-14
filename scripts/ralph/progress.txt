@@ -351,3 +351,7 @@ Started: 2026-09-13
 ## 2026-09-14 / 工作包 A 确认删除与人工恢复 Chromium 补充
 - 新增真实 Settings 删除确认 journey：取消确认保持零 DELETE，确认后恰好一次 DELETE，随后 Tracking 读取未配置摘要并禁用 probe；新增 MARK_SUCCEEDED/MARK_FAILED 确认恢复 journey，recover body 仅 expected_revision/action/confirm，无 ref、probe 或秘密。
 - 验证：`npm --prefix frontend run build` 通过；`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q` → `21 passed`（真实 Chromium）。
+
+## 2026-09-14 / 工作包 A saved probe 门控补充
+- 扩展 management 与 submit/retry journey 的确认取消路径：取消确认后保持零外部写入，再确认才捕获一次 saved-generation request；新增未显式 probe 前 submit 不可用的真实页面断言。
+- 验证：`npm --prefix frontend run build` 通过；`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q` → `22 passed`（真实 Chromium）。

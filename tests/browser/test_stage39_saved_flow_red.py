@@ -273,6 +273,10 @@ def test_saved_management_actions_send_only_bound_connection_fields(page, live_s
         page.locator("#tracking-delete-external-scope-ASSOCIATED_RSS").check()
     page.locator(selector).click()
     if page.locator(".confirm-dialog").count():
+        page.locator(".confirm-dialog .cancel-button, .confirm-dialog .secondary-button").first.click(timeout=2000)
+        assert captured == []
+        page.locator(selector).click()
+    if page.locator(".confirm-dialog").count():
         page.locator(".confirm-dialog .danger-button, .confirm-dialog .primary-button").last.click(timeout=2000)
     page.wait_for_timeout(500)
     assert captured, action
@@ -684,6 +688,10 @@ def test_saved_submit_and_retry_use_one_explicit_generation(page, live_server_ur
     page.wait_for_selector(selector)
     page.locator(selector).click()
     expect(page.locator(".confirm-dialog")).to_be_visible()
+    page.locator(".confirm-dialog .cancel-button, .confirm-dialog .secondary-button").first.click()
+    assert calls == []
+    page.locator(selector).click()
+    expect(page.locator(".confirm-dialog")).to_be_visible()
     page.locator(".confirm-dialog .danger-button, .confirm-dialog .primary-button").last.click()
     page.wait_for_timeout(150)
     assert len(calls) == 1
@@ -825,6 +833,27 @@ def test_settings_delete_requires_confirmation_and_then_tracking_degrades(page, 
     page.goto(f"{live_server_url}/app/tracking")
     page.wait_for_selector("#tracking-probe-saved")
     assert page.locator("#tracking-probe-saved").is_disabled()
+
+
+@pytest.mark.browser
+def test_submit_actions_are_not_available_before_explicit_probe(page, live_server_url):
+    ref = "11111111-1111-4111-8111-111111111111"
+    item = {**_item("tracking-a", "待探测"), "available_actions": [{"code": "SUBMIT", "label": "提交", "style": "PRIMARY", "requires_confirmation": True, "target_scopes": []}]}
+
+    def handler(route, request):
+        path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+        if request.method == "GET" and path == "/settings/autobangumi":
+            route.fulfill(json={"ok": True, "result": {"configured": True, "credential_present": True, "connection_ref": ref, "configuration_revision": 3, "connection_status": "CONFIGURED"}}); return
+        if request.method == "GET" and path == "/tracking/items":
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}}); return
+        if request.method == "GET" and path == "/tracking/items/tracking-a":
+            route.fulfill(json={"ok": True, "result": _detail_payload(item)}); return
+        route.continue_()
+
+    page.route("**/api/v1/**", handler)
+    page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+    page.wait_for_selector("#tracking-probe-saved")
+    assert page.locator("#tracking-submit").count() == 0
 
 
 @pytest.mark.browser
