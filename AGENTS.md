@@ -69,13 +69,13 @@ HTTP/认证细节留在 adapter，持久化留在 repository，纯规则不混�
 
 - 主 Agent 默认负责规划、审核与协调；直接开发限于文档、轻量修复或用户明确要求。
   未启用团队时不自行创建子 Agent；用户启用后再按开发 A → 独立审核 → 修复 B → 提交 C 分工。
-  子 Agent 模型默认使用 gpt-5.6-luna 或 deepseek-flash，根据主 Agent 的模型选择子agent模型。
-  如主agent模型是GPT，则子agent模型就用 gpt-5.6-luna
-  开发 A 主要负责运行监控ralph.sh进行stage用户故事开发。
-  当主agent是gpt时使用codex gpt-5.6-luna运行ralph。
-  当主agent是deepseek时使用claude fable模型(实际对应deepseek-flash)运行ralph。
-- Stage 实现使用项目 Ralph skill；每迭代只做一个 story。批次和最大迭代数启动前明确，
-  已授权的三故事批次完成后停下审核，未通过不进入下一批。
+  GPT 团队的开发 Agent 默认用 gpt-5.6-luna；无特殊依赖严禁复制主 Agent 全量上下文，必须以
+  `fork_turns="none"` 创建干净子 Agent，由主 Agent 提供自包含的范围、边界、验证与停止条件。
+- 同一工作包优先复用一个开发 Agent，通过 follow-up 连续推进；每批结束声明实际协作/模型模式，
+  并分别用一句话概括给开发、测试、审核、修复 Agent 的提示词。详细规则见
+  [Stage 39 过渡开发流程](docs/development/stage39-transition-workflow.md)。
+- Stage 39 后续保留 Ralph 的 PRD、逐 story 验收/提交与 progress，不再用 `ralph.sh` 逐 story
+  启动新进程，也不固定三个 story 一批；按 PRD 定义的原子工作包完成后统一独立审核。
 - 修复指令指定仓库/分支、文件或问题、不能改的范围、最小验证与停止条件。
   同一共享工作区只允许一个写入 Agent；审核/提交前确认写入者已结束。
 - 用户只要求诊断/静态审核时不擅自实现；禁止的 pytest/浏览器检查严格不运行。
@@ -92,6 +92,8 @@ HTTP/认证细节留在 adapter，持久化留在 repository，纯规则不混�
   移到唯一备份目录，不删除未知数据，不覆盖已有备份。临时服务由启动者管理和收尾。
 - 按 PRD acceptance criteria 独立审核：优先业务、安全、状态一致性、并发/幂等、契约漂移、
   敏感泄漏与测试真实性。报告按严重度给文件/行号；无阻断也说明剩余风险。
+- 审核应一次性形成完整问题清单；先由测试 Agent 固化最小红测，再交同一个修复 Agent 集中收口。
+  复审仍有阻断时继续复用该 Agent 和剩余清单，不重启整套流程、不因预算阈值遗留半成品。
 - Ralph 的 COMPLETE 文本、`passes=true`、progress 都需核对代码和证据；不能当作审核结论。
   达到迭代上限即停；修复重复无进展时报告，不无界循环或靠全量重跑碰运气。
 - progress 记录可复用结论、实际验证命令/结果和遗留风险；阶段历史放 PRD/归档，
