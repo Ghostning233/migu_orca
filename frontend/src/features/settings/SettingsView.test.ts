@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
@@ -36,6 +36,7 @@ vi.mock('@/api/client', () => ({
 
 const apiGet = vi.mocked(api.get)
 const apiPost = vi.mocked(api.post)
+const apiPut = vi.mocked(api.put)
 
 const DEFAULT_PREFERENCES = {
   version: 1,
@@ -93,6 +94,7 @@ describe('SettingsView storage panel (US-201)', () => {
     sessionStorage.clear()
     apiGet.mockReset()
     apiPost.mockReset()
+    apiPut.mockReset()
     apiGet.mockResolvedValue(DEFAULT_PREFERENCES)
   })
 
@@ -135,6 +137,29 @@ describe('SettingsView storage panel (US-201)', () => {
     expect(localStorage.getItem('miguOrca.web.storageDir')).toBeNull()
     expect(localStorage.getItem('miguOrca.web.saveRequest')).toBeNull()
     expect(wrapper.find('#storage-preferences-form .status-alert').text()).toContain('偏好已清除')
+  })
+})
+
+describe('Stage 39 saved connection conflict flow', () => {
+  it('rereads the safe summary after 409 and does not auto-resubmit secrets', async () => {
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/v1/settings/autobangumi') return {
+        configured: true, credential_present: true, connection_ref: 'ref-1',
+        configuration_revision: 2, connection_status: 'CONFIGURED',
+      } as never
+      return DEFAULT_PREFERENCES as never
+    })
+    apiPut.mockRejectedValue({ status: 409, type: 'configuration_conflict', message: '冲突' })
+    const { wrapper } = await mountSettings()
+    await nextTick()
+    await wrapper.find('#settings-ab-endpoint').setValue('https://ab.invalid')
+    await wrapper.find('#settings-ab-username').setValue('user')
+    await wrapper.find('#settings-ab-password').setValue('secret')
+    await wrapper.find('#settings-ab-save-form').trigger('submit')
+    await flushPromises()
+    expect(apiGet.mock.calls.filter(([path]) => path === '/api/v1/settings/autobangumi')).toHaveLength(3)
+    expect(apiPut).toHaveBeenCalledTimes(1)
+    expect(wrapper.find<HTMLInputElement>('#settings-ab-password').element.value).toBe('secret')
   })
 })
 
