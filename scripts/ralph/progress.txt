@@ -338,3 +338,7 @@ Started: 2026-09-13
 ## 2026-09-14 / 工作包 A submit/retry 与本地 recovery Chromium 补充
 - 新增真实 saved-generation submit/retry 参数化 journey：PENDING_SUBMIT 与 SUBMIT_FAILED 均经摘要加载和显式 probe 后点击确认，捕获 body 校验 ref/revision、confirm、key、expected_revision 且无凭据；新增未配置时 AUTO recovery 与 REVALIDATE 本地请求，recover 仅 expected_revision/action，revalidate 仅 expected_revision，不触发 probe。
 - 验证：`npm --prefix frontend run build` 通过；`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q` → `16 passed`（真实 Chromium）。
+
+## 2026-09-14 / 工作包 A recovery projection 命名收口
+- 将 trackingProjection 测试中的旧 `sessionConfig`/password credential fixture 迁移为 saved generation fixture，保留 AUTO、人工结论与 VERIFY_EXTERNAL 的严格 body/门控断言。
+- 验证：trackingProjection Vitest `33 passed`；frontend build 与 saved Chromium suite `16 passed`（真实 Chromium）。
