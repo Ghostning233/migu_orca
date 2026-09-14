@@ -292,3 +292,8 @@ Started: 2026-09-13
 - 新增真实 Chromium unknown recovery 降级用例：未具备严格可执行恢复目标时 VERIFY_EXTERNAL 不显示、无外部调用；保留源绑定 fail-closed 语义。管理矩阵与 sync 用例继续验证 saved ref/revision body。
 - 验证：`frontend npm run build`；`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q` → `9 passed`；`uv run ruff check tests/browser/test_stage39_saved_flow_red.py`、`git diff --check` 通过。
 - 遗留风险：同 ref 且存在完整外部映射的 DELETE_EXTERNAL 成功浏览器写入、VERIFY_EXTERNAL 成功核验仍未被本轮真实 Chromium 覆盖；当前新增用例验证的是安全降级而非成功路径。
+
+## 2026-09-14 / 工作包 A 第三阶段成功删除路径补充
+- 将真实 Chromium DELETE_EXTERNAL 旅程切换为完整 external mapping fixture；显式 saved probe 后选择作用域、确认并捕获成功 envelope，断言 ref/revision/confirm/idempotency_key/expected_revision、无 `file`/`ab_config`/secret，结果面板可见且本地记录仍保留。
+- 验证：`uv run pytest tests/browser/test_stage39_saved_flow_red.py -q` → `9 passed`；此前 `frontend npm run build` 已通过。
+- 遗留风险：VERIFY_EXTERNAL 当前仍仅有安全降级覆盖，尚未形成绑定 unknown operation 的成功点击/OUTCOME_UNKNOWN 回查旅程。

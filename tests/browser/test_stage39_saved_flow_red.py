@@ -4,6 +4,7 @@ import pytest
 from playwright.sync_api import expect
 
 from tests.browser.test_app_tracking import (
+    _delete_detail,
     _detail_payload,
     _item,
     _management_actions,
@@ -169,6 +170,8 @@ def test_saved_management_actions_send_only_bound_connection_fields(page, live_s
             "warnings": [],
         },
     }
+    if action == "DELETE_EXTERNAL":
+        detail = _delete_detail(1)
 
     def handler(route, request):
         path = request.url.split("/api/v1", 1)[-1]
@@ -272,16 +275,17 @@ def test_saved_management_actions_send_only_bound_connection_fields(page, live_s
     if page.locator(".confirm-dialog").count():
         page.locator(".confirm-dialog .danger-button, .confirm-dialog .primary-button").last.click(timeout=2000)
     page.wait_for_timeout(500)
-    if action == "DELETE_EXTERNAL":
-        # The fake record has no externally-owned deletion mapping; the UI must
-        # fail closed and emit zero writes rather than inventing a target.
-        assert captured == []
-        return
     assert captured, action
     body = captured[-1]
     assert body["connection_ref"] == ref
     assert body["configuration_revision"] == 3
     assert "ab_config" not in body and "password" not in str(body)
+    if action == "DELETE_EXTERNAL":
+        assert body["confirm"] is True
+        assert body["expected_revision"] == 1
+        assert body["idempotency_key"]
+        assert "file" not in body
+        expect(page.locator("#tracking-delete-external-result")).to_be_visible()
 
 
 @pytest.mark.browser
