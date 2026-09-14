@@ -6,19 +6,18 @@
 | --- | --- |
 | Stage / 工作包 | 39；新增后端前置支撑 + 扩展 F-G |
 | Backlog | BL-025 后端新增支撑、BL-026 设置与发布收尾 |
-| 状态 | US-318～US-340 已实现；US-338～US-340 完成候选验收记录，等待独立审核；未发布 |
+| 状态 | 已完成并归档；US-318～US-340 全部通过独立 Gate 5 审核，已于 2026-09-15 合并至 `main` |
 | 决策日期 | 2026-09-13 |
-| 核对基线 | 本地 HEAD `c294ee4`；本地 `origin/main=c9a35d9`，两者文件树一致；未刷新远端或验证最新 CI |
-| 当前工作分支 | `docs/agent-workflow-guidance`，工作区初始干净；不在此分支启动 Ralph |
-| 目标开发分支 | `ralph/stage39-deployment-settings`，仅指定名称，尚未创建 |
-| Ralph stories | US-318～US-340，23 条；US-318～US-337 已完成，US-338～US-340 候选验收中 |
-| 待启动 JSON | [Stage 39 计划](../scripts/ralph/plans/stage39-deployment-settings/prd.json) |
+| 核对基线 | 合并提交 `f29e217`（PR #64）；GitHub CI 三项门禁通过 |
+| 执行分支 | `ralph/stage39-deployment-settings`（历史保留） |
+| Ralph stories | US-318～US-340，23 条，全部完成 |
+| 初始计划 | [Stage 39 初始计划](../scripts/ralph/archive/2026-09-15-stage39-deployment-settings/initial-plan.json)（历史） |
 | 前置 | Stage 28～38 已交付的草案、tracking、AB adapter、generated API 与设计系统 |
 | 验收基线 | [交互规格](design/frontend-ux-interaction-spec.md)、[设计 Token](design/frontend-ux-design-tokens-v1.md)、[Stage 38 记录](MiGuOrca_stage38_tracking_management_PRD.md) |
 
-本轮仅编写文档与待启动计划，不切分支、不更新活动 Ralph 状态、不执行实现、测试、Git 提交或发布。
-`scripts/ralph/prd.json` / `progress.txt` 仍保留 Stage 38，启动前须按[计划加载说明](../scripts/ralph/plans/README.md)核对并归档。
-PRD 准备就绪不代表任意批次或团队已获启动授权。
+本 PRD 的执行快照已归档至
+[`scripts/ralph/archive/2026-09-15-stage39-deployment-settings/`](../scripts/ralph/archive/2026-09-15-stage39-deployment-settings/)；
+初始待启动计划仍保留作历史决策参考。它不构成后续 Stage 的启动授权。
 
 ## 2. 产品决策与评审结论
 

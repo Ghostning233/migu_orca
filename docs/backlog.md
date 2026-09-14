@@ -30,7 +30,7 @@
 | 18 | BL-023 | Web API 契约固化与服务端边界治理 | 已完成 (Stage 26, 2026-08-30) |
 | 19 | BL-024 | 前端工程化迁移与页面重构 | 已完成 (Stage 27, 2026-08-31) |
 | 20 | BL-025 | 前端体验重构的后端支撑与 Auto Bangumi 管理契约 | B-A～B-D 已完成（Stage 28～32，US-210～US-256） |
-| 21 | BL-026 | 桌面端前端体验分片重构 | F-A～F-G 已完成；Stage 39 候选验收中 |
+| 21 | BL-026 | 桌面端前端体验分片重构 | 已完成（Stage 33～39）；等待用户审核已交付功能并形成问题清单 |
 | 22 | BL-014 | 部署/配置向导可行性验证 | 待办，远期，仅辅助配置 |
 
 以下事项已经落盘，但尚未进入开发优先级排序；触发条件满足或完成独立可行性评估后，再决定是否进入新的 Stage：
@@ -540,7 +540,7 @@ Stage 32 执行范围见 `docs/MiGuOrca_stage32_contract_hardening_PRD.md`（US-
 
 ### BL-026: 桌面端前端体验分片重构
 
-- 状态：F-A～F-F 已完成为 Stage 33～38；Stage 39 扩展 F-G PRD 已编写，US-318～US-340 全部待实现
+- 状态：已完成；F-A～F-G 已由 Stage 33～39 交付，US-257～US-340 已归档
 - 来源：2026-09-07 前端体验重构 Gate 1～3
 - 优先级：21，P1
 - 候选 PRD：`docs/MiGuOrca_frontend_ux_implementation_PRD.md`
@@ -557,8 +557,9 @@ Stage 32 执行范围见 `docs/MiGuOrca_stage32_contract_hardening_PRD.md`（US-
 - Stage 38 执行 PRD：`docs/MiGuOrca_stage38_tracking_management_PRD.md`
 - Stage 38 执行分支：`ralph/stage38-tracking-management`；Ralph stories 为 US-303～US-317（已全部完成并归档）
 - Stage 39 执行 PRD：[部署连接配置与设置发布收尾](MiGuOrca_stage39_deployment_settings_PRD.md)
-- 新确认范围：仅 AB 凭据部署持久化、设置统一管理连接且不使用全局凭据弹窗、删除 qB 与无用旧 Web
-  编排、MiKan 用户无配置搜索、跨页徽标/用户文档/Gate 5；后端前置工作包必须先独立验收，尚未启动
+- Stage 39 已完成：仅 AB 凭据部署持久化、设置统一管理连接且不使用全局凭据弹窗、删除 qB 与无用旧 Web
+  编排、MiKan 用户无配置搜索、跨页徽标、用户文档与 Gate 5 均已收尾。
+- 后续安排：由用户审核已交付的前端功能并提出问题；问题经产品边界、影响与验收条件澄清后，才决定是否建立新的 Stage PRD。
 
 候选范围：
 
