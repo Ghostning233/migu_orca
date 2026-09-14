@@ -561,8 +561,15 @@ class TestAppWorkbenchCandidateSelectionAndDraft:
         assert "有效种子数" in text
         # The form keeps the applied value after re-render.
         assert page.locator("#preview-must-not-contain").input_value() == "V2"
-        # Editing never writes storage.
-        assert not storage_dir.exists() or not any(storage_dir.iterdir())
+        # Settings initialization may create storage files, but this journey
+        # must never persist MiKan configuration or the search query.
+        stored = "\n".join(
+            path.read_text(encoding="utf-8", errors="replace")
+            for path in storage_dir.rglob("*")
+            if path.is_file()
+        ) if storage_dir.exists() else ""
+        assert "mikan_config" not in stored
+        assert "咒术回战" not in stored
 
     def test_preview_modify_sends_base_revision_and_keeps_it_in_memory(
         self, page: Page, live_server_url: str, storage_dir: Path

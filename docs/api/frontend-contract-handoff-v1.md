@@ -7,7 +7,7 @@
 ## 使用规则
 
 - 页面只从 `frontend/src/api/generated/api.ts` 导入 `operations`/`components` 类型，不能复制 DTO 或根据状态字符串自行推断动作。
-- 请求通过统一 API transport 发送。`draft_id`、`candidate_context`、`ab_config`、`mikan_config`、`idempotency_key` 等 request-scoped 值只存在组件局部内存和对应的一次 POST body；不得进入 URL、history、store 持久化、browser storage、日志、DOM、截图或 trace。
+- 请求通过统一 API transport 发送。Web MiKan 搜索配置由服务端封装，公共请求不得发送 `mikan_config` 或 `source`；CLI/engine 的显式 source/config 不属于 Web 契约。`draft_id`、`candidate_context`、`ab_config`、`idempotency_key` 等 request-scoped 值只存在组件局部内存和对应的一次 POST body；不得进入 URL、history、store 持久化、browser storage、日志、DOM、截图或 trace。
 - `tracking_id`、`request_id` 是公开 opaque 标识，可以用于路由和路径参数；endpoint、凭据、原始上游内容、绝对路径和外部 ID 不得进入 URL 或页面可见内容。
 - 成功响应是 `{ok: true, result}`；失败响应是 `{ok: false, error_type, error_message, error_data}`。HTTP 400/401/404/409/502/503/504/500 的含义以 OpenAPI 和统一 transport 为准，页面展示固定中文反馈，不渲染服务端原始错误详情。
 

@@ -1087,8 +1087,22 @@ def test_modify_accepted_request_recomputes_seeds_and_rejects_cancelled(
     assert str(tmp_path) not in str(cancel_payload)
 
 
-def test_create_request_generates_without_writing_storage(tmp_path: Path) -> None:
+def test_create_request_generates_without_writing_storage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     storage_dir = tmp_path / "storage"
+    transport = _FakeMikanTransport({
+        "https://mikanani.me/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2":
+            '<a class="an-text" href="/Home/Bangumi/123">芙莉莲</a>',
+        "https://mikanani.me/Home/Bangumi/123":
+            '<h1 class="bangumi-title">芙莉莲</h1><a class="mikan-rss" href="/RSS/Bangumi?bangumiId=123">RSS</a>',
+        "https://mikanani.me/RSS/Bangumi?bangumiId=123":
+            '<rss><channel><item><title>芙莉莲 - 01</title><link>https://example.invalid/1</link></item></channel></rss>',
+    })
+    monkeypatch.setattr(
+        "apps.migu_orca_entry.controllers.entry_controller.mikan_client_module.create_mikan_client",
+        lambda config: create_mikan_client(config, transport=transport),
+    )
 
     response = _client().post(
         "/api/v1/requests",
@@ -1111,14 +1125,18 @@ def test_create_request_generates_without_writing_storage(tmp_path: Path) -> Non
 def test_create_request_defaults_to_static_fixture_without_mikan_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured: dict[str, Any] = {}
-
-    def spy_generate_request(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        captured["source_mode"] = kwargs.get("source_mode")
-        captured["mikan_config"] = kwargs.get("mikan_config")
-        return generate_request(*args, **kwargs)
-
-    monkeypatch.setattr("apps.migu_orca_web.routes_requests.generate_request", spy_generate_request)
+    transport = _FakeMikanTransport({
+        "https://mikanani.me/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2":
+            '<a class="an-text" href="/Home/Bangumi/123">芙莉莲</a>',
+        "https://mikanani.me/Home/Bangumi/123":
+            '<h1 class="bangumi-title">芙莉莲</h1><a class="mikan-rss" href="/RSS/Bangumi?bangumiId=123">RSS</a>',
+        "https://mikanani.me/RSS/Bangumi?bangumiId=123":
+            '<rss><channel><item><title>芙莉莲 - 01</title><link>https://example.invalid/1</link></item></channel></rss>',
+    })
+    monkeypatch.setattr(
+        "apps.migu_orca_entry.controllers.entry_controller.mikan_client_module.create_mikan_client",
+        lambda config: create_mikan_client(config, transport=transport),
+    )
 
     response = _client().post(
         "/api/v1/requests",
@@ -1130,39 +1148,24 @@ def test_create_request_defaults_to_static_fixture_without_mikan_config(
     payload = response.get_json()
     assert response.status_code == 200
     assert payload["ok"] is True
-    assert captured["source_mode"] == "static_fixture"
-    assert captured["mikan_config"] is None
+    assert transport.requests == [
+        ("https://mikanani.me/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2", 15.0),
+        ("https://mikanani.me/Home/Bangumi/123", 15.0),
+        ("https://mikanani.me/RSS/Bangumi?bangumiId=123", 15.0),
+    ]
     assert payload["result"]["request"]["input"]["raw_title"] == "芙莉莲"
 
 
 def test_create_request_uses_inline_mikan_config_when_explicitly_requested(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured: dict[str, Any] = {}
-    factory_configs: list[MikanConfig] = []
+    called = False
 
-    def fake_create_mikan_client(config: MikanConfig) -> _FakeMikanClient:
-        factory_configs.append(config)
-        transport = _FakeMikanTransport(
-            {
-                "https://mikan.example/RSS/Bangumi?bangumiId=123": (
-                    "<rss><channel><item><title>芙莉莲 - 01</title>"
-                    "<link>https://example.invalid/1</link></item></channel></rss>"
-                )
-            }
-        )
-        return _FakeMikanClient(config, transport)
-
-    def spy_generate_request(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        captured["source_mode"] = kwargs.get("source_mode")
-        captured["mikan_config"] = kwargs.get("mikan_config")
-        return generate_request(*args, **kwargs)
-
-    monkeypatch.setattr(
-        "apps.migu_orca_entry.controllers.entry_controller.mikan_client_module.create_mikan_client",
-        fake_create_mikan_client,
-    )
-    monkeypatch.setattr("apps.migu_orca_web.routes_requests.generate_request", spy_generate_request)
+    def fail_if_called(*args: Any, **kwargs: Any) -> Any:
+        nonlocal called
+        called = True
+        raise AssertionError("inline MiKan config must be rejected before generation")
+    monkeypatch.setattr("apps.migu_orca_web.routes_requests.generate_request", fail_if_called)
 
     response = _client().post(
         "/api/v1/requests",
@@ -1177,17 +1180,11 @@ def test_create_request_uses_inline_mikan_config_when_explicitly_requested(
     )
 
     payload = response.get_json()
-    request = payload["result"]["request"]
-    assert response.status_code == 200
-    assert payload["ok"] is True
-    assert captured["source_mode"] == "mikan_http"
-    assert isinstance(captured["mikan_config"], MikanConfig)
-    assert captured["mikan_config"].search_endpoint == "https://mikan.example/Home/Search"
-    assert captured["mikan_config"].timeout_seconds == 5.0
-    assert factory_configs == [captured["mikan_config"]]
-    assert request["source_info"]["matched_bangumi"]["title"] == "芙莉莲"
-    assert request["confirmable_config"]["selected_subtitle_group"] == "Loli"
-    assert request["confirmable_config"]["selected_rss_url"] == "https://mikan.example/RSS/Bangumi?bangumiId=123"
+    assert response.status_code == 400
+    assert payload["ok"] is False
+    assert payload["error_type"] == "data_validation_errors"
+    assert any(e["field"].startswith("mikan_config") for e in payload["error_data"]["errors"])
+    assert called is False
 
 
 def test_create_request_accepts_request_scoped_mikan_direct_entry(
@@ -1224,11 +1221,6 @@ def test_create_request_accepts_request_scoped_mikan_direct_entry(
         "/api/v1/requests",
         json={
             "title": "不会用于搜索",
-            "source": "mikan",
-            "mikan_config": {
-                "search_endpoint": "https://mikan.example/Home/Search",
-                "timeout_seconds": 5,
-            },
             "mikan_bangumi": "123",
             "storage_dir": _profile(tmp_path, storage_dir.name),
         },
@@ -1239,8 +1231,8 @@ def test_create_request_accepts_request_scoped_mikan_direct_entry(
     assert response.status_code == 200
     assert payload["ok"] is True
     assert transport.requests == [
-        ("https://mikan.example/Home/Bangumi/123", 5.0),
-        ("https://mikan.example/RSS/Bangumi?bangumiId=123&subgroupid=10", 5.0),
+        ("https://mikan.example/Home/Bangumi/123", 15.0),
+        ("https://mikan.example/RSS/Bangumi?bangumiId=123&subgroupid=10", 15.0),
     ]
     assert request["source_info"]["matched_bangumi"]["title"] == "芙莉莲"
     assert (
@@ -1422,7 +1414,6 @@ def test_create_request_uses_default_mikan_config_when_source_is_mikan(
         "/api/v1/requests",
         json={
             "title": "芙莉莲",
-            "source": "mikan",
         },
     )
 
@@ -1508,7 +1499,7 @@ def test_candidate_search_api_returns_sanitized_candidates_with_order(
 ) -> None:
     transport = _FakeMikanTransport(
         {
-            "https://mikan.example/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2": (
+                "https://mikanani.me/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2": (
                 '<section class="related-recommendations">'
                 '<div class="bangumi-item">'
                 '<a class="an-image" href="/Home/Bangumi/2353">'
@@ -1538,10 +1529,6 @@ def test_candidate_search_api_returns_sanitized_candidates_with_order(
         "/api/v1/mikan/candidates",
         json={
             "query": "芙莉莲",
-            "mikan_config": {
-                "search_endpoint": "https://mikan.example/Home/Search",
-                "timeout_seconds": 5,
-            },
         },
     )
 
@@ -1574,9 +1561,9 @@ def test_candidate_search_api_returns_sanitized_candidates_with_order(
         {
             "bangumi_id": "2353",
             "title": "葬送的芙莉莲",
-            "mikan_url": "https://mikan.example/Home/Bangumi/2353",
+                "mikan_url": "https://mikanani.me/Home/Bangumi/2353",
             "poster_url": "/api/v1/mikan/posters/"
-            + poster_cache_key("https://mikan.example/assets/cover/2353.jpg"),
+                + poster_cache_key("https://mikanani.me/assets/cover/2353.jpg"),
             "source_query": "芙莉莲",
             "aliases": ["Frieren EN"],
             "recommendation": "可能匹配",
@@ -1584,7 +1571,7 @@ def test_candidate_search_api_returns_sanitized_candidates_with_order(
         {
             "bangumi_id": "3072",
             "title": "咒术回战 第三季",
-            "mikan_url": "https://mikan.example/Home/Bangumi/3072",
+                "mikan_url": "https://mikanani.me/Home/Bangumi/3072",
             "poster_url": None,
             "source_query": "芙莉莲",
             "aliases": [],
@@ -1593,8 +1580,8 @@ def test_candidate_search_api_returns_sanitized_candidates_with_order(
     ]
     assert transport.requests == [
         (
-            "https://mikan.example/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2",
-            5.0,
+                "https://mikanani.me/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2",
+                15.0,
         )
     ]
 
@@ -1604,7 +1591,7 @@ def test_candidate_search_api_returns_empty_list_when_no_candidates(
 ) -> None:
     transport = _FakeMikanTransport(
         {
-            "https://mikan.example/Home/Search?searchstr=ghost": (
+            "https://mikanani.me/Home/Search?searchstr=ghost": (
                 '<section class="related-recommendations"><p>暂无相关合集</p></section>'
             )
         }
@@ -1622,10 +1609,6 @@ def test_candidate_search_api_returns_empty_list_when_no_candidates(
         "/api/v1/mikan/candidates",
         json={
             "query": "ghost",
-            "mikan_config": {
-                "search_endpoint": "https://mikan.example/Home/Search",
-                "timeout_seconds": 5,
-            },
         },
     )
 
@@ -1650,10 +1633,6 @@ def test_candidate_search_api_rejects_empty_query_before_network(
         "/api/v1/mikan/candidates",
         json={
             "query": "   ",
-            "mikan_config": {
-                "search_endpoint": "https://mikan.example/Home/Search",
-                "timeout_seconds": 5,
-            },
         },
     )
 
@@ -1776,10 +1755,6 @@ def test_candidate_search_api_returns_sanitized_mikan_errors(
         "/api/v1/mikan/candidates",
         json={
             "query": "芙莉莲",
-            "mikan_config": {
-                "search_endpoint": "https://mikan.example/Home/Search",
-                "timeout_seconds": 5,
-            },
         },
     )
 

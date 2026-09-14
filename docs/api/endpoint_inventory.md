@@ -276,7 +276,7 @@ issues、外部安全映射摘要和最近 20 条审计事件；绝不回显完�
 
 ### 4.2 request-scoped 配置（不进入 storage JSON / 浏览器 storage / URL / 日志 / trace）
 
-  - `mikan_config`、`mikan_bangumi`、`ab_config`、`candidate_context`、
+  - `mikan_bangumi`、`ab_config`、`candidate_context`、
   `draft_id`（US-194：draft 内容由服务端持有，客户端只持有 opaque id，绝不进入 URL /
   browser storage / 日志 / trace）。
 - `base_revision`/`draft_revision`（US-211：单调草案 revision 只在请求体与组件内存，
@@ -431,6 +431,7 @@ Vue 3 + TypeScript + Vite 工程，生产构建由 Flask 在 `/app/` 同源托�
   相对目录名，绝对路径旧值在读取时被忽略并回退默认根目录）
 - `miguOrca.web.saveRequest`（`"true"`/`"false"`）
 
+MiKan Web 的公共请求不接受 `mikan_config` 或 `source`；搜索配置统一由服务端提供。CLI/engine 仍可在其独立信任边界显式传入 MiKan source/config。
 其它敏感值（endpoint/token/cookie/密码/外部服务凭据）**绝不**写入 localStorage/sessionStorage。
 
 ### 5.2 URL 参数（SPA history 状态）

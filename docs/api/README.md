@@ -61,7 +61,8 @@ npm run api:check       # 漂移检查：生成结果与入库文件不一致时
   500 服务端内部错误。`_ENDPOINTS` 注册表的 `errors` 声明与
   `extensions/flask_api/api.py:_error_http_status` 分类保持一致。
 - 示例全部使用虚构脱敏值；`example.invalid` 是文档保留域。
-- 凭据/外部配置字段（`mikan_config`、`ab_config`、
+- Web 公共契约不接受 `mikan_config` 或 `source`；MiKan 搜索配置由服务端封装。CLI/engine 仍可在独立信任边界显式传入 source/config。
+- 凭据/外部配置字段（`ab_config`、
   `candidate_context`、`draft_id`）标记为 `x-request-scoped: true`：
   request-scoped，绝不进入 storage JSON、URL、浏览器 storage、日志或 trace。
   US-194/211/212：未保存草案由服务端权威持有，客户端只持有 opaque `draft_id` 与单调
