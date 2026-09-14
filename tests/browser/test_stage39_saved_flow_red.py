@@ -651,3 +651,84 @@ def test_tracking_saved_capability_degrade_hides_management_actions(page, live_s
     if page.locator("#tracking-refresh-rss-submit").count():
         expect(page.locator("#tracking-refresh-rss-submit")).to_be_disabled()
     assert writes == []
+
+
+@pytest.mark.browser
+@pytest.mark.parametrize(("status", "code", "selector"), [("PENDING_SUBMIT", "SUBMIT", "#tracking-submit"), ("SUBMIT_FAILED", "RETRY", "#tracking-retry")])
+def test_saved_submit_and_retry_use_one_explicit_generation(page, live_server_url, status, code, selector):
+    ref = "11111111-1111-4111-8111-111111111111"
+    body_item = {**_item("tracking-a", "提交番", status), "status": status,
+        "available_actions": [{"code": code, "label": code, "style": "PRIMARY", "requires_confirmation": True, "target_scopes": []}]}
+    detail = {"ok": True, "result": {**_detail_payload(body_item), "revision": 4}}
+    calls: list[dict] = []
+
+    def handler(route, request):
+        path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+        if request.method == "GET" and path == "/settings/autobangumi":
+            route.fulfill(json={"ok": True, "result": {"configured": True, "credential_present": True, "connection_ref": ref, "configuration_revision": 3, "connection_status": "CONFIGURED"}}); return
+        if request.method == "GET" and path == "/tracking/items":
+            route.fulfill(json={"ok": True, "result": {"items": [body_item], "summary": {"total": 1}, "warnings": []}}); return
+        if request.method == "GET" and path == "/tracking/items/tracking-a":
+            route.fulfill(json=detail); return
+        if request.method == "POST" and path == "/settings/autobangumi/probe":
+            route.fulfill(json={"ok": True, "result": _probe_capabilities()}); return
+        if request.method == "POST" and path.endswith("/submit") or request.method == "POST" and path.endswith("/retry"):
+            calls.append(request.post_data_json or {})
+            route.fulfill(json={"ok": True, "result": {"tracking_id": "tracking-a", "action": code, "outcome": "OUTCOME_UNKNOWN", "needs_manual": True, "tracking": body_item}}); return
+        route.continue_()
+
+    page.route("**/api/v1/**", handler)
+    page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+    page.wait_for_selector("#tracking-probe-saved")
+    page.locator("#tracking-probe-saved").click()
+    page.wait_for_selector(selector)
+    page.locator(selector).click()
+    expect(page.locator(".confirm-dialog")).to_be_visible()
+    page.locator(".confirm-dialog .primary-button").click()
+    page.wait_for_timeout(150)
+    assert len(calls) == 1
+    sent = calls[0]
+    assert sent["connection_ref"] == ref and sent["configuration_revision"] == 3
+    assert sent["confirm"] is True and sent["expected_revision"] == 4
+    assert sent["idempotency_key"] and "ab_config" not in sent and "password" not in str(sent)
+
+
+@pytest.mark.browser
+def test_local_recovery_needs_no_saved_probe_and_revalidate_is_local(page, live_server_url):
+    item = _recovery_item("tracking-a", "本地恢复", revision=4)
+    item["available_actions"] = [
+        {"code": "RECOVER_AUTO", "label": "自动恢复", "style": "SECONDARY", "requires_confirmation": False, "target_scopes": []},
+        {"code": "MARK_SUCCEEDED", "label": "标记成功", "style": "PRIMARY", "requires_confirmation": True, "target_scopes": []},
+        {"code": "MARK_FAILED", "label": "标记失败", "style": "DANGER", "requires_confirmation": True, "target_scopes": []},
+        {"code": "REVALIDATE", "label": "本地复核", "style": "SECONDARY", "requires_confirmation": False, "target_scopes": []},
+    ]
+    detail = {"ok": True, "result": _detail_payload(item)}
+    calls: list[tuple[str, dict]] = []
+
+    def handler(route, request):
+        path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+        if request.method == "GET" and path == "/settings/autobangumi":
+            route.fulfill(json={"ok": True, "result": {"configured": False, "credential_present": False, "connection_ref": None, "configuration_revision": 0, "connection_status": "UNCONFIGURED"}}); return
+        if request.method == "GET" and path == "/tracking/items":
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}}); return
+        if request.method == "GET" and path == "/tracking/items/tracking-a":
+            route.fulfill(json=detail); return
+        if request.method == "POST" and path.endswith("/recover"):
+            calls.append(("recover", request.post_data_json or {}))
+            route.fulfill(json={"ok": True, "result": {"tracking_id": "tracking-a", "action": "RECOVER_AUTO", "outcome": "SUCCEEDED", "checked_revision": 4, "next_revision": 5, "needs_manual": False, "tracking": item}}); return
+        if request.method == "POST" and path.endswith("/revalidate"):
+            calls.append(("revalidate", request.post_data_json or {}))
+            route.fulfill(json={"ok": True, "result": {"ready": False, "next_status": "NEEDS_RECONFIRM", "issues": []}}); return
+        if request.method == "POST":
+            raise AssertionError(f"unexpected external call: {path}")
+        route.continue_()
+
+    page.route("**/api/v1/**", handler)
+    page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+    page.wait_for_selector("#tracking-recover-auto")
+    page.locator("#tracking-revalidate").click()
+    page.wait_for_timeout(100)
+    assert any(kind == "revalidate" and payload == {"expected_revision": 4} for kind, payload in calls)
+    page.locator("#tracking-recover-auto").click()
+    page.wait_for_timeout(100)
+    assert any(kind == "recover" and payload == {"expected_revision": 4, "action": "AUTO"} for kind, payload in calls)
