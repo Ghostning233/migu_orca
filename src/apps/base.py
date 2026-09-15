@@ -63,6 +63,22 @@ def _canonical_host(value: str) -> str | None:
     return f"[{host.lower()}]" if ":" in host else host.lower()
 
 
+def _is_private_network_host(value: str | None) -> bool:
+    """Allow hosts that are only reachable from the local network."""
+    if value is None:
+        return False
+    host = value.strip("[]")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return (
+        address.is_loopback
+        or address.is_link_local
+        or (address.version == 4 and address.is_private)
+    )
+
+
 def create_app(config_name: str | None = None) -> Flask:
     """Create the MiGuOrca Flask application."""
 
@@ -74,7 +90,10 @@ def create_app(config_name: str | None = None) -> Flask:
         if candidate and _canonical_host(candidate):
             trusted_hosts.append(candidate)
     canonical_trusted_hosts = {_canonical_host(host) for host in trusted_hosts}
-    app.config["TRUSTED_HOSTS"] = list(dict.fromkeys(trusted_hosts))
+    # Werkzeug only supports exact host names and suffix patterns here; it
+    # cannot express private IP ranges.  Let the application-level validator
+    # below handle both the private ranges and the explicit host allowlist.
+    app.config["TRUSTED_HOSTS"] = None
     app.config["MIGU_ORCA_CANONICAL_TRUSTED_HOSTS"] = {host for host in canonical_trusted_hosts if host}
     trusted_origins: set[str] = set()
     for candidate in os.environ.get("MIGU_ORCA_TRUSTED_ORIGINS", "").split(","):
@@ -87,14 +106,21 @@ def create_app(config_name: str | None = None) -> Flask:
 
     @app.before_request
     def _protect_settings_io() -> object | None:
+        canonical_host = _canonical_host(request.host)
+        host_is_trusted = (
+            canonical_host in current_app.config["MIGU_ORCA_CANONICAL_TRUSTED_HOSTS"]
+            or _is_private_network_host(canonical_host)
+        )
+        if not host_is_trusted:
+            if request.path.startswith("/api/v1/"):
+                return failed_response("untrusted_host", "请求主机不受信任")
+            return Response("Bad Request", status=400, content_type="text/plain; charset=utf-8")
         retired_exact_paths = {"/api/v1/requests/preview-save", "/api/v1/autobangumi/test-connection", "/api/v1/qbittorrent/test-connection"}
         retired_suffixes = ("/submit-ab", "/accept", "/submit", "/retry", "/recover", "/queue")
         if request.path in retired_exact_paths or (
             request.path.startswith("/api/v1/batches/") and request.path.endswith(retired_suffixes)
         ) or request.path.endswith("/submit-ab"):
             return Response(status=404)
-        if request.path.startswith("/api/v1/") and _canonical_host(request.host) not in current_app.config["MIGU_ORCA_CANONICAL_TRUSTED_HOSTS"]:
-            return failed_response("untrusted_host", "请求主机不受信任")
         if not request.path.startswith("/api/v1/settings/autobangumi"):
             return None
         origin = request.headers.get("Origin")
