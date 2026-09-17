@@ -532,6 +532,63 @@ class TestAppBatchCandidateAndDraft:
         assert "路哥S4" in page.locator("#batch-parse-result").inner_text()
         assert "萌王S4" not in page.locator("#batch-parse-result").inner_text()
 
+    def test_current_view_switch_is_independent_from_checkbox_selection(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """AC (US-345/F4)：批量「当前查看」只切换右栏，复选框只改变保存范围；
+        固定操作栏是唯一批量主「保存并确认 N 部」入口。"""
+        items = [
+            _batch_item(
+                f"item-{index:02d}",
+                f"番剧{index:02d}",
+                status="DRAFT",
+                canonical_title=f"番剧{index:02d} 第 1 季",
+                preview_request=_preview_request(f"番剧{index:02d}", f"req-f4-{index:02d}"),
+            )
+            for index in range(12)
+        ]
+        page.route(
+            "**/api/v1/batches/parse",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result(items),
+            ),
+        )
+        _goto_batch(page, live_server_url)
+        page.fill("#batch-raw-input", "\n".join(f"番剧{index:02d}" for index in range(12)))
+        page.click("#batch-parse-submit")
+        expect(page.locator(".batch-draft-card")).to_have_count(12)
+
+        cards = page.locator(".batch-draft-card")
+        second = cards.nth(1)
+        second.locator(".batch-card-checkbox-row").check()
+        expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选且可确认 1 项")
+
+        # 切换「当前查看」到第 5 项：只有右栏换条目，勾选与保存范围不变。
+        cards.nth(4).locator(".batch-card-expand").click()
+        expect(cards.nth(4).locator(".batch-card-expand")).to_have_attribute("aria-expanded", "true")
+        expect(second.locator(".batch-card-expand")).to_have_attribute("aria-expanded", "false")
+        expect(second.locator(".batch-card-checkbox-row")).to_be_checked()
+        expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选且可确认 1 项")
+
+        # 唯一主入口在固定操作栏；右栏与列内动作都是次要按钮。
+        expect(page.locator("#batch-detail-pane")).to_be_visible()
+        expect(page.locator("#batch-detail-pane .primary-button")).to_have_count(0)
+        detail_accept_class = page.locator("#batch-detail-accept").get_attribute("class") or ""
+        assert "secondary-button" in detail_accept_class
+        submit_class = page.locator("#batch-accept-submit").get_attribute("class") or ""
+        assert "primary-button" in submit_class
+        all_class = page.locator("#batch-accept-all").get_attribute("class") or ""
+        assert "secondary-button" in all_class
+
+        # 回到第 2 项：保存范围仍是同一个复选框，未被「当前查看」改写。
+        second.locator(".batch-card-expand").click()
+        expect(second.locator(".batch-card-expand")).to_have_attribute("aria-expanded", "true")
+        expect(second.locator(".batch-card-checkbox-row")).to_be_checked()
+        expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选且可确认 1 项")
+        expect(page.locator("#batch-detail-pane")).to_contain_text("编辑订阅草案")
+
     def test_expired_batch_draft_keeps_card_and_returns_to_candidates(
         self, page: Page, live_server_url: str
     ) -> None:

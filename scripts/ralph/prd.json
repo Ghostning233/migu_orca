@@ -1,26 +1,49 @@
 {
   "project": "MiGuOrca",
-  "branchName": "ralph/stage40-add-anime-reliability",
-  "description": "Stage 40：只处理 FE-01 的单番草案修改后保存确认阻断。开发与定向真实 Chromium 验收已完成；本计划不代表提交、发布或后续 Stage 授权。",
+  "branchName": "ralph/stage41-add-anime-ux",
+  "description": "Stage 41 / WP-41-D（US-345）：F4 添加页与共享审核详情的信息层级。执行 PRD 为 docs/MiGuOrca_stage40_add_anime_reliability_and_ux_PRD.md 的 WP-41-D；仅前端 workbench/add/search/candidate 组件与样式及相应测试，不改 API/OpenAPI/generated client/后端、不扩展未保存 safe-info、不发明额外 DTO、不改追番管理/设置/外部写，也不改变 WP-41-C 的 draft_id+revision、scheduler、保存确认与安全边界。本计划不代表提交、发布、Stage 42 或 WP-42-A 授权。",
   "userStories": [
     {
-      "id": "US-341",
-      "title": "修复单番草案修改后保存确认阻断",
-      "description": "作为添加番剧的用户，我希望服务端成功更新未保存草案后，保存并确认按钮与提示能同步恢复可用，并以最新草案 revision 保存确认。",
+      "id": "US-344",
+      "title": "F3 服务端权威草案自动重算与保存修改",
+      "description": "作为审核订阅草案的用户，我希望字幕组与影响资源的过滤规则都由服务端权威自动重算，目录名只在「保存修改」时提交；任何防抖等待、在途请求、未恢复失败或手工待提交字段都不会被最终「保存并确认」隐式吞掉。",
       "acceptanceCriteria": [
-        "先固化连续最小红测：生成草案 revision=1 → 修改规则 → preview-modify 成功返回同一 draft_id、revision=2 和有效资源后，保存并确认恢复可点击，且就地说明不再与 disabled 状态矛盾",
-        "点击保存并确认只发送服务端签发的 draft_id、最新 base_revision 和内存 idempotency_key；测试断言请求使用 revision=2，前端不回传完整 Request、草案能力不进入 URL、history、浏览器存储、通知或日志",
-        "将主按钮 disabled 状态和其中文就地原因绑定至同一响应式状态源；修改中、待应用编辑、无字幕组、无有效资源、修改失败、草案失效、revision 冲突和保存中均阻断且给出可理解原因，不得出现灰色按钮同时称可用",
-        "成功 save-confirm 仍只建立本地待提交 tracking 记录，不触发任何 Auto Bangumi 外部写；save_confirm_failed 的既有重试确认恢复语义不回归",
-        "draft_revision_conflict、draft_expired、draft_evicted、draft_replayed 仍按现有安全恢复回到重新选择合集；不显示原始错误、draft_id、完整 Request、RSS URL、magnet、绝对路径或服务端内部文本",
-        "定向 Vitest 覆盖连续成功路径、held preview-modify 在途、零资源、可重试失败和 revision 冲突；在 frontend/ 运行 npm run typecheck、npm run lint 通过",
-        "使用 dev-browser skill 的真实 Chromium 定向场景：held preview-modify 时按钮禁用且提示正确，fulfill revision=2 后按钮/提示同步并核对 save-confirm body；另验证冲突与零资源，检查 DOM、URL/history、storage、console 的敏感 canary",
-        "独立审核按 Stage 40 PRD 核对响应式根因、draft revision、保存/外部提交边界、敏感输出与测试真实性；审核问题先固化最小红测，再由同一修复 Agent 集中收口并复审通过",
+        "更换字幕组立即发送 preview-modify；must_contain/must_not_contain/use_regex/case_sensitive 属于同一过滤规则，在最后一次输入或切换后 1.5 秒防抖发送；立即的字幕组请求不得夹带尚未到期的过滤输入",
+        "expected_folder_name 不影响资源筛选且绝不自动发送；「保存修改」立即提交它以及尚未到期的过滤输入，只更新服务端内存草案，完成后仍须「保存并确认」",
+        "每次请求都携带最新 draft_id + base_revision；成功时服务端返回的 request、资源摘要、字幕组/规则与新 revision 一次性原子替换，不出现「新选择 + 上次有效资源」的已生效组合",
+        "同一 item 在请求在途时不得复用 revision 发出第二个 CAS；在途期间的输入保留为待处理，当前请求完成后只对仍最新的意图继续调度",
+        "切换批量详情、离开或草案失效时取消 timer 并令旧响应无效，旧响应不得覆盖新 item；单番详情、批量卡片与右栏详情读取同一条目状态",
+        "失败保留最后一个服务端一致结果并把新意图标记为尚未生效，提供重试与恢复上次结果；冲突/草案失效回到重新生成，不泄漏内部错误、草案能力或还原响应",
+        "资源变为零时进入阻断态，原有效资源不再被称为当前有效；存在防抖等待、请求在途、失败未恢复或手工待提交字段时「保存并确认」禁用并显示对应中文原因，点击时不隐式发送第二个请求",
+        "定向验证：受影响 Vitest（draftEditScheduler/useDraftSession/AnimeDraftEditor/WorkbenchView/BatchWorkbenchView）通过；frontend npm run typecheck、npm run lint、npm run build 通过；真实 Chromium 用 route mock + held preview-modify 覆盖即时字幕、1.5 秒防抖与连续输入、保存修改 flush、在途排队与 revision、失败重试/恢复、冲突、零资源与 save-confirm 阻断，并检查 DOM/URL/history/storage/console canary",
+        "不改变 API/OpenAPI/generated client/后端、draft_id+revision 契约、save-confirm 语义、候选人工确认边界或搜索/parse 契约；草案能力、完整 Request、URL/RSS/magnet/绝对路径与秘密不进入 DOM、浏览器存储、URL/history、日志或测试输出",
+        "独立审核按 Stage 40 PRD 的 WP-41-C 核对 CAS/revision 独占、显示原子性、取消与乱序、失败恢复、零资源阻断与敏感边界；审核问题先固化最小红测，再由同一修复 Agent 集中收口并复审通过",
         "Tests pass"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "依赖 docs/MiGuOrca_stage40_add_anime_reliability_and_ux_PRD.md 的 WP-40-A。2026-09-17 已以连续 Vitest、typecheck/lint/build 和真实 Chromium 定向用例验收；未改变 API 或保存语义，不进入 Stage 41。"
+      "notes": "依赖 docs/MiGuOrca_stage40_add_anime_reliability_and_ux_PRD.md 的 WP-41-C。基线 cd6dbf0（Stage 40 已合并）。2026-09-17 开发与独立审核通过：新增编辑调度 composable + Vitest，单番/批量 host 接线与 8 条真实 Chromium 用例；主 Agent 独立复跑受影响 Vitest 4 files/97 passed、ruff、TestAppWorkbenchDraftAutoRecompute 8 passed，并核对 CAS/revision 独占、原子快照、取消/失效、失败恢复、零资源阻断与敏感边界。typecheck/lint/build、全量单测与受影响浏览器套件证据由开发 Agent 提供并复核记录。未提交、未发布。"
+    },
+    {
+      "id": "US-345",
+      "title": "F4 添加页与共享审核详情的信息层级",
+      "description": "作为添加订阅的用户，我希望单番首页、候选、单番审核与批量左卡右详情都围绕当前任务组织信息：初始只聚焦名称输入与模式切换，候选只给公开决策证据，审核默认层直接回答「已选哪部/哪一季、筛后有什么、能否确认」，技术细节与完整种子按需展开，单番与批量共用同一审核核心。",
+      "acceptanceCriteria": [
+        "单番初始页聚焦名称输入和模式切换，未搜索时没有空结果大面板；直连合集仅在无结果后的次级救援入口，人工选择真实合集不变",
+        "候选只显示公开封面、标题、季度证据、总集数和选择动作；季数冲突就近解释；草案生成前不显示资源结论",
+        "审核默认回答「已选哪部/哪一季、筛后有什么、能否确认」：已选合集、字幕与资源摘要、筛选规则、阻断原因、保存确认；技术 ID、原始标题、RSS 选择、英文区名和诊断不在默认层；高级设置和完整种子按需展开",
+        "未保存详情不用 safe-info API；保存后的方案详情继续复用严格安全白名单；任何显示都不渲染 URL、magnet、绝对路径、原始响应、草案能力或秘密",
+        "完整种子中字幕组为一级，组内资源为二级缩进；长标题、1280 宽度和键盘 <details> 展开仍可读",
+        "批量当前查看只切换右栏，复选框只改变保存范围；固定操作栏是唯一批量主「保存并确认 N 部」入口；部分成功时成功/失败/未处理计数、焦点和仅失败项重试遵从既有交互规格",
+        "页面状态表：单番初始/搜索中/空/失败保留输入与就地错误、未搜索不展示空结果；候选生成中/失败沿用 WP-41-B 候选旁加载与重试且不自动选合集；草案一致/重算中/失败/零资源沿用 WP-41-C 一致性与阻断理由；批量局部成功不回滚、不重提成功项、不把 HTTP 200 当整批成功；未保存草案「全部信息」默认无服务端 safe-info 弹窗",
+        "定向验证：所有变动组件 Vitest 并同步搜索既有 WorkbenchView.test.ts、BatchWorkbenchView.test.ts 与 tests/browser/test_app_*.py 断言；typecheck/lint/build；真实 Chromium 1440×900、1280 和宽桌面覆盖单番初始/候选/审核、批量 1、约 12、36 项及部分成功、长标题、键盘焦点、空结果/零资源与敏感 DOM canary",
+        "不改变 WP-41-C 的 draft_id+revision、scheduler、保存确认或安全边界；不新增 API/OpenAPI/generated client/后端、未保存 safe-info、额外公开 DTO 或批量单条重搜；不用 mock 字段、隐藏 CSS 或接口别名绕过",
+        "独立审核按 Stage 40 PRD 的 WP-41-D 核对信息层级、任务导向交互、共享审核核心、种子分组与敏感边界；审核问题先固化最小红测，再由同一修复 Agent 集中收口并复审通过",
+        "Tests pass"
+      ],
+      "priority": 2,
+  "passes": true,
+  "notes": "依赖 docs/MiGuOrca_stage40_add_anime_reliability_and_ux_PRD.md 的 WP-41-D，前置 WP-41-A/B/C 已通过独立审核。基线 cd6dbf0（Stage 40 已合并）。2026-09-17 开发、独立审核与修复复审通过：单番初始层重排、候选卡片信息层级、审核默认层（已选合集/季度/总集数/字幕组/筛选规则 + 资源摘要）、技术层折叠、种子按字幕组二级缩进、批量右栏次要动作收敛；未新增 API/DTO，未对未保存草案调用 safe-info。主 Agent 独立复跑 `npm run test:unit -- --run` → 47 files/578 passed，typecheck/lint/build 通过，ruff 通过；真实 Chromium 收尾 `uv run pytest tests/browser -q --tb=short -p no:cacheprovider` → 221 passed。审核发现的绝对本地路径 DOM 泄漏先固化为 ResourceSummary 红测（1 failed），同一 Claude 修复为 POSIX/UNC/Windows 路径脱敏后 ResourceSummary 4 passed、typecheck/lint 通过并复审。未提交、未发布。"
     }
   ]
 }

@@ -3,21 +3,26 @@
 //
 // Button primitive with the three legacy variants (primary / secondary /
 // danger). All attributes (type, disabled, aria-label, ...) fall through to
-// the native `<button>`; `loading` swaps the label for a neutral "处理中…"
-// state and disables the button. The native focus-visible outline comes from
-// the shared design baseline (styles/main.css).
+// the native `<button>`; `loading` replaces the label with `loadingLabel`
+// (neutral "处理中…" by default) and disables the button. The label is the
+// carrier of the in-progress state: under `prefers-reduced-motion: reduce` the
+// spinner is suppressed so a motionless arc is never the only signal. The
+// native focus-visible outline comes from the shared design baseline
+// (styles/main.css).
 withDefaults(
   defineProps<{
     variant?: 'primary' | 'secondary' | 'danger'
     type?: 'button' | 'submit' | 'reset'
     disabled?: boolean
     loading?: boolean
+    loadingLabel?: string
   }>(),
   {
     variant: 'secondary',
     type: 'button',
     disabled: false,
     loading: false,
+    loadingLabel: '处理中…',
   },
 )
 </script>
@@ -30,7 +35,8 @@ withDefaults(
     :aria-busy="loading || undefined"
   >
     <span v-if="loading" aria-hidden="true" class="base-button-spinner" />
-    <slot>{{ loading ? '处理中…' : '' }}</slot>
+    <span v-if="loading" class="base-button-loading-label">{{ loadingLabel }}</span>
+    <slot v-else />
   </button>
 </template>
 
@@ -79,15 +85,21 @@ withDefaults(
   animation: base-button-spin 0.8s linear infinite;
 }
 
+.base-button-loading-label {
+  white-space: nowrap;
+}
+
 @keyframes base-button-spin {
   to {
     transform: rotate(360deg);
   }
 }
 
+/* A frozen arc says nothing about progress; the loading label and aria-busy
+   carry the state instead. */
 @media (prefers-reduced-motion: reduce) {
   .base-button-spinner {
-    animation: none;
+    display: none;
   }
 }
 </style>

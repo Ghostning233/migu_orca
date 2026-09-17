@@ -15,10 +15,17 @@ const props = defineProps<{
 
 const completeTotal = () => props.completeGroups.reduce((sum, group) => sum + group.seedNames.length, 0)
 
+// URL-like / magnet values are replaced by a generic label.
+const URL_LIKE_SEED = /^(?:magnet:|[a-z][a-z0-9+.-]*:\/\/)/i
+// Absolute local paths: POSIX (`/…`), UNC (`\\…`), Windows drive (`C:\…` / `C:/…`).
+const LOCAL_PATH_LIKE_SEED = /^(?:\/|\\\\|[a-z]:[\\/])/i
+
 function safeSeedTitle(value: string): string {
-  // Seed titles are public display data, but never allow URL-like values or
-  // magnet links to become DOM-visible if an upstream parser returns one.
-  if (/^(?:magnet:|[a-z][a-z0-9+.-]*:\/\/)/i.test(value)) return '[已隐藏资源地址]'
+  // Seed titles are public display data, but never allow URL-like values,
+  // magnet links, or absolute local paths to become DOM-visible if an upstream
+  // parser returns one. The path itself is never echoed back.
+  if (URL_LIKE_SEED.test(value)) return '[已隐藏资源地址]'
+  if (LOCAL_PATH_LIKE_SEED.test(value)) return '[已隐藏本地路径]'
   return value
 }
 
@@ -84,6 +91,15 @@ function safeReason(value: string): string {
 .seed-details { border: 1px solid var(--color-border); border-radius: 6px; padding: 0.5rem 0.75rem; }
 .seed-details summary { cursor: pointer; font-weight: 500; }
 .seed-list { margin: 0.5rem 0 0; padding-left: 1.25rem; display: grid; gap: 0.25rem; }
+/* F4: 完整种子按字幕组分层——字幕组是一级条目，组内资源缩进为二级。 */
+.complete-seed-groups { display: grid; gap: 0.4rem; margin-top: 0.5rem; }
+.subgroup-seed-group {
+  border-left: 2px solid var(--color-border);
+  padding: 0.15rem 0 0.15rem 0.6rem;
+}
+.subgroup-seed-group > summary { font-weight: 500; cursor: pointer; }
+.subgroup-seed-group .seed-list { padding-left: 1.6rem; }
+.seed-list li { overflow-wrap: anywhere; }
 .excluded-seed-list .seed-exclude-reason, .muted-text { color: var(--color-text-muted); }
 .muted-text { margin: 0.25rem 0 0; }
 @media (max-width: 720px) {

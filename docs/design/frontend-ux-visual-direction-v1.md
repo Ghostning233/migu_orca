@@ -16,8 +16,9 @@
 越过上述文字规格成为新的业务需求。
 
 后续评审于 2026-09-17 确认了[添加番剧新版六张效果图](frontend-ux-review-mockups-2026-09-17.md)
-作为该页面的开发方向：以下单番首页 V1 保留作 Gate 3 历史参考，不再作为添加页首页的现行参考；
-批量 V2 的双栏布局、其他页面与异常状态参考及设计 Token 继续有效。旧图待核对引用后归档。
+作为该页面的开发方向：单番首页 V1 不再作为添加页首页的现行参考，已于 2026-09-17 移至
+[归档目录](assets/frontend-ux/archive/) 仅作 Gate 3 历史记录；批量 V2 的双栏布局、其他页面与
+异常状态参考及设计 Token 继续有效。
 
 ## 2. 视觉方向
 
@@ -31,9 +32,12 @@
 
 ## 3. 单番首页
 
-![添加番剧单番首页 V1](assets/frontend-ux/add-anime-home-v1.png)
+现行方向：添加页首页以[新版六张效果图](frontend-ux-review-mockups-2026-09-17.md) 为准，
+首屏聚焦单一搜索任务的层级见其中的 `01-single-search.png`。本节仅保留 Gate 3 历史图。
 
-观察：
+![添加番剧单番首页 V1（已归档）](assets/frontend-ux/archive/add-anime-home-v1.png)
+
+观察（针对 2026-09-07 的 Gate 3 历史图）：
 
 - 单一搜索任务非常突出，三步预告容易理解。
 - 单番/批量分段控件的选中态明确，顶部四项导航没有挤压内容。
@@ -115,5 +119,7 @@ Constraints: desktop only; no technical IDs, credentials, code, third-party logo
 4. 两处已知生成偏差已经在 V2 参考图中修正。
 5. 关键异常状态和可编码的设计 Token 已补齐。
 
-原始 V1 图片继续作为设计过程记录保留，不再作为对应页面的实现参考。Gate 3 通过只授权进入
+原始 V1 图片继续作为设计过程记录保留，不再作为对应页面的实现参考；其中已被取代的三张
+（`add-anime-home-v1.png`、`batch-review-12-v1.png`、`tracking-management-v1.png`）已于
+2026-09-17 移入 `assets/frontend-ux/archive/`，仅作历史记录。Gate 3 通过只授权进入
 正式 PRD 与实现切片设计，不等于已经授权生产代码实现。

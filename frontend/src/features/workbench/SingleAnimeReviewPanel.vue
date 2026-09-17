@@ -1,7 +1,9 @@
 <script setup lang="ts">
-// Single-anime review step (US-277). The shared editor is the only editing
-// surface; this host owns the component-local draft session and step actions.
-import { computed, ref } from 'vue'
+// Single-anime review step (US-277 / US-344). The shared editor is the only
+// editing surface; this host owns the component-local draft session, the edit
+// scheduler that decides when a preview-modify leaves the browser, and the
+// step actions.
+import { computed, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { api, toApiError } from '@/api/client'
@@ -19,7 +21,8 @@ import ConfirmDialog from '@/components/feedback/ConfirmDialog.vue'
 import BaseButton from '@/components/forms/BaseButton.vue'
 import LoadingState from '@/components/feedback/LoadingState.vue'
 import AnimeDraftEditor from '@/features/workbench/AnimeDraftEditor.vue'
-import type { PreviewPatch } from '@/features/workbench/candidateSearch'
+import { useDraftEditScheduler } from '@/features/workbench/draftEditScheduler'
+import type { PreviewEditState, SelectedCollectionSummary } from '@/features/workbench/candidateSearch'
 import { effectiveSeeds, type RequestSnapshot } from '@/features/requests/requestDetail'
 import { storageQuery } from '@/features/requests/requestStorage'
 import { isPublicRouteIdentifier, routeLocation } from '@/app/router/catalog'
@@ -30,6 +33,12 @@ const props = defineProps<{
   draftId: string
   draftRevision?: number
   reuseSuggestion?: ReuseSuggestion | null
+  /**
+   * F4: in-memory projection of the candidate this draft came from, used only
+   * to answer「已选哪部/哪一季」in the review default layer. It is never sent
+   * anywhere and never reaches the URL, storage or history.
+   */
+  selectedCollection?: SelectedCollectionSummary | null
 }>()
 
 const emit = defineEmits<{
@@ -43,6 +52,17 @@ const confirmDialog = ref<InstanceType<typeof ConfirmDialog> | null>(null)
 const editor = ref<InstanceType<typeof AnimeDraftEditor> | null>(null)
 const session = useDraftSession({ request: props.request, draftId: props.draftId, draftRevision: props.draftRevision })
 const draftSnapshot = computed(() => (session.request.value ?? props.request) as RequestSnapshot)
+
+// US-344: subtitle groups commit immediately, filter rules after 1.5s, the
+// folder name only through the explicit 保存修改 flush. Every success replaces
+// the snapshot, resource summary, rules and revision in one step.
+const scheduler = useDraftEditScheduler({
+  session,
+  storageDir: () => storageQuery().storage_dir ?? null,
+  onApplied: () => onDraftApplied(),
+  onInvalid: () => onDraftInvalidated(),
+  onFailed: () => onDraftModifyFailed(),
+})
 const formError = ref('')
 const navigationLoading = ref(false)
 const dirty = ref(false)
@@ -103,7 +123,12 @@ const saveBlockers = computed(() => {
   if (session.invalid.value) reasons.push('订阅草案已失效')
   if (journey.state.phase !== 'review') reasons.push('当前订阅方案已进入确认恢复流程')
   if (session.applying.value) reasons.push('正在重新计算订阅方案')
-  if (dirty.value) reasons.push('有尚未应用的编辑')
+  // A pending local edit is never submitted by the confirm click itself: the
+  // scheduler owns every preview-modify, so the primary action stays blocked
+  // until it has something server-consistent to confirm.
+  if (scheduler.waiting.value) reasons.push('有尚未应用的编辑，正在等待过滤规则自动更新')
+  else if (scheduler.folderPending.value) reasons.push('有尚未应用的编辑，等待提交目录名')
+  else if (dirty.value) reasons.push('有尚未应用的编辑')
   if (session.error.value) reasons.push('存在未恢复的字段修改失败')
   if (!draftSnapshot.value.confirmable_config?.selected_subtitle_group) reasons.push('尚未选择字幕组')
   if (!effectiveSeeds(draftSnapshot.value).length) reasons.push('没有有效资源')
@@ -234,43 +259,58 @@ async function retrySavedConfirmation(): Promise<void> {
   }
 }
 
-async function applyModify(patch: PreviewPatch): Promise<void> {
+/** One successful preview-modify publishes the new snapshot and revision. */
+function onDraftApplied(): void {
   formError.value = ''
-  const result = await session.apply(patch, storageQuery().storage_dir ?? null)
-  if (!result) {
-    if (session.invalid.value) {
-      notification.error('订阅草案已失效', '请重新选择合集后再试。')
-      emit('discard', 'candidates')
-      return
-    }
-    formError.value = '订阅草案修改失败，请稍后重试。'
-    notification.error('修改失败', formError.value)
-    return
-  }
   emit('changed', {
     request: draftSnapshot.value,
     draftId: session.draftId.value ?? '',
     draftRevision: session.draftRevision.value ?? 1,
   })
   journey.setDraft(session.draftId.value ?? '', session.draftRevision.value ?? 1)
-  notification.success('已应用修改', '订阅草案种子展示已重新计算。')
+}
+
+function onDraftModifyFailed(): void {
+  formError.value = '订阅草案修改失败，请稍后重试。'
+}
+
+function onDraftInvalidated(): void {
+  notification.error('订阅草案已失效', '请重新选择合集后再试。')
+  emit('discard', 'candidates')
+}
+
+function onSubtitleGroupChange(value: string): void {
+  if (journey.state.phase !== 'review') return
+  scheduler.setSubtitleGroup(value)
+}
+
+function onFilterChange(state: PreviewEditState): void {
+  if (journey.state.phase !== 'review') return
+  scheduler.setFilter(state)
+}
+
+function onFolderNameChange(value: string): void {
+  if (journey.state.phase !== 'review') return
+  scheduler.setFolderName(value)
+}
+
+/** 保存修改: flush the not-yet-due filter input and the folder name now. */
+async function flushModify(): Promise<void> {
+  await scheduler.flush()
 }
 
 async function retryModify(): Promise<void> {
   formError.value = ''
-  const result = await session.retry()
-  if (result) {
-    emit('changed', { request: draftSnapshot.value, draftId: session.draftId.value ?? '', draftRevision: session.draftRevision.value ?? 1 })
-  } else if (session.error.value || session.invalid.value) {
-    formError.value = session.invalid.value ? '订阅草案已失效，请重新选择合集。' : '订阅草案修改失败，请稍后重试。'
-  }
+  await scheduler.retry()
 }
 
 function resetFailedModify(): void {
   editor.value?.reset()
-  session.reset()
+  scheduler.restore()
   formError.value = ''
 }
+
+onUnmounted(() => scheduler.dispose())
 
 function applyReuseSuggestion(): void {
   if (!props.reuseSuggestion) return
@@ -363,17 +403,22 @@ defineExpose({ session, editor, leaveGuard })
         :request="draftSnapshot"
         id-prefix="preview"
         form-id="detail-preview-edit-form"
+        :candidate-summary="props.selectedCollection ?? null"
+        apply-variant="secondary"
         :applying="session.applying.value"
         :error="formError"
         :can-retry="session.canRetry.value"
         :disabled="navigationLoading || session.invalid.value || journey.state.phase !== 'review'"
-        @apply="applyModify"
+        @apply="flushModify"
+        @subtitle-group-change="onSubtitleGroupChange"
+        @filter-change="onFilterChange"
+        @folder-change="onFolderNameChange"
         @dirty-change="dirty = $event; journey.setDirty($event)"
         @retry="retryModify"
         @reset="resetFailedModify"
       >
         <template #review-note>
-          <p class="review-note">保存并确认只提交当前草案能力、版本和本次操作的内存幂等键；不会回传订阅方案快照或触发外部订阅动作。</p>
+          <p class="review-note">字幕组会立即重新计算；筛选规则在停止输入 1.5 秒后自动更新；目录名只在「保存修改」时提交。以上都只更新服务端内存草案，保存并确认只提交当前草案能力、版本和本次操作的内存幂等键，不会回传订阅方案快照或触发外部订阅动作。</p>
         </template>
       </AnimeDraftEditor>
     </div>

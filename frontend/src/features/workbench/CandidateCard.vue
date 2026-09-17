@@ -1,17 +1,24 @@
 <script setup lang="ts">
-// CandidateCard (US-204).
+// CandidateCard (US-204 / WP-41-D).
 //
-// One public MiKan candidate card in the workbench search results. It renders
-// only the whitelisted public metadata (title, bangumi id, episode progress,
-// recommendation label, source query, poster via the opaque poster endpoint)
-// and the explicit "选择此合集" action. It never auto-selects a candidate and
-// never renders raw URLs / candidate_context.
+// One public MiKan candidate card in the workbench search results. The default
+// layer (F4) shows only the public decision evidence: poster, title,
+// recommendation label, episode progress, season evidence and the explicit
+// "选择此合集" action. The opaque collection id and the parse search query are
+// diagnostics, so they live behind the collapsed 高级信息 details. It never
+// auto-selects a candidate and never renders raw URLs / candidate_context.
 //
 // Season evidence (US-204): a NEEDS_CONFIRMATION candidate shows the explicit
 // confirmation checkbox (confirmedSeason bound by the parent); a CONFLICT
 // candidate shows the warning and disables selection. The parser hint is only
 // ever turned into evidence through the confirmation checkbox or the server's
 // candidate_context — never through displayed fields.
+//
+// Loading (US-343): `loading` marks this candidate as the one generating a
+// draft. The state is carried by the button label plus `aria-busy` (the parent
+// passes `loading` only for the clicked candidate, so the others stay disabled
+// without being marked as loading). `error` keeps a sanitized generation
+// failure beside this candidate and re-offers the action as a retry.
 import { computed } from 'vue'
 
 import BaseButton from '@/components/forms/BaseButton.vue'
@@ -20,15 +27,22 @@ import {
   candidateSelectionIsBlocked,
   episodeProgressText,
   needsSeasonConfirmation,
+  seasonEvidenceText,
   type MikanCandidate,
 } from '@/features/workbench/candidateSearch'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   candidate: MikanCandidate
   query: string
   disabled?: boolean
   confirmedSeason: number | null
-}>()
+  loading?: boolean
+  error?: string
+}>(), {
+  disabled: false,
+  loading: false,
+  error: '',
+})
 
 const emit = defineEmits<{
   (e: 'select'): void
@@ -37,6 +51,7 @@ const emit = defineEmits<{
 
 const blocked = computed(() => candidateSelectionIsBlocked(props.candidate, props.confirmedSeason))
 const needsConfirmation = computed(() => needsSeasonConfirmation(props.candidate))
+const errorId = computed(() => `candidate-generate-error-${props.candidate.bangumi_id}`)
 const seasonNumber = computed(() => {
   const season = props.candidate.season_evidence?.season
   return Number.isInteger(season) && season !== null ? Number(season) : null
@@ -57,14 +72,13 @@ const posterSrc = computed(() => {
 </script>
 
 <template>
-  <li class="candidate-card">
+  <li class="candidate-card" :class="{ 'is-generating': loading }">
     <strong class="candidate-title">{{ candidate.title || '未命名合集' }}</strong>
 
     <span v-if="candidate.recommendation" class="candidate-recommendation">
       {{ candidate.recommendation }}
     </span>
 
-    <div class="candidate-meta">MiKan ID: {{ candidate.bangumi_id }}</div>
     <div class="candidate-progress">{{ episodeProgressText(candidate.total_episodes) }}</div>
 
     <img
@@ -76,8 +90,6 @@ const posterSrc = computed(() => {
       decoding="async"
     >
     <div v-else class="candidate-poster candidate-poster-placeholder">暂无封面</div>
-
-    <div class="candidate-source">搜索词：{{ candidate.source_query || query }}</div>
 
     <template v-if="needsConfirmation && seasonNumber !== null">
       <label class="candidate-season-confirmation">
@@ -96,16 +108,37 @@ const posterSrc = computed(() => {
     <p v-else-if="candidate.season_evidence?.status === 'CONFLICT'" class="candidate-season-conflict">
       候选合集季数与搜索识别结果冲突，请先人工核对。
     </p>
+    <p v-else class="candidate-season-evidence">{{ seasonEvidenceText(candidate) }}</p>
 
     <BaseButton
       class="candidate-select"
       variant="primary"
       :disabled="disabled || blocked"
-      :aria-disabled="String(disabled || blocked)"
+      :loading="loading"
+      loading-label="正在生成草案…"
+      :aria-disabled="String(disabled || blocked || loading)"
+      :aria-describedby="error ? errorId : undefined"
       @click="emit('select')"
     >
-      选择此合集
+      {{ error ? '重试生成草案' : '选择此合集' }}
     </BaseButton>
+
+    <p v-if="loading" class="candidate-generating-status" role="status">
+      正在生成订阅草案…
+    </p>
+    <p v-else-if="error" :id="errorId" class="candidate-generate-error" role="alert">
+      {{ error }}
+    </p>
+
+    <!-- F4: 公开封面对应的技术编号与解析搜索词属于诊断信息，默认层不显示；
+         需要核对时按需展开。 -->
+    <details class="candidate-advanced">
+      <summary>高级信息</summary>
+      <dl class="candidate-advanced-grid">
+        <div class="candidate-advanced-row"><dt>合集编号</dt><dd>{{ candidate.bangumi_id }}</dd></div>
+        <div class="candidate-advanced-row"><dt>匹配搜索词</dt><dd>{{ candidate.source_query || query }}</dd></div>
+      </dl>
+    </details>
   </li>
 </template>
 
@@ -133,11 +166,42 @@ const posterSrc = computed(() => {
   color: var(--color-text-muted);
 }
 
-.candidate-meta,
 .candidate-progress,
-.candidate-source {
+.candidate-season-evidence {
   font-size: 0.875rem;
   color: var(--color-text-muted);
+}
+
+.candidate-advanced {
+  border-top: 1px solid var(--color-border);
+  padding-top: 0.35rem;
+  font-size: 0.875rem;
+}
+
+.candidate-advanced summary {
+  cursor: pointer;
+  color: var(--color-text-muted);
+}
+
+.candidate-advanced-grid {
+  margin: 0.35rem 0 0;
+  display: grid;
+  gap: 0.2rem 1rem;
+  grid-template-columns: max-content 1fr;
+}
+
+.candidate-advanced-row {
+  display: contents;
+}
+
+.candidate-advanced-row dt {
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.candidate-advanced-row dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .candidate-poster {
@@ -170,5 +234,23 @@ const posterSrc = computed(() => {
 
 .candidate-select {
   justify-self: start;
+}
+
+.candidate-generating-status,
+.candidate-generate-error {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.candidate-generating-status {
+  color: var(--color-text-muted);
+}
+
+.candidate-generate-error {
+  color: var(--color-danger);
+}
+
+.candidate-card.is-generating {
+  border-color: var(--color-action-primary);
 }
 </style>
