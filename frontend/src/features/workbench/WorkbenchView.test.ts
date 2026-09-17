@@ -1,4 +1,4 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
@@ -770,6 +770,158 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     expect(notification.current?.message).toBe('从 MiKan 合集生成订阅草案失败：MiKan 页面格式异常，请稍后重试。')
     expect(wrapper.findAll('.candidate-card')).toHaveLength(1)
     expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(false)
+  })
+})
+
+describe('WorkbenchView draft-modify save-confirm reliability (US-341)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    apiPost.mockReset()
+    apiGet.mockReset()
+  })
+
+  const saveButton = (wrapper: VueWrapper) => wrapper.find('#single-review-save-button')
+  const saveNote = (wrapper: VueWrapper) => wrapper.find('#single-review-save-blockers')
+
+  /** Both the disabled state and the in-place reason must come from one source. */
+  function expectConsistentSaveState(wrapper: VueWrapper, expected: 'available' | 'blocked'): string {
+    const disabled = saveButton(wrapper).attributes('disabled') !== undefined
+    const note = saveNote(wrapper).text()
+    // Assert the reason first so a mismatch reports the contradictory text.
+    if (expected === 'available') expect(note).toContain('保存并确认可用')
+    else expect(note).toContain('保存并确认暂不可用')
+    expect({ disabled, note }).toMatchObject({ disabled: expected === 'blocked' })
+    return note
+  }
+
+  async function openDraftReview(wrapper: VueWrapper): Promise<void> {
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.candidate-select').trigger('click')
+    await flushPromises()
+  }
+
+  /** The server echo after applying `must_not_contain=V2` at revision 2. */
+  function modifiedSnapshot() {
+    return previewSnapshot({
+      confirmable_config: {
+        ...previewSnapshot().confirmable_config,
+        filter_rule: { must_contain: '', must_not_contain: 'V2', use_regex: false, case_sensitive: false },
+      },
+    })
+  }
+
+  function saveConfirmResult() {
+    return {
+      outcome: 'CONFIRMED',
+      request: { request_id: 'req-confirmed' },
+      handoff: {
+        request_id: 'req-confirmed', status: 'CONFIRMED', next_action: 'TRACKING',
+        tracking_id: 'tracking-confirmed', tracking_status: 'PENDING_SUBMIT',
+        tracking_ready: true, safe_message: null,
+      },
+    }
+  }
+
+  it('restores the button and reason together after a held preview-modify returns revision=2', async () => {
+    let releaseModify!: (value: unknown) => void
+    const modifyPending = new Promise((resolve) => { releaseModify = resolve })
+    apiPost
+      .mockResolvedValueOnce(candidateResult())
+      .mockResolvedValueOnce(createDraftResult())
+      // Held preview-modify: the route is stored, never slept in.
+      .mockReturnValueOnce(modifyPending as never)
+    const { wrapper } = await mountWorkbench()
+    await openDraftReview(wrapper)
+
+    expectConsistentSaveState(wrapper, 'available')
+
+    // 1) A pending form edit blocks the save with its own reason.
+    await wrapper.find('#preview-must-not-contain').setValue('V2')
+    await nextTick()
+    expect(expectConsistentSaveState(wrapper, 'blocked')).toContain('有尚未应用的编辑')
+
+    // 2) The in-flight recompute blocks it, still consistently.
+    await wrapper.find('#preview-apply-button').trigger('click')
+    await nextTick()
+    const inFlightNote = expectConsistentSaveState(wrapper, 'blocked')
+    expect(inFlightNote).toContain('正在重新计算订阅方案')
+
+    // 3) The server returns the same draft capability at revision 2.
+    releaseModify({ request: modifiedSnapshot(), summary: {}, draft_id: 'opaque-draft-token', draft_revision: 2 })
+    await flushPromises()
+
+    expectConsistentSaveState(wrapper, 'available')
+    expect(saveNote(wrapper).text()).not.toContain('正在重新计算订阅方案')
+    expect(saveNote(wrapper).text()).not.toContain('有尚未应用的编辑')
+
+    apiPost.mockResolvedValueOnce(saveConfirmResult() as never)
+    await saveButton(wrapper).trigger('click')
+    await flushPromises()
+
+    const saveCalls = apiPost.mock.calls.filter(([path]) => path === '/api/v1/requests/save-confirm')
+    expect(saveCalls).toHaveLength(1)
+    expect(saveCalls[0]![1]?.body).toMatchObject({
+      draft_id: 'opaque-draft-token',
+      base_revision: 2,
+      storage_dir: null,
+    })
+    expect(saveCalls[0]![1]?.body).toHaveProperty('idempotency_key')
+    expect(saveCalls[0]![1]?.body).not.toHaveProperty('request')
+    expect(saveCalls[0]![1]?.body).not.toHaveProperty('summary')
+  })
+
+  it('blocks the save with a reason when a successful modify leaves no effective resource', async () => {
+    apiPost
+      .mockResolvedValueOnce(candidateResult())
+      .mockResolvedValueOnce(createDraftResult())
+      .mockResolvedValueOnce({
+        request: previewSnapshot({
+          source_info: {
+            matched_bangumi: previewSnapshot().source_info.matched_bangumi,
+            rss_sources: [],
+          },
+          confirmable_config: {
+            ...previewSnapshot().confirmable_config,
+            effective_seed_names: [],
+          },
+        }),
+        summary: {},
+        draft_id: 'opaque-draft-token',
+        draft_revision: 2,
+      })
+    const { wrapper } = await mountWorkbench()
+    await openDraftReview(wrapper)
+
+    await wrapper.find('#preview-must-not-contain').setValue('V2')
+    await wrapper.find('#preview-apply-button').trigger('click')
+    await flushPromises()
+
+    const note = expectConsistentSaveState(wrapper, 'blocked')
+    expect(note).toContain('没有有效资源')
+  })
+
+  it('keeps the button and reason aligned on a retryable modify failure and its recovery', async () => {
+    apiPost
+      .mockResolvedValueOnce(candidateResult())
+      .mockResolvedValueOnce(createDraftResult())
+      .mockRejectedValueOnce({ type: 'network_error', message: '原始网络错误' })
+      .mockResolvedValueOnce({ request: modifiedSnapshot(), summary: {}, draft_id: 'opaque-draft-token', draft_revision: 2 })
+    const { wrapper } = await mountWorkbench()
+    await openDraftReview(wrapper)
+
+    await wrapper.find('#preview-must-not-contain').setValue('V2')
+    await wrapper.find('#preview-apply-button').trigger('click')
+    await flushPromises()
+
+    const failedNote = expectConsistentSaveState(wrapper, 'blocked')
+    expect(failedNote).toContain('存在未恢复的字段修改失败')
+    expect(wrapper.text()).not.toContain('原始网络错误')
+
+    await wrapper.find('#preview-retry-button').trigger('click')
+    await flushPromises()
+    expectConsistentSaveState(wrapper, 'available')
   })
 })
 

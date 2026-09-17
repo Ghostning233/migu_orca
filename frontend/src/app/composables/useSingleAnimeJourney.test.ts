@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { computed, nextTick } from 'vue'
 
 import { toSafeJourneyError, useSingleAnimeJourney } from '@/app/composables/useSingleAnimeJourney'
 
@@ -26,6 +27,35 @@ describe('useSingleAnimeJourney (US-275)', () => {
     expect(journey.state.idempotencyKey).toBeNull()
     journey.finishTracking('tracking-1')
     expect(journey.state.phase).toBe('complete')
+  })
+
+  it('exposes the snapshot as reactive state so host computeds recompute (US-341)', async () => {
+    // FE-01: the save button derives its disabled state from this composable.
+    // A non-reactive snapshot made host computeds cache their first value.
+    const journey = useSingleAnimeJourney()
+    const phase = computed(() => journey.state.phase)
+    const confirmable = computed(() => journey.canConfirm())
+
+    expect(phase.value).toBe('input')
+    expect(confirmable.value).toBe(false)
+
+    journey.setCandidates(1)
+    journey.transition('candidates')
+    journey.selectCandidate()
+    journey.setDraft('draft-capability', 2)
+    await nextTick()
+
+    expect(phase.value).toBe('review')
+    expect(confirmable.value).toBe(true)
+
+    journey.setDirty(true)
+    await nextTick()
+    expect(confirmable.value).toBe(false)
+
+    journey.setDraft('draft-capability', 3)
+    await nextTick()
+    expect(journey.state.draftRevision).toBe(3)
+    expect(confirmable.value).toBe(true)
   })
 
   it('keeps saved-confirm recovery separate from draft saving', () => {

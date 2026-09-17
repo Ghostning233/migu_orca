@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -620,6 +621,244 @@ class TestAppWorkbenchCandidateSelectionAndDraft:
         assert "request_id=" not in page.url and "revision" not in page.url
         body_text = page.locator("body").inner_text()
         assert "draft_revision" not in body_text
+
+    def test_held_preview_modify_restores_save_confirm_with_new_revision(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        """US-341 (FE-01): after a successful preview-modify the save action and
+        its in-place reason recover together from one reactive source, and the
+        next save-confirm carries the same draft capability at revision 2."""
+        page.route(
+            "**/api/v1/mikan/candidates",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_candidate_result_json(
+                    "芙莉莲",
+                    [
+                        _candidate(
+                            bangumi_id="2353", title="葬送的芙莉莲", mikan_url="https://mikan.example/Home/Bangumi/2353"
+                        )
+                    ],
+                ),
+            ),
+        )
+        preview = _preview_request("芙莉莲", "req-wb-341")
+        generation_body = preview_result_json(preview)
+        draft_id = json.loads(generation_body)["result"]["draft_id"]
+        _register_generation_capture(page, [], body=generation_body)
+
+        held: list[Any] = []
+        modify_bodies: list[dict[str, Any]] = []
+
+        def _hold_modify(route: Any, request: Any) -> None:
+            if request.url.endswith("/api/v1/requests/preview-modify"):
+                # Store the route and assert the in-flight UI first. Sleeping in
+                # this handler would block Playwright's dispatcher thread and
+                # hide the very loading state under test.
+                modify_bodies.append(request.post_data_json)
+                held.append(route)
+                return
+            route.continue_()
+
+        save_bodies: list[dict[str, Any]] = []
+
+        def _save(route: Any, request: Any) -> None:
+            if request.url.endswith("/api/v1/requests/save-confirm"):
+                save_bodies.append(request.post_data_json)
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "ok": True,
+                            "result": {
+                                "outcome": "CONFIRMED",
+                                "request": {"request_id": "req-wb-341"},
+                                "summary": {"request_id": "req-wb-341", "status": "ACCEPTED"},
+                                "handoff": {
+                                    "request_id": "req-wb-341",
+                                    "status": "CONFIRMED",
+                                    "next_action": "TRACKING",
+                                    "tracking_id": "tracking-wb-341",
+                                    "tracking_status": "PENDING_SUBMIT",
+                                    "tracking_ready": True,
+                                    "safe_message": None,
+                                },
+                            },
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
+                return
+            route.continue_()
+
+        page.route("**/api/v1/requests/preview-modify", _hold_modify)
+        page.route("**/api/v1/requests/save-confirm", _save)
+        page.route(
+            "**/api/v1/tracking/items*",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "ok": True,
+                        "result": {
+                            "items": [],
+                            "summary": {
+                                "total": 0,
+                                "pending": 0,
+                                "processing": 0,
+                                "active": 0,
+                                "needs_attention": 0,
+                                "unreadable": 0,
+                            },
+                            "warnings": [],
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+            ),
+        )
+        console_messages: list[str] = []
+        page.on("console", lambda message: console_messages.append(message.text))
+
+        set_storage_preferences(page, storage_dir)
+        _goto_workbench(page, live_server_url)
+        page.fill("#mikan-candidate-query", "芙莉莲")
+        page.click("#mikan-candidate-search-submit")
+        expect(page.locator(".candidate-card")).to_have_count(1)
+        page.locator(".candidate-card button:has-text('选择此合集')").click()
+        page.wait_for_selector("#detail-preview-edit-form", timeout=5000)
+
+        save_button = page.locator("#single-review-save-button")
+        note = page.locator("#single-review-save-blockers")
+        expect(save_button).to_be_enabled()
+        expect(note).to_contain_text("保存并确认可用")
+
+        # A pending form edit blocks the save with its own reason.
+        page.fill("#preview-must-not-contain", "V2")
+        expect(save_button).to_be_disabled()
+        expect(note).to_contain_text("有尚未应用的编辑")
+        expect(note).not_to_contain_text("保存并确认可用")
+
+        page.click("#preview-apply-button")
+        deadline = time.time() + 5.0
+        while not held and time.time() < deadline:
+            page.wait_for_timeout(50)
+        assert held, "held preview-modify route was not reached"
+
+        # In flight: still blocked, and the button never claims availability.
+        expect(save_button).to_be_disabled()
+        expect(note).to_contain_text("正在重新计算订阅方案")
+        expect(note).not_to_contain_text("保存并确认可用")
+
+        # Fulfil against the real backend: revision 2 with the applied rule.
+        held[0].continue_()
+        expect(note).to_contain_text("保存并确认可用", timeout=5000)
+        expect(save_button).to_be_enabled()
+        expect(note).not_to_contain_text("正在重新计算订阅方案")
+        expect(note).not_to_contain_text("有尚未应用的编辑")
+
+        assert modify_bodies and modify_bodies[0]["base_revision"] == 1
+        assert modify_bodies[0]["draft_id"] == draft_id
+
+        save_button.click()
+        deadline = time.time() + 5.0
+        while not save_bodies and time.time() < deadline:
+            page.wait_for_timeout(50)
+        assert save_bodies, "save-confirm was not called"
+        body = save_bodies[0]
+        # Same server-issued draft capability, latest revision, in-memory key.
+        assert body["draft_id"] == draft_id
+        assert body["base_revision"] == 2
+        assert body["idempotency_key"]
+        assert "request" not in body
+        assert "summary" not in body
+
+        # Sensitive canary: the draft capability, revision and draft payload
+        # stay out of the URL, browser storage, DOM and console.
+        page.wait_for_url("**/app/tracking?tracking_id=tracking-wb-341", timeout=5000)
+        browser_state = page.evaluate(
+            """() => ({
+                url: window.location.href,
+                localStorage: JSON.stringify(window.localStorage),
+                sessionStorage: JSON.stringify(window.sessionStorage),
+                bodyText: document.body.innerText,
+            })"""
+        )
+        for value in (draft_id, "base_revision", "draft_revision", "idempotency_key"):
+            assert value not in browser_state["url"]
+            assert value not in browser_state["localStorage"]
+            assert value not in browser_state["sessionStorage"]
+            assert value not in browser_state["bodyText"]
+        assert all(draft_id not in message for message in console_messages)
+
+    def test_preview_modify_zero_effective_resources_blocks_save_with_reason(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        """US-341: a modify that leaves no effective resource blocks the save
+        with a specific reason instead of a grey button that claims 可用."""
+        page.route(
+            "**/api/v1/mikan/candidates",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_candidate_result_json(
+                    "咒术回战",
+                    [_candidate(bangumi_id="42", title="咒术回战", mikan_url="https://mikan.example/Home/Bangumi/42")],
+                ),
+            ),
+        )
+        preview = _preview_request("咒术回战", "req-wb-341-zero")
+        generation_body = preview_result_json(preview)
+        draft_id = json.loads(generation_body)["result"]["draft_id"]
+        summary = json.loads(generation_body)["result"]["summary"]
+        _register_generation_capture(page, [], body=generation_body)
+
+        empty_request = json.loads(json.dumps(preview))
+        empty_request["source_info"]["rss_sources"] = []
+        empty_request["confirmable_config"]["effective_seed_names"] = []
+        empty_request["confirmable_config"]["filter_rule"]["must_not_contain"] = "V2"
+
+        def _empty(route: Any, request: Any) -> None:
+            if request.url.endswith("/api/v1/requests/preview-modify"):
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "ok": True,
+                            "result": {
+                                "request": empty_request,
+                                "summary": summary,
+                                "draft_id": draft_id,
+                                "draft_revision": 2,
+                            },
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
+                return
+            route.continue_()
+
+        page.route("**/api/v1/requests/preview-modify", _empty)
+        set_storage_preferences(page, storage_dir)
+        _goto_workbench(page, live_server_url)
+        page.fill("#mikan-candidate-query", "咒术回战")
+        page.click("#mikan-candidate-search-submit")
+        expect(page.locator(".candidate-card")).to_have_count(1)
+        page.locator(".candidate-card button:has-text('选择此合集')").click()
+        page.wait_for_selector("#detail-preview-edit-form", timeout=5000)
+
+        save_button = page.locator("#single-review-save-button")
+        note = page.locator("#single-review-save-blockers")
+        page.fill("#preview-must-not-contain", "V2")
+        page.click("#preview-apply-button")
+
+        expect(note).to_contain_text("没有有效资源", timeout=5000)
+        expect(save_button).to_be_disabled()
+        expect(note).not_to_contain_text("保存并确认可用")
 
     def test_draft_revision_conflict_offers_regeneration_hint(
         self, page: Page, live_server_url: str, storage_dir: Path

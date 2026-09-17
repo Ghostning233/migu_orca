@@ -92,19 +92,27 @@ journey.transition('candidates')
 journey.selectCandidate()
 journey.setDraft(props.draftId, props.draftRevision ?? 1)
 
-const blockingReasons = computed(() => {
+// FE-01/US-341: the save action has exactly one reactive source. The button's
+// disabled state and the in-place Chinese reason are both derived from this
+// list, so a blocked button can never claim it is available. Every entry is
+// evaluated on each read: an early reason must not short-circuit the reactive
+// dependencies of the later ones.
+const saveBlockers = computed(() => {
   const reasons: string[] = []
+  if (confirmLoading.value) reasons.push('正在保存并确认')
+  if (session.invalid.value) reasons.push('订阅草案已失效')
+  if (journey.state.phase !== 'review') reasons.push('当前订阅方案已进入确认恢复流程')
   if (session.applying.value) reasons.push('正在重新计算订阅方案')
   if (dirty.value) reasons.push('有尚未应用的编辑')
+  if (session.error.value) reasons.push('存在未恢复的字段修改失败')
   if (!draftSnapshot.value.confirmable_config?.selected_subtitle_group) reasons.push('尚未选择字幕组')
   if (!effectiveSeeds(draftSnapshot.value).length) reasons.push('没有有效资源')
-  if (session.invalid.value) reasons.push('订阅草案已失效')
-  if (session.error.value) reasons.push('存在未恢复的字段修改失败')
-  if (journey.state.phase !== 'review') reasons.push('当前订阅方案已进入确认恢复流程')
+  if (!session.draftId.value || session.draftRevision.value === null) reasons.push('订阅草案版本不可用')
+  if (!journey.canConfirm()) reasons.push('当前订阅方案不可确认')
   return reasons
 })
 
-const saveButtonDisabled = computed(() => !journey.canConfirm() || confirmLoading.value || blockingReasons.value.length > 0)
+const saveButtonDisabled = computed(() => saveBlockers.value.length > 0)
 
 function handoffFrom(result: ConfirmRequestSaveResult): NonNullable<ConfirmRequestSaveResult['handoff']> | null {
   const handoff = result.handoff
@@ -347,7 +355,7 @@ defineExpose({ session, editor, leaveGuard })
         <p v-else-if="journey.state.phase === 'saved_pending_confirm'" id="single-review-accept-recovery" class="field-help" role="status">订阅方案已保存但确认未完成，可直接重试确认；不会重复保存。</p>
         <p v-else-if="confirmError" id="single-review-save-error" class="field-error" role="alert">{{ confirmError }}</p>
         <p v-if="acceptError" id="single-review-accept-error" class="field-error" role="alert">{{ acceptError }}</p>
-        <p v-else id="single-review-save-blockers" class="field-help">保存并确认{{ blockingReasons.length ? `暂不可用：${blockingReasons.join('；')}` : '可用' }}。</p>
+        <p v-else id="single-review-save-blockers" class="field-help">保存并确认{{ saveBlockers.length ? `暂不可用：${saveBlockers.join('；')}` : '可用' }}。</p>
       </div>
 
       <AnimeDraftEditor
