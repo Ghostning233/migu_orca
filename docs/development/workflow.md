@@ -56,6 +56,12 @@ UI 至少有相关真实 Chromium 证据，Vitest/mock 不替代浏览器；后�
 失败先跑最小失败用例。无实质代码/环境变化不重复全量；同根因连续修复无进展应停下报告，
 不是不断让新 Agent 全仓重查。用户禁止某类测试时严格遵守，并报告验证缺口。
 
+Host 校验属于部署兼容性和安全边界：不得把局域网访问回归为仅 localhost，或通过关闭
+Host 校验来“修复”公网请求。变更 Host/Origin 中间件时，必须保留并执行
+`tests/api_contract/test_autobangumi_settings_security.py` 中的局域网 IPv4（含端口）放行、
+公网 Host 拒绝、显式可信 Host 放行和 IPv6 ULA 拒绝/显式放行回归；若测试被移动，需同步
+更新引用和等价覆盖，不得仅删除测试使门禁通过。
+
 定向示例（替换为实际目标，不原样执行占位路径）：
 
 ```bash
