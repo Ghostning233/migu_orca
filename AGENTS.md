@@ -69,13 +69,18 @@ HTTP/认证细节留在 adapter，持久化留在 repository，纯规则不混�
 
 - 主 Agent 默认负责规划、审核与协调；直接开发限于文档、轻量修复或用户明确要求。
   未启用团队时不自行创建子 Agent；用户启用后再按开发 A → 独立审核 → 修复 B → 提交 C 分工。
-  GPT 团队的开发 Agent 默认用 gpt-5.6-luna；无特殊依赖严禁复制主 Agent 全量上下文，必须以
+  GPT 团队的开发 Agent 默认用 gpt-5.6-luna；用户指定且运行环境提供时可改用 Claude Fable
+  （实际模型 `deepseek-v4-flash`）。无特殊依赖严禁复制主 Agent 全量上下文，必须以
   `fork_turns="none"` 创建干净子 Agent，由主 Agent 提供自包含的范围、边界、验证与停止条件。
 - 同一工作包优先复用一个开发 Agent，通过 follow-up 连续推进；每批结束声明实际协作/模型模式，
   并分别用一句话概括给开发、测试、审核、修复 Agent 的提示词。详细规则见
-  [Stage 39 过渡开发流程](docs/development/stage39-transition-workflow.md)。
+  [开发与审核流程](docs/development/workflow.md)。工作包的开发、审核、修复与复审闭环前不得
+  更换/关闭其开发或修复 Agent；仅闭环后才为下一工作包新建 Agent。
 - Stage 39 后续保留 Ralph 的 PRD、逐 story 验收/提交与 progress，不再用 `ralph.sh` 逐 story
   启动新进程，也不固定三个 story 一批；按 PRD 定义的原子工作包完成后统一独立审核。
+- 中文 PR 推送/合并由长期 C Agent 负责，跨工作包/Stage 尽量复用；累计约 20 次 PR 提交后才轮换。
+  C 仅处理已审核 HEAD，且每次仍须用户明确发布授权；跨主会话复用与 Luna/Fable 调用细节见
+  [子 Agent 编排](docs/development/subagent-orchestration.md)。
 - 已启动的工作包必须跑完其约定的开发、定向验证、独立审核、红测、集中修复与复审闭环；
   任一 AC、固定问题清单或验证矩阵单元未覆盖/未通过时，不得以部分结果、后续风险或
   Agent 自述在中途交回，继续复用同一修复 Agent 收口至工作包边界。

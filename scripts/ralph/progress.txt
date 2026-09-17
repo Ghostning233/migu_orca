@@ -3,5 +3,7 @@
 Stage 39 已于 2026-09-15 完成并归档至
 `scripts/ralph/archive/2026-09-15-stage39-deployment-settings/`。
 
-当前没有活动 Stage、用户故事或开发授权。下一步由用户审核已交付前端功能并提出问题；
-问题经范围和验收条件澄清后，才创建新的执行 PRD 与 Ralph 状态。
+Stage 40 已建立为待启动的单故事 Ralph 计划：US-341（FE-01，单番草案修改后保存确认阻断）。
+执行 PRD 是 `docs/MiGuOrca_stage40_add_anime_reliability_and_ux_PRD.md`；当前
+`scripts/ralph/prd.json` 的 `branchName` 故意为空，等待用户在真正启动开发前确认执行分支、
+最大迭代数与提交授权。所有 stories 均为 `passes=false`，尚未运行开发、测试、浏览器或提交。
