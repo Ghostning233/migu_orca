@@ -1,7 +1,7 @@
 {
   "project": "MiGuOrca",
-  "branchName": "",
-  "description": "Stage 40（待启动）：只处理 FE-01 的单番草案修改后保存确认阻断。执行分支、启动授权和每次最多迭代数由用户在启动前确认；本计划不代表开发、提交、发布或后续 Stage 授权。",
+  "branchName": "ralph/stage40-add-anime-reliability",
+  "description": "Stage 40：只处理 FE-01 的单番草案修改后保存确认阻断。开发与定向真实 Chromium 验收已完成；本计划不代表提交、发布或后续 Stage 授权。",
   "userStories": [
     {
       "id": "US-341",
@@ -19,8 +19,8 @@
         "Tests pass"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "依赖 docs/MiGuOrca_stage40_add_anime_reliability_and_ux_PRD.md 的 WP-40-A。停止条件：最小红测未能证实连续路径、修复要求改变 API/保存语义、或独立审核未通过时停止并交回，不进入 Stage 41。"
+      "passes": true,
+      "notes": "依赖 docs/MiGuOrca_stage40_add_anime_reliability_and_ux_PRD.md 的 WP-40-A。2026-09-17 已以连续 Vitest、typecheck/lint/build 和真实 Chromium 定向用例验收；未改变 API 或保存语义，不进入 Stage 41。"
     }
   ]
 }

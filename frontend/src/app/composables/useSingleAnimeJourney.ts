@@ -5,7 +5,13 @@
  * boundary for the three-step flow; hosts attach transport calls in a later
  * story. Opaque capabilities and the idempotency key therefore live only in
  * the returned in-memory state and are never serialised by this module.
+ *
+ * The snapshot is a reactive source (US-341): hosts derive their disabled
+ * states and in-place reasons from `state`/`canConfirm()`, so a successful
+ * modify must invalidate those host computeds.
  */
+import { shallowRef } from 'vue'
+
 import type { operations } from '@/api/generated/api'
 
 type JsonBody<Operation extends keyof operations> = NonNullable<
@@ -179,45 +185,47 @@ export interface SingleAnimeJourney {
 }
 
 export function useSingleAnimeJourney(): SingleAnimeJourney {
-  let snapshot: JourneySnapshot = {
+  // Every transition replaces the snapshot object, so a shallow ref is the
+  // precise reactive dependency for hosts without proxying nested fields.
+  const snapshot = shallowRef<JourneySnapshot>({
     phase: 'input', title: '', candidateCount: 0, selectedCandidate: false,
     draftId: null, draftRevision: null, dirty: false, busy: null,
     idempotencyKey: null, requestId: null, trackingId: null, error: null,
-  }
+  })
 
   const journey: SingleAnimeJourney = {
-    get state() { return snapshot },
+    get state() { return snapshot.value },
     transition(phase) {
-      if (!canTransition(snapshot.phase, phase)) throw new Error(`非法单番旅程迁移: ${snapshot.phase} -> ${phase}`)
-      snapshot = { ...snapshot, phase, error: null }
+      if (!canTransition(snapshot.value.phase, phase)) throw new Error(`非法单番旅程迁移: ${snapshot.value.phase} -> ${phase}`)
+      snapshot.value = { ...snapshot.value, phase, error: null }
     },
-    setTitle(title) { snapshot = { ...snapshot, title: title.trim(), error: null } },
-    setCandidates(count) { snapshot = { ...snapshot, candidateCount: Math.max(0, Math.floor(count)), selectedCandidate: false, error: null } },
-    selectCandidate() { if (snapshot.phase !== 'candidates' || snapshot.candidateCount < 1) return; snapshot = { ...snapshot, selectedCandidate: true, error: null } },
-    setDraft(draftId, revision) { if (snapshot.phase === 'candidates') journey.transition('review'); snapshot = { ...snapshot, draftId, draftRevision: revision, dirty: false, idempotencyKey: null, error: null } },
-    setDirty(dirty) { snapshot = { ...snapshot, dirty, ...(dirty ? { idempotencyKey: null } : {}) } },
+    setTitle(title) { snapshot.value = { ...snapshot.value, title: title.trim(), error: null } },
+    setCandidates(count) { snapshot.value = { ...snapshot.value, candidateCount: Math.max(0, Math.floor(count)), selectedCandidate: false, error: null } },
+    selectCandidate() { if (snapshot.value.phase !== 'candidates' || snapshot.value.candidateCount < 1) return; snapshot.value = { ...snapshot.value, selectedCandidate: true, error: null } },
+    setDraft(draftId, revision) { if (snapshot.value.phase === 'candidates') journey.transition('review'); snapshot.value = { ...snapshot.value, draftId, draftRevision: revision, dirty: false, idempotencyKey: null, error: null } },
+    setDirty(dirty) { snapshot.value = { ...snapshot.value, dirty, ...(dirty ? { idempotencyKey: null } : {}) } },
     begin(busy) {
-      if (snapshot.busy !== null) return false
-      if (busy === 'searching' && snapshot.phase !== 'input') return false
+      if (snapshot.value.busy !== null) return false
+      if (busy === 'searching' && snapshot.value.phase !== 'input') return false
       if (busy === 'saving' && !journey.canConfirm()) return false
-      if (busy === 'accepting' && snapshot.phase !== 'saved_pending_confirm') return false
-      snapshot = { ...snapshot, busy, error: null }
+      if (busy === 'accepting' && snapshot.value.phase !== 'saved_pending_confirm') return false
+      snapshot.value = { ...snapshot.value, busy, error: null }
       return true
     },
     finishConfirm(result = {}) {
-      snapshot = { ...snapshot, busy: null, requestId: result.requestId ?? snapshot.requestId, phase: result.savedOnly ? 'saved_pending_confirm' : 'confirmed_pending_tracking', dirty: false, draftId: null, draftRevision: null, idempotencyKey: null }
+      snapshot.value = { ...snapshot.value, busy: null, requestId: result.requestId ?? snapshot.value.requestId, phase: result.savedOnly ? 'saved_pending_confirm' : 'confirmed_pending_tracking', dirty: false, draftId: null, draftRevision: null, idempotencyKey: null }
     },
-    finishTracking(trackingId) { snapshot = { ...snapshot, busy: null, trackingId: trackingId ?? snapshot.trackingId, phase: trackingId ? 'complete' : 'confirmed_pending_tracking' } },
-    finishVerificationPending() { snapshot = { ...snapshot, busy: null, phase: 'verification_pending' } },
-    returnToSavedPending() { snapshot = { ...snapshot, busy: null, phase: 'saved_pending_confirm', error: null } },
+    finishTracking(trackingId) { snapshot.value = { ...snapshot.value, busy: null, trackingId: trackingId ?? snapshot.value.trackingId, phase: trackingId ? 'complete' : 'confirmed_pending_tracking' } },
+    finishVerificationPending() { snapshot.value = { ...snapshot.value, busy: null, phase: 'verification_pending' } },
+    returnToSavedPending() { snapshot.value = { ...snapshot.value, busy: null, phase: 'saved_pending_confirm', error: null } },
     fail(error) {
       const safeError = toSafeJourneyError(error)
       const clearsConfirmKey = safeError.type === 'idempotency_conflict' ||
         safeError.type === 'draft_expired' || safeError.type === 'draft_evicted' ||
         safeError.type === 'draft_replayed' || safeError.type === 'draft_revision_conflict'
       if (safeError.type === 'save_confirm_failed' && safeError.requestId && safeError.retryAction === 'ACCEPT_SAVED_REQUEST') {
-        snapshot = {
-          ...snapshot,
+        snapshot.value = {
+          ...snapshot.value,
           phase: 'saved_pending_confirm',
           busy: null,
           draftId: null,
@@ -229,23 +237,23 @@ export function useSingleAnimeJourney(): SingleAnimeJourney {
         }
         return
       }
-      snapshot = {
-        ...snapshot,
-        phase: snapshot.phase === 'confirming' ? 'review' : snapshot.phase,
+      snapshot.value = {
+        ...snapshot.value,
+        phase: snapshot.value.phase === 'confirming' ? 'review' : snapshot.value.phase,
         busy: null,
         error: safeError,
         ...(clearsConfirmKey ? { idempotencyKey: null } : {}),
       }
     },
-    discard() { snapshot = { ...snapshot, phase: 'input', title: '', candidateCount: 0, selectedCandidate: false, draftId: null, draftRevision: null, dirty: false, busy: null, idempotencyKey: null, requestId: null, trackingId: null, error: null } },
+    discard() { snapshot.value = { ...snapshot.value, phase: 'input', title: '', candidateCount: 0, selectedCandidate: false, draftId: null, draftRevision: null, dirty: false, busy: null, idempotencyKey: null, requestId: null, trackingId: null, error: null } },
     newConfirmOperation() {
       if (!journey.canConfirm()) return null
-      if (snapshot.idempotencyKey) return snapshot.idempotencyKey
+      if (snapshot.value.idempotencyKey) return snapshot.value.idempotencyKey
       const key = randomKey()
-      snapshot = { ...snapshot, idempotencyKey: key }
+      snapshot.value = { ...snapshot.value, idempotencyKey: key }
       return key
     },
-    canConfirm() { return snapshot.phase === 'review' && snapshot.busy === null && !snapshot.dirty && !!snapshot.draftId && snapshot.draftRevision !== null },
+    canConfirm() { return snapshot.value.phase === 'review' && snapshot.value.busy === null && !snapshot.value.dirty && !!snapshot.value.draftId && snapshot.value.draftRevision !== null },
   }
   return journey
 }
