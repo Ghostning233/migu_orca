@@ -141,12 +141,14 @@ describe('App shell (US-260)', () => {
     expect(region.exists()).toBe(true)
     expect(region.attributes('aria-live')).toBe('polite')
     expect(region.attributes('role')).toBe('status')
+    expect(region.attributes('aria-atomic')).toBe('true')
     expect(region.text()).toContain('保存成功')
     expect(region.text()).toContain('订阅方案已保存。')
 
     notification.clear()
     await wrapper.vm.$nextTick()
     expect(wrapper.find('.global-notification').exists()).toBe(false)
+    wrapper.unmount()
   })
 
   it('renders error notifications with role=alert and a close button', async () => {
@@ -164,10 +166,12 @@ describe('App shell (US-260)', () => {
 
     const region = wrapper.find('.global-notification')
     expect(region.attributes('role')).toBe('alert')
+    expect(region.attributes('aria-live')).toBe('assertive')
     expect(region.classes()).toContain('global-notification-error')
 
     await wrapper.find('.global-notification-close').trigger('click')
     expect(wrapper.find('.global-notification').exists()).toBe(false)
+    wrapper.unmount()
   })
 
   it('renders a keyboard skip link to the main landmark (US-207)', async () => {

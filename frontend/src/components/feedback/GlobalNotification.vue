@@ -1,18 +1,37 @@
 <script setup lang="ts">
-// Global notification region (US-199).
+// Global notification toast (US-199, Stage 42 / US-346).
 //
-// A single `aria-live` container in the shell: success/info use role=status
-// (polite), errors use role=alert. Messages are pre-sanitized by the caller
-// (api/client.ts + notification store) and never contain sensitive values.
+// One floating `aria-live` toast for non-critical success/info/error
+// summaries. It is `position: fixed`, so it never joins the `main` document
+// flow and never shifts the page under the user. It is deliberately not a
+// carrier for anything actionable: field validation, candidate/draft/batch
+// failures, their retry entries and save-confirm blocks all stay next to their
+// own controls, and this toast only adds a short summary on top of them.
+//
+// The floating layer is click-through (`pointer-events: none`) so a toast can
+// never swallow a click aimed at a page control it happens to cover; the close
+// button opts back in. Nothing here moves focus, and messages arrive already
+// sanitized by the caller (api/client.ts + notification store): no endpoints,
+// tokens, cookies, raw bodies, absolute paths or full Requests.
 import { storeToRefs } from 'pinia'
-import { computed } from 'vue'
+import { computed, onBeforeUnmount } from 'vue'
 
 import { useNotificationStore } from '@/app/stores/notification'
 
 const notificationStore = useNotificationStore()
 const { current } = storeToRefs(notificationStore)
 
-const role = computed(() => (current.value?.kind === 'error' ? 'alert' : 'status'))
+// Fail closed outside the two polite kinds: an unexpected kind is announced
+// assertively instead of being silently downgraded to a status message.
+const isPolite = computed(
+  () => current.value?.kind === 'success' || current.value?.kind === 'info',
+)
+
+// The store owns the auto-close timers; unmounting has to take the pending one
+// with it so it cannot outlive the toast and mutate the shell afterwards.
+onBeforeUnmount(() => {
+  notificationStore.clear()
+})
 </script>
 
 <template>
@@ -20,8 +39,8 @@ const role = computed(() => (current.value?.kind === 'error' ? 'alert' : 'status
     v-if="current"
     class="global-notification"
     :class="`global-notification-${current.kind}`"
-    :role="role"
-    :aria-live="current.kind === 'error' ? 'assertive' : 'polite'"
+    :role="isPolite ? 'status' : 'alert'"
+    :aria-live="isPolite ? 'polite' : 'assertive'"
     aria-atomic="true"
   >
     <div class="global-notification-copy">
@@ -30,22 +49,38 @@ const role = computed(() => (current.value?.kind === 'error' ? 'alert' : 'status
         {{ current.message }}
       </p>
     </div>
-    <button type="button" class="secondary-button global-notification-close" @click="notificationStore.clear()">
+    <button
+      type="button"
+      class="secondary-button global-notification-close"
+      @click="notificationStore.clear()"
+    >
       关闭
     </button>
   </div>
 </template>
 
 <style scoped>
+/* Anchored to the viewport (not the main flow) under the shell header, in the
+   corner opposite the batch toolbar's fixed save/confirm actions. */
 .global-notification {
+  position: fixed;
+  top: calc(var(--size-shell-header) + var(--space-4));
+  right: var(--space-5);
+  z-index: var(--z-overlay);
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-4);
+  max-width: min(30rem, calc(100vw - var(--space-5) * 2));
   border-radius: var(--radius-md);
   padding: var(--space-3) var(--space-4);
-  margin: 0 auto var(--space-4);
-  max-width: 1180px;
+  box-shadow: var(--shadow-shell);
+  pointer-events: none;
+}
+
+.global-notification-close {
+  flex-shrink: 0;
+  pointer-events: auto;
 }
 
 .global-notification-success {
@@ -77,9 +112,5 @@ const role = computed(() => (current.value?.kind === 'error' ? 'alert' : 'status
 
 .global-notification-message {
   margin: 0;
-}
-
-.global-notification-close {
-  flex-shrink: 0;
 }
 </style>

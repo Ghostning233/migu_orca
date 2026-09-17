@@ -1,305 +1,85 @@
 # Ralph 当前状态
 
-Stage 39 已于 2026-09-15 完成并归档至
-`scripts/ralph/archive/2026-09-15-stage39-deployment-settings/`。
+Stage 41 已于 2026-09-17 经 [PR #69](https://github.com/Ghostning233/migu_orca/pull/69)
+合并至 `main`（merge `ab333cf`）；其 Ralph 快照已归档至
+`scripts/ralph/archive/2026-09-18-stage41-add-anime-ux/`。
 
-Stage 40 已于 2026-09-17 完成并合并（US-341，合并提交 `cd6dbf0`）。
+Stage 42 当前计划为 WP-42-A / US-346（F5 悬浮全局提示收尾）。执行分支为
+`ralph/stage42-global-notification`，基线为 `origin/main` 的 `ab333cf`。
+US-346 已通过开发验证和主 Agent 独立审核，`passes=true`；改动仅在本地工作区，
+未提交、未 push、未建 PR、未合并，待用户另行授权发布。
 
-Stage 41 已完成（发布前）：US-344（WP-41-C，F3 服务端权威草案自动重算与「保存修改」）
-与 US-345（WP-41-D，F4 添加页与共享审核详情的信息层级）。
-执行 PRD 是 `docs/MiGuOrca_stage40_add_anime_reliability_and_ux_PRD.md` 的 WP-41-C / WP-41-D；
-执行分支为 `ralph/stage41-add-anime-ux`，基线为 `cd6dbf0`。US-342（WP-41-A）与 US-343（WP-41-B）
-均已通过独立审核并保留在 progress 历史中；US-344、US-345 均已通过独立审核并置 `passes=true`。
-本计划覆盖 WP-41-A～D，不含 WP-42 或 Stage 42；提交、推送、PR 与合并由用户本次授权处理。
+## 2026-09-18 - Stage 42 规划
 
-## 2026-09-17 - WP-40-A / US-341
+- 依据 `docs/MiGuOrca_stage40_add_anime_reliability_and_ux_PRD.md` 的 WP-42-A，补充独立执行 PRD
+  `docs/MiGuOrca_stage42_global_notification_PRD.md` 并写入单故事 Ralph `prd.json`。
+- 范围冻结：只收敛既有 `useNotificationStore`、`GlobalNotification`、App 壳和其测试的非关键短时
+  提示；不改 API/OpenAPI/generated client/后端、草案/保存确认、候选人工选择、追番管理、设置或外部写。
+- 产品边界：success/info 默认 10 秒、error 默认 20 秒；按消息 id 隔离替换 timer；关键恢复入口
+  保持就地；通知不持久化且不泄露敏感值。是否引入 loading kind 必须先由现有调用点证明其必要性，
+  不为满足视觉效果新增第二套提示通道。
+- 最小验证已冻结为 store/GlobalNotification/App Vitest、typecheck/lint/build 与定向真实 Chromium；
+  完整后端、前端和 Chromium 门禁仅在 Stage 42 收尾执行一次。
 
-- 修复单番 `preview-modify` 成功返回新 revision 后的响应式失联：
-  `useSingleAnimeJourney` 的旅程快照改为 `shallowRef`；`SingleAnimeReviewPanel` 以同一
-  `saveBlockers` 响应式来源同时驱动保存按钮和中文就地原因，避免灰色按钮宣称可用。
-- 新增连续回归：revision 1 → held `preview-modify` → revision 2 → `save-confirm`，断言同一
-  `draft_id`、`base_revision=2` 与内存幂等键；另覆盖零资源、可重试修改失败/恢复、冲突安全恢复，
-  以及 URL/history/storage/DOM/console 的敏感 canary。
-- 验证通过：`npm run test:unit -- --run src/app/composables/useSingleAnimeJourney.test.ts src/features/workbench/WorkbenchView.test.ts`
-  （41 passed）；`npm run typecheck`；`npm run lint`；`npm run build`；
-  `uv run ruff check tests/browser/test_app_workbench.py`；
-  `uv run pytest -q tests/browser/test_app_workbench.py::TestAppWorkbenchCandidateSelectionAndDraft::test_held_preview_modify_restores_save_confirm_with_new_revision tests/browser/test_app_workbench.py::TestAppWorkbenchCandidateSelectionAndDraft::test_preview_modify_zero_effective_resources_blocks_save_with_reason tests/browser/test_app_workbench.py::TestAppWorkbenchCandidateSelectionAndDraft::test_draft_revision_conflict_offers_regeneration_hint`
-  （3 passed）。
-- 浏览器环境按 README/`script/setup-browser-deps.sh` 恢复本地 Chromium 依赖；使用 Playwright route mock，
-  未访问真实 MiKan、Auto Bangumi 或 qBittorrent。独立审核确认未改 API/OpenAPI、保存确认语义或外部写边界。
-- US-341 通过；Stage 40 仅此 story。未提交、未 push、未建 PR、未合并；不自动进入 Stage 41。
+## 2026-09-18 - WP-42-A / US-346 开发与定向验证（待独立审核）
 
-## 2026-09-17 - WP-41-A / US-342（已通过主 Agent 独立审核）
-
-- 范围：仅文档与二进制资产路径整理。未改前端、后端、测试、OpenAPI、运行数据、秘密或图片内容。
-- 全库引用盘点（`rg add-anime-home-v1|batch-review-12-v1|tracking-management-v1`）确认：
-  三张旧图除 `docs/` 下的文档链接/说明外，无源码、构建、测试或图片生成流程消费；命中的其他位置仅为
-  `docs/archive/**`、`scripts/ralph/archive/**` 历史日志（按 AGENTS.md 不改历史快照）。
-- 唯一真实断链为 `docs/design/frontend-ux-visual-direction-v1.md` 的首页 V1 图链接，已更新为 archive 路径。
-- 以 `git mv` 将三张旧图移入 `docs/design/assets/frontend-ux/archive/`：
-  `add-anime-home-v1.png`、`batch-review-12-v1.png`、`tracking-management-v1.png`。
-  `git status` 显示为 rename，blob 哈希移动前/后一致（`ba826533`/`88608465`/`1e5514d5`），内容未变。
-- 新增 `docs/design/assets/frontend-ux/archive/README.md` 明确归档角色、取代者与归档日期；
-  现行添加页首页唯一指向六张 `review-2026-09-17/` 图。
-- 更新说明与链接：`frontend-ux-visual-direction-v1.md`（§1/§3/§8）、
-  `frontend-ux-review-mockups-2026-09-17.md`、`frontend-review-issues-2026-09-17.md`（§4 盘点表与状态行）、
-  `frontend-ux-followup-handoff-2026-09-17.md`（D0 行标记已完成）。执行 PRD 的 WP-41-A 目标陈述按规范原文保留。
-- 未移动/覆盖/删除：`batch-review-12-v2.png`、`tracking-management-v2.png`、
-  `batch-partial-success-v1.png`、`tracking-revalidation-failed-v1.png` 与六张 `review-2026-09-17/` 图，均核对存在。
-- 验证命令与结果：
-  - `rg '\](assets/frontend-ux/(add-anime-home-v1|batch-review-12-v1|tracking-management-v1)\.png'` → 无命中。
-  - 自写只读 Markdown 相对链接核对（项目无既有链接检查脚本，已如实报告）：
-    `docs/**/*.md` 共 112 条相对链接，仅剩 1 条为既存无关断链
-    `docs/archive/stage39/current-handoff-2026-09-14.md -> stage39-transition-workflow.md`（历史归档，不在本工作包范围，未改）。
-  - `git diff --check` → 通过；`find` 核对资产树完整。
-- 遗留风险：无功能或契约变更；`docs/archive/stage39/current-handoff-2026-09-14.md` 的既存断链未处理。
-
-### 独立审核（2026-09-17，主 Agent）
-
-- 结论：WP-41-A / US-342 **通过**。`prd.json` 已将 US-342 置为 `passes=true`。
-- 复核证据（均为实际命令输出）：
-  - 三张移动图片相对基线 `cd6dbf0` 的 blob SHA 完全一致，内容未变。
-  - `git diff --cached --name-status` → 三条 `R100`，重命名历史保留、无内容改写。
-  - `git diff --check` 与 `git diff --cached --check` 均通过。
-  - 旧的非 `archive/` Markdown 图片链接无命中；现行添加页首页唯一指向六张 `review-2026-09-17/` 图。
-  - 六张 review 图与 `batch-review-12-v2.png`、`tracking-management-v2.png`、
-    `batch-partial-success-v1.png`、`tracking-revalidation-failed-v1.png` 文件与引用均存在。
-  - `prd.json` 的分支名（`ralph/stage41-add-anime-ux`）、唯一 US-342 与 scope 均正确。
-- 审核确认 `docs/archive/stage39/current-handoff-2026-09-14.md -> stage39-transition-workflow.md`
-  为**既存**断链：该文件在本工作包中**未被修改**，断链在基线 `cd6dbf0` 即已存在，不属于 WP-41-A
-  范围，未处理；非本工作包引入，不影响本次审核结论。
-- 按用户指令：未 commit、未 push、未建 PR、未合并；未改任何其他文件，未改变资产暂存状态
-  （三条 `R100` 保持已暂存），不进入 WP-41-B/C/D 或 Stage 42。
-
-## 2026-09-17 - WP-41-B / US-343（开发与定向验证完成，待独立审核）
-
-- 范围：F2 候选加载反馈与减少动态效果。仅前端 workbench/BaseButton 及其测试；未改 API、OpenAPI、
-  generated client、后端、draft_id+revision、save-confirm、候选人工确认边界或搜索/parse 契约。
-- 先固化红测：新增 8 条最小 Vitest（`CandidateCollectionList.test.ts` 3 条、`WorkbenchView.test.ts` 3 条、
-  `BatchWorkbenchView.test.ts` 2 条）。实现前运行
-  `npm run test:unit -- --run` （三个文件）→ **7 failed | 77 passed**，确认缺口真实存在（加载态、
-  按候选隔离、就地错误/重试、批量 item 隔离当时均无对应行为）。
-- 实现（公开输入，不另造卡片）：
-  - `CandidateCollectionList` 新增 `loadingCandidateId` 与 `candidateErrors`；仅被点候选标记 loading，
-    其他候选暂禁但不标加载；`CandidateCard` 新增 `loading`/`error`，按钮就地显示「正在生成草案…」
-    + `aria-busy`，卡片内 `role="status"` 进行中文案与 `role="alert"` 安全错误，错误态按钮变「重试生成草案」。
-  - `WorkbenchView`：`generatingCandidateId` + `candidateErrors`（按 bangumi_id），一次仅一次生成；
-    `generateDraft` 改为返回 `{ ok, message }` 以便把脱敏文案就地显示（请求体与超时不变）；搜索词变化、
-    重新搜索、修改搜索与丢弃草案都会清空这些状态。
-  - `BatchWorkbenchView`：`draftCreateCandidateIds` / `draftCreateErrors` 以 `item_id` 为键，只用当前
-    item 的候选列表渲染加载；其他 item 的卡片保持可查看/可选择/可编辑且不显示加载；成功仍在一次
-    `items.value.map` + journey dispatch 中把该 item 原子置为 DRAFT。
-  - `BaseButton`：新增可选 `loadingLabel`（默认「处理中…」）在 loading 时替代 slot 文案，并在
-    `prefers-reduced-motion: reduce` 下 `display:none` 掉 spinner（不再残留静止残缺圆弧）；普通动效
-    仍为连续旋转。这是本包唯一的跨页可见文案变化。
-  - 候选阶段资源数：批量卡片「有效种子数」改为仅在已有草案请求时渲染（候选阶段不再出现该字段）；
-    单番候选步骤本就不显示资源数。
-  - 消除重复指示：候选自身承担加载态时不再同时显示页面级「正在从候选生成订阅草案」，直连 fallback
-    路径保持原样。
-- 验证命令与结果：
-  - `npm run test:unit -- --run src/features/workbench/CandidateCollectionList.test.ts src/features/workbench/WorkbenchView.test.ts` → 43 passed。
-  - `npm run test:unit -- --run src/features/workbench/BatchWorkbenchView.test.ts` → 41 passed。
-  - `npm run test:unit -- --run`（全量）→ 46 files / 557 passed。
+- 范围与落点：只改 `frontend/src/app/stores/notification.ts`、
+  `frontend/src/components/feedback/GlobalNotification.vue`、受影响 Vitest（`App.test.ts`、
+  新增 `notification.test.ts` 与 `GlobalNotification.test.ts`）与新增
+  `tests/browser/test_app_global_notification.py`。未改 `App.vue`、未改 API/OpenAPI/generated
+  client/后端、草案与保存确认契约、追番管理/设置业务、外部写或任何业务成功判定。
+- 实现：
+  - 单一 store 新增 `NOTIFICATION_AUTO_CLOSE_MS`（success/info 10s、error 20s）；`show()` 先按
+    上一条消息 id 取消其 timer，再为新 id 建 timer；timer 回调只清理自己 id 的消息（`current?.id`
+    守卫）。未定义 kind 不落任何时长，改为手动关闭，避免静默取得不安全默认。
+  - `clear()` 取消当前消息 timer；timer 存在模块级 Map（不进 Pinia 响应式 state），
+    到期/替换/clear/卸载四条路径各自移除，任意时刻至多一条挂起。
+  - `GlobalNotification` 改为 `position: fixed`（header 下方右上、`--z-overlay`），容器
+    `pointer-events: none` 让点击穿透、关闭按钮 opt-in `auto`；`role`/`aria-live` 改为白名单：
+    success/info 才 polite+status，其余（含未定义 kind）fail closed 为 assertive+alert，
+    保留 `aria-atomic="true"`；`onBeforeUnmount` 清理 store，避免 orphan timer。
+  - 未新增 loading kind：核对全部 46 处既有 `notification.*` 调用点均无短时全局进行中需求，
+    页面 loading/disabled 仍由各页面就地持有，故不引入第二套通道。
+- 验证命令与结果（全部实际执行）：
+  - `npm run test:unit -- --run src/app/stores/notification.test.ts src/components/feedback/GlobalNotification.test.ts src/App.test.ts` → 3 files / 20 passed。
+  - `npm run test:unit -- --run` → 49 files / 593 passed（Stage 41 收尾为 47 files / 578 passed）。
   - `npm run typecheck`、`npm run lint`、`npm run build` → 均通过。
-  - `uv run ruff check tests/browser/test_app_workbench.py` → All checks passed。
-  - `uv run pytest tests/browser/test_app_workbench.py::TestAppWorkbenchCandidateLoadingFeedback -q` → 4 passed。
-  - `uv run pytest tests/browser/test_app_workbench.py tests/browser/test_app_batch_workbench.py tests/browser/test_app_responsive_a11y.py tests/browser/test_app_shell.py -q` → 94 passed。
-  - `uv run pytest tests/browser -q` → 203 passed（一次全量，用于覆盖 BaseButton 共享改动）。
-- 真实 Chromium 定向用例（`tests/browser/test_app_workbench.py`，全部 Playwright route mock，未访问真实
-  MiKan/AB/qB）：held `POST /api/v1/requests` 断言被点候选 `aria-busy`+「正在生成草案」而其他候选只 disabled、
-  未标加载，且页面内仅一个 spinner；普通动效断言 `animationName != none`、`infinite`、`duration != 0s`；
-  `reduced_motion="reduce"` 断言 spinner `display:none` 且文字与 `aria-busy` 仍在；失败用例断言就地脱敏文案、
-  原始错误原文不出现、二次点击即重试成功；批量用例在 item-a held 时切到 item-b 仍能查看候选并保持可点、
-  不显示加载，fulfill 后仅 item-a 原子变「草案」；并断言候选阶段无「有效种子数」、URL/storage/DOM 无 draft_id、
-  候选 context 与 request_id 参数。route handler 不 sleep，非 POST 一律 `continue_()`；测试数据经 conftest 的
-  tmp storage 隔离，未触碰 `.migu_orca/storage`。
-- 遗留风险与说明（请审核核对）：
-  - 新增的 4 条 Chromium 用例是在实现落地后运行，未单独产出浏览器红测；红测证据来自实现前的
-    Vitest 7 failed，以及这些断言针对本包新增的 DOM（`aria-busy`、`正在生成草案…`、卡片内 `role=alert`）。
-  - `BaseButton` 的 loading 文案替代是共享组件行为变化：其他页面的加载中按钮现在显示「处理中…」而非原动作
-    文案（普通与 reduced motion 一致）。全量浏览器套件 203 passed 覆盖了现有流程，但新文案本身未逐页加断言。
-  - 失败时 Toast 仍保留（既有浏览器/Vitest 断言「生成失败」），就地错误是新增的第二载体，不是替代。
-  - 批量允许两个 item 各自同时生成（沿用既有“无全局锁”设计，未新增限制）；仅保证互不误标加载与状态原子。
-- `prd.json` 已切为唯一 US-343、`passes=false`；按用户指令未 commit/push/建 PR/合并，等待独立审核后再定 passes。
-
-### 审核收口（2026-09-17，主 Agent 审核后；仅改测试与 progress）
-
-- 范围：只改 `tests/browser/test_app_workbench.py` 与 `scripts/ralph/progress.txt`；**未改**产品实现、
-  `BaseButton`、API/OpenAPI/generated client/后端，也**未改**任何 WP-41-A 文件或资产暂存状态（三条 `R100`
-  仍为已暂存）。
-- 1) progress 头部：Stage 41 当前故事由 US-342/WP-41-A 更正为 **US-343/WP-41-B**，并注明 US-342 已通过
-  独立审核、保留在历史中；`passes` 仍为 `false`。
-- 2) 单番 F2 用例 canary 加固：新增 `window.history.state` 与 console 消息两处断言（沿用同文件既有
-  `page.on("console", ...)` 与 `history.state` canary 写法），并显式注明公开 `request_id` 不作为秘密；
-  另加 `historyState not in ("", "null")` 守卫，避免 canary 在 history 面消失时空转。
-- 3) 批量 held 用例改为真实并发：item-b 增加第二个候选；在 item-a 仍 in-flight 时实际点击 item-b 候选，
-  断言 item-b 自身 `aria-busy`+「正在生成草案」、其兄弟候选只被暂禁不标加载、item-a 的生成不被取消或改写、
-  两个卡片状态不互换；再切回 item-a 的候选面板断言仍只有 item-a 被点的候选在加载，且全页
-  `.candidate-select[aria-busy='true']` 恰为 1；最后按 held 顺序分别 fulfill 两个请求（两个 draft_id 必须不同），
-  断言两项各自原子进入「草案」、fulfill 一项不释放另一项、结束后无残留候选加载与 draft 能力入 URL。
-- 修改前记录：本轮改动的精确最小测试在当前工作区先跑一次 → **2 passed**（该两条用例此前已通过）。
-  本轮是断言加固与 progress 更正，**不产生新的红测**，不声称红测；实现阶段的红测证据仍为上一轮
-  `npm run test:unit -- --run`（三文件）的 **7 failed | 77 passed**。
-- 修改后验证：
-  - `uv run ruff check tests/browser/test_app_workbench.py` → All checks passed。
-  - `uv run pytest tests/browser/test_app_workbench.py::TestAppWorkbenchCandidateLoadingFeedback -q` → **4 passed**。
-  - `uv run pytest tests/browser/test_app_workbench.py tests/browser/test_app_batch_workbench.py tests/browser/test_app_responsive_a11y.py -q` → **85 passed**。
-  - `historyState` 守卫通过，证明 history canary 非空转；全部为 route mock + held POST，未访问真实
-    MiKan/AB/qB，测试数据仍由 conftest 的 tmp storage 隔离。
-- 遗留：`passes=false` 保持，等待复审；未 commit/push/建 PR/合并。
-
-### 独立审核（2026-09-17，主 Agent 复审）
-
-- 结论：WP-41-B / US-343 **通过**。`prd.json` 已将 US-343 置为 `passes=true`。
-- 独立复核证据（审核方实际命令与结果）：
-  - `git diff --check` 与 `git diff --cached --check` → 通过。
-  - frontend 下 `npm run test:unit -- --run src/features/workbench/CandidateCollectionList.test.ts src/features/workbench/WorkbenchView.test.ts src/features/workbench/BatchWorkbenchView.test.ts`
-    → **3 files / 84 passed**。
-  - `uv run pytest tests/browser/test_app_workbench.py::TestAppWorkbenchCandidateLoadingFeedback -q` → **4 passed**。
-- 审核确认：`BaseButton` 的 `loadingLabel` 与 reduced-motion 处理属 F2「可访问文字反馈」的必要最小通用修复；
-  无 API、`draft_id + revision`、保存确认语义、候选人工选择边界或敏感边界漂移。
-- 按用户指令：未 commit、未 push、未建 PR、未合并；未改其他文件，未更改任何暂存状态（三条 `R100` 保持
-  已暂存），不进入 WP-41-C/D 或 Stage 42。
-
-## 2026-09-17 - WP-41-C / US-344（开发与定向验证完成，待独立审核）
-
-- 范围：F3 服务端权威草案自动重算与「保存修改」。仅前端 `features/workbench/**` 与
-  `app/composables/useDraftSession.ts` 的既有契约、其 Vitest 与 `tests/browser/test_app_workbench.py`；
-  未改 API/OpenAPI/generated client/后端、`draft_id + base_revision` 契约、save-confirm 语义、
-  候选人工确认边界、搜索/parse 契约或外部写。
-- 最小调度架构（先冻结契约再实现）：新增 `frontend/src/features/workbench/draftEditScheduler.ts`
-  （`useDraftEditScheduler`）。它只决定「何时」发 `preview-modify`，CAS 仍由既有 `useDraftSession` 独占：
-  - 字幕组：立即 `pump({filter:false,folder:false})`；
-  - 过滤规则（must_contain/must_not_contain/use_regex/case_sensitive 为一个单位）：最后一次输入或切换后
-    `DRAFT_FILTER_DEBOUNCE_MS = 1500` 防抖；
-  - 目录名：只在显式 flush/重试时随请求提交，绝不自动发送；
-  - 在途时只保留最新意图（`queued` + `queuedScope`），请求完成后再 pump，永不复用同一 revision；
-  - 成功时 `reconcile()` 清掉已被服务端确认的槽位，配合 `session.apply` 的原子替换实现
-    「request + 资源摘要 + 规则 + revision 一次性更新」；
-  - `restore()` = 丢弃本地意图 + `session.reset()`；`dispose()`/`cancelTimer()`/`dropPending()`
-    用于离开、切换 item 与失效。
-- host 接线：`SingleAnimeReviewPanel` 与 `BatchWorkbenchView` 各自持有调度器（批量按 `item_id` 建 Map，
-  与 `draftSessions` 一一配对）。批量卡片快捷字幕组选择与右栏详情走同一调度器，因此两个入口不可能
-  用同一 revision 发两次 CAS；切换详情时对离开项 `cancelTimer()+dropPending()`，删除/失效/卸载时 `dispose()`。
-  `saveBlockers` / `itemConfirmability` 新增中文阻断原因：「…正在等待过滤规则自动更新」「…等待提交目录名」，
-  并在防抖、在途、失败未恢复或手工待提交字段时禁用「保存并确认」；点击最终确认只发 save-confirm，
-  不隐式发送第二个 preview-modify。
-- `AnimeDraftEditor`：新增 `subtitle-group-change` / `filter-change` / `folder-change` 三类编辑意图
-  （同步 watcher + `guarded()`，程序化写入不产生意图，已由测试固定）；默认草案态按钮文案改为「保存修改」。
-  快照同步由「整体重置」改为「字段合并」：本地值等于旧或新服务端值时采纳服务端值，否则保留用户尚未生效的
-  输入——这是「在途期间的输入保留为待处理」所必需，`AnimeDraftEditor.test.ts` 中对应既有断言按新契约
-  改写并加强（同一快照仅同步已确认字段 + 新增「程序化写入不宣告意图」用例）。
-- 先红后绿证据：
-  - 新增 `draftEditScheduler.test.ts` 时模块尚不存在 → `Failed to resolve import` 全红；实现后 12 passed。
-  - 期间发现并修复真实语义缺口：立即的字幕组请求会夹带尚未到期的过滤输入。先加红测
-    `never piggybacks a not-yet-due filter rule on an immediate subtitle change` → **1 failed**
-    （实际 patch 含 `filter_rule`），再引入 `PumpScope` 限定每次 CAS 可提交的部分 → 13 passed。
-- 验证命令与结果：
-  - `npm run test:unit -- --run` → **47 files / 571 passed**。
-  - `npm run typecheck`、`npm run lint`、`npm run build` → 均通过。
-  - `uv run ruff check tests/browser/test_app_workbench.py` → All checks passed。
-  - `uv run pytest tests/browser/test_app_workbench.py::TestAppWorkbenchDraftAutoRecompute -q` → **8 passed**。
-  - `uv run pytest tests/browser/test_app_workbench.py tests/browser/test_app_batch_workbench.py
-    tests/browser/test_app_responsive_a11y.py tests/browser/test_app_shell.py -q` → **102 passed**。
-  - `uv run pytest tests/browser/test_app_request_detail.py tests/browser/test_app_plans_stage37.py
-    tests/browser/test_app_requests.py tests/browser/test_app_mode_input.py
-    tests/browser/test_app_feature_parity.py -q` → **50 passed**（覆盖共享编辑器的已保存方案路径）。
-- 真实 Chromium 定向用例（全部 Playwright route mock，未访问真实 MiKan/AB/qB；held route 先存后 fulfill，
-  handler 不 sleep）：即时字幕组（请求 < 1.5 秒到达、patch 仅含字幕组）；过滤规则防抖 + 连续输入仅 1 次请求 +
-  「保存修改」立即 flush 且其后不再发；目录名 2 秒内不发、阻断确认、flush 后可用；held 在途输入排队并以
-  第二次请求的 `base_revision=2` 发出且只含仍未生效的意图；失败（HTTP 500 + 内部原文）保留最后一致资源、
-  就地原因、恢复上次结果不发请求、重试携带原 base_revision；冲突 409 回到重新选择合集且 DOM/URL/history/
-  storage/console 无草案能力；零资源自动重算后阻断确认且资源数归零；批量切换详情取消防抖、held 旧响应
-  fulfill 后不改新 item、原 item 卡片原子更新且无 pageerror。
-- 遗留风险与说明（请审核核对）：
-  - `AnimeDraftEditor` 的快照同步语义由「整体重置」改为「保留未生效输入」，属 F3 必需的行为变更；
-    为兼容既有断言，防抖等待与目录待提交的中文原因均包含「有尚未应用的编辑」子串。
-  - 单番的「保存修改」`flush()` 会把尚未到期的过滤输入与目录名一起提交；批量右栏同理。这与 PRD 冻结语义一致。
-  - 批量在途时右栏编辑器的全部输入为禁用（既有行为），因此在途输入保留主要通过单番过滤输入与批量卡片路径验证。
-  - 自动重算不再逐次弹成功 Toast（就地资源摘要即反馈）；失败仍在就地显示原因与重试/恢复入口并保留既有 Toast。
-  - 语义收敛：本次不做「请求绝不 aborted」类断言（PRD 无此要求）；临时诊断（含 print/DIAG）已全部删除，
-    仅保留 console/pageerror canary。
-  - 本轮为唯一写入 Agent；未改变三条已暂存 `R100` 重命名，未 commit/push/建 PR/合并。
-
-### WP-41-C / US-344 独立审核收口（2026-09-17）
-
-- 主 Agent 独立复核通过：`npm run test:unit -- --run src/features/workbench/draftEditScheduler.test.ts src/features/workbench/AnimeDraftEditor.test.ts src/features/workbench/WorkbenchView.test.ts src/features/workbench/BatchWorkbenchView.test.ts` → **4 files / 97 passed**；`uv run ruff check tests/browser/test_app_workbench.py` → 通过；`uv run pytest tests/browser/test_app_workbench.py::TestAppWorkbenchDraftAutoRecompute -q --tb=short -p no:cacheprovider` → **8 passed**。
-- 审核覆盖 scheduler 的 1.5 秒防抖、字幕即时且不夹带过滤、目录显式 flush、在途 CAS 独占/最新意图排队、原子 revision 更新、失效/失败恢复、零资源和保存确认阻断；核对未新增 API/OpenAPI、未把完整 Request 或敏感值送入 DOM/URL/history/storage/log。
-- 未发现需固化红测的阻断；`US-344` 置为 `passes=true`。未 commit/push/建 PR/合并，下一工作包为 WP-41-D / US-345。
-
-## 2026-09-17 - WP-41-D / US-345（F4 添加页与共享审核详情的信息层级）
-
-- 范围冻结：先建立 US-345 AC—代码—测试矩阵再实现。矩阵覆盖 6 条可观察 AC 与页面状态表，
-  落到 4 个文件族：`WorkbenchView.vue`（单番初始/候选/救援入口）、`CandidateCard.vue`（候选
-  信息层级）、`AnimeDraftEditor.vue` + `SingleAnimeReviewPanel.vue`（共享审核核心默认层）、
-  `ResourceSummary.vue`（种子分组）+ `BatchWorkbenchView.vue`（批量左右栏与唯一主入口）。
-  未触碰 API/OpenAPI/generated client/后端，未新增 DTO，未对未保存草案调用 `safe-info`。
-- 单番初始层：删除「未搜索即渲染」的空结果大面板与旧直连合集块，搜索结果面板改为
-  `mode === 'single' && !draftRequest && searchStarted` 才挂载；直连合集降级为
-  `.candidate-fallback-rescue`，仅在 `searchSettled && !hasResults` 时出现，`#mikan-fallback-*`
-  既有 id 与人工选择真实合集路径不变。
-- 候选卡片：默认层只保留 标题 → 推荐标记 → 封面/占位 → 播出进度 → 季度证据 → 「选择此合集」；
-  `合集编号`/`匹配搜索词` 与 `MiKan ID:`、`搜索词：` 文案删除，改为折叠的
-  `details.candidate-advanced`（「高级信息」）；季数冲突仍在卡片内就地解释。
-- 审核默认层（单番/批量共用 `AnimeDraftEditor`）：新增中文摘要行
-  （`已选合集`/`季度`/`总集数`/`字幕组`/`筛选规则`，`.draft-review-summary`），
-  `ResourceSummary` 留在默认层；`Overview`/`Source` 折叠进
-  `details.advanced-detail`（「全部信息（技术详情）」），英文区名就地中文化
-  （`Filter`→`筛选规则`、`Seeds`→`资源摘要`），保持 aria-label 与既有选择器稳定。
-- 「已选哪一季」的取值方式（请审核重点核对）：未保存草案快照不含季数/总集数字段，
-  本 Stage 不新增端点也不调 `safe-info`（D40-01）。因此新增纯展示投影
-  `selectedCollectionSummary(candidate, confirmedSeason)`：把宿主内存中已有的**公开候选**
-  投影为 `{title, season, totalEpisodes}`，经新 prop `candidateSummary` 传入共享编辑器的摘要行；
-  缺失时显示「未提供/未知」而不是伪造取值。作用域限定为单番流程；批量右栏无该投影，
-  季数显示「未提供」。该投影不进入 URL/history/storage，也不随请求发送。
-- 标题回显收敛：`h3.request-detail-title` 由「原始标题优先」改为渲染同一公开合集投影
-  并经 `displayValue` 脱敏，默认层不再回显原始输入标题；技术层的「原始标题」行保持可展开读取。
-- 种子分组：`ResourceSummary` 的完整种子改为字幕组一级（`.subgroup-seed-group`）、
-  组内资源二级缩进（`.subgroup-seed-group .seed-list`），新增
-  `.complete-seed-groups > .seed-list` 不存在断言以防回到并列结构。
-- 批量动作收敛：`#batch-detail-accept` 与右栏编辑器 `apply-variant="secondary"`，
-  `#batch-accept-submit` 保持主按钮，固定操作栏仍是唯一批量主入口；新增 Vitest 断言
-  `#batch-detail-pane` 内 `.primary-button` 数量为 0。
-- 先红后绿证据（最小红测）：实现前跑受影响 Vitest → **3 failed | 155 passed**，
-  三条失败分别对应「初始页不得出现空结果面板」「救援入口只在无结果后出现」「默认层不得
-  含英文区名/技术字段」，即本次三个真实产品变更；实现后同一批次转绿。
-  新增 `AnimeDraftEditor`/`ResourceSummary`/`WorkbenchView`/`BatchWorkbenchView` 用例并加强既有断言。
-- 验证命令与结果：
-  - `npm run test:unit -- --run` → **47 files / 578 passed**。
-  - `npm run typecheck`、`npm run lint`、`npm run build` → 均通过。
-  - `uv run ruff check .` → All checks passed。
-  - `uv run pytest tests/browser/test_app_workbench.py -q` → **45 passed**（含新增
-    `TestAppWorkbenchReviewHierarchy` **7 passed**）。
-  - `uv run pytest tests/browser/test_app_batch_workbench.py tests/browser/test_app_responsive_a11y.py
-    tests/browser/test_app_request_detail.py tests/browser/test_app_shell.py -q` → **92 passed**（批量新增
-    `test_current_view_switch_is_independent_from_checkbox_selection` 1 条）。
-- 真实 Chromium 定向用例（全部 Playwright route mock + 每个测试独立 tmp storage，未访问真实
-  MiKan/AB/qB）：初始页无空结果面板/无救援入口且焦点在名称输入；救援入口仅在候选为空后出现；
-  候选默认层只有公开决策证据（封面、标题、季度证据、`播出进度：待开发 / 28 集`、`选择此合集`，
-  无 `MiKan ID:`/`匹配搜索词`）且高级信息默认折叠；审核默认层回答四问并从内存投影取第 2 季/28 集；
-  技术层（Overview/Source/request_id/原始标题/RSS 来源）默认折叠、展开后可读；默认层英文区名
-  `Filter`/`Seeds` 不存在；`#request-detail-container` 内 `.primary-button` 恰为 1 个
-  （`#single-review-save-button` 主、`#preview-apply-button` 次）且无 `/safe-info` 请求；
-  完整种子二级缩进结构；`<details>` 键盘 Enter 展开 / Space 收起；长标题在 1280×900、1440×900、
-  1920×1080 下无横向滚动，且 `history.state`/`localStorage`/`sessionStorage`/console/DOM 无
-  MiKan URL 与 draft_id。批量侧（`test_app_batch_workbench.py`）在 12 项草案下断言：切换当前查看
-  只改 `aria-expanded` 与右栏，复选框勾选与「已选且可确认 1 项」不变，`#batch-detail-pane` 内
-  `.primary-button` 为 0、`#batch-detail-accept` 次要、`#batch-accept-submit` 主、
-  `#batch-accept-all` 次要；1/12/36 项布局与部分成功沿用既有参数化用例（同批次全绿）。
-- 遗留风险与说明（请审核核对）：
-  - 季度/总集数来自内存公开候选投影而非服务端 DTO（D40-01 保守方案）。若后端后续提供未保存草案
-    的季度字段，应改为服务端权威来源并删除该投影；批量右栏在无投影时显示「未提供」。
-  - 未逐像素复刻六张效果图；只落实任务导向层级与 AC 指定可见项。
-  - 「已更新集数」仍为「待开发 / 不可用」，未实现（属非目标）。
-  - `有效种子数`/`排除种子数` 与 `ResourceSummary` 保持在默认层：既有 `tests/browser` 与
-    `test_app_request_detail.py` 依赖其英文区名之外的中文标签位于详情容器内；未迁移以避免破坏既有门禁。
-  - 未改动 WP-41-C 的 `draft_id + revision`、`draftEditScheduler`、保存确认与安全边界；
-    临时诊断（print/DIAG）已全部删除，仅保留 console/pageerror canary。
-- 本轮为唯一写入 Agent；未改变三条已暂存 `R100` 重命名，未 commit/push/建 PR/合并，未调用 `ralph.sh`。
-
-### WP-41-D / US-345 独立审核、红测修复与 Stage 41 Gate（2026-09-17）
-
-- 主 Agent 独立审核确认：信息层级、单番初始/候选/审核、批量当前查看与固定主入口、共享审核核心、种子分组、键盘/宽度与敏感边界均符合 WP-41-D；未新增 API/OpenAPI/generated client/后端、safe-info 或公开 DTO，未改变 WP-41-C 状态机与确认语义。
-- 发现并固化安全红测：`ResourceSummary` 原先会把 `/home/...` 绝对路径渲染到 DOM，新增 `does not render absolute filesystem paths` 后先得 **1 failed**。同一 Claude 修复 Agent 将 POSIX、UNC、Windows drive 路径替换为 `[已隐藏本地路径]`；复跑 `ResourceSummary.test.ts` → **4 passed**，typecheck/lint 通过。
-- 收尾验证（主 Agent 实际执行）：`npm run test:unit -- --run` → **47 files / 578 passed**；`npm run typecheck`、`npm run lint`、`npm run build` → 通过；`uv run ruff check tests/browser/test_app_workbench.py tests/browser/test_app_batch_workbench.py` → 通过；`uv run pytest tests/browser -q --tb=short -p no:cacheprovider` → **221 passed**。
-- Stage 41 完成：US-342、US-343、US-344、US-345 均 `passes=true`。本阶段未 commit/push/建 PR/合并，未进入 WP-42/F5 或 Stage 42；停止于当前工作包审核通过后的发布前状态。
+  - `uv run pytest tests/browser/test_app_global_notification.py -q --tb=short -p no:cacheprovider`
+    → 8 passed（真实 Chromium；candidate 端点全程 route mock，`storage_dir` 为 per-test tmp_path，
+    未访问真实 MiKan/AB/qB，未生成含敏感值的 screenshot/trace，未用 sleep 伪造通过）。
+  - 回归既有断言 toast 的浏览器文件 `test_app_request_detail.py test_app_settings.py
+    test_app_responsive_a11y.py test_app_workbench.py test_app_batch_workbench.py`
+    → 138 passed，确认新自动关闭时长未破坏旧断言、就地反馈未被移走。
+  - `uv run ruff check tests/browser/test_app_global_notification.py` → All checks passed。
+  - `git diff --check` → 无输出（通过）。
+- 浏览器用例覆盖：fixed 计算样式与不造成正文位移（关闭前后比对 `#mikan-candidate-search-result`
+  包围盒）、1280/1440/1920 无横向 overflow、键盘 Tab/Enter 关闭且出现/替换前后焦点不变、
+  鼠标点击关闭 + `elementFromPoint` 命中测试（新增，见下）、就地候选失败与「重试」在 toast
+  关闭后仍可恢复并替换过期摘要、以及 DOM/URL/history/localStorage/sessionStorage/console canary
+  （canary 值放在 `error_data.details` 内，经 `api/client.ts` 的 `ApiError.details` 真实进入前端
+  内存后再断言不落地到任何表面）。
+- 测试非空转的变异验证（改后均复原，`git diff --stat` 与改前一致）：
+  - 删除 `show()` 中的 `cancelAutoClose(previous.id)` → store 2 条用例失败（timer 计数 3 != 1）。
+  - 删除 `.global-notification` 的 `position: fixed` 等定位声明 → 浏览器位置断言失败，
+    且把位置断言临时放宽后，位移断言报 `y moved when the toast left: 391.375 -> 304.375`
+    （就地内容被推移 87px），证明布局位移断言真实有效。
+  - 删除关闭按钮的 `pointer-events: auto` → 新增鼠标关闭用例失败（`'none' == 'auto'`），
+    而原键盘用例仍通过。
+- 本轮新增的真实覆盖缺口修复：原浏览器用例只用 `close.focus()` + Enter 验证关闭，
+  键盘路径不经过命中测试，因此容器 `pointer-events: none` 若漏给按钮 `auto`，
+  鼠标将无法关闭而测试仍全绿。已补
+  `test_mouse_click_on_the_close_control_dismisses_the_toast`（真实 `click()` +
+  `elementFromPoint` 断言点击穿透 + 关闭后 `.candidate-card` 仍可用）。
+- 独立审核与收尾门禁（主 Agent，2026-09-18）：
+  - 逐项审查 store timer id 隔离、组件卸载清理、固定定位/点击穿透、role/aria、关键就地
+    恢复和 canary；未发现阻断项。独立复跑 `npx vitest --run` 的 6 个受影响文件，134 passed；
+    `uv run pytest tests/browser/test_app_global_notification.py -q -p no:cacheprovider`，8 passed。
+  - Stage 收尾：`uv run ruff check src tests` 通过；`uv run pytest -q -m 'not browser'` 为
+    1528 passed、229 deselected；`uv run migu-orca-openapi --check` 通过；前端
+    `npm run api:check`、`typecheck`、`lint`、`test:unit -- --run`（49 files / 593 passed）与
+    `build` 通过。完整 Chromium 门禁已启动并跑至结束；工具的超时交接未保留最终汇总，故不把
+    它当作独立可引用证据，新增 Stage 42 用例的独立 8 passed 结果在上方保留。
+  - toast 与 `ConfirmDialog`/`SafeInfoDialog` 同为 `--z-overlay`，靠 teleport 到 body 的
+    DOM 顺序使模态压在其上；行为已核对但未加自动化断言，属可接受的产品选择。
+  - 容器 `pointer-events: none` 使 toast 文案不可用鼠标选中复制；这是换取「绝不吞掉
+    页面点击」的取舍，关闭按钮与键盘仍完全可用。
