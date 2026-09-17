@@ -1,6 +1,26 @@
 {
   "project": "MiGuOrca",
   "branchName": "",
-  "description": "当前没有活动 Stage。Stage 39 已归档；等待用户审核已交付前端功能并确认新的产品范围。",
-  "userStories": []
+  "description": "Stage 40（待启动）：只处理 FE-01 的单番草案修改后保存确认阻断。执行分支、启动授权和每次最多迭代数由用户在启动前确认；本计划不代表开发、提交、发布或后续 Stage 授权。",
+  "userStories": [
+    {
+      "id": "US-341",
+      "title": "修复单番草案修改后保存确认阻断",
+      "description": "作为添加番剧的用户，我希望服务端成功更新未保存草案后，保存并确认按钮与提示能同步恢复可用，并以最新草案 revision 保存确认。",
+      "acceptanceCriteria": [
+        "先固化连续最小红测：生成草案 revision=1 → 修改规则 → preview-modify 成功返回同一 draft_id、revision=2 和有效资源后，保存并确认恢复可点击，且就地说明不再与 disabled 状态矛盾",
+        "点击保存并确认只发送服务端签发的 draft_id、最新 base_revision 和内存 idempotency_key；测试断言请求使用 revision=2，前端不回传完整 Request、草案能力不进入 URL、history、浏览器存储、通知或日志",
+        "将主按钮 disabled 状态和其中文就地原因绑定至同一响应式状态源；修改中、待应用编辑、无字幕组、无有效资源、修改失败、草案失效、revision 冲突和保存中均阻断且给出可理解原因，不得出现灰色按钮同时称可用",
+        "成功 save-confirm 仍只建立本地待提交 tracking 记录，不触发任何 Auto Bangumi 外部写；save_confirm_failed 的既有重试确认恢复语义不回归",
+        "draft_revision_conflict、draft_expired、draft_evicted、draft_replayed 仍按现有安全恢复回到重新选择合集；不显示原始错误、draft_id、完整 Request、RSS URL、magnet、绝对路径或服务端内部文本",
+        "定向 Vitest 覆盖连续成功路径、held preview-modify 在途、零资源、可重试失败和 revision 冲突；在 frontend/ 运行 npm run typecheck、npm run lint 通过",
+        "使用 dev-browser skill 的真实 Chromium 定向场景：held preview-modify 时按钮禁用且提示正确，fulfill revision=2 后按钮/提示同步并核对 save-confirm body；另验证冲突与零资源，检查 DOM、URL/history、storage、console 的敏感 canary",
+        "独立审核按 Stage 40 PRD 核对响应式根因、draft revision、保存/外部提交边界、敏感输出与测试真实性；审核问题先固化最小红测，再由同一修复 Agent 集中收口并复审通过",
+        "Tests pass"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "依赖 docs/MiGuOrca_stage40_add_anime_reliability_and_ux_PRD.md 的 WP-40-A。停止条件：最小红测未能证实连续路径、修复要求改变 API/保存语义、或独立审核未通过时停止并交回，不进入 Stage 41。"
+    }
+  ]
 }
