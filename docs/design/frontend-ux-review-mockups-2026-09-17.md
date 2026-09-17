@@ -15,7 +15,7 @@
 | [05 批量候选加载](assets/frontend-ux/review-2026-09-17/05-batch-candidates-loading.png) | 从左栏选条目，在右栏选择真实合集 | 左卡右详情、当前查看与勾选的区分、仅当前条目的候选加载、其他条目仍可操作。 |
 | [06 批量草案审核](assets/frontend-ux/review-2026-09-17/06-batch-draft-review.png) | 审核两个待确认条目中的当前草案 | 与单番同一详情信息层级；批量“保存并确认”只在固定操作栏；总集数与已更新集数占位。 |
 
-既有 [批量部分成功图](assets/frontend-ux/batch-partial-success-v1.png)继续作为异常状态参考，本轮不重复生成。`batch-review-12-v1.png` 与 `tracking-management-v1.png` 已被 V2 替代；`add-anime-home-v1.png` 已被新版首页方向取代。三张旧图待核对引用后移动到独立归档目录；目前均未移动或覆盖。
+既有 [批量部分成功图](assets/frontend-ux/batch-partial-success-v1.png)继续作为异常状态参考，本轮不重复生成。`batch-review-12-v1.png` 与 `tracking-management-v1.png` 已被 V2 替代；`add-anime-home-v1.png` 已被新版首页方向取代。三张旧图已于 2026-09-17 移至 [archive/](assets/frontend-ux/archive/)，仅作历史记录；添加页首页的现行参考只有上表六图。
 
 ## 讨论后采用的设计取舍
 

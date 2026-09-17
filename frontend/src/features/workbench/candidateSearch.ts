@@ -16,6 +16,7 @@
  */
 import type { operations } from '@/api/generated/api'
 import { displayValue } from '@/features/requests/requestDetail'
+import type { RequestDetailSnapshot, RequestSnapshot } from '@/features/requests/requestDetail'
 
 /** Public candidate-search result produced by `POST /api/v1/mikan/candidates`. */
 export type CandidateSearchResult = NonNullable<
@@ -70,6 +71,52 @@ export function episodeProgressText(totalEpisodes: number | null | undefined): s
   return Number.isInteger(total) && total > 0 ? `播出进度：待开发 / ${total} 集` : '播出进度：待开发 / 未知'
 }
 
+/** Season number carried by the candidate's own public season evidence. */
+export function candidateSeasonNumber(candidate: MikanCandidate): number | null {
+  const season = Number(candidate.season_evidence?.season)
+  return Number.isInteger(season) && season >= 1 && season <= 99 ? season : null
+}
+
+/**
+ * Chinese season-evidence line for the candidate default layer (F4). Conflicts
+ * and the explicit confirmation checkbox are rendered in place by the card;
+ * this line covers the plain-evidence case so every card states its season
+ * evidence instead of leaving the season field unstated.
+ */
+export function seasonEvidenceText(candidate: MikanCandidate): string {
+  const season = candidateSeasonNumber(candidate)
+  return season === null ? '季度证据：候选合集未提供季数' : `季度证据：候选合集为第 ${season} 季`
+}
+
+/**
+ * Display-only projection of the candidate the user selected (F4 审核默认层).
+ *
+ * The unsaved draft snapshot returned by `POST /api/v1/requests` carries no
+ * season, poster or total-episode fields, and this Stage must not add an
+ * endpoint or call `safe-info` for an unsaved draft (D40-01). The review header
+ * therefore answers「已选哪部/哪一季」from the already-public candidate
+ * metadata the host still holds in component memory — never from a new DTO.
+ */
+export interface SelectedCollectionSummary {
+  title: string
+  season: number | null
+  totalEpisodes: number | null
+}
+
+/** Project the chosen candidate into the review header summary. */
+export function selectedCollectionSummary(
+  candidate: MikanCandidate,
+  confirmedSeason: number | null,
+): SelectedCollectionSummary {
+  const total = Number(candidate.total_episodes)
+  const season = Number.isInteger(confirmedSeason) ? Number(confirmedSeason) : candidateSeasonNumber(candidate)
+  return {
+    title: String(candidate.title ?? '').trim() || '未命名合集',
+    season: season !== null && season >= 1 && season <= 99 ? season : null,
+    totalEpisodes: Number.isInteger(total) && total > 0 ? total : null,
+  }
+}
+
 /** Validate the single-search query input (legacy `buildCandidateSearchPayload`). */
 export function validateCandidateQuery(query: string): string | null {
   const trimmed = query.trim()
@@ -107,6 +154,23 @@ export interface PreviewEditState {
 export type PreviewPatch = NonNullable<
   operations['previewModifyRequest']['requestBody']
 >['content']['application/json']['patch']
+
+/**
+ * Project a server snapshot onto the editable form state (US-344). Hosts and
+ * the edit scheduler compare this projection with the live form state, so the
+ * two must never drift.
+ */
+export function previewEditStateFrom(request: RequestSnapshot | RequestDetailSnapshot): PreviewEditState {
+  const config = request.confirmable_config
+  return {
+    selectedSubtitleGroup: config?.selected_subtitle_group ?? '',
+    mustContain: config?.filter_rule?.must_contain ?? '',
+    mustNotContain: config?.filter_rule?.must_not_contain ?? '',
+    useRegex: config?.filter_rule?.use_regex === true,
+    caseSensitive: config?.filter_rule?.case_sensitive === true,
+    expectedFolderName: config?.expected_folder_name ?? '',
+  }
+}
 
 /** Build a modify patch from the preview-edit form state (legacy helper). */
 export function collectPreviewEditPatch(original: PreviewEditState, current: PreviewEditState): PreviewPatch {

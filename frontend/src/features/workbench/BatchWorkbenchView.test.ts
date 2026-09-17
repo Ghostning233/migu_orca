@@ -447,6 +447,12 @@ describe('BatchWorkbenchView candidate & draft (US-205)', () => {
     expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(true)
     expect(wrapper.find('#batch-detail-accept').exists()).toBe(true)
     expect(wrapper.find('#batch-detail-delete').exists()).toBe(true)
+    // F4/US-345: 右栏只负责当前条目的查看与改选，固定操作栏是唯一的批量
+    // 「保存并确认 N 部」主入口，右栏不再摆放第二个主按钮。
+    expect(wrapper.find('#batch-detail-accept').classes()).toContain('secondary-button')
+    expect(wrapper.find('#batch-preview-apply-button').classes()).toContain('secondary-button')
+    expect(wrapper.find('#batch-accept-submit').classes()).toContain('primary-button')
+    expect(wrapper.find('#batch-detail-pane').findAll('.primary-button')).toHaveLength(0)
   })
 
   it('blocks a dirty draft from detail selection and save-confirm', async () => {
@@ -465,6 +471,9 @@ describe('BatchWorkbenchView candidate & draft (US-205)', () => {
     expect(wrapper.find('.batch-card-checkbox-row').attributes('disabled')).toBeDefined()
     expect(wrapper.text()).toContain('有尚未应用的编辑')
     expect(apiPost).toHaveBeenCalledTimes(1)
+    // US-344: leaving the item disposes the pending 1.5s debounce window, so a
+    // later test can never inherit this one's timer.
+    wrapper.unmount()
   })
 
   it('blocks a draft with no effective resources', async () => {
@@ -960,5 +969,117 @@ describe('BatchWorkbenchView accept (US-205)', () => {
 
     expect(wrapper.findAll('.batch-draft-card')).toHaveLength(2)
     expect(wrapper.text()).not.toContain('req-2')
+  })
+})
+
+// WP-41-B / US-343: batch candidate generation locks only the current item.
+// The clicked candidate loads in place; every other item stays viewable,
+// selectable and editable and is never marked as loading.
+describe('BatchWorkbenchView candidate loading feedback (US-343)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    apiPost.mockReset()
+  })
+
+  const candidateFor = (bangumiId: string, title: string) => ({
+    bangumi_id: bangumiId,
+    title,
+    mikan_url: `https://mikan.example/Home/Bangumi/${bangumiId}`,
+  })
+
+  function twoFoundItems() {
+    return parseResult({
+      items: [
+        batchItem({
+          item_id: 'item-a',
+          raw_title: '甲',
+          status: 'FOUND',
+          candidates: [candidateFor('42', '候选甲')],
+        }),
+        batchItem({
+          item_id: 'item-b',
+          raw_title: '乙',
+          status: 'FOUND',
+          candidates: [candidateFor('77', '候选乙')],
+        }),
+      ],
+    })
+  }
+
+  it('loads only the current item candidate and keeps the other item operable', async () => {
+    let resolveRequest!: (value: unknown) => void
+    const pending = new Promise((resolve) => { resolveRequest = resolve })
+    apiPost.mockResolvedValueOnce(twoFoundItems())
+    apiPost.mockImplementationOnce(() => pending as never)
+    const { wrapper } = await mountBatch()
+
+    await wrapper.find('#batch-raw-input').setValue('甲\n乙')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('.batch-draft-card[data-item-id="item-a"] .batch-card-expand').trigger('click')
+    await nextTick()
+    const pane = wrapper.find('#batch-detail-pane')
+    await pane.find('.candidate-select').trigger('click')
+    await nextTick()
+
+    const loadingButton = wrapper.find('#batch-detail-pane .candidate-select')
+    expect(loadingButton.attributes('aria-busy')).toBe('true')
+    expect(loadingButton.text()).toContain('正在生成草案')
+    expect((loadingButton.element as HTMLButtonElement).disabled).toBe(true)
+    // The generating item shows the in-place status; the other item never does.
+    expect(wrapper.find('.batch-draft-card[data-item-id="item-a"]').text()).toContain('正在生成订阅草案')
+    expect(wrapper.find('.batch-draft-card[data-item-id="item-b"]').text()).not.toContain('正在生成订阅草案')
+
+    // The other item stays viewable and selectable: switch its detail pane and
+    // pick another candidate; nothing there is marked as loading.
+    const expandB = wrapper.find('.batch-draft-card[data-item-id="item-b"] .batch-card-expand')
+    expect((expandB.element as HTMLButtonElement).disabled).toBe(false)
+    await expandB.trigger('click')
+    await nextTick()
+
+    const paneB = wrapper.find('#batch-detail-pane')
+    expect(paneB.text()).toContain('候选乙')
+    const idleButton = paneB.find('.candidate-select')
+    expect(idleButton.attributes('aria-busy')).toBeUndefined()
+    expect((idleButton.element as HTMLButtonElement).disabled).toBe(false)
+    expect(idleButton.text()).toContain('选择此合集')
+    expect(paneB.text()).not.toContain('正在生成草案')
+
+    resolveRequest({ request: previewRequest('req-a'), summary: {}, draft_id: 'draft-a', draft_revision: 1 })
+    await flushPromises()
+
+    // Success is atomic for the generating item only.
+    const cardA = wrapper.find('.batch-draft-card[data-item-id="item-a"]')
+    expect(cardA.find('.batch-card-status').text()).toContain('草案')
+    expect(wrapper.find('.batch-draft-card[data-item-id="item-b"] .batch-card-status').text()).toContain('找到候选')
+  })
+
+  it('keeps a sanitized candidate failure beside that item only', async () => {
+    apiPost.mockResolvedValueOnce(twoFoundItems())
+    apiPost.mockRejectedValueOnce({ type: 'network_error', message: '原始网络错误' })
+    const { wrapper } = await mountBatch()
+
+    await wrapper.find('#batch-raw-input').setValue('甲\n乙')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('.batch-draft-card[data-item-id="item-a"] .batch-card-expand').trigger('click')
+    await nextTick()
+    await wrapper.find('#batch-detail-pane .candidate-select').trigger('click')
+    await flushPromises()
+
+    const pane = wrapper.find('#batch-detail-pane')
+    expect(pane.text()).toContain('从 MiKan 合集生成订阅草案失败：网络或连接不可用，请检查网络后重试。')
+    expect(pane.text()).not.toContain('原始网络错误')
+    const retry = pane.find('.candidate-select')
+    expect(retry.attributes('aria-busy')).toBeUndefined()
+    expect(retry.text()).toContain('重试生成草案')
+    expect((retry.element as HTMLButtonElement).disabled).toBe(false)
+
+    const cardB = wrapper.find('.batch-draft-card[data-item-id="item-b"]')
+    expect(cardB.text()).not.toContain('生成订阅草案失败')
+    expect(cardB.find('.batch-card-status').text()).toContain('找到候选')
+    expect(wrapper.find('#batch-parse-submit').attributes('disabled')).toBeUndefined()
   })
 })

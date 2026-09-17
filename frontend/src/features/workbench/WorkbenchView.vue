@@ -6,12 +6,17 @@
 //
 //   1. 单个搜索 — POST /api/v1/mikan/candidates, renders public candidate
 //      cards (no auto-selection) with season-evidence confirmation/conflict
-//      handling and the auditable title-parse summary;
-//   2. 直连合集 fallback — optional checkbox reveals the direct MiKan
-//      URL/ID form; both paths generate an unsaved server-authoritative draft
-//      through POST /api/v1/requests;
+//      handling. F4/WP-41-D: the initial page is only the name input and the
+//      mode switch — the results panel (and its collapsed parse diagnostics)
+//      exists only after a search has been started;
+//   2. 直连合集 fallback — a secondary rescue entry rendered inside the results
+//      panel only after a started search produced no candidates; it reveals the
+//      direct MiKan URL/ID form. Both paths generate an unsaved
+//      server-authoritative draft through POST /api/v1/requests;
 //   3. 订阅草案 preview — the returned draft_id + display snapshot render in
 //      SingleAnimeReviewPanel (editable preview-modify + atomic save-confirm).
+//      The review header's「已选哪部/哪一季」comes from the candidate the host
+//      still holds in memory, never from an extra request.
 //
 // Security boundary (US-194): candidate context and draft_id exist only in
 // component memory — never in URL, browser storage, history or logs. No
@@ -41,6 +46,7 @@ import {
   buildFallbackCreatePayload,
   parseSourceLabel,
   parseSeasonNumber,
+  selectedCollectionSummary,
   validateCandidateQuery,
   validateFallbackValue,
   type CandidateSearchResult,
@@ -78,6 +84,20 @@ const searchError = ref('')
 const searchResult = ref<CandidateSearchResult | null>(null)
 const lastSearchQuery = ref('')
 
+/**
+ * F4: the initial page is a name input plus the mode switch — no empty result
+ * panel before a search. The results panel (and the direct-collection rescue
+ * entry inside it) only exists once a search has actually been started.
+ */
+const searchStarted = computed(
+  () => searchLoading.value || Boolean(searchError.value) || searchResult.value !== null,
+)
+
+/** A started search that is no longer in flight and produced no candidates. */
+const searchSettled = computed(
+  () => !searchLoading.value && (Boolean(searchError.value) || searchResult.value !== null),
+)
+
 // Fallback (direct-collection) state.
 const fallbackEnabled = ref(false)
 const fallbackValue = ref('')
@@ -93,17 +113,41 @@ const draftLoading = ref(false)
 // candidate draft generation.  The individual flags remain for accurate UI
 // labels, while this lock prevents two long MiKan plans from racing.
 const singleBusy = ref(false)
+// US-343: which candidate owns the in-flight generation, and the sanitized
+// failure that stays beside a candidate after its generation failed.
+const generatingCandidateId = ref<string | null>(null)
+const candidateErrors = ref<Record<string, string>>({})
 const reuseSuggestion = ref<ReuseSuggestion | null>(null)
 const reuseSource = ref<{ title: string; mikanBangumiId: string } | null>(null)
 // Track per-candidate season confirmation in memory (never persisted).
 const seasonConfirmations = ref<Record<string, number | null>>({})
+// The candidate that produced the current draft, kept in memory only so the
+// review step can answer「已选哪部/哪一季」without a second backend read
+// (F4; the unsaved draft snapshot has no season/total-episode fields and
+// D40-01 forbids safe-info for an unsaved draft).
+const selectedCandidate = ref<MikanCandidate | null>(null)
+
+/** Display-only projection of the selected collection for the review header. */
+const selectedCollection = computed(() =>
+  selectedCandidate.value
+    ? selectedCollectionSummary(selectedCandidate.value, seasonConfirmations.value[selectedCandidate.value.bangumi_id] ?? null)
+    : null,
+)
 
 const hasResults = computed(() => (searchResult.value?.candidates?.length ?? 0) > 0)
+
+/** Candidate generation state never outlives the search results it belongs to. */
+function resetCandidateGenerationState(): void {
+  generatingCandidateId.value = null
+  candidateErrors.value = {}
+}
 
 function editSearch(): void {
   searchResult.value = null
   lastSearchQuery.value = ''
   searchError.value = ''
+  selectedCandidate.value = null
+  resetCandidateGenerationState()
   void nextTick(() => singleInput.value?.focus())
 }
 
@@ -116,6 +160,8 @@ watch(query, (value) => {
   lastSearchQuery.value = ''
   searchError.value = ''
   seasonConfirmations.value = {}
+  selectedCandidate.value = null
+  resetCandidateGenerationState()
 })
 
 async function changeMode(nextMode: AnimeMode): Promise<void> {
@@ -127,6 +173,7 @@ async function changeMode(nextMode: AnimeMode): Promise<void> {
   // result of the newly selected mode.
   searchResult.value = null
   searchError.value = ''
+  selectedCandidate.value = null
   await nextTick()
   const nextInput = nextMode === 'single' ? singleInput.value : batchInput.value
   nextInput?.focus()
@@ -201,6 +248,8 @@ async function searchCandidates(): Promise<void> {
   searchError.value = ''
   searchResult.value = null
   seasonConfirmations.value = {}
+  selectedCandidate.value = null
+  resetCandidateGenerationState()
   lastSearchQuery.value = query.value.trim()
   singleBusy.value = true
   searchLoading.value = true
@@ -238,11 +287,35 @@ async function searchCandidates(): Promise<void> {
 }
 
 async function generateFromCandidate(candidate: MikanCandidate): Promise<void> {
+  // One candidate generation at a time; a click while one is in flight is a
+  // no-op rather than a second racing plan.
+  if (singleBusy.value || generatingCandidateId.value !== null) return
+  const bangumiId = candidate.bangumi_id
   const payload = buildCandidateCreatePayload(candidate, {
     storageDir: currentStorageDir(),
     confirmedSeason: confirmedSeasonFor(candidate),
   })
-  await generateDraft(payload)
+  generatingCandidateId.value = bangumiId
+  // A retry starts clean: the previous failure must not linger while the new
+  // attempt is in flight.
+  if (candidateErrors.value[bangumiId]) {
+    const next = { ...candidateErrors.value }
+    delete next[bangumiId]
+    candidateErrors.value = next
+  }
+  try {
+    const { ok, message } = await generateDraft(payload)
+    if (ok) {
+      // The review step answers「已选哪部/哪一季」from this remembered
+      // candidate; nothing extra leaves the browser.
+      selectedCandidate.value = candidate
+    } else if (message) {
+      // US-343: the failure stays beside the candidate that produced it.
+      candidateErrors.value = { ...candidateErrors.value, [bangumiId]: message }
+    }
+  } finally {
+    generatingCandidateId.value = null
+  }
 }
 
 async function generateFromFallback(): Promise<void> {
@@ -260,7 +333,7 @@ async function generateFromFallback(): Promise<void> {
   fallbackLoading.value = true
   try {
     const generated = await generateDraft(payload)
-    if (generated) {
+    if (generated.ok) {
       fallbackValue.value = ''
     }
   } finally {
@@ -268,8 +341,10 @@ async function generateFromFallback(): Promise<void> {
   }
 }
 
-async function generateDraft(payload: Record<string, unknown>): Promise<boolean> {
-  if (singleBusy.value) return false
+async function generateDraft(
+  payload: Record<string, unknown>,
+): Promise<{ ok: boolean; message: string }> {
+  if (singleBusy.value) return { ok: false, message: '' }
   singleBusy.value = true
   draftLoading.value = true
   try {
@@ -284,15 +359,16 @@ async function generateDraft(payload: Record<string, unknown>): Promise<boolean>
       draftRevision.value =
         typeof result.draft_revision === 'number' ? result.draft_revision : 1
       notification.success('预览已生成', '这是未保存的订阅草案；保存后可确认、修改或删除。')
-      return true
+      return { ok: true, message: '' }
     }
-    notification.error('生成失败', '订阅草案生成失败，请重试。')
-    return false
+    const message = '订阅草案生成失败，请重试。'
+    notification.error('生成失败', message)
+    return { ok: false, message }
   } catch (error) {
     void error
     const message = mikanFailureMessage(error, '从 MiKan 合集生成订阅草案')
     notification.error('生成失败', message)
-    return false
+    return { ok: false, message }
   } finally {
     draftLoading.value = false
     singleBusy.value = false
@@ -315,8 +391,10 @@ function discardDraft(destination: 'candidates' | 'input'): void {
   draftId.value = ''
   draftRevision.value = 1
   seasonConfirmations.value = {}
+  selectedCandidate.value = null
   reuseSuggestion.value = null
   reuseSource.value = null
+  resetCandidateGenerationState()
   if (destination === 'input') {
     searchResult.value = null
     lastSearchQuery.value = ''
@@ -374,118 +452,128 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
         </BaseButton>
       </div>
     </form>
-
-    <!-- ── direct fallback (single mode only) ────────────────────── -->
-    <template v-if="mode === 'single' && !hasResults">
-      <CheckboxRow
-        id="mikan-fallback-enabled"
-        v-model:checked="fallbackEnabled"
-        label="搜索无结果时使用直连合集"
-        help="可选：勾选后可粘贴 MiKan 合集 URL 或数字 ID 直接生成订阅草案；仅用于本次生成，不写入浏览器存储、URL、history 或订阅方案 JSON。"
-      />
-      <form
-        v-if="fallbackEnabled"
-        id="mikan-fallback-form"
-        class="candidate-fallback-form"
-        @submit.prevent="generateFromFallback"
-      >
-        <label for="mikan-fallback-bangumi">MiKan 合集 URL 或 ID</label>
-        <BaseInput
-          id="mikan-fallback-bangumi"
-          v-model="fallbackValue"
-          type="text"
-          autocomplete="off"
-          placeholder="mikan.example/Home/Bangumi/2353 或 2353"
-          :disabled="singleBusy"
-        />
-        <p class="field-help" id="mikan-fallback-help">
-          仅接受数字 ID 或同源 HTTP(S) /Home/Bangumi/&lt;id&gt; URL；生成成功后清空。
-        </p>
-        <p v-if="fallbackError" id="mikan-fallback-error" class="field-error" role="alert">
-          {{ fallbackError }}
-        </p>
-        <div class="notification-actions">
-          <BaseButton id="mikan-fallback-generate" type="submit" variant="secondary" :loading="fallbackLoading" :disabled="singleBusy">
-            使用直连合集生成
-          </BaseButton>
-        </div>
-      </form>
-    </template>
   </PanelSection>
 
-  <!-- ── search results ──────────────────────────────────────────── -->
-  <PanelSection v-if="mode === 'single' && !draftRequest" title="搜索结果" class="search-results-panel">
-    <div
-      id="mikan-candidate-search-result"
-      class="candidate-list-wrapper"
-      aria-live="polite"
-      aria-relevant="additions text"
+    <!-- ── search results: created by a search, never before one ──────── -->
+    <PanelSection
+      v-if="mode === 'single' && !draftRequest && searchStarted"
+      title="搜索结果"
+      class="search-results-panel"
     >
-      <LoadingState v-if="searchLoading" :message="`正在搜索「${query}」的 MiKan 候选...`" />
-      <ErrorState
-        v-else-if="searchError"
-        title="候选搜索失败"
-        :message="searchError"
-        retry-label="重试"
-        @retry="searchCandidates"
-      />
-      <EmptyState
-        v-else-if="searchResult && !hasResults"
-        message="未找到候选合集。可调整番剧标题后重试，或勾选「搜索无结果时使用直连合集」直接生成订阅草案。"
-      />
-      <template v-else-if="searchResult && hasResults">
-        <p class="step-label">步骤 2 · 选择合集</p>
-        <p class="candidate-search-summary" role="status">
-          已搜索「{{ searchResult.query }}」，请选择要审核的 MiKan 合集。
-        </p>
-        <BaseButton id="mikan-edit-search" variant="secondary" @click="editSearch">修改搜索</BaseButton>
-        <section v-if="parseSummaryRows().length" class="title-parse-summary" aria-label="标题解析摘要">
-          <h3 class="detail-section-heading">标题解析摘要</h3>
-          <dl class="detail-grid">
-            <template v-for="[label, value] in parseSummaryRows()" :key="label">
-              <div class="detail-row"><dt>{{ label }}</dt><dd>{{ displayValue(value) }}</dd></div>
-            </template>
-          </dl>
-          <template v-if="attemptedQueryTexts().length">
-            <h4 class="parse-subheading">实际搜索词</h4>
-            <ul class="title-parse-query-list">
-              <li v-for="text in attemptedQueryTexts()" :key="text">{{ text }}</li>
-            </ul>
-          </template>
-          <template v-if="parseNeedsReview">
-            <h4 class="parse-subheading">需人工核对</h4>
-            <ul class="title-parse-review-hints">
-              <li v-for="hint in parseReviewHints().length ? parseReviewHints() : ['该解析结果需要人工核对。']" :key="hint">
-                {{ hint }}
-              </li>
-            </ul>
-          </template>
-        </section>
-        <CandidateCollectionList
-          :candidates="searchResult.candidates"
-          :query="searchResult.query"
-          :disabled="searchLoading || draftLoading"
-          :confirmed-seasons="seasonConfirmations"
-          @select="generateFromCandidate"
-          @update:confirmed-season="(bangumiId: string, season: number | null) => (seasonConfirmations = { ...seasonConfirmations, [bangumiId]: season })"
+      <div
+        id="mikan-candidate-search-result"
+        class="candidate-list-wrapper"
+        aria-live="polite"
+        aria-relevant="additions text"
+      >
+        <LoadingState v-if="searchLoading" :message="`正在搜索「${query}」的 MiKan 候选...`" />
+        <ErrorState
+          v-else-if="searchError"
+          title="候选搜索失败"
+          :message="searchError"
+          retry-label="重试"
+          @retry="searchCandidates"
         />
-      </template>
-      <EmptyState v-else message="输入番剧标题后搜索候选合集。" />
-    </div>
-  </PanelSection>
+        <EmptyState
+          v-else-if="searchResult && !hasResults"
+          message="未找到候选合集。可调整番剧标题后重试，或使用下方直连合集生成订阅草案。"
+        />
+        <section v-if="searchSettled && !hasResults" class="candidate-fallback-rescue">
+          <CheckboxRow
+            id="mikan-fallback-enabled"
+            v-model:checked="fallbackEnabled"
+            label="搜索无结果时使用直连合集"
+            help="可选：勾选后可粘贴 MiKan 合集 URL 或数字 ID 直接生成订阅草案；仅用于本次生成，不写入浏览器存储、URL、history 或订阅方案 JSON。"
+          />
+          <form
+            v-if="fallbackEnabled"
+            id="mikan-fallback-form"
+            class="candidate-fallback-form"
+            @submit.prevent="generateFromFallback"
+          >
+            <label for="mikan-fallback-bangumi">MiKan 合集 URL 或 ID</label>
+            <BaseInput
+              id="mikan-fallback-bangumi"
+              v-model="fallbackValue"
+              type="text"
+              autocomplete="off"
+              placeholder="mikan.example/Home/Bangumi/2353 或 2353"
+              :disabled="singleBusy"
+            />
+            <p class="field-help" id="mikan-fallback-help">
+              仅接受数字 ID 或同源 HTTP(S) /Home/Bangumi/&lt;id&gt; URL；生成成功后清空。
+            </p>
+            <p v-if="fallbackError" id="mikan-fallback-error" class="field-error" role="alert">
+              {{ fallbackError }}
+            </p>
+            <div class="notification-actions">
+              <BaseButton id="mikan-fallback-generate" type="submit" variant="secondary" :loading="fallbackLoading" :disabled="singleBusy">
+                使用直连合集生成
+              </BaseButton>
+            </div>
+          </form>
+        </section>
+        <template v-if="searchResult && hasResults">
+          <p class="step-label">步骤 2 · 选择合集</p>
+          <p class="candidate-search-summary" role="status">
+            已搜索「{{ searchResult.query }}」，请选择要审核的 MiKan 合集。
+          </p>
+          <BaseButton id="mikan-edit-search" variant="secondary" @click="editSearch">修改搜索</BaseButton>
+          <details class="title-parse-summary">
+            <summary>标题解析摘要（诊断信息）</summary>
+            <dl class="detail-grid">
+              <template v-for="[label, value] in parseSummaryRows()" :key="label">
+                <div class="detail-row"><dt>{{ label }}</dt><dd>{{ displayValue(value) }}</dd></div>
+              </template>
+            </dl>
+            <template v-if="attemptedQueryTexts().length">
+              <h4 class="parse-subheading">实际搜索词</h4>
+              <ul class="title-parse-query-list">
+                <li v-for="text in attemptedQueryTexts()" :key="text">{{ text }}</li>
+              </ul>
+            </template>
+            <template v-if="parseNeedsReview">
+              <h4 class="parse-subheading">需人工核对</h4>
+              <ul class="title-parse-review-hints">
+                <li v-for="hint in parseReviewHints().length ? parseReviewHints() : ['该解析结果需要人工核对。']" :key="hint">
+                  {{ hint }}
+                </li>
+              </ul>
+            </template>
+          </details>
+          <CandidateCollectionList
+            :candidates="searchResult.candidates"
+            :query="searchResult.query"
+            :disabled="searchLoading || (draftLoading && generatingCandidateId === null)"
+            :loading-candidate-id="generatingCandidateId"
+            :candidate-errors="candidateErrors"
+            :confirmed-seasons="seasonConfirmations"
+            @select="generateFromCandidate"
+            @update:confirmed-season="(bangumiId: string, season: number | null) => (seasonConfirmations = { ...seasonConfirmations, [bangumiId]: season })"
+          />
+        </template>
+      </div>
+      <p v-if="parseNeedsReview && hasResults" class="field-help" id="candidate-parse-review-note">
+        标题解析结果需人工核对；展开「标题解析摘要」查看识别标题、季度与解析来源。
+      </p>
+    </PanelSection>
 
-  <!-- ── draft preview ───────────────────────────────────────────── -->
-  <SingleAnimeReviewPanel
-    v-if="mode === 'single' && draftRequest && draftId"
-    :key="draftId"
-    :request="draftRequest"
-    :draft-id="draftId"
-    :draft-revision="draftRevision"
-    :reuse-suggestion="reuseSuggestion"
-    @changed="onDraftChanged"
-    @discard="discardDraft"
+    <!-- ── draft preview ───────────────────────────────────────────── -->
+    <SingleAnimeReviewPanel
+      v-if="mode === 'single' && draftRequest && draftId"
+      :key="draftId"
+      :request="draftRequest"
+      :draft-id="draftId"
+      :draft-revision="draftRevision"
+      :reuse-suggestion="reuseSuggestion"
+      :selected-collection="selectedCollection"
+      @changed="onDraftChanged"
+      @discard="discardDraft"
+    />
+  <LoadingState
+    v-if="mode === 'single' && draftLoading && !draftRequest && generatingCandidateId === null"
+    message="正在从候选生成订阅草案..."
   />
-  <LoadingState v-if="mode === 'single' && draftLoading && !draftRequest" message="正在从候选生成订阅草案..." />
 
   <!-- ── batch workbench (US-205) ────────────────────────────────── -->
   <template v-if="mode === 'batch'">
@@ -524,6 +612,23 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
   border: 1px solid var(--color-border);
   border-radius: 6px;
   padding: 0.75rem;
+}
+
+.title-parse-summary summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+/* F4: the direct-collection form is a secondary rescue path that only appears
+   after a started search found no candidates. */
+.candidate-fallback-rescue {
+  display: grid;
+  gap: 0.6rem;
+  border: 1px dashed var(--color-border);
+  border-radius: 6px;
+  padding: 0.75rem;
+  margin-top: 0.25rem;
 }
 
 .detail-grid {

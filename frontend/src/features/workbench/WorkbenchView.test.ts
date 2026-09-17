@@ -206,12 +206,42 @@ describe('WorkbenchView single search (US-204)', () => {
     expect(wrapper.find('#preview-folder-name').element).toHaveProperty('value', '建议目录')
   })
 
-  it('disables search for empty input before calling the API', async () => {
+  it('keeps the initial page to the name input and mode switch (no empty result panel)', async () => {
     const { wrapper } = await mountWorkbench()
 
-    expect(wrapper.find('#mikan-candidate-search-result').text()).toContain('输入番剧标题后搜索候选合集')
+    // F4/US-345: before any search there is no results panel, no empty-result
+    // hint and no direct-collection rescue entry — only the search form.
+    expect(wrapper.find('#mikan-candidate-search-form').exists()).toBe(true)
+    expect(wrapper.find('#mikan-candidate-search-result').exists()).toBe(false)
+    expect(wrapper.find('#mikan-fallback-enabled').exists()).toBe(false)
+    expect(wrapper.find('#mikan-fallback-form').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('输入番剧标题后搜索候选合集')
     expect(wrapper.find('#mikan-candidate-search-submit').attributes('disabled')).toBeDefined()
     expect(apiPost).not.toHaveBeenCalled()
+  })
+
+  it('offers the direct-collection rescue only after a search found no candidates', async () => {
+    apiPost.mockResolvedValueOnce(candidateResult({ candidates: [] }))
+    const { wrapper } = await mountWorkbench()
+
+    expect(wrapper.find('#mikan-fallback-enabled').exists()).toBe(false)
+    await wrapper.find('#mikan-candidate-query').setValue('ghost')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#mikan-fallback-enabled').exists()).toBe(true)
+    expect(wrapper.find('#mikan-fallback-form').exists()).toBe(false)
+
+    // A search that does find candidates never offers the rescue path.
+    apiPost.mockResolvedValueOnce(candidateResult())
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await nextTick()
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.candidate-card')).toHaveLength(1)
+    expect(wrapper.find('#mikan-fallback-enabled').exists()).toBe(false)
+    // The view focuses the first candidate through `document.querySelector`, so
+    // this wrapper must not stay attached to document.body with candidates.
+    wrapper.unmount()
   })
 
   it('focuses the title input on entry and moves focus to the first candidate', async () => {
@@ -243,8 +273,16 @@ describe('WorkbenchView single search (US-204)', () => {
     const cards = wrapper.findAll('.candidate-card')
     expect(cards).toHaveLength(1)
     expect(cards[0]!.text()).toContain('葬送的芙莉莲')
-    expect(cards[0]!.text()).toContain('MiKan ID: 2353')
     expect(cards[0]!.text()).toContain('选择此合集')
+    expect(cards[0]!.find('.candidate-progress').text()).toContain('播出进度')
+    // F4/US-345: the collection id and the parse search query are diagnostics.
+    // They stay in the collapsed 高级信息 details, so the real browser's
+    // rendered default layer never shows them (asserted in Chromium).
+    const advanced = cards[0]!.find('details.candidate-advanced')
+    expect(advanced.exists()).toBe(true)
+    expect(advanced.attributes('open')).toBeUndefined()
+    expect(advanced.text()).toContain('2353')
+    expect(advanced.text()).toContain('芙莉莲')
   })
 
   it('never auto-selects a candidate even when only one matches', async () => {
@@ -301,7 +339,9 @@ describe('WorkbenchView single search (US-204)', () => {
     await flushPromises()
 
     const summary = wrapper.find('.title-parse-summary')
-    expect(summary.text()).toContain('标题解析摘要')
+    // F4/US-345: parse diagnostics are collapsed on the candidate step.
+    expect((summary.element as HTMLDetailsElement).open).toBe(false)
+    expect(summary.find('summary').text()).toContain('标题解析摘要')
     expect(summary.text()).toContain('识别标题')
     expect(summary.text()).toContain('无职转生 第四季')
     expect(summary.text()).toContain('识别季度')
@@ -326,6 +366,48 @@ describe('WorkbenchView single search (US-204)', () => {
     expect(wrapper.find('#mikan-candidate-search-result').text()).toContain('直连合集')
   })
 
+  it('answers the review default layer from memory and keeps technical details collapsed', async () => {
+    apiPost
+      .mockResolvedValueOnce(
+        candidateResult({
+          candidates: [
+            candidate({
+              total_episodes: 28,
+              season_evidence: { status: 'NEEDS_CONFIRMATION', season: 1, requires_review: true },
+            }) as never,
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(createDraftResult())
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.candidate-season-confirmation input').setValue(true)
+    await wrapper.find('.candidate-select').trigger('click')
+    await flushPromises()
+
+    // F4/US-345: 默认层回答「已选哪部/哪一季、筛后有什么」——合集与季度来自
+    // 宿主内存中的公开候选投影，不新增请求也不调用 safe-info。
+    const summary = wrapper.find('.draft-review-summary')
+    expect(summary.exists()).toBe(true)
+    expect(summary.text()).toContain('已选合集')
+    expect(summary.text()).toContain('葬送的芙莉莲')
+    expect(summary.text()).toContain('第 1 季')
+    expect(summary.text()).toContain('28 集')
+    expect(summary.text()).toContain('喵萌奶茶屋')
+    expect(summary.text()).toContain('筛选规则')
+    // 资源摘要保留在默认层；内部 ID / 原始标题 / RSS 选择折叠在技术层。
+    expect(wrapper.find('.resource-summary').exists()).toBe(true)
+    const technical = wrapper.find('details.advanced-detail')
+    expect(technical.exists()).toBe(true)
+    expect((technical.element as HTMLDetailsElement).open).toBe(false)
+    expect(technical.find('summary').text()).toContain('全部信息')
+    expect(technical.text()).toContain('request_id')
+    expect(apiGet.mock.calls.some(([url]) => String(url).includes('safe-info'))).toBe(false)
+  })
+
   it('clears stale candidates when the search title is edited', async () => {
     apiPost.mockResolvedValue(candidateResult())
     const { wrapper } = await mountWorkbench()
@@ -341,7 +423,10 @@ describe('WorkbenchView single search (US-204)', () => {
     await nextTick()
 
     expect(wrapper.findAll('.candidate-card')).toHaveLength(0)
-    expect(wrapper.find('#mikan-candidate-search-result').text()).toContain('输入番剧标题后搜索候选合集')
+    // F4/US-345: leaving the results no longer reveals an empty-result panel;
+    // the page returns to the name input until a new search is started.
+    expect(wrapper.find('#mikan-candidate-search-result').exists()).toBe(false)
+    expect(wrapper.find('#mikan-fallback-enabled').exists()).toBe(false)
     expect((wrapper.find('#mikan-candidate-query').element as HTMLInputElement).value).toBe('无职转生')
   })
 
@@ -931,9 +1016,29 @@ describe('WorkbenchView direct fallback (US-204)', () => {
     apiPost.mockReset()
   })
 
+  /**
+   * F4/US-345: the direct-collection form is a secondary rescue entry that only
+   * exists after a started search produced no candidates, so every direct-path
+   * test reaches that state first.
+   */
+  async function startEmptySearch(wrapper: VueWrapper, query = '芙莉莲'): Promise<void> {
+    apiPost.mockResolvedValueOnce(candidateResult({ candidates: [] }))
+    await wrapper.find('#mikan-candidate-query').setValue(query)
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+  }
+
+  /** The long-running create requests, excluding the candidate search. */
+  function createCalls(): unknown[] {
+    return apiPost.mock.calls.filter(([url]) => url === '/api/v1/requests')
+  }
+
   it('reveals the fallback form only when the checkbox is checked', async () => {
     const { wrapper } = await mountWorkbench()
 
+    expect(wrapper.find('#mikan-fallback-enabled').exists()).toBe(false)
+    await startEmptySearch(wrapper)
+    expect(wrapper.find('#mikan-fallback-enabled').exists()).toBe(true)
     expect(wrapper.find('#mikan-fallback-form').exists()).toBe(false)
     await wrapper.find('#mikan-fallback-enabled').setValue(true)
     await nextTick()
@@ -942,13 +1047,14 @@ describe('WorkbenchView direct fallback (US-204)', () => {
 
   it('validates the fallback value before calling the API', async () => {
     const { wrapper } = await mountWorkbench()
+    await startEmptySearch(wrapper)
     await wrapper.find('#mikan-fallback-enabled').setValue(true)
     await nextTick()
 
     await wrapper.find('#mikan-fallback-generate').trigger('click')
     await nextTick()
 
-    expect(apiPost).not.toHaveBeenCalled()
+    expect(createCalls()).toHaveLength(0)
     expect(wrapper.find('#mikan-fallback-error').text()).toContain('生成前必须填写 MiKan 合集 URL 或 ID')
 
     await wrapper.find('#mikan-fallback-bangumi').setValue('not a url or id')
@@ -957,11 +1063,11 @@ describe('WorkbenchView direct fallback (US-204)', () => {
     expect(wrapper.find('#mikan-fallback-error').text()).toContain('必须是数字 ID 或 HTTP(S) URL')
   })
 
-  it('generates a draft from a bare ID and clears the input on success', async () => {
+  it('generates a draft from a bare ID and leaves no direct-collection input behind', async () => {
     apiPost.mockResolvedValue(createDraftResult())
     const { wrapper } = await mountWorkbench()
 
-    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await startEmptySearch(wrapper)
     await wrapper.find('#mikan-fallback-enabled').setValue(true)
     await nextTick()
     await wrapper.find('#mikan-fallback-bangumi').setValue('2353')
@@ -977,7 +1083,26 @@ describe('WorkbenchView direct fallback (US-204)', () => {
       timeoutMs: 240000,
     })
     expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(true)
-    expect((wrapper.find('#mikan-fallback-bangumi').element as HTMLInputElement).value).toBe('')
+    // The draft replaces the whole search step, so neither the rescue entry nor
+    // its input can survive into the review step.
+    expect(wrapper.find('#mikan-candidate-search-result').exists()).toBe(false)
+    expect(wrapper.find('#mikan-fallback-bangumi').exists()).toBe(false)
+  })
+
+  it('keeps the direct-collection input when generation fails', async () => {
+    apiPost.mockRejectedValueOnce({ type: 'mikan_http_failed', message: 'MiKan HTTP 请求失败' })
+    const { wrapper } = await mountWorkbench()
+
+    await startEmptySearch(wrapper)
+    await wrapper.find('#mikan-fallback-enabled').setValue(true)
+    await nextTick()
+    await wrapper.find('#mikan-fallback-bangumi').setValue('2353')
+    await wrapper.find('#mikan-fallback-generate').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(false)
+    expect((wrapper.find('#mikan-fallback-bangumi').element as HTMLInputElement).value).toBe('2353')
+    expect(createCalls()).toHaveLength(1)
   })
 
   it('prevents duplicate direct generation while the long request is pending', async () => {
@@ -986,7 +1111,7 @@ describe('WorkbenchView direct fallback (US-204)', () => {
     apiPost.mockReturnValue(pending as never)
     const { wrapper } = await mountWorkbench()
 
-    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await startEmptySearch(wrapper)
     await wrapper.find('#mikan-fallback-enabled').setValue(true)
     await nextTick()
     await wrapper.find('#mikan-fallback-bangumi').setValue('2353')
@@ -995,7 +1120,7 @@ describe('WorkbenchView direct fallback (US-204)', () => {
     await nextTick()
     await submit.trigger('click')
 
-    expect(apiPost).toHaveBeenCalledTimes(1)
+    expect(createCalls()).toHaveLength(1)
     expect(submit.attributes('disabled')).toBeDefined()
     resolveRequest({ draft_id: 'opaque', request: {} })
     await flushPromises()
@@ -1007,7 +1132,7 @@ describe('WorkbenchView direct fallback (US-204)', () => {
     apiPost.mockImplementation(() => pending)
     const { wrapper } = await mountWorkbench()
 
-    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await startEmptySearch(wrapper)
     await wrapper.find('#mikan-fallback-enabled').setValue(true)
     await nextTick()
     await wrapper.find('#mikan-fallback-bangumi').setValue('2353')
@@ -1015,9 +1140,129 @@ describe('WorkbenchView direct fallback (US-204)', () => {
     await nextTick()
     await wrapper.find('#mikan-candidate-search-submit').trigger('click')
 
-    expect(apiPost).toHaveBeenCalledTimes(1)
+    expect(createCalls()).toHaveLength(1)
     expect(wrapper.find('#mikan-candidate-search-submit').attributes('disabled')).toBeDefined()
     resolveRequest(createDraftResult())
     await flushPromises()
+  })
+})
+
+// WP-41-B / US-343: an explicit, in-place, recoverable loading state beside the
+// clicked candidate. Only one candidate generation runs at a time; the other
+// candidates are temporarily unavailable but never labelled as loading.
+describe('WorkbenchView candidate loading feedback (US-343)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    apiPost.mockReset()
+  })
+
+  function twoCandidates() {
+    return candidateResult({
+      candidates: [
+        candidate(),
+        candidate({ bangumi_id: '3072', title: '葬送的芙莉莲 第二季' }),
+      ],
+    })
+  }
+
+  it('labels only the clicked candidate while its draft request is in flight', async () => {
+    let resolveRequest!: (value: CreateResult) => void
+    const pending = new Promise<CreateResult>((resolve) => { resolveRequest = resolve })
+    apiPost.mockResolvedValueOnce(twoCandidates())
+    apiPost.mockImplementationOnce(() => pending)
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+
+    const cards = wrapper.findAll('.candidate-card')
+    expect(cards).toHaveLength(2)
+    await cards[0]!.find('.candidate-select').trigger('click')
+    await nextTick()
+
+    // The clicked candidate carries the in-place loading state.
+    const loadingButton = cards[0]!.find('.candidate-select')
+    expect(loadingButton.attributes('aria-busy')).toBe('true')
+    expect(loadingButton.text()).toContain('正在生成草案')
+    expect((loadingButton.element as HTMLButtonElement).disabled).toBe(true)
+    expect(cards[0]!.text()).toContain('正在生成订阅草案')
+
+    // A second generation cannot start, but the other candidate is only
+    // disabled — it is never marked as loading.
+    const idleButton = cards[1]!.find('.candidate-select')
+    expect((idleButton.element as HTMLButtonElement).disabled).toBe(true)
+    expect(idleButton.attributes('aria-busy')).toBeUndefined()
+    expect(idleButton.text()).toContain('选择此合集')
+    expect(cards[1]!.text()).not.toContain('正在生成草案')
+    expect(apiPost).toHaveBeenCalledTimes(2)
+
+    resolveRequest(createDraftResult())
+    await flushPromises()
+
+    // Success is atomic: the candidate step is replaced by the draft review.
+    expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(true)
+    expect(wrapper.find('.candidate-card').exists()).toBe(false)
+  })
+
+  it('keeps a sanitized failure beside the clicked candidate and retries in place', async () => {
+    apiPost.mockResolvedValueOnce(twoCandidates())
+    apiPost.mockRejectedValueOnce({ type: 'mikan_parse_failed', message: 'MiKan 番剧页解析失败' })
+    apiPost.mockResolvedValueOnce(createDraftResult())
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+
+    const cards = wrapper.findAll('.candidate-card')
+    await cards[0]!.find('.candidate-select').trigger('click')
+    await flushPromises()
+
+    // The failure stays in that candidate's card and never shows raw server text.
+    expect(cards[0]!.text()).toContain('从 MiKan 合集生成订阅草案失败：MiKan 页面格式异常，请稍后重试。')
+    expect(cards[0]!.text()).not.toContain('MiKan 番剧页解析失败')
+    expect(cards[0]!.find('[role="alert"]').exists()).toBe(true)
+    expect(cards[1]!.text()).not.toContain('生成订阅草案失败')
+    // The candidate step is preserved: the list is still there and no draft exists.
+    expect(wrapper.findAll('.candidate-card')).toHaveLength(2)
+    expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(false)
+
+    const { useNotificationStore } = await import('@/app/stores/notification')
+    expect(useNotificationStore().current?.title).toBe('生成失败')
+
+    // The same candidate can retry in place and then succeed.
+    const retry = cards[0]!.find('.candidate-select')
+    expect(retry.attributes('aria-busy')).toBeUndefined()
+    expect(retry.text()).toContain('重试生成草案')
+    await retry.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(true)
+    const generateCalls = apiPost.mock.calls.filter(([path]) => path === '/api/v1/requests')
+    expect(generateCalls).toHaveLength(2)
+  })
+
+  it('clears the candidate failure when the search results are replaced', async () => {
+    apiPost.mockResolvedValueOnce(candidateResult())
+    apiPost.mockRejectedValueOnce({ type: 'network_error', message: '原始网络错误' })
+    apiPost.mockResolvedValueOnce(candidateResult())
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.candidate-select').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.candidate-card').text()).toContain('生成订阅草案失败')
+
+    await wrapper.find('#mikan-edit-search').trigger('click')
+    await wrapper.find('#mikan-candidate-query').setValue('无职转生')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.findAll('.candidate-card')).toHaveLength(1)
+    expect(wrapper.find('.candidate-card').text()).not.toContain('生成订阅草案失败')
+    expect(wrapper.find('.candidate-card').text()).not.toContain('原始网络错误')
   })
 })

@@ -1,10 +1,22 @@
 <script setup lang="ts">
-// AnimeDraftEditor (US-270).
+// AnimeDraftEditor (US-270 / US-344 / WP-41-D).
 //
 // Shared, controlled review UI for single and batch drafts. It owns only the
 // transient form controls; the parent owns the Request snapshot, draft
 // capability, revision and transport. In particular, this component has no
 // save/confirm endpoint dependency and never receives sensitive source data.
+// It never calls `safe-info` (US-345): the default layer is built from the
+// already-rendered snapshot plus an optional in-memory candidate projection.
+//
+// F4 information hierarchy: the default layer answers「已选哪部/哪一季、筛后有
+// 什么、能否确认」— a Chinese summary row (已选合集/季度/总集数/字幕组/筛选规则)
+// and the 资源摘要 section. Internal ids, the raw title, the RSS selection and
+// the English section names live in the collapsed 全部信息（技术详情）.
+//
+// US-344: every user edit also announces *what kind* of edit it is, so the
+// host can send the server-authoritative preview-modify at the right time
+// (subtitle group immediately, filter rule debounced, folder name only on an
+// explicit flush). The editor itself still performs no request.
 import { computed, ref, watch } from 'vue'
 
 import BaseButton from '@/components/forms/BaseButton.vue'
@@ -17,8 +29,10 @@ import ResourceSummary from '@/features/workbench/ResourceSummary.vue'
 import SubtitleGroupSelect from '@/features/workbench/SubtitleGroupSelect.vue'
 import {
   collectPreviewEditPatch,
+  previewEditStateFrom,
   type PreviewEditState,
   type PreviewPatch,
+  type SelectedCollectionSummary,
 } from '@/features/workbench/candidateSearch'
 import {
   completeSeedGroups,
@@ -45,6 +59,20 @@ const props = defineProps<{
   formId?: string
   canRetry?: boolean
   retryLabel?: string
+  /**
+   * F4: in the draft review the host owns the single primary action
+   * (保存并确认 / 固定批量操作栏), so its编辑动作 is rendered as a secondary
+   * button. The saved-plan page keeps the default primary styling because its
+   * own 保存方案修改 is the only action there.
+   */
+  applyVariant?: 'primary' | 'secondary'
+  /**
+   * F4: display-only projection of the collection the user selected. The
+   * unsaved draft snapshot has no season/poster/total-episode fields and this
+   * Stage adds no endpoint for them, so the host passes the public candidate
+   * metadata it still holds in memory. Absent => the summary says 未提供.
+   */
+  candidateSummary?: SelectedCollectionSummary | null
 }>()
 
 const emit = defineEmits<{
@@ -53,13 +81,17 @@ const emit = defineEmits<{
   (e: 'retry'): void
   (e: 'reset'): void
   (e: 'empty-apply'): void
+  // US-344 edit intents, classified by what the change affects on the server.
+  (e: 'subtitle-group-change', value: string): void
+  (e: 'filter-change', state: PreviewEditState): void
+  (e: 'folder-change', value: string): void
 }>()
 
 const idPrefix = computed(() => props.idPrefix ?? 'anime-draft')
 const editorMode = computed(() => props.mode ?? 'draft')
 const panelHeading = computed(() => props.heading ?? '订阅方案详情')
 const formHeading = computed(() => props.formHeading ?? (editorMode.value === 'saved' ? '编辑已保存方案' : '编辑订阅草案'))
-const applyLabel = computed(() => props.applyLabel ?? (editorMode.value === 'saved' ? '保存方案修改' : '应用修改'))
+const applyLabel = computed(() => props.applyLabel ?? (editorMode.value === 'saved' ? '保存方案修改' : '保存修改'))
 
 const editGroup = ref('')
 const editMustContain = ref('')
@@ -72,28 +104,34 @@ const clearMustNotContain = ref(false)
 const clearFolderName = ref(false)
 
 function stateFromRequest(request: RequestSnapshot | RequestDetailSnapshot): PreviewEditState {
-  const config = request.confirmable_config
-  return {
-    selectedSubtitleGroup: config?.selected_subtitle_group ?? '',
-    mustContain: config?.filter_rule?.must_contain ?? '',
-    mustNotContain: config?.filter_rule?.must_not_contain ?? '',
-    useRegex: config?.filter_rule?.use_regex === true,
-    caseSensitive: config?.filter_rule?.case_sensitive === true,
-    expectedFolderName: config?.expected_folder_name ?? '',
+  return previewEditStateFrom(request)
+}
+
+// Programmatic writes (snapshot sync, reuse suggestion, explicit reset) must
+// not be announced as user intent, or the host would auto-send them.
+let suppressIntent = 0
+function guarded(write: () => void): void {
+  suppressIntent += 1
+  try {
+    write()
+  } finally {
+    suppressIntent -= 1
   }
 }
 
 function resetForm(): void {
-  const state = stateFromRequest(props.request)
-  editGroup.value = state.selectedSubtitleGroup
-  editMustContain.value = state.mustContain
-  editMustNotContain.value = state.mustNotContain
-  editUseRegex.value = state.useRegex
-  editCaseSensitive.value = state.caseSensitive
-  editFolderName.value = state.expectedFolderName
-  clearMustContain.value = false
-  clearMustNotContain.value = false
-  clearFolderName.value = false
+  guarded(() => {
+    const state = stateFromRequest(props.request)
+    editGroup.value = state.selectedSubtitleGroup
+    editMustContain.value = state.mustContain
+    editMustNotContain.value = state.mustNotContain
+    editUseRegex.value = state.useRegex
+    editCaseSensitive.value = state.caseSensitive
+    editFolderName.value = state.expectedFolderName
+    clearMustContain.value = false
+    clearMustNotContain.value = false
+    clearFolderName.value = false
+  })
   emit('dirty-change', false)
 }
 
@@ -113,10 +151,61 @@ const patch = computed(() => collectPreviewEditPatch(originalState.value, curren
 const dirty = computed(() => Object.keys(patch.value).length > 0)
 
 watch(dirty, (value) => emit('dirty-change', value), { immediate: true })
-watch(() => props.request, resetForm, { deep: true })
+
+/**
+ * US-344: a new server snapshot replaces the fields the server has already
+ * confirmed, but keeps an edit the user made while a request was in flight.
+ * A field is the user's to keep when its local value matches neither the
+ * previous snapshot nor the new one; otherwise the server value wins.
+ */
+function syncFromSnapshot(previous: RequestSnapshot | RequestDetailSnapshot, next: RequestSnapshot | RequestDetailSnapshot): void {
+  const before = stateFromRequest(previous)
+  const after = stateFromRequest(next)
+  guarded(() => {
+    if (editGroup.value === before.selectedSubtitleGroup || editGroup.value === after.selectedSubtitleGroup) {
+      editGroup.value = after.selectedSubtitleGroup
+    }
+    if (!clearMustContain.value && (editMustContain.value === before.mustContain || editMustContain.value === after.mustContain)) {
+      editMustContain.value = after.mustContain
+    }
+    if (!clearMustNotContain.value && (editMustNotContain.value === before.mustNotContain || editMustNotContain.value === after.mustNotContain)) {
+      editMustNotContain.value = after.mustNotContain
+    }
+    if (editUseRegex.value === before.useRegex || editUseRegex.value === after.useRegex) {
+      editUseRegex.value = after.useRegex
+    }
+    if (editCaseSensitive.value === before.caseSensitive || editCaseSensitive.value === after.caseSensitive) {
+      editCaseSensitive.value = after.caseSensitive
+    }
+    if (!clearFolderName.value && (editFolderName.value === before.expectedFolderName || editFolderName.value === after.expectedFolderName)) {
+      editFolderName.value = after.expectedFolderName
+    }
+  })
+}
+
+watch(
+  () => props.request,
+  (next, previous) => {
+    if (!previous) return
+    syncFromSnapshot(previous, next)
+  },
+  { deep: true },
+)
+
 watch(clearMustContain, (clear) => { if (clear) editMustContain.value = '' })
 watch(clearMustNotContain, (clear) => { if (clear) editMustNotContain.value = '' })
 watch(clearFolderName, (clear) => { if (clear) editFolderName.value = '' })
+
+// Synchronous watchers so `guarded` still covers programmatic writes.
+watch(editGroup, (value) => {
+  if (suppressIntent === 0) emit('subtitle-group-change', value)
+}, { flush: 'sync' })
+watch([editMustContain, editMustNotContain, editUseRegex, editCaseSensitive], () => {
+  if (suppressIntent === 0) emit('filter-change', currentState())
+}, { flush: 'sync' })
+watch(editFolderName, (value) => {
+  if (suppressIntent === 0) emit('folder-change', value)
+}, { flush: 'sync' })
 
 const groupOptions = computed(() =>
   (props.request.source_info?.rss_sources ?? []).map((source) => ({
@@ -132,6 +221,30 @@ const selectedGroupName = computed(
   () => props.request.confirmable_config?.selected_subtitle_group ?? '未选择字幕组',
 )
 
+// F4 default layer. The selected collection falls back to the server-confirmed
+// matched title, then to the raw title, so the row is never blank on a saved
+// plan that has no candidate projection; a redacting `displayValue` still
+// guards the rendered text.
+const selectedCollectionTitle = computed(
+  () =>
+    props.candidateSummary?.title ||
+    props.request.source_info?.matched_bangumi?.title ||
+    props.request.input?.raw_title ||
+    '未提供',
+)
+
+/** 筛选规则 one-line summary for the default layer (rules stay authoritative). */
+const filterSummaryText = computed(() => {
+  const config = props.request.confirmable_config
+  const rule = config?.filter_rule
+  const mustContain = displayValue(rule?.must_contain) || '不限'
+  const mustNotContain = displayValue(rule?.must_not_contain) || '不限'
+  const mode = rule?.use_regex === true ? '正则' : '普通字符'
+  const caseText = rule?.case_sensitive === true ? '区分大小写' : '不区分大小写'
+  const folder = displayValue(config?.expected_folder_name) || '默认'
+  return `包含 ${mustContain}；排除 ${mustNotContain}；${mode}；${caseText}；目录名 ${folder}`
+})
+
 resetForm()
 
 function apply(): void {
@@ -143,15 +256,19 @@ function apply(): void {
 }
 
 function applySuggestion(suggestion: ReuseSuggestion): void {
-  editGroup.value = suggestion.selectedSubtitleGroup
-  editMustContain.value = suggestion.filterRule.mustContain
-  editMustNotContain.value = suggestion.filterRule.mustNotContain
-  editUseRegex.value = suggestion.filterRule.useRegex
-  editCaseSensitive.value = suggestion.filterRule.caseSensitive
-  editFolderName.value = suggestion.expectedFolderName
-  clearMustContain.value = false
-  clearMustNotContain.value = false
-  clearFolderName.value = false
+  // Filling the form is not a transport decision: the suggestion is only
+  // staged, and the user still submits it (or lets the scheduler send it).
+  guarded(() => {
+    editGroup.value = suggestion.selectedSubtitleGroup
+    editMustContain.value = suggestion.filterRule.mustContain
+    editMustNotContain.value = suggestion.filterRule.mustNotContain
+    editUseRegex.value = suggestion.filterRule.useRegex
+    editCaseSensitive.value = suggestion.filterRule.caseSensitive
+    editFolderName.value = suggestion.expectedFolderName
+    clearMustContain.value = false
+    clearMustNotContain.value = false
+    clearFolderName.value = false
+  })
 }
 
 defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
@@ -160,9 +277,34 @@ defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
 <template>
   <PanelSection :title="panelHeading" class="anime-draft-editor" :data-mode="editorMode">
     <div :id="props.containerId ?? 'anime-draft-editor'" class="request-detail" aria-live="polite" aria-relevant="additions text">
-      <h3 class="request-detail-title">
-        {{ request.input?.raw_title || request.source_info?.matched_bangumi?.title || '订阅方案' }}
-      </h3>
+      <!-- F4: 标题同样取自公开合集投影，默认层不回显原始输入标题；技术上
+           的「原始标题」留在下方折叠的技术层里。 -->
+      <h3 class="request-detail-title">{{ displayValue(selectedCollectionTitle) }}</h3>
+
+      <!-- F4 审核默认层：回答「已选哪部/哪一季、筛后有什么」。合集与季度来自
+           宿主内存中的公开候选投影（未保存草案快照不含这些字段）；不适用时
+           显示「未提供」而不是伪造取值。 -->
+      <section class="draft-review-summary" aria-label="已选合集与筛选摘要">
+        <dl class="detail-grid">
+          <div class="detail-row"><dt>已选合集</dt><dd>{{ displayValue(selectedCollectionTitle) }}</dd></div>
+          <div class="detail-row">
+            <dt>季度</dt>
+            <dd>{{ candidateSummary?.season ? `第 ${candidateSummary.season} 季` : '未提供' }}</dd>
+          </div>
+          <div class="detail-row">
+            <dt>总集数</dt>
+            <dd>{{ candidateSummary?.totalEpisodes ? `${candidateSummary.totalEpisodes} 集` : '未知' }}</dd>
+          </div>
+          <div class="detail-row">
+            <dt>字幕组</dt>
+            <dd>{{ displayValue(request.confirmable_config?.selected_subtitle_group) }}</dd>
+          </div>
+          <div class="detail-row">
+            <dt>筛选规则</dt>
+            <dd>{{ filterSummaryText }}</dd>
+          </div>
+        </dl>
+      </section>
 
       <form :id="props.formId" class="detail-inline-form" @submit.prevent="apply">
         <h4 class="detail-form-heading">{{ formHeading }}</h4>
@@ -201,10 +343,14 @@ defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
           <BaseButton :id="`${idPrefix}-reset-button`" type="button" variant="secondary" :disabled="applying" @click="$emit('reset')">恢复上次结果</BaseButton>
         </div>
         <div class="detail-form-actions">
-          <BaseButton :id="`${idPrefix}-apply-button`" type="submit" variant="primary" :loading="applying" :disabled="disabled || !dirty">{{ applyLabel }}</BaseButton>
+          <BaseButton :id="`${idPrefix}-apply-button`" type="submit" :variant="props.applyVariant ?? 'primary'" :loading="applying" :disabled="disabled || !dirty">{{ applyLabel }}</BaseButton>
         </div>
       </form>
       <slot name="review-note" />
+
+      <!-- F4 技术层：内部 ID、原始标题、RSS 选择与英文区名默认折叠。 -->
+      <details class="advanced-detail">
+        <summary>全部信息（技术详情）</summary>
 
       <section class="detail-section overview-section" aria-label="Overview">
         <h4 class="detail-section-heading">Overview</h4>
@@ -224,9 +370,10 @@ defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
           <div class="detail-row"><dt>匹配番剧标题</dt><dd>{{ displayValue(request.source_info?.matched_bangumi?.title) }}</dd></div>
         </dl>
       </section>
+      </details>
 
-      <section class="detail-section filter-section" aria-label="Filter">
-        <h4 class="detail-section-heading">Filter</h4>
+      <section class="detail-section filter-section" aria-label="筛选规则">
+        <h4 class="detail-section-heading">筛选规则</h4>
         <dl class="detail-grid">
           <div class="detail-row"><dt>包含规则</dt><dd>{{ displayValue(request.confirmable_config?.filter_rule?.must_contain) }}</dd></div>
           <div class="detail-row"><dt>排除规则</dt><dd>{{ displayValue(request.confirmable_config?.filter_rule?.must_not_contain) }}</dd></div>
@@ -238,8 +385,8 @@ defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
         </dl>
       </section>
 
-      <section class="detail-section seeds-section" aria-label="Seeds">
-        <h4 class="detail-section-heading">Seeds</h4>
+      <section class="detail-section seeds-section" aria-label="资源摘要">
+        <h4 class="detail-section-heading">资源摘要</h4>
         <ResourceSummary :effective-seeds="effective" :complete-groups="completeGroups" :excluded-seeds="excluded" :selected-group-name="selectedGroupName" />
       </section>
     </div>
@@ -249,6 +396,10 @@ defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
 <style scoped>
 .request-detail { display: grid; gap: 1rem; }
 .request-detail-title { margin: 0; font-size: 1.15rem; }
+.draft-review-summary { display: grid; gap: 0.5rem; border: 1px solid var(--color-border); border-radius: 6px; padding: 0.75rem; background: var(--color-bg-muted); }
+.draft-review-summary dd { color: var(--color-text); }
+.advanced-detail { display: grid; gap: 0.75rem; border: 1px solid var(--color-border); border-radius: 6px; padding: 0.75rem; }
+.advanced-detail summary { cursor: pointer; font-weight: 600; }
 .detail-inline-form { display: grid; gap: 0.75rem; border: 1px solid var(--color-border); border-radius: 6px; padding: 1rem; }
 .detail-form-heading, .detail-section-heading { margin: 0; font-size: 1rem; }
 .detail-form-actions, .filter-options { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; }

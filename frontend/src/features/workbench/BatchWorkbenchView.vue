@@ -26,7 +26,7 @@
 // fields) + storage_dir (relative profile). Destructive/irreversible actions
 // go through the shared ConfirmDialog and failures surface fixed Chinese copy
 // only.
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { api, toApiError } from '@/api/client'
@@ -44,6 +44,7 @@ import PanelSection from '@/components/layout/PanelSection.vue'
 import AnimeTitleInput from '@/features/workbench/AnimeTitleInput.vue'
 import AnimeDraftEditor from '@/features/workbench/AnimeDraftEditor.vue'
 import CandidateCollectionList from '@/features/workbench/CandidateCollectionList.vue'
+import { useDraftEditScheduler, type DraftEditScheduler } from '@/features/workbench/draftEditScheduler'
 
 import {
   batchSaveConfirmErrorLabel,
@@ -74,7 +75,7 @@ import {
   type BatchParseResult,
 } from '@/features/workbench/batchWorkbench'
 import { displayValue, type RequestSnapshot } from '@/features/requests/requestDetail'
-import type { PreviewPatch } from '@/features/workbench/candidateSearch'
+import type { PreviewEditState } from '@/features/workbench/candidateSearch'
 import { currentStorageDir, storageQuery } from '@/features/requests/requestStorage'
 import { isPublicRouteIdentifier, routeLocation } from '@/app/router/catalog'
 import {
@@ -135,6 +136,11 @@ const selectedItemIds = computed<Set<string>>({
   },
 })
 const draftCreateItemIds = ref<Set<string>>(new Set())
+// US-343: the candidate each item is currently generating a draft from, and the
+// sanitized failure that stays beside that candidate. Both are keyed by item so
+// one item's generation can never mark another item as loading or failing.
+const draftCreateCandidateIds = ref<Record<string, string>>({})
+const draftCreateErrors = ref<Record<string, Record<string, string>>>({})
 const saveInFlight = ref(false)
 const acceptFeedback = ref<Record<string, string>>({})
 const savingItemIds = ref<Set<string>>(new Set())
@@ -168,7 +174,10 @@ const detailItemId = ref<string | null>(null)
 // cannot diverge between the two surfaces.
 const draftSessions = new Map<string, DraftSession>()
 const draftApplyErrors = ref<Record<string, string>>({})
-const pendingCardSubtitleGroups = ref<Record<string, string>>({})
+// US-344: one edit scheduler per item, paired with the session it was built
+// for. Both surfaces (card shortcut and right-hand detail) drive the same
+// scheduler, so a revision can never be used by two requests at once.
+const editSchedulers = new Map<string, { session: DraftSession; scheduler: DraftEditScheduler }>()
 const detailEditor = ref<InstanceType<typeof AnimeDraftEditor> | null>(null)
 
 function ensureDraftSession(item: BatchItem): DraftSession | null {
@@ -184,6 +193,52 @@ function ensureDraftSession(item: BatchItem): DraftSession | null {
   })
   draftSessions.set(itemId, session)
   return session
+}
+
+/** The item's edit scheduler, recreated whenever its session is replaced. */
+function ensureScheduler(item: BatchItem): DraftEditScheduler | null {
+  const itemId = item.item_id
+  const session = ensureDraftSession(item)
+  if (!itemId || !session) return null
+  const existing = editSchedulers.get(itemId)
+  if (existing && existing.session === session) return existing.scheduler
+  existing?.scheduler.dispose()
+  const scheduler = useDraftEditScheduler({
+    session,
+    storageDir: () => storageQuery().storage_dir ?? null,
+    onSending: () => {
+      // Keep the review journal in step with the transport: a send may follow
+      // a previous failure, so both transitions are attempted.
+      journey.dispatch({ type: 'retry_apply', itemId })
+      journey.dispatch({ type: 'begin_apply', itemId })
+    },
+    onApplied: () => {
+      onDraftChanged(itemId, {
+        request: (session.request.value ?? batchCardRequest(item)) as RequestSnapshot,
+        draftId: session.draftId.value ?? '',
+        draftRevision: session.draftRevision.value ?? 1,
+      })
+    },
+    onInvalid: () => onDraftExpired(itemId),
+    onFailed: () => {
+      draftApplyErrors.value = { ...draftApplyErrors.value, [itemId]: '订阅草案修改失败，请稍后重试。' }
+      journey.dispatch({ type: 'apply_failed', itemId, error: session.error.value })
+    },
+  })
+  editSchedulers.set(itemId, { session, scheduler })
+  return scheduler
+}
+
+function disposeScheduler(itemId: string): void {
+  editSchedulers.get(itemId)?.scheduler.dispose()
+  editSchedulers.delete(itemId)
+}
+
+/** Displayed subtitle group for a card: unconfirmed intent first. */
+function cardSubtitleGroupValue(item: BatchItem): string {
+  const pending = editSchedulers.get(item.item_id ?? '')?.scheduler.pendingGroup.value
+  if (pending) return pending
+  return batchCardRequest(item)?.confirmable_config?.selected_subtitle_group ?? ''
 }
 
 interface BatchItemConfirmability {
@@ -204,7 +259,11 @@ function itemConfirmability(itemId: string): BatchItemConfirmability {
   if (!draftId || !draftId.trim()) blockers.push('草案能力无效')
   if (!Number.isInteger(revision) || (revision ?? 0) <= 0) blockers.push('草案版本无效')
   if (!session || session.invalid.value) blockers.push('订阅草案已失效')
-  if (session?.dirty.value) blockers.push('有尚未应用的编辑')
+  const scheduler = item ? ensureScheduler(item) : null
+  // A local edit is never confirmed implicitly: it must reach the server first.
+  if (scheduler?.waiting.value) blockers.push('有尚未应用的编辑，正在等待过滤规则自动更新')
+  else if (scheduler?.folderPending.value) blockers.push('有尚未应用的编辑，等待提交目录名')
+  else if (session?.dirty.value || scheduler?.groupPending.value) blockers.push('有尚未应用的编辑')
   if (session?.applying.value) blockers.push('正在重新计算资源')
   if (session?.error.value || session?.canRetry.value) blockers.push('修改失败，请重试或恢复最后一致值')
   if (savingItemIds.value.has(itemId) || item?.status === 'RESPONSE_UNKNOWN' || journeyItem?.phase === 'saving' || journeyItem?.phase === 'response_unknown') blockers.push('保存结果待核验')
@@ -233,12 +292,15 @@ function hasUnsafeBatchWork(): boolean {
 }
 
 function clearBatchRouteLocalState(): void {
+  for (const { scheduler } of editSchedulers.values()) scheduler.dispose()
+  editSchedulers.clear()
   for (const session of draftSessions.values()) session.invalidate()
   draftSessions.clear()
   saveOperation.value = null
   draftCreateItemIds.value = new Set()
+  draftCreateCandidateIds.value = {}
+  draftCreateErrors.value = {}
   selectedItemIds.value = new Set()
-  pendingCardSubtitleGroups.value = {}
   journey.dispatch({ type: 'clear_route' })
 }
 
@@ -311,8 +373,18 @@ function sortExceptionsFirst(): void {
 }
 
 function selectCurrentItem(item: BatchItem): void {
-  currentItemId.value = item.item_id ?? null
-  detailItemId.value = item.item_id ?? null
+  const previousId = detailItemId.value ?? currentItemId.value
+  const nextId = item.item_id ?? null
+  if (previousId && previousId !== nextId) {
+    // US-344: leaving an item cancels its debounce window and drops intent the
+    // user can no longer see; a late response for it can never touch the new
+    // item because every session and scheduler is keyed by item_id.
+    const leaving = editSchedulers.get(previousId)
+    leaving?.scheduler.cancelTimer()
+    leaving?.scheduler.dropPending()
+  }
+  currentItemId.value = nextId
+  detailItemId.value = nextId
 }
 
 function setCardElement(itemId: string | null | undefined, element: unknown): void {
@@ -471,11 +543,39 @@ function setAllSelected(selected: boolean): void {
   selectedItemIds.value = next
 }
 
+/** The candidate an item is currently generating a draft from, if any. */
+function generatingCandidateIdFor(itemId: string): string | null {
+  return draftCreateCandidateIds.value[itemId] ?? null
+}
+
+/** The sanitized generation failures of one item's candidates. */
+function candidateErrorsFor(itemId: string): Record<string, string> {
+  return draftCreateErrors.value[itemId] ?? {}
+}
+
+function setItemCandidateError(itemId: string, bangumiId: string, message: string | null): void {
+  const itemErrors = { ...(draftCreateErrors.value[itemId] ?? {}) }
+  if (message) itemErrors[bangumiId] = message
+  else delete itemErrors[bangumiId]
+  if (Object.keys(itemErrors).length) {
+    draftCreateErrors.value = { ...draftCreateErrors.value, [itemId]: itemErrors }
+    return
+  }
+  const next = { ...draftCreateErrors.value }
+  delete next[itemId]
+  draftCreateErrors.value = next
+}
+
 async function generateDraftFromCandidate(candidate: BatchCandidate): Promise<void> {
   const item = detailItem.value
   const itemId = item?.item_id ?? ''
   if (!item || !itemId || operationLocks(itemId) || draftCreateItemIds.value.has(itemId)) return
+  const bangumiId = candidate.bangumi_id
   draftCreateItemIds.value = new Set(draftCreateItemIds.value).add(itemId)
+  // Only this item's clicked candidate is marked as loading; a retry clears the
+  // previous failure instead of stacking it.
+  draftCreateCandidateIds.value = { ...draftCreateCandidateIds.value, [itemId]: bangumiId }
+  setItemCandidateError(itemId, bangumiId, null)
   try {
     const payload = buildBatchCandidateCreatePayload(candidate, {
       storageDir: currentStorageDir(),
@@ -499,14 +599,24 @@ async function generateDraftFromCandidate(candidate: BatchCandidate): Promise<vo
         : current,
     )
     ensureDraftSession({ ...item, preview_request: request, draft_id: draftId, draft_revision: draftRevision })
+    // The item left the candidate step atomically; its candidate feedback goes
+    // with it.
+    const nextErrors = { ...draftCreateErrors.value }
+    delete nextErrors[itemId]
+    draftCreateErrors.value = nextErrors
     notification.success('订阅草案已生成', '已根据所选 MiKan 合集生成当前批量条目的订阅草案。')
   } catch (error) {
     void error
-    notification.error('生成订阅草案失败', mikanFailureMessage(error, '从 MiKan 合集生成订阅草案'))
+    const message = mikanFailureMessage(error, '从 MiKan 合集生成订阅草案')
+    notification.error('生成订阅草案失败', message)
+    setItemCandidateError(itemId, bangumiId, message)
   } finally {
     const next = new Set(draftCreateItemIds.value)
     next.delete(itemId)
     draftCreateItemIds.value = next
+    const nextCandidates = { ...draftCreateCandidateIds.value }
+    delete nextCandidates[itemId]
+    draftCreateCandidateIds.value = nextCandidates
   }
 }
 
@@ -516,45 +626,24 @@ function subtitleGroupOptions(item: BatchItem): Array<{ value: string; label: st
     .filter((option) => option.value)
 }
 
-async function applyCardSubtitleGroup(item: BatchItem, value: string): Promise<void> {
-  const session = ensureDraftSession(item)
-  if (!session || !value || session.applying.value || session.invalid.value) return
-  journey.dispatch({ type: 'begin_apply', itemId: item.item_id ?? '' })
-  const patch: PreviewPatch = { selected_subtitle_group: value }
-  pendingCardSubtitleGroups.value = { ...pendingCardSubtitleGroups.value, [item.item_id ?? '']: value }
+/**
+ * US-344: a subtitle-group change is authoritative immediately, from either
+ * surface. The scheduler owns the CAS so the card and the detail pane can
+ * never issue two requests with the same revision.
+ */
+function applyCardSubtitleGroup(item: BatchItem, value: string): void {
+  if (!value) return
+  const scheduler = ensureScheduler(item)
+  if (!scheduler) return
   draftApplyErrors.value = { ...draftApplyErrors.value, [item.item_id ?? '']: '' }
-  const result = await session.apply(patch, storageQuery().storage_dir ?? null)
-  if (result?.request) {
-    onDraftChanged(item.item_id ?? '', {
-      request: result.request as RequestSnapshot,
-      draftId: session.draftId.value ?? item.draft_id ?? '',
-      draftRevision: session.draftRevision.value ?? item.draft_revision ?? 1,
-    })
-    notification.success('已应用字幕组修改', '订阅草案资源已重新计算。')
-  } else {
-    journey.dispatch({ type: 'apply_failed', itemId: item.item_id ?? '', error: session.error.value })
-    draftApplyErrors.value = { ...draftApplyErrors.value, [item.item_id ?? '']: '修改失败，可重试或恢复上次结果。' }
-    notification.error('修改失败', '订阅草案修改失败，请稍后重试。')
-  }
+  scheduler.setSubtitleGroup(value)
 }
 
-async function retryCardSubtitleGroup(item: BatchItem): Promise<void> {
-  const session = draftSessions.get(item.item_id ?? '')
-  if (!session || session.applying.value || !session.canRetry.value) return
-  journey.dispatch({ type: 'retry_apply', itemId: item.item_id ?? '' })
-  const result = await session.retry()
-  if (result?.request) {
-    onDraftChanged(item.item_id ?? '', {
-      request: result.request as RequestSnapshot,
-      draftId: session.draftId.value ?? item.draft_id ?? '',
-      draftRevision: session.draftRevision.value ?? item.draft_revision ?? 1,
-    })
-    notification.success('已恢复修改', '订阅草案资源已重新计算。')
-  } else if (session.invalid.value) {
-    onDraftExpired(item.item_id ?? '')
-  } else {
-    journey.dispatch({ type: 'apply_failed', itemId: item.item_id ?? '', error: session.error.value })
-  }
+async function retryCardModify(item: BatchItem): Promise<void> {
+  const scheduler = ensureScheduler(item)
+  if (!scheduler) return
+  draftApplyErrors.value = { ...draftApplyErrors.value, [item.item_id ?? '']: '' }
+  await scheduler.retry()
 }
 
 function openDraftDetail(item: BatchItem): void {
@@ -562,6 +651,7 @@ function openDraftDetail(item: BatchItem): void {
 }
 
 function deleteBatchCard(itemId: string): void {
+  disposeScheduler(itemId)
   draftSessions.get(itemId)?.invalidate()
   draftSessions.delete(itemId)
   journey.dispatch({ type: 'remove_item', itemId })
@@ -959,9 +1049,6 @@ function onDraftChanged(
       : current,
   )
   draftApplyErrors.value = { ...draftApplyErrors.value, [itemId]: '' }
-  const pending = { ...pendingCardSubtitleGroups.value }
-  delete pending[itemId]
-  pendingCardSubtitleGroups.value = pending
 }
 
 function onDetailDirty(dirty: boolean): void {
@@ -977,6 +1064,7 @@ function onDraftDeleted(itemId: string): void {
 }
 
 function onDraftExpired(itemId: string): void {
+  disposeScheduler(itemId)
   draftSessions.get(itemId)?.invalidate()
   journey.dispatch({ type: 'invalidate_draft', itemId })
   const nextSelected = new Set(selectedItemIds.value)
@@ -1001,59 +1089,49 @@ function onDraftExpired(itemId: string): void {
   detailItemId.value = null
 }
 
-async function applyDetailModify(patch: PreviewPatch): Promise<void> {
+/** 保存修改: flush the not-yet-due filter input and the folder name now. */
+async function flushDetailModify(): Promise<void> {
   const item = detailItem.value
   if (!item) return
-  const session = ensureDraftSession(item)
-  if (!session) return
-  journey.dispatch({ type: 'begin_apply', itemId: item.item_id ?? '' })
+  const scheduler = ensureScheduler(item)
+  if (!scheduler) return
   draftApplyErrors.value = { ...draftApplyErrors.value, [item.item_id ?? '']: '' }
-  const result = await session.apply(patch, storageQuery().storage_dir ?? null)
-  if (result?.request) {
-    onDraftChanged(item.item_id ?? '', {
-      request: result.request as RequestSnapshot,
-      draftId: session.draftId.value ?? item.draft_id ?? '',
-      draftRevision: session.draftRevision.value ?? item.draft_revision ?? 1,
-    })
-    notification.success('已应用修改', '订阅草案资源已重新计算。')
-    return
-  }
-  if (session.invalid.value) {
-    onDraftExpired(item.item_id ?? '')
-    return
-  }
-  draftApplyErrors.value = { ...draftApplyErrors.value, [item.item_id ?? '']: '订阅草案修改失败，请稍后重试。' }
-  journey.dispatch({ type: 'apply_failed', itemId: item.item_id ?? '', error: session.error.value })
-  notification.error('修改失败', '订阅草案修改失败，请稍后重试。')
+  await scheduler.flush()
+}
+
+function onSubtitleGroupChange(value: string): void {
+  const item = detailItem.value
+  if (!item) return
+  applyCardSubtitleGroup(item, value)
+}
+
+function onFilterChange(state: PreviewEditState): void {
+  const item = detailItem.value
+  const scheduler = item ? ensureScheduler(item) : null
+  if (!scheduler) return
+  scheduler.setFilter(state)
+}
+
+function onFolderNameChange(value: string): void {
+  const item = detailItem.value
+  const scheduler = item ? ensureScheduler(item) : null
+  if (!scheduler) return
+  scheduler.setFolderName(value)
 }
 
 async function retryDetailModify(): Promise<void> {
   const item = detailItem.value
-  const session = item ? draftSessions.get(item.item_id ?? '') : null
-  if (!item || !session) return
-  journey.dispatch({ type: 'retry_apply', itemId: item.item_id ?? '' })
-  const result = await session.retry()
-  if (result?.request) {
-    onDraftChanged(item.item_id ?? '', {
-      request: result.request as RequestSnapshot,
-      draftId: session.draftId.value ?? item.draft_id ?? '',
-      draftRevision: session.draftRevision.value ?? item.draft_revision ?? 1,
-    })
-    notification.success('已恢复修改', '订阅草案资源已重新计算。')
-  } else if (session.invalid.value) {
-    onDraftExpired(item.item_id ?? '')
-  } else {
-    journey.dispatch({ type: 'apply_failed', itemId: item.item_id ?? '', error: session.error.value })
-  }
+  const scheduler = item ? ensureScheduler(item) : null
+  if (!scheduler) return
+  await scheduler.retry()
 }
 
 function resetDetailModify(): void {
   const item = detailItem.value
-  const session = item ? draftSessions.get(item.item_id ?? '') : null
-  if (!session) return
+  const scheduler = item ? ensureScheduler(item) : null
+  if (!scheduler) return
   detailEditor.value?.reset()
-  session.reset()
-  journey.dispatch({ type: 'reset_apply', itemId: item?.item_id ?? '' })
+  scheduler.restore()
   journey.dispatch({ type: 'set_dirty', itemId: item?.item_id ?? '', dirty: false })
   draftApplyErrors.value = { ...draftApplyErrors.value, [item?.item_id ?? '']: '' }
 }
@@ -1081,6 +1159,11 @@ onMounted(() => {
     // card grid itself is never persisted server-side, so a refresh can only
     // restore the queue context, not the cards.
   }
+})
+
+onUnmounted(() => {
+  for (const { scheduler } of editSchedulers.values()) scheduler.dispose()
+  editSchedulers.clear()
 })
 
 defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, deleteBatchCard })
@@ -1223,7 +1306,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                 <label :for="`batch-card-subtitle-${item.item_id}`">字幕组快捷修改</label>
                 <select
                   :id="`batch-card-subtitle-${item.item_id}`"
-                  :value="pendingCardSubtitleGroups[item.item_id ?? ''] ?? batchCardRequest(item)?.confirmable_config?.selected_subtitle_group ?? ''"
+                  :value="cardSubtitleGroupValue(item)"
                   :disabled="operationLocks(item.item_id ?? '') || draftSessions.get(item.item_id ?? '')?.applying.value"
                   @change="applyCardSubtitleGroup(item, ($event.target as HTMLSelectElement).value)"
                 >
@@ -1235,12 +1318,22 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                 <BaseButton
                   v-if="draftSessions.get(item.item_id ?? '')?.canRetry.value"
                   variant="secondary"
-                  :disabled="savingItemIds.has(item.item_id ?? '')"
-                  @click.stop="retryCardSubtitleGroup(item)"
+                  :disabled="savingItemIds.has(item.item_id ?? '') || draftSessions.get(item.item_id ?? '')?.applying.value"
+                  @click.stop="retryCardModify(item)"
                 >重试修改</BaseButton>
               </div>
-              <div class="batch-card-seeds">有效种子数：{{ batchCardSeedSummary(item) }}</div>
+              <!-- US-343: the candidate step shows no resource count; the
+                   effective seed count appears only once a draft exists. -->
+              <div v-if="batchCardRequest(item)" class="batch-card-seeds">有效种子数：{{ batchCardSeedSummary(item) }}</div>
               <div class="batch-card-progress">{{ batchEpisodeProgressText(undefined) }}</div>
+
+              <p
+                v-if="generatingCandidateIdFor(item.item_id ?? '')"
+                class="batch-card-generating-status"
+                role="status"
+              >
+                正在生成订阅草案…
+              </p>
 
               <p v-if="String(item.status ?? '') === 'EMPTY'" class="batch-candidate-feedback">
                 未找到匹配的 MiKan 合集。
@@ -1333,6 +1426,8 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                 :candidates="detailItem.candidates ?? []"
                 :query="batchCardTitle(detailItem)"
                   :disabled="operationLocks(detailItem.item_id ?? '')"
+                :loading-candidate-id="generatingCandidateIdFor(detailItem.item_id ?? '')"
+                :candidate-errors="candidateErrorsFor(detailItem.item_id ?? '')"
                 :confirmed-seasons="seasonConfirmations"
                 @select="generateDraftFromCandidate"
                 @update:confirmed-season="(bangumiId: string, season: number | null) => (seasonConfirmations = { ...seasonConfirmations, [bangumiId]: season })"
@@ -1347,23 +1442,29 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                   id-prefix="batch-preview"
                   form-id="detail-preview-edit-form"
                   container-id="request-detail-container"
+                  apply-variant="secondary"
                   :applying="ensureDraftSession(detailItem)?.applying.value ?? false"
                   :error="draftApplyErrors[detailItem.item_id ?? '']"
                   :can-retry="ensureDraftSession(detailItem)?.canRetry.value ?? false"
                   :disabled="(ensureDraftSession(detailItem)?.applying.value ?? false) || operationLocks(detailItem.item_id ?? '')"
-                  @apply="applyDetailModify"
+                  @apply="flushDetailModify"
+                  @subtitle-group-change="onSubtitleGroupChange"
+                  @filter-change="onFilterChange"
+                  @folder-change="onFolderNameChange"
                   @dirty-change="onDetailDirty"
                   @retry="retryDetailModify"
                   @reset="resetDetailModify"
                 >
                   <template #review-note>
-                    <p class="field-help preview-mode-note">订阅草案（未保存）：可编辑下方订阅方案；点击「应用修改」重新计算资源，然后在固定操作栏统一保存并确认。</p>
+                    <p class="field-help preview-mode-note">订阅草案（未保存）：字幕组会立即重新计算，筛选规则在停止输入 1.5 秒后自动更新，目录名只在「保存修改」时提交；随后在固定操作栏统一保存并确认。</p>
                   </template>
                 </AnimeDraftEditor>
                 <div class="batch-draft-actions" aria-label="批量卡片操作">
+                  <!-- F4: 右栏只负责当前条目的查看与改选，固定操作栏是唯一的
+                       批量「保存并确认」主入口，因此这里不使用主按钮样式。 -->
                   <BaseButton
                     id="batch-detail-accept"
-                    variant="primary"
+                    variant="secondary"
                     :disabled="!itemConfirmability(detailItem.item_id ?? '').confirmable"
                     :title="itemConfirmability(detailItem.item_id ?? '').blockers.join('；')"
                     @click="selectForBatch(detailItem.item_id ?? '')"
@@ -1617,11 +1718,18 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 .batch-card-source,
 .batch-card-preference,
 .batch-card-seeds,
+.batch-card-generating-status,
 .batch-card-progress {
   color: var(--color-text-muted);
   font-size: 0.84rem;
   overflow-wrap: anywhere;
   grid-column: 2;
+}
+
+/* The generating item is marked in place; the candidates it owns carry the
+   aria-busy loading state in the detail pane. */
+.batch-card-generating-status {
+  color: var(--color-action-primary);
 }
 
 .batch-card-preference {
