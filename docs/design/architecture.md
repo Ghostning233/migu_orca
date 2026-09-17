@@ -174,6 +174,14 @@ git diff --check
   根目录可创建/可写（不可用返回 503 `{ok: false, result: "storage_unavailable"}`）。
   两者都不访问真实 MiKan / AutoBangumi / qBittorrent。
 - 部署基线：默认 local-only（`flask run` 只监听 127.0.0.1）；未认证时禁止直接暴露公网。
+  当部署方明确将 Flask 绑定到局域网后，Host 校验必须继续允许回环地址、IPv4 私网地址
+  （如 `192.168.0.0/16`）和链路本地地址，使同一局域网的其他设备可以通过
+  `局域网 IP:端口` 访问。公网地址、IPv6 ULA 和其他域名不得因该兼容性放行而自动信任，
+  仍须由服务端通过 `MIGU_ORCA_TRUSTED_HOSTS` 显式配置。
+- 局域网 Host 放行是正式部署能力，不得为“收紧 Host 校验”或重构中间件而随意删除、
+  改回只允许 localhost 的实现。修改 Host 解析/受信逻辑时，必须保留 API 契约回归覆盖：
+  `tests/api_contract/test_autobangumi_settings_security.py` 至少验证带端口的 IPv4 私网
+  Host 成功、公网 Host 失败，以及显式可信 Host 和 IPv6 ULA 的现有边界。
 
 ## 8. 拆分原则
 

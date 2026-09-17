@@ -122,6 +122,8 @@ def test_ipv6_loopback_and_explicit_trusted_host(monkeypatch, tmp_path: Path) ->
     assert client.get("/api/v1/settings/autobangumi", headers={"Host": "[::1]"}).status_code == 200
     assert client.get("/api/v1/settings/autobangumi", headers={"Host": "[::1]:5000"}).status_code == 200
     assert client.get("/api/v1/settings/autobangumi", headers={"Host": "localhost:5000"}).status_code == 200
+    assert client.get("/api/v1/settings/autobangumi", headers={"Host": "192.168.31.114:5000"}).status_code == 200
+    assert client.get("/api/v1/settings/autobangumi", headers={"Host": "8.8.8.8:5000"}).status_code == 400
     assert client.get("/api/v1/settings/autobangumi", headers={"Host": "[fd00::1]"}).status_code == 400
     monkeypatch.setenv("MIGU_ORCA_TRUSTED_HOSTS", "[fd00::1]")
     client = _client(monkeypatch, tmp_path)
