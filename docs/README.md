@@ -12,9 +12,12 @@
 - Stage 40～41 的执行范围与验收基线：[添加番剧可靠性与体验改版 PRD](MiGuOrca_stage40_add_anime_reliability_and_ux_PRD.md)
 - F5 悬浮提示的完成范围与验收：[Stage 42 PRD](MiGuOrca_stage42_global_notification_PRD.md)
 - 用户新一轮前端人工审核的问题与设计讨论：[前端审核问题记录](design/frontend-review-issues-2026-09-17.md)
-- Stage 41 添加页状态反馈与任务导向审核已完成（US-342～US-345）；执行证据见 [`scripts/ralph/progress.txt`](../scripts/ralph/progress.txt)。
+- Stage 41 添加页状态反馈与任务导向审核已完成（US-342～US-345）；执行证据见 [Stage 41 归档 progress](../scripts/ralph/archive/2026-09-18-stage41-add-anime-ux/progress.txt)。
 - 添加番剧单番与批量旅程已确认的六张效果图：[新版设计方向](design/frontend-ux-review-mockups-2026-09-17.md)
-- 下一阶段的代表事项、验收边界与 Terra 规划交接：[前端审核后续交接](development/frontend-ux-followup-handoff-2026-09-17.md)
+- 当前正式总体规划：[Stage 43～45 添加番剧视觉与信息层级收口](MiGuOrca_stage43_45_add_anime_visual_PRD.md)
+- 当前执行 PRD：[Stage 43 搜索入口与候选选择](MiGuOrca_stage43_add_anime_entry_visual_PRD.md)；Ralph [JSON](../scripts/ralph/prd.json) / [progress](../scripts/ralph/progress.txt) 尚未开发
+- 当前产品决策与后续 Stage 编写入口：[决策/规划交接](development/add-anime-visual-prd-handoff-2026-09-18.md)；[团队主 Agent 启动提示词](development/stage43-team-main-agent-prompt.md)
+- Stage 40～42 的历史规划来源：[2026-09-17 前端审核后续交接](development/frontend-ux-followup-handoff-2026-09-17.md)，不作为当前未完成清单
 - 当前截图与六图对比后的外部规划输入（非执行 PRD）：[添加番剧视觉与信息层级收口分析](design/frontend-ux-external-analysis-2026-09-18.md)
 - 产品定位与总体需求：[主 PRD](MiGuOrca_main_PRD.md)
 - 当前代码架构与目录边界：[架构与目录约定](design/architecture.md)
@@ -31,7 +34,9 @@
   完成 F-D（US-284～US-293）并归档；Stage 37 已完成 F-E（US-294～US-302）并归档；Stage 38
   已完成 F-F（US-303～US-317）并归档；F-G 已由 Stage 39 完成并归档（US-318～US-340）。
   前端体验重构的用户审核已形成问题清单；Stage 40（FE-01）与 Stage 41（D0、F2～F4）
-  与 F5/WP-42-A 均已完成并合并；后续产品范围须由新的用户审核问题清单决定。
+  与 F5/WP-42-A 均已完成并合并。当前 Stage 43 执行材料已准备，US-347～US-352尚未开发；
+  WP-43-A可开始，后续视觉包受D-01用户主题作用域决定门控。Stage 44/45仍需前阶段交接后
+  编写独立执行PRD，不把总体规划当作已授权的全部Stage开发。
   工作目标、候选 Stage、设计决策门和 Agent 协作顺序见
   [前端体验重构：工作目标与协作流程](frontend-ux-refactor-work-goals.md)。
 - 页面体验设计与视觉评审已经作为独立工作完成。后续必须先完成后端支撑和前端分片 PRD、
@@ -85,6 +90,8 @@ Stage 42 已完成 WP-42-A / US-346，并经 PR #70 合并至 `main`（merge `cb
 - Stage 39：[部署连接配置与设置发布收尾](MiGuOrca_stage39_deployment_settings_PRD.md)（US-318～US-340 已完成并归档）
 - Stage 40～41：[添加番剧可靠性与体验改版](MiGuOrca_stage40_add_anime_reliability_and_ux_PRD.md)（US-341 与 WP-41-A～D 已完成）
 - Stage 42：[悬浮全局提示收尾](MiGuOrca_stage42_global_notification_PRD.md)（WP-42-A / US-346 已完成并经 PR #70 合并）
+- Stage 43：[搜索入口与候选选择视觉收口](MiGuOrca_stage43_add_anime_entry_visual_PRD.md)（US-347～US-352，准备完成、未开发；D-01门控）
+- Stage 44/45：候选范围见[总体 PRD](MiGuOrca_stage43_45_add_anime_visual_PRD.md)，编写前置见[决策/交接](development/add-anime-visual-prd-handoff-2026-09-18.md)，尚无独立执行 PRD
 
 Stage PRD 记录单一阶段的范围、非目标、决策和验收结果。已完成阶段的 Ralph 执行快照位于 `../scripts/ralph/archive/`。
 

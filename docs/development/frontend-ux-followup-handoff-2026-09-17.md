@@ -1,5 +1,10 @@
 # 添加番剧前端审核后续交接：Terra 规划输入
 
+现行入口（2026-09-18）：本文是Stage 40～42历史规划来源，D0/F1～F5已完成对应交付，
+下文旧启动提示词不用于本次开发。当前使用[Stage 43执行PRD](../MiGuOrca_stage43_add_anime_entry_visual_PRD.md)、
+[后续Stage编写交接](add-anime-visual-prd-handoff-2026-09-18.md)和
+[Stage 43团队主Agent提示词](stage43-team-main-agent-prompt.md)。
+
 状态：2026-09-17 用户已确认[新版六张效果图](../design/frontend-ux-review-mockups-2026-09-17.md)作为后续开发方向；本文是给 Terra 制定执行 PRD 的输入，不是执行 PRD、故事完成证明或代码/发布授权。当前问题以[FE-01～FE-08 记录](../design/frontend-review-issues-2026-09-17.md)为线索，静态推断须由代码、契约和真实交互复核。Stage 39 已完成；新 Stage 编号、范围与工作包由 Terra 核对仓库现状后规划，不沿用旧 progress 猜测。
 
 ## 角色和产物

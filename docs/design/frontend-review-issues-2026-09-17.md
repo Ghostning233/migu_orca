@@ -1,5 +1,11 @@
 # 前端人工审核问题记录（2026-09-17）
 
+现行入口（2026-09-18）：本记录保留当时观察，FE-01～04及FE-06相关能力已由Stage 40～42完成，
+不得作为当前未完成开发清单。当前范围以[Stage 43～45总体PRD](../MiGuOrca_stage43_45_add_anime_visual_PRD.md)、
+[Stage 43执行PRD](../MiGuOrca_stage43_add_anime_entry_visual_PRD.md)及
+[决策/后续编写交接](../development/add-anime-visual-prd-handoff-2026-09-18.md)为准。
+旧表状态和下文提示用于追溯，仍需代码核实，不自动覆盖现行需求。
+
 状态：用户已确认[新版六张效果图](frontend-ux-review-mockups-2026-09-17.md)作为后续开发方向；FE-01～FE-08 仍待按实际代码、契约和真实 Chromium 复现后制定执行验收。本文来自用户单番与批量添加的人工观察及当前分支代码静态核对；尚未修改实现，也不建立新 Stage。设计图不是逐像素验收规格；三张已被取代的旧图已按第 4 节移至 `docs/design/assets/frontend-ux/archive/`。后续工作包见[Terra 规划交接](../development/frontend-ux-followup-handoff-2026-09-17.md)。
 
 ## 1. 问题清单与建议顺序

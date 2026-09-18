@@ -1,5 +1,10 @@
 # MiGuOrca Future Stages
 
+当前后续规划入口（2026-09-18）：[Stage 43～45 添加番剧视觉收口总体PRD](MiGuOrca_stage43_45_add_anime_visual_PRD.md)。
+Stage 43 [执行PRD](MiGuOrca_stage43_add_anime_entry_visual_PRD.md)已准备、未开发；首包可开始，
+其余视觉包受D-01门控。Stage 44/45需各自前阶段交接后编写，不提前视为执行或发布授权。
+决策与编写检查单见[后续PRD交接](development/add-anime-visual-prd-handoff-2026-09-18.md)。
+
 ## 1. 总体方向
 
 MiGuOrca 后续方向是 Auto Bangumi 前置的批量新番订阅编排工作台，而不是 Auto Bangumi 或 qBittorrent 的替代执行系统。
