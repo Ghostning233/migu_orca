@@ -148,6 +148,19 @@ Stage 41 证据在 scripts/ralph/archive/2026-09-18-stage41-add-anime-ux/。
   因而未启动红测/修复/发布Agent。提示词摘要：开发—入口层级不改既有搜索/草案业务；审核—核对 FOUND、
   EMPTY、FAILED 分流及焦点/人工选择安全边界；修复—本包无需执行。
 
+## 2026-09-18 - WP-43-D 独立审核闭环
+
+- 审核结论：US-351 的批量输入只保留父级一个 v-model/表单入口，0/37+ 在入口禁用且 BatchWorkbenchView
+  函数入口仍校验；1～36 原文不截断。重搜仅在存在候选、草案或勾选等未保存现场时请求 ConfirmDialog，取消
+  恢复 `previousRawInput` 并把焦点返回父级输入；确认后才清理。初始不显示空工作台，等待反馈显示原文/规模/
+  整体进行中，未加入逐项进度或单项重搜。
+- 主Agent复验：`cd frontend && npm run test:unit -- --run src/features/workbench/WorkbenchView.test.ts` → 43 passed；
+  `git diff b516658..07bff69 --check` 通过。开发定向证据为121 Vitest、27 Chromium及typecheck/lint/build/
+  api:check通过；未改API/后端或D-02～D-04范围。
+- 实际协作/模型：开发gpt-5.6-luna（Fable CLI环境失败后的替代）、主Agent独立审核；无问题，未启动红测/
+  修复/发布Agent。提示词摘要：开发—容量和整体等待不越过业务边界；审核—检查确认取消、焦点与混合结果；
+  修复—本包无需执行。
+
 ## 2026-09-18 - WP-43-A 独立审核与复审闭环
 
 - 审核结论：US-347/US-348 的完整批次资格范围、弹窗内存 intent、确认前 batch/集合/draft/revision
