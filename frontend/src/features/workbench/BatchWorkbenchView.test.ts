@@ -1254,13 +1254,17 @@ describe('BatchWorkbenchView confirm-all dialog intent (US-348)', () => {
     await wrapperUnderTest.find('.batch-draft-card[data-item-id="item-a"] .batch-card-expand').trigger('click')
     await nextTick()
 
+    // 先发出修改并保持响应在途；真实 ConfirmDialog 打开后背景表单会 inert，
+    // 因此不能在弹窗打开后再从背景触发表单提交。
+    await wrapperUnderTest.find('#batch-preview-must-contain').setValue('新筛选')
+    await wrapperUnderTest.find('#detail-preview-edit-form').trigger('submit')
+    await nextTick()
+    expect(apiPost.mock.calls.filter(([path]) => path === '/api/v1/requests/preview-modify')).toHaveLength(1)
+
     await openAllDialog()
     expect(wrapperUnderTest.find('.confirm-dialog').exists()).toBe(true)
 
     // 弹窗打开期间，已在途的修改响应把该条目的草案版本推进到 2。
-    await wrapperUnderTest.find('#batch-preview-must-contain').setValue('新筛选')
-    await wrapperUnderTest.find('#detail-preview-edit-form').trigger('submit')
-    await nextTick()
     const applied = previewRequest('req-a')
     applied.confirmable_config.filter_rule.must_contain = '新筛选'
     resolveModify({ request: applied, draft_id: 'draft-a', draft_revision: 2 })
