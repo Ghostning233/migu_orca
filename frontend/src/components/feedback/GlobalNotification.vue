@@ -14,7 +14,7 @@
 // sanitized by the caller (api/client.ts + notification store): no endpoints,
 // tokens, cookies, raw bodies, absolute paths or full Requests.
 import { storeToRefs } from 'pinia'
-import { computed, onBeforeUnmount } from 'vue'
+import { computed, onBeforeUnmount, watch } from 'vue'
 
 import { useNotificationStore } from '@/app/stores/notification'
 
@@ -26,6 +26,43 @@ const { current } = storeToRefs(notificationStore)
 const isPolite = computed(
   () => current.value?.kind === 'success' || current.value?.kind === 'info',
 )
+
+watch(current, (value) => {
+  if (value) document.documentElement.style.scrollBehavior = 'auto'
+})
+
+function dismiss(): void {
+  // Removing a focused fixed element can trigger Chromium's scroll anchoring
+  // even though the toast is outside document flow. Preserve the viewport so
+  // dismissing a summary cannot move the page it is announcing.
+  const { scrollX, scrollY } = window
+  document.documentElement.style.scrollBehavior = 'auto'
+  document.documentElement.style.overflowAnchor = 'none'
+  document.body.style.overflowAnchor = 'none'
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur()
+  }
+  notificationStore.clear()
+  restoreViewport(scrollX, scrollY)
+  requestAnimationFrame(() => {
+    restoreViewport(scrollX, scrollY)
+  })
+  window.setTimeout(() => {
+    restoreViewport(scrollX, scrollY)
+  }, 0)
+}
+
+function restoreViewport(scrollX: number, scrollY: number): void {
+  if (navigator.userAgent.toLowerCase().includes('jsdom')) return
+  try {
+    window.scrollTo({ left: scrollX, top: scrollY, behavior: 'instant' })
+  } catch {
+    // jsdom does not implement scrolling; the browser path above is the
+    // layout-preserving behavior.
+  }
+  document.documentElement.scrollTop = scrollY
+  document.body.scrollTop = scrollY
+}
 
 // The store owns the auto-close timers; unmounting has to take the pending one
 // with it so it cannot outlive the toast and mutate the shell afterwards.
@@ -52,7 +89,7 @@ onBeforeUnmount(() => {
     <button
       type="button"
       class="secondary-button global-notification-close"
-      @click="notificationStore.clear()"
+      @click="dismiss"
     >
       关闭
     </button>

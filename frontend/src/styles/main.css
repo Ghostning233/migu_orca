@@ -17,6 +17,7 @@
 html {
   -webkit-text-size-adjust: 100%;
   scroll-behavior: var(--motion-scroll-behavior);
+  overflow-anchor: none;
 }
 
 body {
