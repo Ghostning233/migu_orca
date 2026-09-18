@@ -1,0 +1,93 @@
+# Ralph 当前状态
+
+Stage 41 已于 2026-09-17 经 [PR #69](https://github.com/Ghostning233/migu_orca/pull/69)
+合并至 `main`（merge `ab333cf`）；其 Ralph 快照已归档至
+`scripts/ralph/archive/2026-09-18-stage41-add-anime-ux/`。
+
+Stage 42（WP-42-A / US-346，F5 悬浮全局提示收尾）已于 2026-09-17 经
+[PR #70](https://github.com/Ghostning233/migu_orca/pull/70) 合并至 `main`
+（merge `cb45b245e774e05121b109b8c47229ae615164dc`）。其 Ralph 快照已归档至
+`scripts/ralph/archive/2026-09-18-stage42-global-notification/`。
+
+## 2026-09-18 - Stage 42 规划
+
+- 依据 `docs/MiGuOrca_stage40_add_anime_reliability_and_ux_PRD.md` 的 WP-42-A，补充独立执行 PRD
+  `docs/MiGuOrca_stage42_global_notification_PRD.md` 并写入单故事 Ralph `prd.json`。
+- 范围冻结：只收敛既有 `useNotificationStore`、`GlobalNotification`、App 壳和其测试的非关键短时
+  提示；不改 API/OpenAPI/generated client/后端、草案/保存确认、候选人工选择、追番管理、设置或外部写。
+- 产品边界：success/info 默认 10 秒、error 默认 20 秒；按消息 id 隔离替换 timer；关键恢复入口
+  保持就地；通知不持久化且不泄露敏感值。是否引入 loading kind 必须先由现有调用点证明其必要性，
+  不为满足视觉效果新增第二套提示通道。
+- 最小验证已冻结为 store/GlobalNotification/App Vitest、typecheck/lint/build 与定向真实 Chromium；
+  完整后端、前端和 Chromium 门禁仅在 Stage 42 收尾执行一次。
+
+## 2026-09-18 - WP-42-A / US-346 开发与定向验证
+
+- 范围与落点：只改 `frontend/src/app/stores/notification.ts`、
+  `frontend/src/components/feedback/GlobalNotification.vue`、受影响 Vitest（`App.test.ts`、
+  新增 `notification.test.ts` 与 `GlobalNotification.test.ts`）与新增
+  `tests/browser/test_app_global_notification.py`。未改 `App.vue`、未改 API/OpenAPI/generated
+  client/后端、草案与保存确认契约、追番管理/设置业务、外部写或任何业务成功判定。
+- 实现：
+  - 单一 store 新增 `NOTIFICATION_AUTO_CLOSE_MS`（success/info 10s、error 20s）；`show()` 先按
+    上一条消息 id 取消其 timer，再为新 id 建 timer；timer 回调只清理自己 id 的消息（`current?.id`
+    守卫）。未定义 kind 不落任何时长，改为手动关闭，避免静默取得不安全默认。
+  - `clear()` 取消当前消息 timer；timer 存在模块级 Map（不进 Pinia 响应式 state），
+    到期/替换/clear/卸载四条路径各自移除，任意时刻至多一条挂起。
+  - `GlobalNotification` 改为 `position: fixed`（header 下方右上、`--z-overlay`），容器
+    `pointer-events: none` 让点击穿透、关闭按钮 opt-in `auto`；`role`/`aria-live` 改为白名单：
+    success/info 才 polite+status，其余（含未定义 kind）fail closed 为 assertive+alert，
+    保留 `aria-atomic="true"`；`onBeforeUnmount` 清理 store，避免 orphan timer。
+  - 未新增 loading kind：核对全部 46 处既有 `notification.*` 调用点均无短时全局进行中需求，
+    页面 loading/disabled 仍由各页面就地持有，故不引入第二套通道。
+- 验证命令与结果（全部实际执行）：
+  - `npm run test:unit -- --run src/app/stores/notification.test.ts src/components/feedback/GlobalNotification.test.ts src/App.test.ts` → 3 files / 20 passed。
+  - `npm run test:unit -- --run` → 49 files / 593 passed（Stage 41 收尾为 47 files / 578 passed）。
+  - `npm run typecheck`、`npm run lint`、`npm run build` → 均通过。
+  - `uv run pytest tests/browser/test_app_global_notification.py -q --tb=short -p no:cacheprovider`
+    → 8 passed（真实 Chromium；candidate 端点全程 route mock，`storage_dir` 为 per-test tmp_path，
+    未访问真实 MiKan/AB/qB，未生成含敏感值的 screenshot/trace，未用 sleep 伪造通过）。
+  - 回归既有断言 toast 的浏览器文件 `test_app_request_detail.py test_app_settings.py
+    test_app_responsive_a11y.py test_app_workbench.py test_app_batch_workbench.py`
+    → 138 passed，确认新自动关闭时长未破坏旧断言、就地反馈未被移走。
+  - `uv run ruff check tests/browser/test_app_global_notification.py` → All checks passed。
+  - `git diff --check` → 无输出（通过）。
+- 浏览器用例覆盖：fixed 计算样式与不造成正文位移（关闭前后比对 `#mikan-candidate-search-result`
+  包围盒）、1280/1440/1920 无横向 overflow、键盘 Tab/Enter 关闭且出现/替换前后焦点不变、
+  鼠标点击关闭 + `elementFromPoint` 命中测试（新增，见下）、就地候选失败与「重试」在 toast
+  关闭后仍可恢复并替换过期摘要、以及 DOM/URL/history/localStorage/sessionStorage/console canary
+  （canary 值放在 `error_data.details` 内，经 `api/client.ts` 的 `ApiError.details` 真实进入前端
+  内存后再断言不落地到任何表面）。
+- 测试非空转的变异验证（改后均复原，`git diff --stat` 与改前一致）：
+  - 删除 `show()` 中的 `cancelAutoClose(previous.id)` → store 2 条用例失败（timer 计数 3 != 1）。
+  - 删除 `.global-notification` 的 `position: fixed` 等定位声明 → 浏览器位置断言失败，
+    且把位置断言临时放宽后，位移断言报 `y moved when the toast left: 391.375 -> 304.375`
+    （就地内容被推移 87px），证明布局位移断言真实有效。
+  - 删除关闭按钮的 `pointer-events: auto` → 新增鼠标关闭用例失败（`'none' == 'auto'`），
+    而原键盘用例仍通过。
+- 本轮新增的真实覆盖缺口修复：原浏览器用例只用 `close.focus()` + Enter 验证关闭，
+  键盘路径不经过命中测试，因此容器 `pointer-events: none` 若漏给按钮 `auto`，
+  鼠标将无法关闭而测试仍全绿。已补
+  `test_mouse_click_on_the_close_control_dismisses_the_toast`（真实 `click()` +
+  `elementFromPoint` 断言点击穿透 + 关闭后 `.candidate-card` 仍可用）。
+- 独立审核与收尾门禁（主 Agent，2026-09-18）：
+  - 逐项审查 store timer id 隔离、组件卸载清理、固定定位/点击穿透、role/aria、关键就地
+    恢复和 canary；未发现阻断项。独立复跑 `npx vitest --run` 的 6 个受影响文件，134 passed；
+    `uv run pytest tests/browser/test_app_global_notification.py -q -p no:cacheprovider`，8 passed。
+  - Stage 收尾：`uv run ruff check src tests` 通过；`uv run pytest -q -m 'not browser'` 为
+    1528 passed、229 deselected；`uv run migu-orca-openapi --check` 通过；前端
+    `npm run api:check`、`typecheck`、`lint`、`test:unit -- --run`（49 files / 593 passed）与
+    `build` 通过。完整 Chromium 门禁已启动并跑至结束；工具的超时交接未保留最终汇总，故不把
+    它当作独立可引用证据，新增 Stage 42 用例的独立 8 passed 结果在上方保留。
+  - toast 与 `ConfirmDialog`/`SafeInfoDialog` 同为 `--z-overlay`，靠 teleport 到 body 的
+    DOM 顺序使模态压在其上；行为已核对但未加自动化断言，属可接受的产品选择。
+  - 容器 `pointer-events: none` 使 toast 文案不可用鼠标选中复制；这是换取「绝不吞掉
+    页面点击」的取舍，关闭按钮与键盘仍完全可用。
+
+## 2026-09-18 - Stage 42 发布与归档收尾
+
+- PR #70 的 rebase 后 HEAD 通过三项 CI：Static checks & non-browser tests、Frontend
+  (typecheck, lint, unit, build)、Real Chromium browser suite 均为 SUCCESS；随后 squash merge。
+- 没有 Stage 42 范围内的未解决阻断项。仅保留两项非阻断的已知取舍：Toast 文案不可鼠标复制，
+  以及其与模态同用 overlay z-index 的既有 DOM 顺序依赖；均不改变主流程、安全边界或恢复入口。
+- Stage 42 完成后不自动创建 Stage 43；新的产品开发须来自用户审核反馈及新的执行 PRD。
