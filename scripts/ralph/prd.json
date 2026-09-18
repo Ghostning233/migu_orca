@@ -1,7 +1,7 @@
 {
   "project": "MiGuOrca",
   "branchName": "ralph/stage43-add-anime-entry-visual",
-  "description": "Stage 43：搜索入口与候选选择视觉收口。WP-43-A先修完整批次确认全部与弹窗意图；WP-43-B～E受D-01主题作用域门控。执行PRD docs/MiGuOrca_stage43_add_anime_entry_visual_PRD.md；决策台账 docs/development/add-anime-visual-prd-handoff-2026-09-18.md。仅准备未启动；保持既有草案/保存/安全契约，不使用ralph.sh、不实现Stage44/45。",
+  "description": "Stage 43：搜索入口与候选选择视觉收口。WP-43-A先修完整批次确认全部与弹窗意图；D-01已于2026-09-18批准全局共享主题与基础控件对齐Token V1并做四页回归，不改其他页业务；按A→B→C→D→E闭环推进。执行PRD docs/MiGuOrca_stage43_add_anime_entry_visual_PRD.md；决策台账 docs/development/add-anime-visual-prd-handoff-2026-09-18.md。仅准备未启动；保持既有草案/保存/安全契约，不使用ralph.sh、不实现Stage44/45。",
   "userStories": [
     {
       "id": "US-347",
@@ -43,12 +43,12 @@
     },
     {
       "id": "US-349",
-      "title": "按用户批准作用域对齐Token V1",
+      "title": "全局共享主题与基础控件对齐Token V1",
       "description": "作为使用者，我希望搜索、候选、控件和状态遵循一致的已批准视觉基线。",
       "acceptanceCriteria": [
-        "前置WP-43-A独立审核闭环；必须读取决策台账D-01实际用户回答并记录，待决时不开始本故事、不自行选择全局/局部主题",
-        "在批准作用域通过现有共享语义Token映射V1画布/文字/主色/状态/焦点/字号/行高/间距/圆角/尺寸/动效，不逐页散落色值；主要控件44px、首页搜索52px",
-        "全局方案对共享主题/控件及四页视觉定向回归但不改业务；仅添加页方案须共享层批准作用域并处理Teleport，其他页computed style保持现状",
+        "前置WP-43-A独立审核闭环；读取决策台账记录D-01已于2026-09-18批准全局共享主题与基础控件对齐Token V1及四页回归，不改其他页业务",
+        "在全局共享层通过现有语义Token映射V1画布/文字/主色/状态/焦点/字号/行高/间距/圆角/尺寸/动效，不逐页散落色值；主要控件44px、首页搜索52px",
+        "共享主题/基础控件对齐并对添加番剧、追番方案、追番管理、设置四页各正常及错误/禁用态定向回归；模态/Teleport使用同一共享视觉基线，不新增添加页独立主题或修改其他页业务",
         "正文对比4.5:1、控件边界3:1、可见焦点不裁剪；disabled旁有原因、loading有文字；三档桌面和200%缩放可达，reduced-motion取消非必要位移",
         "不重做Toast store/timer或品牌/导航业务；真实命中验证导航/底栏/模态/Toast层级、键盘及中文反馈",
         "完成执行PRD §5列明受影响styles/基础组件/App Vitest、typecheck/lint/build与四页定向Chromium，不以Token字符串测试代替真实可读性",

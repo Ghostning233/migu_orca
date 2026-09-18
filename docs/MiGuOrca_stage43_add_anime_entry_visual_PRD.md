@@ -4,7 +4,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 状态 | 已准备执行材料、尚未开发；WP-43-A 可开始，WP-43-B～E 受 D-01 门控 |
+| 状态 | 已准备执行材料、尚未开发；D-01 已批准全局对齐及四页回归，按 A→B→C→D→E 执行 |
 | 日期/基线 | 2026-09-18；`334c8e69dbcc7c27be8ab482f8ccb142081db0b7` |
 | 分支 | `ralph/stage43-add-anime-entry-visual`；开始前核对实时 HEAD/工作区，不从本文猜状态 |
 | 总体依据 | [Stage 43～45 总体 PRD](MiGuOrca_stage43_45_add_anime_visual_PRD.md) |
@@ -22,7 +22,7 @@
 
 允许代码：`frontend/src/features/workbench/WorkbenchView.vue`、`BatchWorkbenchView.vue`、
 `AnimeModeSwitch.vue`、`AnimeTitleInput.vue`、`CandidateCollectionList.vue`、`CandidateCard.vue`、
-`candidateSearch.ts`、`batchWorkbench.ts`；D-01 批准范围内的 styles/表单基础组件及必要壳层样式；
+`candidateSearch.ts`、`batchWorkbench.ts`；全局共享 styles/表单基础组件及必要壳层样式；
 对应 Vitest/Chromium 测试、Ralph 状态与精简交接。
 允许提取小型确认资格/意图 helper，但不造第二套 DTO 或状态机。
 
@@ -46,7 +46,7 @@
 | 包 | 故事/priority | 前置 | 迭代上限/停止点 |
 | --- | --- | --- | --- |
 | WP-43-A | US-347/1、US-348/2 | 基线核查，无产品待决策 | 2 个开发 story turn；两条完成后统一独立审核 |
-| WP-43-B | US-349/3 | A 闭环、D-01 用户已决定并记录 | 1 个开发 story turn；包审核 |
+| WP-43-B | US-349/3 | A 闭环；D-01 已确认全局对齐与四页回归 | 1 个开发 story turn；包审核 |
 | WP-43-C | US-350/4 | B 闭环 | 1 个开发 story turn；包审核 |
 | WP-43-D | US-351/5 | C 闭环 | 1 个开发 story turn；包审核 |
 | WP-43-E | US-352/6 | D 闭环 | 1 个开发 story turn；包审核、Stage 门禁 |
@@ -122,19 +122,20 @@ passes 表示故事已完成列明验证，不替代独立审核；审核状态�
 测试：deferred 修改响应在弹窗开启后更新版本/资格，确认后捕获零 POST；未变化则精确 body。
 真实 Chromium 使用 held route 控制已在途响应，不在 handler sleep，不需让用户操作模态背景。
 
-## 5. WP-43-B／US-349：批准作用域的 Token 对齐
+## 5. WP-43-B／US-349：全局共享主题与基础控件对齐 Token V1
 
 用户故事：搜索、候选、表单和状态使用一致的已批准视觉基线。
 
-前置 D-01 必须有用户实际回答。未回答时保持 false，不静默选择全局或局部方案。
+D-01 已于 2026-09-18 获用户批准：全局共享主题与基础控件对齐 Token V1，并做四页回归。
+前置仍为 WP-43-A 独立审核闭环；此决定不授权修改其他页面业务，也不代表本故事已实现。
 
 可观察 AC：
 
-1. 将用户选定作用域和共享 Token 映射记录于 progress；现行语义变量可映射 V1，不复制一套页面色值。
+1. 将已批准的全局作用域和共享 Token 映射记录于 progress；现行语义变量可映射 V1，不复制一套页面色值。
 2. 覆盖画布/表面、文字、主按钮、状态、边界、焦点、字号/行高、尺寸、圆角、间距与动效。
 3. 默认主要控件 44px、首页搜索操作 52px；12px 补充信息不承载关键错误；品牌/导航结构不重设计。
-4. 全局方案：共享主题/基础控件对齐并四页定向回归，不改四页业务；仅添加方案：共享层定义批准作用域，
-   其他页 computed style 保持原主题，模态/Teleport 样式按作用域明确处理，不散落 magic 值。
+4. 全局共享主题/基础控件对齐，添加番剧、追番方案、追番管理、设置四页各覆盖正常及错误/禁用态；
+   不改其他页面业务。模态/Teleport 使用同一共享视觉基线，不新增添加页独立主题或散落 magic 值。
 5. 焦点可见、不 overflow 裁剪；正文 4.5:1、控件边界 3:1；reduced-motion 保持即时状态与文字加载。
 6. 不改 Toast timer/store，不扩大旧 z-index 取舍；对导航/底栏/模态/Toast 层级做真实命中回归。
 
@@ -286,7 +287,7 @@ B 同一修复者集中收口并复审；C 只处理已审核 HEAD 的授权发�
 本地逐 story 提交只有后续启动授权明确允许时执行，格式 `feat: [Story ID] - [Story Title]`，
 精确暂存实现/测试/prd/progress；不 git add .。本轮只提交文档准备。
 
-停止条件：D-01 未决不开始 B；新增 API/字段/季度编辑需求退出当前包；任何敏感泄漏、
+停止条件：前包未审核闭环不开始下一包；改变已批准全局作用域、扩展其他页业务或新增 API/字段/季度编辑需求退出当前包；任何敏感泄漏、
 旧版本保存、暗中 flush、all 可见化范围、未知换键、外部写、不可达主操作均阻断。
 复审/迭代上限与权限受限不得标 true 或跳下一包；报告精确剩余问题，不盲重跑全量。
 COMPLETE 仅所有故事实际通过且整 Stage 审核/门禁完成才成立，不从 JSON 或 Agent 自述推断。

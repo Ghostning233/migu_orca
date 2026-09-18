@@ -1,8 +1,8 @@
 # MiGuOrca Future Stages
 
 当前后续规划入口（2026-09-18）：[Stage 43～45 添加番剧视觉收口总体PRD](MiGuOrca_stage43_45_add_anime_visual_PRD.md)。
-Stage 43 [执行PRD](MiGuOrca_stage43_add_anime_entry_visual_PRD.md)已准备、未开发；首包可开始，
-其余视觉包受D-01门控。Stage 44/45需各自前阶段交接后编写，不提前视为执行或发布授权。
+Stage 43 [执行PRD](MiGuOrca_stage43_add_anime_entry_visual_PRD.md)已准备、未开发；D-01已批准全局共享主题与基础控件
+对齐Token V1并做四页回归，可按工作包依赖顺序开发。Stage 44/45需各自前阶段交接后编写，不提前视为执行或发布授权。
 决策与编写检查单见[后续PRD交接](development/add-anime-visual-prd-handoff-2026-09-18.md)。
 
 ## 1. 总体方向

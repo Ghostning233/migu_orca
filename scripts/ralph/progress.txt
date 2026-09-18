@@ -6,6 +6,9 @@ Stage 43（搜索入口与候选选择视觉收口）执行材料已准备，尚
 执行 PRD：docs/MiGuOrca_stage43_add_anime_entry_visual_PRD.md。
 总体 PRD：docs/MiGuOrca_stage43_45_add_anime_visual_PRD.md。
 决策台账：docs/development/add-anime-visual-prd-handoff-2026-09-18.md。
+D-01 当前已确认（2026-09-18）：全局共享主题与基础控件对齐 Token V1，并做四页回归；
+不改其他页面业务。Stage 43 产品前置已满足，按 A→B→C→D→E 闭环推进，尚未启动开发。
+以下准备记录中的 D-01 待决描述为当时历史状态，以本条和决策台账为准。
 
 Stage 42 原 JSON/progress 已在 scripts/ralph/archive/2026-09-18-stage42-global-notification/
 完整保留；切换前逐字核对与活动文件一致，不覆盖或重复归档。
@@ -42,3 +45,16 @@ Stage 41 证据在 scripts/ralph/archive/2026-09-18-stage41-add-anime-ux/。
 - 实际执行git diff --check通过；核对git diff与状态，改动仅文档、Ralph JSON/progress。
 - 该记录不代表typecheck/lint/Vitest/pytest/Chromium或Stage门禁通过，这些尚未执行。
 - 就绪边界仍为WP-43-A可开始，D-01待用户回答；启动团队/开发需用户后续明确请求。
+
+## 2026-09-18 - D-01 用户确认与执行材料同步（非功能验证）
+
+- 用户明确批准“允许全局共享主题对齐 V1，并做四页回归”；范围包含共享基础控件的
+  颜色、尺寸、焦点样式，不改其他页面业务。已同步决策台账、总体/执行PRD、团队提示词、
+  文档索引及Ralph JSON；本条取代历史准备记录中的D-01待决就绪边界。
+- Stage43产品前置已满足，按A→B→C→D→E逐包审核闭环推进；六故事仍为false/notes空，
+  未开始开发或团队协作；D-02～04仍留后续Stage由用户决定。
+- 实际只读Node核验：6份Markdown、89个本地链接、围栏/冲突标记检查通过；JSON可解析，
+  六个ID/priority顺序正确、初始false/notes空、末项Typecheck、实际分支匹配、D-01全局与
+  四页口径一致；Stage42归档与334c8e6基线活动文件逐字一致；结果PASS。
+- 实际执行git diff --check通过。仅文档检查，未运行功能测试、typecheck、构建或浏览器。
+- 实际协作模式：单主Agent文档更新；未启动开发/测试/审核/修复/C，不push/PR/merge。
