@@ -76,8 +76,8 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "WP-43-C/US-350（2026-09-18，单写入 Agent：gpt-5.6-luna；US349 的 Fable CLI 两次环境卡住且无改动，本轮按可用默认模型替代）。WorkbenchView 改为唯一任务主标题“添加番剧”，移除重复容器标题；增加输入名称→选择真实合集→审核并保存确认三步、单番搜索操作组与宽桌面限行/窄屏换行；FOUND 后集中搜索摘要/修改搜索入口并保留原焦点恢复；未改变既有 EMPTY/FAILED/请求失败、直连救援、HTTP200 FAILED、唯一候选不自动选择、模式光标和草案宿主状态。未改 AnimeDraftEditor、业务/API/OpenAPI/generated、后端/CAS/保存/外部写/N部语义。先补最小红测后转绿：WorkbenchView Vitest 45 passed（含新增任务层级与摘要焦点 2 例），真实 Chromium `uv run pytest tests/browser/test_app_workbench.py tests/browser/test_app_mode_input.py -q` 47 passed；typecheck、lint、build、api:check 均通过；git diff --check 通过。浏览器使用 route mock/tmp storage，无真实 MiKan/AB/外部写，未发现敏感值泄漏。未更新 AnimeModeSwitch/AnimeTitleInput 实现，因现有键盘/光标行为已满足 AC；未新增截图/trace。"
     },
     {
       "id": "US-351",

@@ -205,3 +205,15 @@ Stage 41 证据在 scripts/ralph/archive/2026-09-18-stage41-add-anime-ux/。
   本轮未顺带改动）；复核只比较 batch/资格集合/draft/revision，尚未纳入更细的条目属性。
 - 实际协作：本轮为用户指定的单写入开发 Agent（Claude Fable 5，本机 model id claude-fable-5[1M]）
   实现并自查；主 Agent 独立审核，未启动测试/修复/发布 Agent。
+
+## 2026-09-18 WP-43-C / US-350 单番搜索入口与搜索摘要层级
+
+- 实现：`WorkbenchView.vue` 使用唯一任务主标题「添加番剧」，移除重复容器标题；增加「输入名称 → 选择真实合集 → 审核并保存确认」三步、邻近模式切换的搜索操作组、宽桌面限行和窄屏换行；FOUND 后集中搜索摘要/修改搜索并恢复输入焦点。既有 EMPTY/FAILED/请求失败、直连救援、HTTP200 FAILED、唯一候选不自动选择、模式光标与草案状态保持。
+- 先补最小红测再实现：`WorkbenchView.test.ts` 新增任务层级/搜索摘要焦点 2 例；未改 `AnimeModeSwitch`、`AnimeTitleInput` 实现（已有键盘、光标行为满足范围）。
+- 实际验证（分支 `ralph/stage43-add-anime-entry-visual`，未 push/PR/merge）：
+  - `cd frontend && npm run test:unit -- --run src/features/workbench/WorkbenchView.test.ts src/features/workbench/AnimeModeSwitch.test.ts src/features/workbench/AnimeTitleInput.test.ts` → 3 files / 45 passed。
+  - `cd frontend && npm run typecheck`、`npm run lint`、`npm run build`、`npm run api:check` → 全部通过；`git diff --check` → 通过。
+  - `uv run pytest tests/browser/test_app_workbench.py tests/browser/test_app_mode_input.py -q` → 47 passed（真实 Chromium；新增入口标题/三步/摘要/焦点用例）。候选与请求全部 route mock，浏览器使用临时 storage，未触碰真实 MiKan、AB、外部写。
+- 变更文件：`frontend/src/features/workbench/WorkbenchView.vue`、`frontend/src/features/workbench/WorkbenchView.test.ts`、`tests/browser/test_app_workbench.py`、`scripts/ralph/prd.json`、`scripts/ralph/progress.txt`。
+- 协作记录：本轮唯一写入 Agent 为可用默认 `gpt-5.6-luna`；US349 的 Fable CLI 两次环境卡住且无改动，本轮未假称 Fable；未启动 D/E 或 C Agent。
+- 遗留风险：未新增截图/trace；`AnimeModeSwitch`/`AnimeTitleInput` 仅通过现有与宿主定向回归，长标题/三视口/200% 仍由既有 Stage 门禁矩阵覆盖，未扩大本 story 的候选业务。

@@ -421,22 +421,33 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 </script>
 
 <template>
-  <h2 id="workbench-heading" class="workbench-title">订阅方案工作台</h2>
+  <h1 id="workbench-heading" class="workbench-title">添加番剧</h1>
 
-  <PanelSection title="创建订阅方案" class="workbench-panel">
+  <PanelSection title="搜索候选合集" class="workbench-panel">
+    <ol class="journey-steps" aria-label="添加番剧步骤">
+      <li class="is-current">输入名称</li>
+      <li>选择真实合集</li>
+      <li>审核并保存确认</li>
+    </ol>
     <!-- ── single search ──────────────────────────────────────────── -->
     <AnimeModeSwitch :model-value="mode" :disabled="singleBusy" @update:model-value="changeMode" />
 
     <form v-if="mode === 'single' && !hasResults" id="mikan-candidate-search-form" class="workbench-search-form" @submit.prevent="searchCandidates">
-      <p class="step-label">步骤 1 · 搜索番剧</p>
-      <label for="mikan-candidate-query">番剧标题</label>
-      <AnimeTitleInput
-        ref="singleInput"
-        id="mikan-candidate-query"
-        v-model="query"
-        mode="single"
-        :disabled="singleBusy"
-      />
+      <div class="search-control-row">
+        <div class="search-field">
+          <label for="mikan-candidate-query">番剧标题</label>
+          <AnimeTitleInput
+            ref="singleInput"
+            id="mikan-candidate-query"
+            v-model="query"
+            mode="single"
+            :disabled="singleBusy"
+          />
+        </div>
+        <BaseButton id="mikan-candidate-search-submit" type="submit" variant="primary" :loading="searchLoading" :disabled="singleBusy || !query.trim()">
+          搜索候选合集
+        </BaseButton>
+      </div>
       <p class="field-help" id="mikan-candidate-help">
         输入番剧标题，从真实 MiKan 搜索候选合集。候选不会自动选择，需手动点击「选择此合集」生成订阅草案。
       </p>
@@ -446,11 +457,6 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
       <p v-if="searchError" id="mikan-candidate-search-error" class="field-error" role="alert">
         {{ searchError }}
       </p>
-      <div class="notification-actions">
-        <BaseButton id="mikan-candidate-search-submit" type="submit" variant="primary" :loading="searchLoading" :disabled="singleBusy || !query.trim()">
-          搜索番剧
-        </BaseButton>
-      </div>
     </form>
   </PanelSection>
 
@@ -515,10 +521,13 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
         </section>
         <template v-if="searchResult && hasResults">
           <p class="step-label">步骤 2 · 选择合集</p>
-          <p class="candidate-search-summary" role="status">
-            已搜索「{{ searchResult.query }}」，请选择要审核的 MiKan 合集。
+          <p class="candidate-search-summary" role="status" aria-live="polite">
+            已搜索「{{ searchResult.query }}」，请选择要审核的真实 MiKan 合集。
           </p>
-          <BaseButton id="mikan-edit-search" variant="secondary" @click="editSearch">修改搜索</BaseButton>
+          <div class="search-summary-actions">
+            <span class="search-summary-label">搜索摘要</span>
+            <BaseButton id="mikan-edit-search" variant="secondary" @click="editSearch">修改搜索</BaseButton>
+          </div>
           <details class="title-parse-summary">
             <summary>标题解析摘要（诊断信息）</summary>
             <dl class="detail-grid">
@@ -599,6 +608,51 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 
 .workbench-title {
   margin: 0;
+}
+
+.search-control-row {
+  display: flex;
+  align-items: end;
+  gap: var(--space-3);
+}
+
+.search-field {
+  display: grid;
+  flex: 1 1 24rem;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.search-control-row > button {
+  flex: 0 0 auto;
+}
+
+.journey-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  color: var(--color-text-muted);
+  list-style-position: inside;
+}
+
+.journey-steps .is-current {
+  color: var(--color-text);
+  font-weight: var(--font-weight-semibold);
+}
+
+.search-summary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.search-summary-label {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
 }
 
 .candidate-list-wrapper {
@@ -684,6 +738,15 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 }
 
 @media (max-width: 720px) {
+  .search-control-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .search-control-row > button {
+    width: 100%;
+  }
+
   .detail-grid {
     grid-template-columns: 1fr;
     gap: 0.2rem;

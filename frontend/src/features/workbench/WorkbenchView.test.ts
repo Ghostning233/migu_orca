@@ -220,6 +220,35 @@ describe('WorkbenchView single search (US-204)', () => {
     expect(apiPost).not.toHaveBeenCalled()
   })
 
+  it('presents one add-anime task heading, three steps, and a grouped search action', async () => {
+    const { wrapper } = await mountWorkbench()
+
+    expect(wrapper.find('#workbench-heading').element.tagName).toBe('H1')
+    expect(wrapper.find('#workbench-heading').text()).toBe('添加番剧')
+    expect(wrapper.find('.journey-steps').text()).toContain('输入名称')
+    expect(wrapper.find('.journey-steps').text()).toContain('选择真实合集')
+    expect(wrapper.find('.journey-steps').text()).toContain('审核并保存确认')
+    expect(wrapper.find('.search-control-row #mikan-candidate-query').exists()).toBe(true)
+    expect(wrapper.find('.search-control-row #mikan-candidate-search-submit').text()).toContain('搜索候选合集')
+    expect(wrapper.text()).not.toContain('外部提交')
+  })
+
+  it('collapses a found search into a summary with a focused edit action', async () => {
+    apiPost.mockResolvedValue(candidateResult())
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#mikan-candidate-query').exists()).toBe(false)
+    expect(wrapper.find('.search-summary-actions').text()).toContain('搜索摘要')
+    expect(wrapper.find('#mikan-edit-search').exists()).toBe(true)
+    await wrapper.find('#mikan-edit-search').trigger('click')
+    await nextTick()
+    expect(document.activeElement).toBe(wrapper.find('#mikan-candidate-query').element)
+  })
+
   it('offers the direct-collection rescue only after a search found no candidates', async () => {
     apiPost.mockResolvedValueOnce(candidateResult({ candidates: [] }))
     const { wrapper } = await mountWorkbench()
