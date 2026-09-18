@@ -96,7 +96,7 @@
   --size-control-min: var(--control-target-min);
   --size-status-min: 48px;
   --focus-ring: 0 0 0 3px rgb(37 99 235 / 32%);
-  --focus-ring-width: 0;
+  --focus-ring-width: 3px;
   --focus-ring-offset: 2px;
   --color-focus-ring: var(--color-focus);
   --motion-fast: 120ms;

@@ -5,6 +5,17 @@ import { describe, expect, it } from 'vitest'
 
 const tokens = readFileSync(resolve(process.cwd(), 'src/styles/tokens.css'), 'utf8')
 const globalStyles = readFileSync(resolve(process.cwd(), 'src/styles/main.css'), 'utf8')
+const sharedFocusStyles = [
+  'src/components/forms/BaseButton.vue',
+  'src/components/forms/BaseInput.vue',
+  'src/components/forms/BaseSelect.vue',
+  'src/components/forms/BaseTextarea.vue',
+  'src/components/forms/CheckboxRow.vue',
+  'src/styles/main.css',
+].map((path) => ({
+  path,
+  content: readFileSync(resolve(process.cwd(), path), 'utf8'),
+}))
 
 describe('Stage 33 semantic design tokens (US-258)', () => {
   it.each([
@@ -33,6 +44,17 @@ describe('Stage 33 semantic design tokens (US-258)', () => {
     expect(tokens).toContain('--control-height-lg: 52px')
     expect(tokens).toContain('--radius-lg: 14px')
     expect(tokens).toContain('--motion-base: 180ms')
+  })
+
+  it('maps every shared focus-visible outline to the focus width token', () => {
+    expect(tokens).toContain('--focus-ring-width: 3px')
+
+    for (const { path, content } of sharedFocusStyles) {
+      expect(content, path).toMatch(
+        /outline:\s*var\(--focus-ring-width\)\s+solid\s+var\(--color-focus-ring\)/,
+      )
+      expect(content, path).not.toMatch(/outline:\s*3px\b/)
+    }
   })
 
   it('provides a reduced-motion override for motion and scrolling', () => {

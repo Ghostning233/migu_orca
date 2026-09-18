@@ -46,7 +46,7 @@ function onInput(event: Event): void {
 }
 
 .base-textarea:focus-visible {
-  outline: 3px solid var(--color-focus-ring);
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
   outline-offset: var(--focus-ring-offset);
 }
 
