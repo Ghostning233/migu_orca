@@ -136,6 +136,18 @@ Stage 41 证据在 scripts/ralph/archive/2026-09-18-stage41-add-anime-ux/。
   对齐且四页只做视觉回归；测试—Token宽度和消费点不得散落；审核—检查共享层与真实Chromium产物；
   修复—只收敛焦点Token，不改业务。
 
+## 2026-09-18 - WP-43-C 独立审核闭环
+
+- 审核结论：US-350 将页面主标题收敛为“添加番剧”，三步引导只包含输入、人工选择真实合集和本地审核保存；
+  搜索摘要仅在 FOUND 且有候选时显示，EMPTY/FAILED/请求失败和直连救援维持既有就地分支，唯一候选没有自动选择。
+  `editSearch` 仍清除候选上下文并由既有 nextTick 聚焦输入，未触碰草案编辑器、服务端契约或外部提交。
+- 主Agent复验：`cd frontend && npm run test:unit -- --run src/features/workbench/WorkbenchView.test.ts` → 42 passed；
+  `git diff 6dad95f..e257fdc --check` 通过。开发的实际定向证据为 45 Vitest、47 Chromium、typecheck/lint/build/
+  api:check 均通过；工作区干净。
+- 实际协作/模型：开发 gpt-5.6-luna（Fable CLI 环境失败延续替代）、主Agent独立审核；无审核问题，
+  因而未启动红测/修复/发布Agent。提示词摘要：开发—入口层级不改既有搜索/草案业务；审核—核对 FOUND、
+  EMPTY、FAILED 分流及焦点/人工选择安全边界；修复—本包无需执行。
+
 ## 2026-09-18 - WP-43-A 独立审核与复审闭环
 
 - 审核结论：US-347/US-348 的完整批次资格范围、弹窗内存 intent、确认前 batch/集合/draft/revision
