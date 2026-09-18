@@ -586,6 +586,31 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(true)
   })
 
+  it('keeps batch input, capacity feedback, and search in one operation area', async () => {
+    apiPost.mockResolvedValue({ batch_id: 'batch-capacity', raw_input: '甲', items: [] } as never)
+    const { wrapper } = await mountWorkbench()
+    await wrapper.find('#anime-mode-batch').trigger('click')
+    await nextTick()
+
+    expect(wrapper.findAll('#batch-raw-input')).toHaveLength(1)
+    expect(wrapper.findAll('#batch-parse-form')).toHaveLength(1)
+    expect(wrapper.find('#batch-input-count').text()).toContain('当前 0 部')
+    expect(wrapper.find('#batch-parse-submit').attributes('disabled')).toBeDefined()
+
+    const rawInput = Array.from({ length: 37 }, (_, index) => `番剧${index}`).join('\n')
+    await wrapper.find('#batch-raw-input').setValue(rawInput)
+    expect(wrapper.find('#batch-input-count').text()).toContain('当前 37 部')
+    expect(wrapper.find('#batch-parse-submit').attributes('disabled')).toBeDefined()
+
+    await wrapper.find('#batch-raw-input').setValue('甲\n乙')
+    expect(wrapper.find('#batch-parse-submit').attributes('disabled')).toBeUndefined()
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    expect(apiPost).toHaveBeenCalledWith('/api/v1/batches/parse', expect.objectContaining({
+      body: expect.objectContaining({ raw_input: '甲\n乙' }),
+    }))
+  })
+
   it('restores the single input cursor after switching modes', async () => {
     const { wrapper } = await mountWorkbench()
     const input = wrapper.find('#mikan-candidate-query').element as HTMLInputElement

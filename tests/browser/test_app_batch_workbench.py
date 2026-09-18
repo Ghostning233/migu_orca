@@ -262,10 +262,8 @@ class TestAppBatchParse:
         page.route("**/api/v1/batches/parse", _capture)
         _goto_batch(page, live_server_url)
 
-        page.click("#batch-parse-submit")
-        expect(page.locator("#batch-parse-error")).to_contain_text(
-            "批量获取前必须输入至少一个番剧名称"
-        )
+        expect(page.locator("#batch-parse-submit")).to_be_disabled()
+        expect(page.locator("#batch-input-count")).to_contain_text("当前 0 部")
         assert calls == []
 
     def test_parse_renders_independent_card_statuses(
@@ -319,7 +317,7 @@ class TestAppBatchParse:
         expect(page.locator("#batch-parse-result")).to_contain_text(
             "正在逐项搜索 2 个批量条目的 MiKan 候选"
         )
-        expect(page.locator("#batch-parse-result")).to_contain_text("逐项处理")
+        expect(page.locator("#batch-parse-result")).to_contain_text("整体结果将在批量完成后统一展示")
         expect(page.locator("#batch-parse-result")).to_contain_text("数分钟")
         assert pending
         pending[0].fulfill(

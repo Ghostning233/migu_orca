@@ -229,3 +229,15 @@ Stage 41 证据在 scripts/ralph/archive/2026-09-18-stage41-add-anime-ux/。
 - 变更文件：`frontend/src/features/workbench/WorkbenchView.vue`、`frontend/src/features/workbench/WorkbenchView.test.ts`、`tests/browser/test_app_workbench.py`、`scripts/ralph/prd.json`、`scripts/ralph/progress.txt`。
 - 协作记录：本轮唯一写入 Agent 为可用默认 `gpt-5.6-luna`；US349 的 Fable CLI 两次环境卡住且无改动，本轮未假称 Fable；未启动 D/E 或 C Agent。
 - 遗留风险：未新增截图/trace；`AnimeModeSwitch`/`AnimeTitleInput` 仅通过现有与宿主定向回归，长标题/三视口/200% 仍由既有 Stage 门禁矩阵覆盖，未扩大本 story 的候选业务。
+
+## 2026-09-18 WP-43-D / US-351 批量输入容量与整体搜索等待
+
+- 实现：宿主 `WorkbenchView.vue` 唯一持有批量 `AnimeTitleInput`、容量计数、关联说明与搜索按钮；`BatchWorkbenchView` 的 `hideInput` 分支不再渲染第二表单/输入，保持一个 v-model。计数复用 `batchItemCount`/`validateBatchRawInput`，0/37+ 禁用、1～36 可搜且函数入口仍校验并保留原文；初始不渲染完整空工作台。
+- 等待与重搜：搜索中显示原文、提交规模及整体不定等待，不展示逐条实时进度/假百分比；结果完成才统一展示真实混合状态，保留 EMPTY/FAILED 其他项。已有候选/草案/勾选现场的重搜先经 ConfirmDialog，取消恢复上次提交原文并聚焦输入，确认才清场；完成聚焦批量工作台标题。`AnimeTitleInput` 增加焦点入口。
+- 先补最小红测再实现：`WorkbenchView.test.ts` 新增单操作区、0/37/1～36 容量与实际 parse 调用覆盖；同步 browser 旧 0 行/等待断言到新 AC。未改 API/OpenAPI/generated、后端/CAS/save/external、N 部语义、恢复会话或逐项重搜。
+- 实际验证（分支 `ralph/stage43-add-anime-entry-visual`，未 push/PR/merge）：
+  - `cd frontend && npm run test:unit -- --run src/features/workbench/BatchWorkbenchView.test.ts src/features/workbench/WorkbenchView.test.ts src/features/workbench/AnimeTitleInput.test.ts src/features/workbench/batchWorkbench.test.ts` → 4 files / 121 passed。
+  - `cd frontend && npm run typecheck`、`npm run lint`、`npm run build`、`npm run api:check`、`git diff --check` → 全部通过。
+  - `uv run pytest tests/browser/test_app_batch_workbench.py -q` → 27 passed（真实 Chromium、held route、临时 storage、外部依赖 mock，无 sleep/外网）。
+- 变更文件：`frontend/src/features/workbench/{WorkbenchView.vue,WorkbenchView.test.ts,BatchWorkbenchView.vue,AnimeTitleInput.vue}`、`tests/browser/test_app_batch_workbench.py`、`scripts/ralph/prd.json`、`scripts/ralph/progress.txt`。
+- 协作记录：本轮唯一写入 Agent 为可用默认 `gpt-5.6-luna`；用户指定 Fable CLI 环境卡住，未假称 Fable；未启动 E 或 C Agent。遗留风险：未新增专门重搜确认浏览器用例，现有批量确认/取消与 held 回归通过；未生成截图/trace。

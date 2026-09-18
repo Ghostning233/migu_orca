@@ -102,10 +102,16 @@ const confirmDialog = ref<InstanceType<typeof ConfirmDialog> | null>(null)
 const journey = useBatchReviewJourney()
 
 const props = withDefaults(defineProps<{ rawInput?: string; hideInput?: boolean }>(), { rawInput: '', hideInput: false })
-const emit = defineEmits<{ (event: 'update:rawInput', value: string): void }>()
+const emit = defineEmits<{
+  (event: 'update:rawInput', value: string): void
+  (event: 'restore-search-focus'): void
+}>()
 
 // Batch parse state.
 const rawInput = ref(props.rawInput)
+const parseStarted = ref(false)
+const previousRawInput = ref(props.rawInput)
+const inputControl = ref<InstanceType<typeof AnimeTitleInput> | null>(null)
 
 watch(() => props.rawInput, (value) => {
   if (value !== rawInput.value) rawInput.value = value
@@ -497,18 +503,32 @@ async function parseBatch(): Promise<void> {
   if (validationError) {
     parseError.value = validationError
     parseResult.value = null
-    items.value = []
-    batchId.value = ''
     notification.error('校验失败', validationError)
     return
   }
+  if (items.value.length && hasUnsafeBatchWork() && !acceptAllDialogOpen.value) {
+    const confirmed = await confirmDialog.value?.confirm({
+      title: '重新搜索批量条目',
+      message: '重新搜索将舍弃当前候选、草案和勾选现场，只保留新的批量输入。是否继续？',
+      confirmLabel: '舍弃现场并搜索',
+      cancelLabel: '取消',
+    })
+    if (!confirmed) {
+      rawInput.value = previousRawInput.value
+      await nextTick()
+      inputControl.value?.focusInput()
+      emit('restore-search-focus')
+      return
+    }
+  }
   parseError.value = ''
   clearBatchRouteLocalState()
-    parseLoading.value = true
+  parseStarted.value = true
+  parseLoading.value = true
   journey.dispatch({ type: 'parse_started' })
   const count = batchItemCount(rawInput.value)
   parseCount.value = count
-  loadingMessage.value = `正在逐项搜索 ${count} 个批量条目的 MiKan 候选；系统会逐项处理，较大的批量可能需要数分钟，请耐心等待。`
+  loadingMessage.value = `正在逐项搜索 ${count} 个批量条目的 MiKan 候选；整体结果将在批量完成后统一展示，较大的批量可能需要数分钟，请耐心等待。`
   try {
     const payload = buildBatchParsePayload(rawInput.value, currentStorageDir())
     const result = await api.post<BatchParseResult>('/api/v1/batches/parse', {
@@ -516,6 +536,7 @@ async function parseBatch(): Promise<void> {
       timeoutMs: batchParseTimeoutMs(count),
     })
     parseResult.value = result
+    previousRawInput.value = rawInput.value
     journey.dispatch({ type: 'parse_succeeded', result })
     const parsedItems = result.items ?? []
     inputItemOrder.value = new Map(
@@ -534,6 +555,8 @@ async function parseBatch(): Promise<void> {
     savingItemIds.value = new Set()
     seasonConfirmations.value = {}
     notification.success('批量搜索完成', `已返回 ${items.value.length} 个条目的候选搜索状态。`)
+    await nextTick()
+    document.querySelector<HTMLElement>('#panel-section-批量工作台')?.focus()
   } catch (error) {
     void error
     journey.dispatch({ type: 'parse_failed', error })
@@ -1252,6 +1275,10 @@ onMounted(() => {
     // card grid itself is never persisted server-side, so a refresh can only
     // restore the queue context, not the cards.
   }
+  void nextTick(() => {
+    const heading = document.querySelector<HTMLElement>('#panel-section-批量工作台')
+    heading?.setAttribute('tabindex', '-1')
+  })
 })
 
 onUnmounted(() => {
@@ -1264,9 +1291,10 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 
 <template>
   <PanelSection title="批量工作台" class="batch-workbench-panel">
-    <form id="batch-parse-form" class="batch-parse-form" @submit.prevent="parseBatch">
+    <form v-if="!props.hideInput" id="batch-parse-form" class="batch-parse-form" @submit.prevent="parseBatch">
       <label v-if="!props.hideInput" for="batch-raw-input">批量番剧名称</label>
       <AnimeTitleInput
+        ref="inputControl"
         v-if="!props.hideInput"
         id="batch-raw-input"
         v-model="rawInput"
@@ -1286,8 +1314,11 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
       </div>
     </form>
 
-    <div id="batch-parse-result" class="batch-parse-result" aria-live="polite" aria-relevant="additions text">
+    <div v-if="parseStarted || parseLoading || parseError || items.length" id="batch-parse-result" class="batch-parse-result" aria-live="polite" aria-relevant="additions text">
       <LoadingState v-if="parseLoading" :message="loadingMessage" />
+      <p v-if="parseLoading" id="batch-parse-loading-summary" class="batch-parse-loading-summary" role="status">
+        原文：{{ rawInput }}；本次提交规模：{{ parseCount }} 部；整体搜索进行中，暂不展示逐项进度。
+      </p>
       <ErrorState
         v-else-if="parseError && !items.length"
         title="批量草案获取失败"

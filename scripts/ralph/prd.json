@@ -95,8 +95,8 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "WP-43-D/US-351（2026-09-18，唯一写入 Agent 为 gpt-5.6-luna；用户指定 Fable CLI 环境卡住，未假称 Fable）。WorkbenchView 现在唯一持有批量输入、容量说明与搜索动作，BatchWorkbenchView hideInput 时不再渲染第二输入/表单，仅一个 v-model；计数复用 batchItemCount/validateBatchRawInput，0/37+入口禁用且关联说明，函数入口仍校验并保留原文。初始不渲染完整空结果；进行态展示原文、提交规模与整体不定等待，完成后统一渲染真实 FOUND/EMPTY/FAILED 混合结果；重搜对未保存候选/草案/勾选现场使用 ConfirmDialog，取消恢复原提交文本与焦点，确认才清除；完成聚焦批量工作台标题。AnimeTitleInput 增加焦点入口。先补最小宿主红测后转绿；未改 API/OpenAPI/generated、backend/CAS/save/external、N 部语义、恢复会话或逐项重搜。实际验证：cd frontend && npm run test:unit -- --run src/features/workbench/BatchWorkbenchView.test.ts src/features/workbench/WorkbenchView.test.ts src/features/workbench/AnimeTitleInput.test.ts src/features/workbench/batchWorkbench.test.ts → 4 files/121 passed；npm run typecheck、lint、build、api:check 均通过；git diff --check 通过；uv run pytest tests/browser/test_app_batch_workbench.py -q → 27 passed（真实 Chromium、held route、tmp storage、外部依赖 mock，无 sleep/外网）。变更文件：frontend/src/features/workbench/{WorkbenchView.vue,WorkbenchView.test.ts,BatchWorkbenchView.vue,AnimeTitleInput.vue}、tests/browser/test_app_batch_workbench.py。遗留风险：未新增专门重搜确认浏览器用例，现有批量确认/取消与 held 等浏览器回归通过；未生成截图/trace。"
     },
     {
       "id": "US-352",

@@ -52,6 +52,7 @@ import {
   type CandidateSearchResult,
   type MikanCandidate,
 } from '@/features/workbench/candidateSearch'
+import { batchItemCount, validateBatchRawInput } from '@/features/workbench/batchWorkbench'
 import { displayValue } from '@/features/requests/requestDetail'
 import type { RequestSnapshot } from '@/features/requests/requestDetail'
 import { currentStorageDir, storageQuery } from '@/features/requests/requestStorage'
@@ -75,6 +76,8 @@ const batchQuery = ref('')
 const mode = ref<AnimeMode>('single')
 const singleInput = ref<InstanceType<typeof AnimeTitleInput> | null>(null)
 const batchInput = ref<InstanceType<typeof AnimeTitleInput> | null>(null)
+const batchWorkbench = ref<InstanceType<typeof BatchWorkbenchView> | null>(null)
+const batchSearchSubmitting = ref(false)
 const selections = ref<Record<AnimeMode, { start: number; end: number }>>({
   single: { start: 0, end: 0 },
   batch: { start: 0, end: 0 },
@@ -92,6 +95,19 @@ const lastSearchQuery = ref('')
 const searchStarted = computed(
   () => searchLoading.value || Boolean(searchError.value) || searchResult.value !== null,
 )
+const batchCount = computed(() => batchItemCount(batchQuery.value))
+const batchValidationError = computed(() => validateBatchRawInput(batchQuery.value))
+const batchSearchDisabled = computed(() => batchSearchSubmitting.value || Boolean(batchValidationError.value))
+
+async function submitBatchSearch(): Promise<void> {
+  if (batchSearchDisabled.value) return
+  batchSearchSubmitting.value = true
+  try {
+    await batchWorkbench.value?.parseBatch()
+  } finally {
+    batchSearchSubmitting.value = false
+  }
+}
 
 /** A started search that is no longer in flight and produced no candidates. */
 const searchSettled = computed(
@@ -586,24 +602,56 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 
   <!-- ── batch workbench (US-205) ────────────────────────────────── -->
   <template v-if="mode === 'batch'">
-    <label for="batch-raw-input">批量番剧名称</label>
-    <AnimeTitleInput ref="batchInput" id="batch-raw-input" v-model="batchQuery" mode="batch" />
-    <p class="field-help" id="batch-raw-input-help">每行一个番剧简称或不完整标题；系统会逐项解析并搜索候选合集，结果需人工审核。</p>
-    <BatchWorkbenchView class="batch-workbench-section" v-model:raw-input="batchQuery" hide-input />
+    <form id="batch-parse-form" class="batch-parse-form" @submit.prevent="submitBatchSearch">
+      <label for="batch-raw-input">批量番剧名称</label>
+      <AnimeTitleInput
+        ref="batchInput"
+        id="batch-raw-input"
+        v-model="batchQuery"
+        mode="batch"
+        :disabled="batchSearchSubmitting"
+        aria-describedby="batch-raw-input-help batch-input-count"
+      />
+      <p class="field-help" id="batch-raw-input-help">每行一个番剧简称或不完整标题；系统会逐项解析并搜索候选合集，结果需人工审核。</p>
+      <p id="batch-input-count" class="batch-input-count" role="status">
+        当前 {{ batchCount }} 部；可输入 1～36 部。{{ batchValidationError || '输入有效，可以开始搜索。' }}
+      </p>
+      <p v-if="batchValidationError" id="batch-input-validation" class="field-error" role="alert">{{ batchValidationError }}</p>
+      <div class="notification-actions">
+        <BaseButton id="batch-parse-submit" type="submit" variant="primary" :loading="batchSearchSubmitting" :disabled="batchSearchDisabled">
+          搜索候选合集
+        </BaseButton>
+      </div>
+    </form>
+    <BatchWorkbenchView
+      ref="batchWorkbench"
+      class="batch-workbench-section"
+      v-model:raw-input="batchQuery"
+      hide-input
+      @restore-search-focus="batchInput?.focusInput()"
+    />
   </template>
 </template>
 
 <style scoped>
 .workbench-search-form,
+.batch-parse-form,
 .candidate-fallback-form {
   display: grid;
   gap: 0.75rem;
 }
 
 .workbench-search-form label,
+.batch-parse-form label,
 .candidate-fallback-form label {
   font-weight: 500;
   font-size: 0.875rem;
+}
+
+.batch-input-count {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
 }
 
 .workbench-title {
