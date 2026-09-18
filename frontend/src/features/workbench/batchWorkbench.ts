@@ -277,6 +277,28 @@ export interface BatchSaveConfirmDescriptor {
   idempotency_key: string
 }
 
+export interface BatchAcceptAllCounts {
+  /** Every item of the parsed batch. */
+  total: number
+  /** Items currently passing the shared confirmability gate. */
+  confirmable: number
+  /** Confirmable items the active review filter hides. */
+  hidden: number
+}
+
+/** Clamp the confirm-all counts to the batch they describe. */
+function normalizeAcceptAllCounts(counts: BatchAcceptAllCounts): {
+  total: number
+  confirmable: number
+  hidden: number
+  excluded: number
+} {
+  const total = Math.max(0, Math.trunc(counts.total))
+  const confirmable = Math.max(0, Math.min(Math.trunc(counts.confirmable), total))
+  const hidden = Math.max(0, Math.min(Math.trunc(counts.hidden), confirmable))
+  return { total, confirmable, hidden, excluded: total - confirmable }
+}
+
 /**
  * US-347: visible scope line for the 保存并确认全部 entry.
  *
@@ -286,23 +308,44 @@ export interface BatchSaveConfirmDescriptor {
  * (M), how many of them the current filter hides, and how many are excluded,
  * so the entry is described by visible copy and not only by a hover title.
  */
-export function batchAcceptAllScopeText(counts: {
-  total: number
-  confirmable: number
-  hidden: number
-}): string {
-  const total = Math.max(0, Math.trunc(counts.total))
+export function batchAcceptAllScopeText(counts: BatchAcceptAllCounts): string {
+  const { total, confirmable, hidden, excluded } = normalizeAcceptAllCounts(counts)
   if (total === 0) return ''
-  const confirmable = Math.max(0, Math.min(Math.trunc(counts.confirmable), total))
   if (confirmable === 0) {
     return `完整批次 ${total} 项均不可确认：请先为条目生成可审核草案，并处理待应用编辑、重算、失败、已确认或结果待核验的条目。`
   }
-  const hidden = Math.max(0, Math.min(Math.trunc(counts.hidden), confirmable))
-  const excluded = total - confirmable
   const details = [`保存并确认全部覆盖完整批次 ${total} 项中的 ${confirmable} 项可确认条目`]
   if (hidden) details.push(`其中 ${hidden} 项当前被筛选隐藏`)
   if (excluded) details.push(`排除 ${excluded} 项未就绪、已确认或结果待核验条目`)
   return `${details.join('，')}；不受筛选或勾选影响。`
+}
+
+export interface BatchAcceptAllConfirmCopy {
+  title: string
+  message: string
+  confirmLabel: string
+}
+
+/**
+ * US-348: dialog copy for one frozen confirm-all intent.
+ *
+ * The title and the confirm button both state M so the number the user saw is
+ * the number the button promises; the body states the complete batch, the
+ * hidden participants that still travel with the request, the excluded items,
+ * and that this only saves a local plan — the external Auto Bangumi submit is
+ * a separate, later confirmation.
+ */
+export function batchAcceptAllConfirmCopy(counts: BatchAcceptAllCounts): BatchAcceptAllConfirmCopy {
+  const { total, confirmable, hidden, excluded } = normalizeAcceptAllCounts(counts)
+  const clauses = [`完整批次 ${total} 部中当前可确认 ${confirmable} 部`]
+  if (hidden) clauses.push(`其中 ${hidden} 部被筛选隐藏，仍会一并保存并确认`)
+  const exclusion = excluded ? `已排除 ${excluded} 部未就绪、已确认或结果待核验的条目。` : ''
+  const label = `保存并确认全部 ${confirmable} 部`
+  return {
+    title: label,
+    message: `${clauses.join('，')}。${exclusion}仅保存本地订阅方案，不会提交到 Auto Bangumi；外部提交需在追番管理再次确认。`,
+    confirmLabel: label,
+  }
 }
 
 /** Build the generated save-confirm body; capabilities never leave this payload. */

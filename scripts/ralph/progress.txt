@@ -1,7 +1,7 @@
 # Ralph 当前状态
 
-Stage 43（搜索入口与候选选择视觉收口）执行中：WP-43-A/US-347 已实现并定向验证通过，
-待独立审核；US-348 尚未开始，B～E 未开始。
+Stage 43（搜索入口与候选选择视觉收口）执行中：WP-43-A 的 US-347/US-348 均已实现并定向验证通过，
+待主 Agent 独立审核；B～E 未开始。
 功能基线：334c8e69dbcc7c27be8ab482f8ccb142081db0b7。
 分支：ralph/stage43-add-anime-entry-visual；实时状态以 git 核对。
 执行 PRD：docs/MiGuOrca_stage43_add_anime_entry_visual_PRD.md。
@@ -106,5 +106,56 @@ Stage 41 证据在 scripts/ralph/archive/2026-09-18-stage41-add-anime-ux/。
   两类集合不要互相引用，否则筛选会再次改写保存范围。
 - 遗留风险：all 弹窗目前只在打开时读取一次数量与集合，确认前尚未复核 draft/revision/batch 与资格
   变化，也没有弹窗内存 intent 冻结——这些是 US-348 的验收内容，本轮不做，也不据此放宽任何口径。
+- 实际协作：本轮为用户指定的单写入开发 Agent（Claude Fable 5，本机 model id claude-fable-5[1M]）
+  实现并自查；主 Agent 独立审核，未启动测试/修复/发布 Agent。
+
+## 2026-09-18 - WP-43-A / US-348 确认全部弹窗冻结意图与确认前复核
+
+- 范围：只做 US-348，依赖 US-347。打开「保存并确认全部」时把完整批次参与集合
+  （item_id/draft_id/base_revision）与计数冻结成内存 intent；确认前复核 batch_id、资格集合增删
+  与每条 draft/revision 绑定，任一变化即零请求并常驻说明；未变化才按冻结集合发送。
+  N 部弹窗与请求、RESPONSE_UNKNOWN 冻结重试、ConfirmDialog 全局焦点机制均未改动；
+  未改 API/OpenAPI/generated client、后端、草案 CAS/authority、外部写与 AnimeDraftEditor。
+- 实现文件：frontend/src/features/workbench/BatchWorkbenchView.vue（buildAcceptAllIntent /
+  acceptAllIntentIsCurrent / confirmBatchAcceptAll、acceptAllDialogOpen 函数入口防重、
+  常驻 #batch-accept-all-recheck + 焦点、全部按钮 aria-describedby 同时引用范围与复核说明）；
+  frontend/src/features/workbench/batchWorkbench.ts（纯 helper batchAcceptAllConfirmCopy，
+  与 US-347 的 batchAcceptAllScopeText 共用 batchAcceptAllCounts 归一化）。
+- 弹窗口径：标题与确认按钮均为「保存并确认全部 M 部」；正文说明完整批次 N 部中可确认 M 部、
+  其中 H 部被筛选隐藏且仍一并确认、排除 E 部未就绪/已确认/结果待核验项、仅保存本地订阅方案，
+  外部提交需在追番管理再次确认。draft_id 等能力只在内存 intent 里，弹窗文案/URL/localStorage 都不含。
+- 复核失败的行为：确认后复核不通过时零 save-confirm POST，弹窗保持关闭状态且不自动重开，
+  说明常驻在固定操作栏（不是 Toast）并获得焦点；现场（卡片、勾选、详情）不变。
+  重新点击全部入口会清除说明并按当时的最新资格/版本生成新 intent。
+- 测试文件：BatchWorkbenchView.test.ts（新增 US-348 组 8 例）、batchWorkbench.test.ts（confirm copy 3 例）、
+  tests/browser/test_app_batch_workbench.py（TestAppBatchAccept 新增 2 例，并同步 US-347 的弹窗文案断言）。
+- 先红后绿证据：8 例中 4 例在实际未修改实现时失败——弹窗标题/按钮未写明 M 部；
+  版本变化后仍发出 1 次 save-confirm；新增资格后仍发送；重复打开会用新资格覆盖已打开的确认文案。
+  Escape 取消、重新解析、取消不改现场、未知重试沿用冻结 body 4 例属行为保持/补充覆盖，
+  其红态未单独观察，不做过度声明。
+- 实际命令与结果（分支 ralph/stage43-add-anime-entry-visual，未 push/PR/merge）：
+  - cd frontend && npm run test:unit -- --run → 49 files, 612 passed（BatchWorkbenchView 55、
+    batchWorkbench 22）。
+  - cd frontend && npm run typecheck → 通过；npm run lint（--max-warnings 0）→ 通过；
+    npm run build → 通过；npm run api:check → 无生成漂移。
+  - uv run pytest tests/browser/test_app_batch_workbench.py -q → 27 passed（原 25 + 新 2）。
+    新增节点：TestAppBatchAccept::test_accept_all_rechecks_a_scope_change_while_the_dialog_is_open、
+    ::test_accept_all_cancel_sends_nothing_and_keeps_the_scene。
+    held route 保留在途草案生成响应，在模态打开期间 fulfill，让第三个条目加入资格集合；
+    确认后捕获零 save-confirm POST 并断言常驻说明与入口描述；再次明确确认才按 3 部发送。
+    取消用例断言零请求、勾选/详情不变、焦点回到原触发入口；外部依赖全部 route mock。
+  - uv run pytest tests/api_contract/test_save_confirm_service.py -q -k
+    'batch_save_confirm_coordinator_preserves_order or batch_save_confirm_coordinator_item_ids'
+    → 2 passed。
+  - uv run pytest src/apps/migu_orca_web/views_test.py -q -k
+    'batch_save_confirm_api_item_ids_selects or batch_save_confirm_api_returns_partial_success'
+    → 2 passed，412.61s（收集/导入开销同 US-347 的记录，与本 story 无关）。
+- 运行数据隔离：browser 测试仍经 autouse fixture 指向 tmp 存储根；运行后核对
+  .migu_orca/storage/tracking_migrations/schema-v1.json 的 mtime 仍为 09-15，未被写入。
+- 可复用结论：弹窗类二次确认应把「展示的东西」冻结成内存 intent 并在发送前逐字段复核，
+  而不是确认时按当时状态重新计算；模态期间背景被 focus trap 置为 inert，
+  浏览器用例应通过 held route 让在途响应到达，不要试图在模态打开时操作用户背景。
+- 遗留风险：N 部入口仍是「按确认时的可见勾选计算」，尚未冻结 intent（PRD 明确留给 Stage 45，
+  本轮未顺带改动）；复核只比较 batch/资格集合/draft/revision，尚未纳入更细的条目属性。
 - 实际协作：本轮为用户指定的单写入开发 Agent（Claude Fable 5，本机 model id claude-fable-5[1M]）
   实现并自查；主 Agent 独立审核，未启动测试/修复/发布 Agent。

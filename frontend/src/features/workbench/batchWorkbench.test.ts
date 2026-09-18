@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { operations } from '@/api/generated/api'
 import {
+  batchAcceptAllConfirmCopy,
   batchAcceptAllScopeText,
   batchCandidateSelectionIsBlocked,
   batchCardNeedsReview,
@@ -267,5 +268,32 @@ describe('batch confirm-all scope text (US-347)', () => {
     expect(batchAcceptAllScopeText({ total: 2, confirmable: 5, hidden: 9 })).toContain('完整批次 2 项中的 2 项可确认条目')
     expect(batchAcceptAllScopeText({ total: 2, confirmable: 5, hidden: 9 })).toContain('其中 2 项当前被筛选隐藏')
     expect(batchAcceptAllScopeText({ total: 2, confirmable: -1, hidden: 0 })).toContain('完整批次 2 项均不可确认')
+  })
+})
+
+describe('batch confirm-all confirm copy (US-348)', () => {
+  it('states the frozen count in the title and the confirm button', () => {
+    const copy = batchAcceptAllConfirmCopy({ total: 2, confirmable: 2, hidden: 0 })
+    expect(copy.title).toBe('保存并确认全部 2 部')
+    expect(copy.confirmLabel).toBe('保存并确认全部 2 部')
+    expect(copy.message).toContain('完整批次 2 部中当前可确认 2 部')
+    expect(copy.message).not.toContain('已排除')
+    expect(copy.message).toContain('仅保存本地订阅方案，不会提交到 Auto Bangumi')
+    expect(copy.message).toContain('外部提交需在追番管理再次确认')
+  })
+
+  it('explains hidden participants and excluded items without naming capabilities', () => {
+    const copy = batchAcceptAllConfirmCopy({ total: 3, confirmable: 2, hidden: 1 })
+    expect(copy.title).toBe('保存并确认全部 2 部')
+    expect(copy.message).toContain('其中 1 部被筛选隐藏，仍会一并保存并确认')
+    expect(copy.message).toContain('已排除 1 部未就绪、已确认或结果待核验的条目')
+    expect(copy.message).not.toContain('draft')
+  })
+
+  it('never reports counts outside the batch bounds', () => {
+    const copy = batchAcceptAllConfirmCopy({ total: 2, confirmable: 5, hidden: 9 })
+    expect(copy.title).toBe('保存并确认全部 2 部')
+    expect(copy.message).toContain('其中 2 部被筛选隐藏')
+    expect(copy.message).not.toContain('已排除')
   })
 })

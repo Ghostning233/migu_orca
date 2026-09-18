@@ -1130,6 +1130,288 @@ describe('BatchWorkbenchView confirm-all scope (US-347)', () => {
   })
 })
 
+// Stage 43 / WP-43-A / US-348: 二次确认看到的数量和集合就是最终发送的对象。
+// 打开弹窗时把完整批次的参与集合与绑定版本冻结在内存 intent 里；确认前重新核对，
+// 任何资格/版本/batch 变化都不发送，改为在固定业务区常驻说明。
+describe('BatchWorkbenchView confirm-all dialog intent (US-348)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    apiPost.mockReset()
+  })
+
+  let wrapperUnderTest: Awaited<ReturnType<typeof mountBatch>>['wrapper']
+
+  function twoDrafts() {
+    return [
+      batchItem({ item_id: 'item-a', raw_title: '甲', status: 'DRAFT', canonical_title_candidates: [], preview_request: previewRequest('req-a'), draft_id: 'draft-a', draft_revision: 1 }),
+      batchItem({ item_id: 'item-b', raw_title: '乙', status: 'DRAFT', canonical_title_candidates: [], preview_request: previewRequest('req-b'), draft_id: 'draft-b', draft_revision: 1 }),
+    ]
+  }
+
+  function twoConfirmedResults() {
+    return saveConfirmResult({
+      results: [
+        { item_id: 'item-a', outcome: 'CONFIRMED', request_id: 'req-a', status: 'CONFIRMED', error_type: null, error_message: null, tracking_id: 'tracking-a', tracking_ready: true },
+        { item_id: 'item-b', outcome: 'CONFIRMED', request_id: 'req-b', status: 'CONFIRMED', error_type: null, error_message: null, tracking_id: 'tracking-b', tracking_ready: true },
+      ],
+      summary: { requested: 2, confirmed: 2, failed: 0 },
+    })
+  }
+
+  function saveConfirmCalls() {
+    return apiPost.mock.calls.filter(([path]) => path === '/api/v1/batches/{batch_id}/save-confirm')
+  }
+
+  async function mountAndParse(rawInput: string) {
+    const mounted = await mountBatch()
+    wrapperUnderTest = mounted.wrapper
+    await wrapperUnderTest.find('#batch-raw-input').setValue(rawInput)
+    await wrapperUnderTest.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    return mounted
+  }
+
+  async function openAllDialog() {
+    await wrapperUnderTest.find('#batch-accept-all').trigger('click')
+    await nextTick()
+  }
+
+  async function confirmDialog() {
+    await wrapperUnderTest.find('.confirm-dialog .primary-button').trigger('click')
+    await flushPromises()
+  }
+
+  it('states the frozen all scope in the dialog and sends exactly that set', async () => {
+    apiPost
+      .mockResolvedValueOnce(parseResult({
+        items: [...twoDrafts(), batchItem({ item_id: 'item-c', raw_title: '丙', status: 'FAILED', canonical_title_candidates: [] })],
+      }))
+      .mockResolvedValueOnce(twoConfirmedResults())
+    await mountAndParse('甲\n乙\n丙')
+    await openAllDialog()
+
+    const dialog = wrapperUnderTest.find('.confirm-dialog')
+    expect(dialog.find('.confirm-dialog-title').text()).toBe('保存并确认全部 2 部')
+    expect(dialog.find('.primary-button').text()).toContain('保存并确认全部 2 部')
+    const message = dialog.find('.confirm-dialog-message').text()
+    expect(message).toContain('完整批次 3 部中当前可确认 2 部')
+    expect(message).toContain('已排除 1 部')
+    expect(message).toContain('仅保存本地订阅方案')
+    expect(message).toContain('追番管理再次确认')
+    // 能力只留在内存 intent 里，不进入弹窗文案。
+    expect(dialog.text()).not.toContain('draft-a')
+    expect(dialog.text()).not.toContain('draft-b')
+
+    await confirmDialog()
+    expect(saveConfirmCalls()).toHaveLength(1)
+    const body = saveConfirmCalls()[0]![1]!.body as Record<string, unknown>
+    expect(body.item_ids).toBeUndefined()
+    expect((body.items as Array<{ item_id: string }>).map((entry) => entry.item_id)).toEqual(['item-a', 'item-b'])
+  })
+
+  it('sends nothing on cancel and keeps the batch scene unchanged', async () => {
+    apiPost.mockResolvedValueOnce(parseResult({ items: twoDrafts() }))
+    await mountAndParse('甲\n乙')
+    await wrapperUnderTest.find('.batch-draft-card[data-item-id="item-a"] input[type="checkbox"]').setValue(true)
+    await wrapperUnderTest.find('.batch-draft-card[data-item-id="item-b"] .batch-card-expand').trigger('click')
+    await nextTick()
+    await openAllDialog()
+
+    await wrapperUnderTest.find('.confirm-dialog .secondary-button').trigger('click')
+    await flushPromises()
+
+    expect(saveConfirmCalls()).toHaveLength(0)
+    expect(wrapperUnderTest.find('.confirm-dialog').exists()).toBe(false)
+    expect(wrapperUnderTest.find('#batch-accept-all-recheck').exists()).toBe(false)
+    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(2)
+    expect((wrapperUnderTest.find('.batch-draft-card[data-item-id="item-a"] input[type="checkbox"]').element as HTMLInputElement).checked).toBe(true)
+    expect(wrapperUnderTest.find('#batch-detail-pane').text()).toContain('编辑订阅草案')
+  })
+
+  it('closes the all dialog on Escape without sending or flagging a recheck', async () => {
+    apiPost.mockResolvedValueOnce(parseResult({ items: twoDrafts() }))
+    await mountAndParse('甲\n乙')
+    await openAllDialog()
+    expect(wrapperUnderTest.find('.confirm-dialog').exists()).toBe(true)
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await flushPromises()
+
+    expect(wrapperUnderTest.find('.confirm-dialog').exists()).toBe(false)
+    expect(saveConfirmCalls()).toHaveLength(0)
+    expect(wrapperUnderTest.find('#batch-accept-all-recheck').exists()).toBe(false)
+    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(2)
+  })
+
+  it('rechecks the frozen versions and refuses to send when a draft revision changed', async () => {
+    let resolveModify!: (value: unknown) => void
+    const pendingModify = new Promise((resolve) => { resolveModify = resolve })
+    apiPost
+      .mockResolvedValueOnce(parseResult({ items: twoDrafts() }))
+      .mockImplementationOnce(() => pendingModify as never)
+      .mockResolvedValueOnce(twoConfirmedResults())
+    await mountAndParse('甲\n乙')
+    await wrapperUnderTest.find('.batch-draft-card[data-item-id="item-a"] .batch-card-expand').trigger('click')
+    await nextTick()
+
+    await openAllDialog()
+    expect(wrapperUnderTest.find('.confirm-dialog').exists()).toBe(true)
+
+    // 弹窗打开期间，已在途的修改响应把该条目的草案版本推进到 2。
+    await wrapperUnderTest.find('#batch-preview-must-contain').setValue('新筛选')
+    await wrapperUnderTest.find('#detail-preview-edit-form').trigger('submit')
+    await nextTick()
+    const applied = previewRequest('req-a')
+    applied.confirmable_config.filter_rule.must_contain = '新筛选'
+    resolveModify({ request: applied, draft_id: 'draft-a', draft_revision: 2 })
+    await flushPromises()
+
+    await confirmDialog()
+
+    expect(saveConfirmCalls()).toHaveLength(0)
+    expect(wrapperUnderTest.find('.confirm-dialog').exists()).toBe(false)
+    const notice = wrapperUnderTest.find('#batch-accept-all-recheck')
+    expect(notice.exists()).toBe(true)
+    expect(notice.text()).toContain('资格或草案版本已变化')
+    expect(notice.text()).toContain('重新确认全部')
+    expect(document.activeElement).toBe(notice.element)
+    // 校验失败不改变现场，也不自动重新打开确认。
+    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(2)
+
+    // 重新确认：新 intent 记录最新版本，发送精确 body。
+    await openAllDialog()
+    expect(wrapperUnderTest.find('#batch-accept-all-recheck').exists()).toBe(false)
+    await confirmDialog()
+    const body = saveConfirmCalls()[0]![1]!.body as Record<string, unknown>
+    expect((body.items as Array<{ item_id: string; base_revision: number }>).map((entry) => [entry.item_id, entry.base_revision]))
+      .toEqual([['item-a', 2], ['item-b', 1]])
+  })
+
+  it('refuses to send when another item becomes confirmable while the dialog is open', async () => {
+    apiPost
+      .mockResolvedValueOnce(parseResult({
+        items: [
+          ...twoDrafts(),
+          batchItem({
+            item_id: 'item-c',
+            raw_title: '丙',
+            status: 'FOUND',
+            canonical_title_candidates: [],
+            candidates: [{ bangumi_id: '77', title: '候选丙', mikan_url: 'https://mikan.example/Home/Bangumi/77' }],
+          }),
+        ],
+      }))
+      .mockResolvedValueOnce({ request: previewRequest('req-c'), summary: {}, draft_id: 'draft-c', draft_revision: 1 })
+    await mountAndParse('甲\n乙\n丙')
+    await openAllDialog()
+
+    // 弹窗打开期间，第三个条目生成了可审核草案并加入资格集合。
+    await wrapperUnderTest.find('.batch-draft-card[data-item-id="item-c"] .batch-card-expand').trigger('click')
+    await nextTick()
+    await wrapperUnderTest.find('#batch-detail-pane .candidate-select').trigger('click')
+    await flushPromises()
+
+    await confirmDialog()
+
+    expect(saveConfirmCalls()).toHaveLength(0)
+    expect(wrapperUnderTest.find('.confirm-dialog').exists()).toBe(false)
+    const notice = wrapperUnderTest.find('#batch-accept-all-recheck')
+    expect(notice.exists()).toBe(true)
+    expect(notice.text()).toContain('资格或草案版本已变化')
+    // 不自动补新 rows：三个条目都还在，只有明确重新确认才会发送。
+    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(3)
+    expect(wrapperUnderTest.find('#batch-accept-all').text()).toContain('3 部')
+  })
+
+  it('keeps the frozen all set when only the filter and the checkboxes change', async () => {
+    apiPost
+      .mockResolvedValueOnce(parseResult({ items: twoDrafts() }))
+      .mockResolvedValueOnce(twoConfirmedResults())
+    await mountAndParse('甲\n乙')
+    await openAllDialog()
+
+    // 可见性与勾选变化不改变已冻结的 all 集合。
+    await wrapperUnderTest.find('#batch-review-search').setValue('乙')
+    await wrapperUnderTest.find('.batch-draft-card[data-item-id="item-b"] input[type="checkbox"]').setValue(true)
+    await nextTick()
+
+    await confirmDialog()
+
+    expect(saveConfirmCalls()).toHaveLength(1)
+    const body = saveConfirmCalls()[0]![1]!.body as Record<string, unknown>
+    expect(body.item_ids).toBeUndefined()
+    expect((body.items as Array<{ item_id: string }>).map((entry) => entry.item_id)).toEqual(['item-a', 'item-b'])
+  })
+
+  it('refuses to send when the batch was re-parsed while the dialog was open', async () => {
+    apiPost
+      .mockResolvedValueOnce(parseResult({ items: twoDrafts() }))
+      .mockResolvedValueOnce(parseResult({
+        batch_id: 'batch-2',
+        items: [batchItem({ item_id: 'item-x', raw_title: '新甲', status: 'DRAFT', canonical_title_candidates: [], preview_request: previewRequest('req-x'), draft_id: 'draft-x', draft_revision: 1 })],
+      }))
+    await mountAndParse('甲\n乙')
+    await openAllDialog()
+
+    // 弹窗打开期间重新解析：batch 与参与集合都已改变。
+    await wrapperUnderTest.find('#batch-raw-input').setValue('新甲')
+    await wrapperUnderTest.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+
+    await confirmDialog()
+
+    expect(saveConfirmCalls()).toHaveLength(0)
+    expect(wrapperUnderTest.find('.confirm-dialog').exists()).toBe(false)
+    expect(wrapperUnderTest.find('#batch-accept-all-recheck').text()).toContain('资格或草案版本已变化')
+    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(1)
+  })
+
+  it('ignores a second open while the all dialog is still open', async () => {
+    apiPost
+      .mockResolvedValueOnce(parseResult({ items: twoDrafts() }))
+      .mockResolvedValueOnce(twoConfirmedResults())
+    await mountAndParse('甲\n乙')
+    await wrapperUnderTest.find('.batch-draft-card[data-item-id="item-a"] .batch-card-expand').trigger('click')
+    await nextTick()
+    await openAllDialog()
+
+    // 弹窗打开期间第一个条目变成不可确认；第二次进入必须被函数入口挡掉，
+    // 弹窗仍保持打开时冻结的 2 部，而不是按新资格静默缩成 1 部。
+    await wrapperUnderTest.find('#batch-preview-must-contain').setValue('未应用修改')
+    await nextTick()
+    await wrapperUnderTest.find('#batch-accept-all').trigger('click')
+    await nextTick()
+
+    expect(wrapperUnderTest.findAll('.confirm-dialog')).toHaveLength(1)
+    expect(wrapperUnderTest.find('.confirm-dialog .confirm-dialog-title').text()).toBe('保存并确认全部 2 部')
+
+    await confirmDialog()
+    expect(saveConfirmCalls()).toHaveLength(0)
+    expect(wrapperUnderTest.find('#batch-accept-all-recheck').exists()).toBe(true)
+  })
+
+  it('keeps an unknown save result on the original frozen request without a new intent', async () => {
+    apiPost
+      .mockResolvedValueOnce(parseResult({ items: twoDrafts() }))
+      .mockRejectedValueOnce({ network: true, type: 'network_error', message: 'network' })
+      .mockResolvedValueOnce(twoConfirmedResults())
+    await mountAndParse('甲\n乙')
+    await openAllDialog()
+    await confirmDialog()
+
+    const first = saveConfirmCalls()[0]
+    expect(wrapperUnderTest.find('#batch-retry-frozen-operation').exists()).toBe(true)
+    expect(wrapperUnderTest.find('#batch-accept-all-recheck').exists()).toBe(false)
+
+    await wrapperUnderTest.find('#batch-retry-frozen-operation').trigger('click')
+    await flushPromises()
+    // 未知重试沿用原冻结 body/key/revision，不新建 intent 也不弹确认框。
+    expect(wrapperUnderTest.find('.confirm-dialog').exists()).toBe(false)
+    expect(saveConfirmCalls()).toHaveLength(2)
+    expect(saveConfirmCalls()[1]?.[1]).toEqual(first?.[1])
+  })
+})
+
 describe('BatchWorkbenchView candidate loading feedback (US-343)', () => {
   beforeEach(() => {
     localStorage.clear()
