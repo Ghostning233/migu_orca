@@ -109,6 +109,25 @@ Stage 41 证据在 scripts/ralph/archive/2026-09-18-stage41-add-anime-ux/。
 - 实际协作：本轮为用户指定的单写入开发 Agent（Claude Fable 5，本机 model id claude-fable-5[1M]）
   实现并自查；主 Agent 独立审核，未启动测试/修复/发布 Agent。
 
+## 2026-09-18 - WP-43-A 独立审核与复审闭环
+
+- 审核结论：US-347/US-348 的完整批次资格范围、弹窗内存 intent、确认前 batch/集合/draft/revision
+  复核、未知结果沿用冻结 body/key/revision/集合，以及公开字段边界均无阻断问题；未改 API/OpenAPI/generated、
+  后端或外部写。剩余产品范围风险仅为 D-02 的 N 部隐藏勾选语义，已明确留给 Stage 45。
+- 独立测试发现原版本变化 Vitest 在 ConfirmDialog 已将背景置为 inert 后仍直接提交背景表单，不能证明
+  「已在途修改在模态期间返回」的真实时序；测试 Agent 将其收紧为先发起并 held preview-modify、再打开
+  模态、随后返回 draft_revision=2，最后断言零 save-confirm POST、常驻说明及焦点。该真实时序在现有实现
+  下通过，未暴露生产代码缺陷；测试修正单独提交 dc91d78
+  `test: [US-348] - 固化模态内在途版本复核`。
+- 复审实际命令：`cd frontend && npm run test:unit -- --run BatchWorkbenchView.test.ts` → 1 file、55 passed；
+  `git diff 6814f5b..HEAD --check` → 通过。独立测试者此前还实际运行精确版本用例（1 passed）与同文件
+  （55 passed）；仅测试文件改动，工作区复核为干净。
+- 实际协作/模型：开发 A 使用用户指定的 Claude CLI `--model fable` 完成两条 story；独立测试 Agent 使用
+  gpt-5.6-luna 固化时序回归；主 Agent 完成代码、契约和测试独立审核；无生产缺陷，故未启动集中修复 B；
+  未启动发布 C，未 push/PR/merge。提示词摘要：开发—完整批次 all 与冻结确认不得越过服务端草案/CAS 边界；
+  测试—用真实 held/deferred 时序验证模态内变化；审核—核对范围、幂等未知恢复与敏感泄漏；修复—本包无问题
+  无需执行。
+
 ## 2026-09-18 - WP-43-A / US-348 确认全部弹窗冻结意图与确认前复核
 
 - 范围：只做 US-348，依赖 US-347。打开「保存并确认全部」时把完整批次参与集合
