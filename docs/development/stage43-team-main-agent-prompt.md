@@ -59,7 +59,7 @@ D-03资源样例与D-04批量完成导航留后续Stage，不顺带实现。
 未知结果继续原冻结body/key/revision/集合，不以新资格重算重放。
 
 团队职责：你主导规划/独立审核，不代替开发Agent写业务代码。
-A默认gpt-5.6-luna；独立测试者固化审核最小红测；B同一修复Agent集中收口；
+A子agent使用Claude Fable模型；独立测试者固化审核最小红测；B同一修复Agent集中收口；
 C长期中文发布者只在以后明确发布授权时启动/复用，不现在发布。
 按AGENTS和编排文档创建fork_turns="none"干净子Agent，不复制主Agent全量对话。
 给每个Agent自包含提示词：实际仓库/分支/HEAD、WP/US、精确文件、目标/非目标、
