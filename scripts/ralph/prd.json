@@ -57,8 +57,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "US-349（2026-09-18，WP-43-B；D-01已确认，未改四页业务流程/状态/路由/API）。全局 tokens.css 对齐 Token V1：画布/表面、文字/状态、深海蓝主色、珊瑚强调、统一焦点、字号行高、4/8/12/16/20/24/32/40/48/64 间距、6/10/14 圆角、44/52px 控件、阴影/z 层级及 reduced-motion；保留现有语义兼容别名，未逐页复制色值。main.css 与 BaseButton/BaseInput/BaseSelect/BaseTextarea/CheckboxRow 使用共享几何和焦点基线；首页 #mikan-candidate-query 为 52px；GlobalNotification 仅修正包裹导航时的共享顶部安全间距，未改 store/timer。新增 tokens.test.ts 的 V1 映射/几何断言。实际验证：cd frontend && npm run test:unit -- --run src/styles/tokens.test.ts src/components/forms/BaseFormControls.test.ts → 2 files/21 passed；npm run typecheck → 通过；npm run lint → 通过；npm run build → 通过；uv run pytest tests/browser/test_app_global_notification.py tests/browser/test_app_shell.py tests/browser/test_app_responsive_a11y.py tests/browser/test_app_workbench.py tests/browser/test_app_requests.py tests/browser/test_app_tracking.py tests/browser/test_app_settings.py -q → 首轮 128 passed/1 failed（Toast 与 1280 包裹导航 4.6px 重叠），修正共享顶部间距后复跑定向集合 → 122 passed；浏览器使用 Flask test server、真实 Chromium、外部接口 route mock、tmp storage fixture，覆盖四页 shell/正常错误禁用反馈、导航/Toast/模态层级、键盘焦点、三档桌面与 200% 缩放。浏览器/测试未触碰真实 MiKan、AB、外部写；未改 Toast 行为、AnimeDraftEditor、后端、契约。变更文件：frontend/src/styles/{tokens.css,tokens.test.ts,main.css}、frontend/src/components/forms/{BaseButton,BaseInput,BaseSelect,BaseTextarea,CheckboxRow}.vue、frontend/src/components/feedback/GlobalNotification.vue。实际协作：本轮唯一写入 Agent 为 gpt-5.6-luna 替代 Fable CLI（Fable 两次环境卡住、无改动后终止），未假称 Fable；未启动 C～E。风险：本轮浏览器为现有四页定向集合，未新增截图/trace；颜色对比按 Token V1 色值及真实页面回归验证，未引入独立自动对比度扫描。"
     },
     {
       "id": "US-350",

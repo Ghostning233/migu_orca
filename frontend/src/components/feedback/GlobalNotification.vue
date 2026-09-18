@@ -64,7 +64,9 @@ onBeforeUnmount(() => {
    corner opposite the batch toolbar's fixed save/confirm actions. */
 .global-notification {
   position: fixed;
-  top: calc(var(--size-shell-header) + var(--space-4));
+  /* Keep the fixed layer below wrapped desktop navigation as well as the
+     nominal 72px shell height. */
+  top: calc(var(--size-shell-header) + var(--space-6));
   right: var(--space-5);
   z-index: var(--z-overlay);
   display: flex;

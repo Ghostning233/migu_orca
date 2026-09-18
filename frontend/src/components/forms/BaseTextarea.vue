@@ -36,8 +36,8 @@ function onInput(event: Event): void {
   width: 100%;
   min-height: calc(var(--control-height) * 1.8);
   padding: var(--control-padding-block) var(--control-padding-inline);
-  border: var(--control-border-width) solid var(--color-control-border);
-  border-radius: var(--radius-sm);
+  border: var(--control-border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-md);
   background: var(--color-control-surface);
   color: var(--color-text);
   font: inherit;
@@ -46,7 +46,7 @@ function onInput(event: Event): void {
 }
 
 .base-textarea:focus-visible {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline: 3px solid var(--color-focus-ring);
   outline-offset: var(--focus-ring-offset);
 }
 

@@ -1,109 +1,147 @@
-/* MiGuOrca semantic design tokens (Stage 33, US-258).
- *
- * This is the only source of brand colours, focus treatment and shell
- * elevation. Components consume semantic names so later visual tuning does
- * not create a second palette or duplicate magic values.
- */
-
+/* MiGuOrca Token V1: the single semantic source for the desktop shell and
+ * shared primitives. Feature CSS consumes these roles; it must not introduce
+ * a second palette. */
 :root {
   color-scheme: light;
+  --color-canvas: #f7f8fa;
+  --color-surface: #ffffff;
+  --color-surface-subtle: #f2f5f8;
+  --color-surface-selected: #f2f6fc;
+  --color-text: #10233f;
+  --color-text-secondary: #52627a;
+  --color-text-disabled: #8793a6;
+  --color-border: #d9e0e8;
+  --color-border-strong: #aab6c5;
+  --color-primary: #0b2a55;
+  --color-primary-hover: #123b73;
+  --color-primary-active: #082143;
+  --color-primary-subtle: #eaf0f8;
+  --color-accent: #d9431f;
+  --color-accent-hover: #b93418;
+  --color-focus: #2563eb;
+  --color-success: #147a4b;
+  --color-success-surface: #eaf7f0;
+  --color-success-border: #a9d9bf;
+  --color-warning: #9a4a00;
+  --color-warning-surface: #fff4e5;
+  --color-warning-border: #f1c27d;
+  --color-danger: #c53030;
+  --color-danger-hover: #a92727;
+  --color-danger-surface: #fdecec;
+  --color-danger-border: #e9a7a7;
+  --color-info: #1e5aa8;
+  --color-info-surface: #eaf2fd;
+  --color-info-border: #a9c7ee;
+  --color-unknown: #596579;
+  --color-unknown-surface: #eef1f4;
+  --color-unknown-border: #cdd4dd;
+  --color-scrim: rgb(16 35 63 / 45%);
 
-  /* Colour: warm paper surfaces, deep-sea ink and restrained coral accents. */
-  --color-surface-canvas: #f7f3ea;
-  --color-surface-raised: #fffdf8;
-  --color-surface-subtle: #eee8de;
-  --color-surface-inverse: #17384f;
-  --color-text-primary: #173044;
-  --color-text-muted: #5d6972;
-  --color-text-inverse: #fffaf2;
-  --color-border-subtle: #d7cfc3;
-  --color-action-primary: #174968;
-  --color-action-primary-hover: #103b56;
-  --color-accent-emphasis: #b85237;
-  --color-danger-emphasis: #a63c36;
-  --color-focus-ring: #b85237;
-
-  /* Feedback semantics. Components must consume these roles instead of
-     creating a second status palette in scoped styles. */
-  --color-feedback-success-surface: #edf8f0;
-  --color-feedback-success-border: #abd3b6;
-  --color-feedback-success-text: #1f5f34;
-  --color-feedback-error-surface: #fff3f1;
-  --color-feedback-error-border: #e3bbb4;
-  --color-feedback-error-text: #8d2f20;
-  --color-feedback-scrim: rgb(23 48 68 / 45%);
-
-  /* Shared interactive control states. Keep form primitives on this small
-     semantic surface instead of introducing component-specific colours. */
-  --color-control-surface: var(--color-surface-raised);
-  --color-control-surface-hover: var(--color-surface-subtle);
-  --color-control-disabled: var(--color-text-muted);
-  --color-control-border: var(--color-border-subtle);
-
-  /* Typography. */
-  --font-family-sans:
-    system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
-    'Microsoft YaHei', sans-serif;
-  --font-size-xs: 0.8125rem;
-  --font-size-sm: 0.875rem;
-  --font-size-md: 1rem;
-  --font-size-lg: 1.125rem;
-  --font-size-xl: 1.375rem;
+  --font-family-sans: Inter, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif;
+  --font-stack: var(--font-family-sans);
+  --type-display: 40px;
+  --type-page-title: 28px;
+  --type-section-title: 20px;
+  --type-card-title: 17px;
+  --type-body: 15px;
+  --type-label: 14px;
+  --type-caption: 12px;
+  --font-size-xs: var(--type-caption);
+  --font-size-sm: var(--type-label);
+  --font-size-md: var(--type-body);
+  --font-size-lg: var(--type-section-title);
+  --font-size-xl: var(--type-page-title);
   --font-weight-regular: 400;
-  --font-weight-medium: 500;
-  --font-weight-semibold: 600;
-  --line-height-tight: 1.25;
-  --line-height-body: 1.5;
+  --font-weight-medium: 550;
+  --font-weight-semibold: 650;
+  --line-height-tight: 1.3;
+  --line-height-body: 1.6;
 
-  /* Spacing and dimensions. */
-  --space-1: 0.25rem;
-  --space-2: 0.5rem;
-  --space-3: 0.75rem;
-  --space-4: 1rem;
-  --space-5: 1.25rem;
-  --space-6: 1.5rem;
-  --space-8: 2rem;
-  --size-control-min: 2.5rem;
-  --size-status-min: 3.5rem;
-  --size-shell-header: 4.5rem;
-  --size-content-max: 94.5rem;
-
-  /* Shape, elevation and stacking. */
-  --radius-sm: 0.375rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 0.75rem;
-  --shadow-shell: 0 0.25rem 1.25rem rgb(23 48 68 / 10%);
-  --shadow-dialog: 0 0.75rem 2rem rgb(23 48 68 / 20%);
-  --z-base: 0;
-  --z-sticky: 40;
-  --z-overlay: 100;
-  --z-skip-link: 200;
-
-  /* Focus and motion. */
-  --focus-ring-width: 0.125rem;
-  --focus-ring-offset: 0.125rem;
-  --motion-duration-fast: 140ms;
-  --motion-duration-standard: 220ms;
-  --motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
-  --motion-distance: 0.25rem;
-  --motion-scroll-behavior: smooth;
-
-  /* Form control geometry. */
-  --control-height: var(--size-control-min);
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --control-height-sm: 36px;
+  --control-height-md: 44px;
+  --control-height-lg: 52px;
+  --control-target-min: 44px;
+  --control-height: var(--control-height-md);
   --control-padding-inline: var(--space-3);
   --control-padding-block: var(--space-2);
   --control-border-width: 1px;
-  --control-checkbox-size: 1.05rem;
-  --control-transition: var(--motion-duration-fast) var(--motion-easing-standard);
+  --control-checkbox-size: 20px;
+  --icon-sm: 16px;
+  --icon-md: 20px;
+  --icon-lg: 24px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+  --border-default: 1px solid var(--color-border);
+  --border-selected: 2px solid var(--color-primary);
+  --shadow-raised: 0 8px 24px rgb(16 35 63 / 8%);
+  --shadow-card: 0 2px 8px rgb(16 35 63 / 5%);
+  --shadow-shell: var(--shadow-card);
+  --shadow-dialog: var(--shadow-raised);
+  --top-nav-height: 72px;
+  --content-max: 1512px;
+  --size-shell-header: var(--top-nav-height);
+  --size-content-max: var(--content-max);
+  --size-control-min: var(--control-target-min);
+  --size-status-min: 48px;
+  --focus-ring: 0 0 0 3px rgb(37 99 235 / 32%);
+  --focus-ring-width: 0;
+  --focus-ring-offset: 2px;
+  --color-focus-ring: var(--color-focus);
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-slow: 240ms;
+  --motion-duration-fast: var(--motion-fast);
+  --motion-duration-standard: var(--motion-base);
+  --motion-easing-standard: cubic-bezier(.2, 0, 0, 1);
+  --motion-distance: 4px;
+  --motion-scroll-behavior: smooth;
+  --control-transition: var(--motion-fast) var(--motion-easing-standard);
 
-  /* Stage 27 compatibility aliases. Remove only as components migrate. */
-  --color-text: var(--color-text-primary);
-  --color-bg: var(--color-surface-raised);
+  /* Compatibility roles used by existing feature styles. */
+  --color-surface-canvas: var(--color-canvas);
+  --color-surface-raised: var(--color-surface);
+  --color-surface-inverse: var(--color-primary);
+  --color-text-primary: var(--color-text);
+  --color-text-muted: var(--color-text-secondary);
+  --color-text-inverse: #ffffff;
+  --color-border-subtle: var(--color-border);
+  --color-action-primary: var(--color-primary);
+  --color-action-primary-hover: var(--color-primary-hover);
+  --color-accent-emphasis: var(--color-accent);
+  --color-danger-emphasis: var(--color-danger);
+  --color-control-surface: var(--color-surface);
+  --color-control-surface-hover: var(--color-surface-subtle);
+  --color-control-disabled: var(--color-text-disabled);
+  --color-feedback-success-surface: var(--color-success-surface);
+  --color-feedback-success-border: var(--color-success-border);
+  --color-feedback-success-text: var(--color-success);
+  --color-feedback-error-surface: var(--color-danger-surface);
+  --color-feedback-error-border: var(--color-danger-border);
+  --color-feedback-error-text: var(--color-danger);
+  --color-feedback-scrim: var(--color-scrim);
+  --color-bg: var(--color-surface);
   --color-bg-muted: var(--color-surface-subtle);
-  --color-border: var(--color-border-subtle);
-  --color-accent: var(--color-action-primary);
-  --color-danger: var(--color-danger-emphasis);
-  --font-stack: var(--font-family-sans);
+  --color-on-accent: #ffffff;
+  --z-base: 0;
+  --z-nav: 20;
+  --z-sticky: 30;
+  --z-popover: 40;
+  --z-modal-backdrop: 50;
+  --z-modal: 60;
+  --z-overlay: var(--z-modal);
+  --z-skip-link: 200;
 }
 
 @media (prefers-reduced-motion: reduce) {

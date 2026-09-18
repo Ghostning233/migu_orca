@@ -54,7 +54,7 @@ function onChange(event: Event): void {
 .checkbox-row {
   display: flex;
   align-items: flex-start;
-  gap: var(--space-2);
+  gap: var(--space-3);
 }
 
 .checkbox-row-copy {
@@ -75,11 +75,13 @@ function onChange(event: Event): void {
   width: var(--control-checkbox-size);
   height: var(--control-checkbox-size);
   margin-top: var(--space-1);
-  accent-color: var(--color-action-primary);
+  min-width: var(--control-target-min);
+  min-height: var(--control-target-min);
+  accent-color: var(--color-primary);
 }
 
 .base-checkbox:focus-visible {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline: 3px solid var(--color-focus-ring);
   outline-offset: var(--focus-ring-offset);
 }
 

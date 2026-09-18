@@ -109,6 +109,14 @@ Stage 41 证据在 scripts/ralph/archive/2026-09-18-stage41-add-anime-ux/。
 - 实际协作：本轮为用户指定的单写入开发 Agent（Claude Fable 5，本机 model id claude-fable-5[1M]）
   实现并自查；主 Agent 独立审核，未启动测试/修复/发布 Agent。
 
+## 2026-09-18 - WP-43-B / US-349 全局共享主题与基础控件对齐 Token V1
+
+- 范围：仅视觉共享层与四页回归。D-01 已确认，未修改添加番剧/追番方案/追番管理/设置的业务流程、状态、路由、API/OpenAPI/generated、后端、草案 CAS、外部写、AnimeDraftEditor 或 Toast store/timer；C～E 未开始。
+- 实现：`frontend/src/styles/tokens.css` 以 Token V1 作为唯一语义源，覆盖画布/表面、文字/状态、深海蓝主色与珊瑚强调、焦点、字号/行高、间距、圆角、阴影/z 层级、44/52px 控件和 reduced-motion，并保留现有语义兼容别名；`main.css` 统一按钮、导航、面板、焦点环和首页 `#mikan-candidate-query` 52px；BaseButton/Input/Select/Textarea/CheckboxRow 对齐共享几何/边界/焦点；GlobalNotification 仅增加共享顶部安全间距，适配 1280 包裹导航，不改生命周期。
+- 测试：补 `tokens.test.ts` 的 V1 值/几何断言；`cd frontend && npm run test:unit -- --run src/styles/tokens.test.ts src/components/forms/BaseFormControls.test.ts` → 2 files、21 passed；`npm run typecheck`、`npm run lint`、`npm run build` 均通过。
+- Chromium：`uv run pytest tests/browser/test_app_global_notification.py tests/browser/test_app_shell.py tests/browser/test_app_responsive_a11y.py tests/browser/test_app_workbench.py tests/browser/test_app_requests.py tests/browser/test_app_tracking.py tests/browser/test_app_settings.py -q` 首轮 128 passed/1 failed（Toast 与 1280 包裹导航 4.6px 重叠）；修正 `GlobalNotification` 顶部 Token 间距后同一受影响集合 → 122 passed。使用真实 Chromium、Flask test server、外部 route mock、tmp storage fixture；覆盖四页反馈、导航/Toast/模态层级、键盘焦点、1280/1440/1920 与 200% 缩放。未访问真实 MiKan/AB，无敏感截图/trace。
+- 风险/协作：未单独加入自动对比度扫描；颜色按 Token V1 规范并经真实页面回归。Fable CLI 两次环境卡住且无改动后终止，本轮唯一写入 Agent 使用 gpt-5.6-luna 替代，未假称 Fable；未启动测试/审核/修复/C Agent。本条完成后停止，不进入 US-350。
+
 ## 2026-09-18 - WP-43-A 独立审核与复审闭环
 
 - 审核结论：US-347/US-348 的完整批次资格范围、弹窗内存 intent、确认前 batch/集合/draft/revision

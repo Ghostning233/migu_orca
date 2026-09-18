@@ -46,8 +46,9 @@ withDefaults(
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  min-height: var(--control-height);
-  border-radius: var(--radius-sm);
+  min-height: var(--control-height-md);
+  min-width: var(--control-target-min);
+  border-radius: var(--radius-md);
   padding: var(--control-padding-block) var(--control-padding-inline);
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
@@ -67,7 +68,7 @@ withDefaults(
 }
 
 .base-button:focus-visible {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline: 3px solid var(--color-focus-ring);
   outline-offset: var(--focus-ring-offset);
 }
 

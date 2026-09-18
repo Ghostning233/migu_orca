@@ -24,6 +24,17 @@ describe('Stage 33 semantic design tokens (US-258)', () => {
     expect(tokens).toContain(`${name}:`)
   })
 
+  it('maps the shared semantic roles to Token V1 values and control geometry', () => {
+    expect(tokens).toContain('--color-canvas: #f7f8fa')
+    expect(tokens).toContain('--color-text: #10233f')
+    expect(tokens).toContain('--color-primary: #0b2a55')
+    expect(tokens).toContain('--color-focus: #2563eb')
+    expect(tokens).toContain('--control-height-md: 44px')
+    expect(tokens).toContain('--control-height-lg: 52px')
+    expect(tokens).toContain('--radius-lg: 14px')
+    expect(tokens).toContain('--motion-base: 180ms')
+  })
+
   it('provides a reduced-motion override for motion and scrolling', () => {
     expect(tokens).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*--motion-duration-standard: 0ms/)
     expect(tokens).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*--motion-distance: 0px/)
