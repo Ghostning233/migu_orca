@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { operations } from '@/api/generated/api'
 import {
+  batchAcceptAllScopeText,
   batchCandidateSelectionIsBlocked,
   batchCardNeedsReview,
   batchCardPreferenceSummary,
@@ -244,5 +245,27 @@ describe('batchWorkbench helpers (US-205)', () => {
     const result = parseResult()
     expect(JSON.stringify(result)).not.toContain('token')
     expect(JSON.stringify(result)).not.toContain('cookie')
+  })
+})
+
+describe('batch confirm-all scope text (US-347)', () => {
+  it('describes the complete batch range with hidden and excluded counts', () => {
+    expect(batchAcceptAllScopeText({ total: 3, confirmable: 2, hidden: 1 })).toBe(
+      '保存并确认全部覆盖完整批次 3 项中的 2 项可确认条目，其中 1 项当前被筛选隐藏，排除 1 项未就绪、已确认或结果待核验条目；不受筛选或勾选影响。',
+    )
+    expect(batchAcceptAllScopeText({ total: 2, confirmable: 2, hidden: 0 })).toBe(
+      '保存并确认全部覆盖完整批次 2 项中的 2 项可确认条目；不受筛选或勾选影响。',
+    )
+  })
+
+  it('states a visible reason when no item of the complete batch is confirmable', () => {
+    expect(batchAcceptAllScopeText({ total: 4, confirmable: 0, hidden: 0 })).toContain('完整批次 4 项均不可确认')
+    expect(batchAcceptAllScopeText({ total: 0, confirmable: 0, hidden: 0 })).toBe('')
+  })
+
+  it('never reports counts outside the batch bounds', () => {
+    expect(batchAcceptAllScopeText({ total: 2, confirmable: 5, hidden: 9 })).toContain('完整批次 2 项中的 2 项可确认条目')
+    expect(batchAcceptAllScopeText({ total: 2, confirmable: 5, hidden: 9 })).toContain('其中 2 项当前被筛选隐藏')
+    expect(batchAcceptAllScopeText({ total: 2, confirmable: -1, hidden: 0 })).toContain('完整批次 2 项均不可确认')
   })
 })

@@ -277,6 +277,34 @@ export interface BatchSaveConfirmDescriptor {
   idempotency_key: string
 }
 
+/**
+ * US-347: visible scope line for the 保存并确认全部 entry.
+ *
+ * The confirm-all scope is the complete batch's confirmable set — review
+ * filters and checkbox selection only change what the user browses, never what
+ * 全部 saves. The text therefore states the batch total, the confirmable count
+ * (M), how many of them the current filter hides, and how many are excluded,
+ * so the entry is described by visible copy and not only by a hover title.
+ */
+export function batchAcceptAllScopeText(counts: {
+  total: number
+  confirmable: number
+  hidden: number
+}): string {
+  const total = Math.max(0, Math.trunc(counts.total))
+  if (total === 0) return ''
+  const confirmable = Math.max(0, Math.min(Math.trunc(counts.confirmable), total))
+  if (confirmable === 0) {
+    return `完整批次 ${total} 项均不可确认：请先为条目生成可审核草案，并处理待应用编辑、重算、失败、已确认或结果待核验的条目。`
+  }
+  const hidden = Math.max(0, Math.min(Math.trunc(counts.hidden), confirmable))
+  const excluded = total - confirmable
+  const details = [`保存并确认全部覆盖完整批次 ${total} 项中的 ${confirmable} 项可确认条目`]
+  if (hidden) details.push(`其中 ${hidden} 项当前被筛选隐藏`)
+  if (excluded) details.push(`排除 ${excluded} 项未就绪、已确认或结果待核验条目`)
+  return `${details.join('，')}；不受筛选或勾选影响。`
+}
+
 /** Build the generated save-confirm body; capabilities never leave this payload. */
 export function buildBatchSaveConfirmPayload(
   descriptors: readonly BatchSaveConfirmDescriptor[],

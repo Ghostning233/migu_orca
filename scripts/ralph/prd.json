@@ -19,8 +19,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "WP-43-A/US-347（2026-09-18，实现在 ralph/stage43-add-anime-entry-visual）。改动：BatchWorkbenchView.vue 新增完整批次资格集合 batchConfirmable（复用 itemConfirmability），「保存并确认全部」的按钮可用性、按钮与范围文案中的 M 计数、弹窗数量、描述符全部同源；confirmBatchAcceptAll 改用该集合并省略 item_ids；新增常驻可见范围/禁用原因 #batch-accept-all-scope 并作为按钮 aria-describedby；batchWorkbench.ts 新增纯 helper batchAcceptAllScopeText。筛选、N 部入口与「全选当前可见可确认项」保持可见口径，隐藏勾选不清除；未改 API/OpenAPI/generated、后端、草案 authority/CAS、external 写与 AnimeDraftEditor。先红后绿：BatchWorkbenchView.test.ts 新增 5 例（先确认 4 例在旧实现下失败，含筛选仅见 B 时请求仍含 A/B、零可见仍可用、全批无资格禁用+中文原因、混合资格排除、隐藏失败可见化并聚焦且成功项退出全部范围）；batchWorkbench.test.ts 新增 batchAcceptAllScopeText 3 例。Chromium test_app_batch_workbench.py 新增 7 例（筛选隐藏/零可见/禁用原因+7 项描述符键集合与隐藏项敏感 canary，3 档桌面+200% 缩放可达），真实捕获 POST body，全部外部依赖 route mock。实际命令与结果：npm run test:unit -- --run BatchWorkbenchView.test.ts batchWorkbench.test.ts → 64 passed（46+18）；pytest tests/browser/test_app_batch_workbench.py -q → 25 passed；npm run typecheck / lint / build 通过；npm run api:check 无漂移；uv run pytest tests/api_contract/test_save_confirm_service.py -q -k 'batch_save_confirm_coordinator_preserves_order or batch_save_confirm_coordinator_item_ids' → 2 passed；uv run pytest src/apps/migu_orca_web/views_test.py -q -k 'batch_save_confirm_api_item_ids_selects or batch_save_confirm_api_returns_partial_success' → 2 passed（该次 362s 属既有收集/导入开销，非本改动引入）。运行数据隔离：browser 测试经 autouse fixture 指向 tmp 存储根，.migu_orca/storage 未被写入（mtime 仍为 09-15）。未做（属 US-348）：弹窗内存 intent 冻结与 draft/revision/batch 变化后的复核拒绝；本 story 仅保证弹窗数量来自完整批次集合。变更文件：frontend/src/features/workbench/{BatchWorkbenchView.vue,BatchWorkbenchView.test.ts,batchWorkbench.ts,batchWorkbench.test.ts}、tests/browser/test_app_batch_workbench.py。passes 仅表示本 story 列明验收与定向验证已实际执行，不替代独立审核。"
     },
     {
       "id": "US-348",

@@ -975,6 +975,161 @@ describe('BatchWorkbenchView accept (US-205)', () => {
 // WP-41-B / US-343: batch candidate generation locks only the current item.
 // The clicked candidate loads in place; every other item stays viewable,
 // selectable and editable and is never marked as loading.
+// Stage 43 / WP-43-A / US-347: 筛选只影响浏览。确认全部的资格集合是完整批次，
+// 不是当前可见子集；按钮可用性、M 计数、弹窗数量和描述符必须同源。
+describe('BatchWorkbenchView confirm-all scope (US-347)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    apiPost.mockReset()
+  })
+
+  function twoDrafts() {
+    return [
+      batchItem({ item_id: 'item-a', raw_title: '甲', status: 'DRAFT', canonical_title_candidates: [], preview_request: previewRequest('req-a'), draft_id: 'draft-a', draft_revision: 1 }),
+      batchItem({ item_id: 'item-b', raw_title: '乙', status: 'DRAFT', canonical_title_candidates: [], preview_request: previewRequest('req-b'), draft_id: 'draft-b', draft_revision: 1 }),
+    ]
+  }
+
+  function twoConfirmedResults() {
+    return saveConfirmResult({
+      results: [
+        { item_id: 'item-a', outcome: 'CONFIRMED', request_id: 'req-a', status: 'CONFIRMED', error_type: null, error_message: null, tracking_id: 'tracking-a', tracking_ready: true },
+        { item_id: 'item-b', outcome: 'CONFIRMED', request_id: 'req-b', status: 'CONFIRMED', error_type: null, error_message: null, tracking_id: 'tracking-b', tracking_ready: true },
+      ],
+      summary: { requested: 2, confirmed: 2, failed: 0 },
+    })
+  }
+
+  let wrapperUnderTest: Awaited<ReturnType<typeof mountBatch>>['wrapper']
+
+  async function mountAndParse(rawInput: string) {
+    const mounted = await mountBatch()
+    wrapperUnderTest = mounted.wrapper
+    await wrapperUnderTest.find('#batch-raw-input').setValue(rawInput)
+    await wrapperUnderTest.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    return mounted
+  }
+
+  async function confirmAllAndReadBody() {
+    await wrapperUnderTest.find('#batch-accept-all').trigger('click')
+    await nextTick()
+    await wrapperUnderTest.find('.confirm-dialog .primary-button').trigger('click')
+    await flushPromises()
+    const acceptCall = apiPost.mock.calls.find(([path]) => path === '/api/v1/batches/{batch_id}/save-confirm')
+    expect(acceptCall).toBeDefined()
+    return acceptCall![1]!.body as Record<string, unknown>
+  }
+
+  it('sends every eligible item when the filter hides one of them', async () => {
+    apiPost
+      .mockResolvedValueOnce(parseResult({ items: twoDrafts() }))
+      .mockResolvedValueOnce(twoConfirmedResults())
+    await mountAndParse('甲\n乙')
+
+    await wrapperUnderTest.find('#batch-review-search').setValue('乙')
+    await nextTick()
+    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(1)
+    expect(wrapperUnderTest.find('.batch-draft-card').attributes('data-item-id')).toBe('item-b')
+    expect((wrapperUnderTest.find('.batch-draft-card input[type="checkbox"]').element as HTMLInputElement).checked).toBe(false)
+
+    const body = await confirmAllAndReadBody()
+    expect(body.item_ids).toBeUndefined()
+    expect((body.items as Array<{ item_id: string }>).map((entry) => entry.item_id)).toEqual(['item-a', 'item-b'])
+    // 扩大的集合仍只发送生成的能力描述符，不带完整 Request 或额外字段。
+    expect(Object.keys(body).sort()).toEqual(['items', 'storage_dir'])
+    for (const entry of body.items as Array<Record<string, unknown>>) {
+      expect(Object.keys(entry).sort()).toEqual(['base_revision', 'draft_id', 'idempotency_key', 'item_id'])
+    }
+  })
+
+  it('keeps confirm-all usable and complete when the filter hides every item', async () => {
+    apiPost
+      .mockResolvedValueOnce(parseResult({ items: twoDrafts() }))
+      .mockResolvedValueOnce(twoConfirmedResults())
+    await mountAndParse('甲\n乙')
+
+    await wrapperUnderTest.find('#batch-review-search').setValue('不存在的标题')
+    await nextTick()
+    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(0)
+    expect(wrapperUnderTest.find('#batch-accept-all').attributes('disabled')).toBeUndefined()
+    expect(wrapperUnderTest.find('#batch-accept-all-scope').text()).toContain('完整批次 2 项中的 2 项可确认条目')
+
+    const body = await confirmAllAndReadBody()
+    expect(body.item_ids).toBeUndefined()
+    expect((body.items as Array<{ item_id: string }>).map((entry) => entry.item_id)).toEqual(['item-a', 'item-b'])
+  })
+
+  it('disables confirm-all with a visible reason when the complete batch has no eligible item', async () => {
+    const noSeeds = twoDrafts()
+    for (const item of noSeeds) {
+      ;(item as { preview_request: { confirmable_config: { effective_seed_names: string[] } } }).preview_request.confirmable_config.effective_seed_names = []
+    }
+    apiPost.mockResolvedValueOnce(parseResult({ items: noSeeds }))
+    await mountAndParse('甲\n乙')
+
+    expect(wrapperUnderTest.find('#batch-accept-all').attributes('disabled')).toBeDefined()
+    expect(wrapperUnderTest.find('#batch-accept-all-scope').text()).toContain('完整批次 2 项均不可确认')
+  })
+
+  it('keeps confirm-all available for the eligible items and states the exclusions', async () => {
+    apiPost
+      .mockResolvedValueOnce(parseResult({
+        items: [
+          ...twoDrafts().slice(0, 1),
+          batchItem({ item_id: 'item-failed', raw_title: '丙', status: 'FAILED', canonical_title_candidates: [] }),
+        ],
+      }))
+      .mockResolvedValueOnce(saveConfirmResult({
+        results: [{ item_id: 'item-a', outcome: 'CONFIRMED', request_id: 'req-a', status: 'CONFIRMED', error_type: null, error_message: null, tracking_id: 'tracking-a', tracking_ready: true }],
+        summary: { requested: 1, confirmed: 1, failed: 0 },
+      }))
+    await mountAndParse('甲\n丙')
+
+    expect(wrapperUnderTest.find('#batch-accept-all').attributes('disabled')).toBeUndefined()
+    const scope = wrapperUnderTest.find('#batch-accept-all-scope').text()
+    expect(scope).toContain('完整批次 2 项中的 1 项可确认条目')
+    expect(scope).toContain('排除 1 项')
+
+    const body = await confirmAllAndReadBody()
+    expect((body.items as Array<{ item_id: string }>).map((entry) => entry.item_id)).toEqual(['item-a'])
+  })
+
+  it('reveals and focuses a filter-hidden item whose confirm failed', async () => {
+    apiPost
+      .mockResolvedValueOnce(parseResult({ items: twoDrafts() }))
+      .mockResolvedValueOnce(saveConfirmResult({
+        results: [
+          { item_id: 'item-a', outcome: 'failed', request_id: null, status: null, error_type: 'invalid_request_status', error_message: 'poisoned detail', tracking_id: null, tracking_ready: null },
+          { item_id: 'item-b', outcome: 'CONFIRMED', request_id: 'req-b', status: 'CONFIRMED', error_type: null, error_message: null, tracking_id: 'tracking-b', tracking_ready: true },
+        ],
+        summary: { requested: 2, confirmed: 1, failed: 1 },
+      }))
+    await mountAndParse('甲\n乙')
+
+    await wrapperUnderTest.find('#batch-review-search').setValue('乙')
+    await nextTick()
+    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(1)
+
+    await wrapperUnderTest.find('#batch-accept-all').trigger('click')
+    await nextTick()
+    await wrapperUnderTest.find('.confirm-dialog .primary-button').trigger('click')
+    await flushPromises()
+
+    // 隐藏失败项先可见化再聚焦，安全原因留在卡片原位。
+    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(2)
+    const failedCard = wrapperUnderTest.find('.batch-draft-card[data-item-id="item-a"]')
+    expect(failedCard.find('.batch-card-status').text()).toContain('草案')
+    expect(failedCard.find('.batch-card-reason').text()).toContain('保存确认失败，请重试。')
+    expect(wrapperUnderTest.find('.batch-review-navigation').text()).toContain('已定位到首个失败条目')
+    expect(document.activeElement).toBe(failedCard.element)
+    expect(wrapperUnderTest.text()).not.toContain('poisoned detail')
+    // 成功项不再参与全部范围，失败项仍需重新处理。
+    expect(wrapperUnderTest.find('.batch-draft-card[data-item-id="item-b"] .batch-card-status').text()).toContain('已确认待提交')
+    expect(wrapperUnderTest.find('#batch-accept-all').text()).toContain('1 部')
+  })
+})
+
 describe('BatchWorkbenchView candidate loading feedback (US-343)', () => {
   beforeEach(() => {
     localStorage.clear()

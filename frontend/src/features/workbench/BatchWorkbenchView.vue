@@ -47,6 +47,7 @@ import CandidateCollectionList from '@/features/workbench/CandidateCollectionLis
 import { useDraftEditScheduler, type DraftEditScheduler } from '@/features/workbench/draftEditScheduler'
 
 import {
+  batchAcceptAllScopeText,
   batchSaveConfirmErrorLabel,
   batchSaveConfirmRecoveryAllowed,
   batchSaveConfirmSucceeded,
@@ -340,6 +341,20 @@ const visibleItems = computed(() => items.value.filter((item) =>
     exceptionsOnly: exceptionsOnly.value,
   }),
 ))
+// US-347: 保存并确认全部 的范围是完整批次，不是当前可见子集。筛选和
+// 「全选当前可见可确认项」只改变浏览，因此 all 的资格集合、按钮可用性、M 计数、
+// 弹窗数量和描述符都必须来自下面同一个完整批次集合。
+const batchConfirmable = computed(() => items.value.filter((item) => itemConfirmability(item.item_id ?? '').confirmable))
+const batchConfirmableCount = computed(() => batchConfirmable.value.length)
+const batchHiddenConfirmableCount = computed(() => {
+  const visibleIds = new Set(visibleItems.value.map((item) => item.item_id))
+  return batchConfirmable.value.filter((item) => !visibleIds.has(item.item_id)).length
+})
+const batchAcceptAllScope = computed(() => batchAcceptAllScopeText({
+  total: items.value.length,
+  confirmable: batchConfirmableCount.value,
+  hidden: batchHiddenConfirmableCount.value,
+}))
 
 function saveReviewScrollPosition(): void {
   if (reviewList.value) reviewScrollPositions.set(reviewFilterKey.value, reviewList.value.scrollTop)
@@ -1018,11 +1033,17 @@ async function confirmBatchAcceptSelected(): Promise<void> {
 }
 
 async function confirmBatchAcceptAll(): Promise<void> {
-  const rows = selectable.value
+  // US-347: 全部 covers the complete batch's confirmable set. The filter and the
+  // checkboxes only change what is browsed, so neither may shrink this scope;
+  // submitBatchSaveConfirm still re-checks every participant before sending.
+  const rows = batchConfirmable.value
   if (!rows.length || saveInFlight.value) return
+  const hiddenCount = rows.filter(
+    (item) => !visibleItems.value.some((visible) => visible.item_id === item.item_id),
+  ).length
   const ok = await confirmDialog.value?.confirm({
     title: '批量保存确认',
-    message: '确认保存并确认全部可确认的批量草案？',
+    message: `确认保存并确认完整批次中的 ${rows.length} 个可确认批量草案？${hiddenCount ? `其中 ${hiddenCount} 个当前被筛选隐藏，仍会一并保存并确认。` : ''}`,
     confirmLabel: '保存并确认',
   })
   if (!ok) return
@@ -1498,6 +1519,13 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
           <span id="batch-accept-selected-count" class="batch-selected-count">
             全部 {{ items.length }} 项；当前筛选 {{ visibleItems.length }} 项；已选且可确认 {{ selectedCount }} 项；可确认 {{ confirmableCount }} 项；需处理 {{ needsProcessingCount }} 项；重算中 {{ processingCount }} 项；请求 {{ saveSummary.requested ?? 0 }} 项；已确认 {{ saveSummary.confirmed ?? 0 }} 项；失败 {{ saveSummary.failed ?? 0 }} 项
           </span>
+          <p
+            id="batch-accept-all-scope"
+            class="batch-accept-scope"
+            :class="{ 'is-blocked': batchConfirmableCount === 0 }"
+          >
+            {{ batchAcceptAllScope }}
+          </p>
           <BaseButton
             v-if="saveOperation?.phase === 'response_unknown'"
             id="batch-retry-frozen-operation"
@@ -1519,11 +1547,12 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
             <BaseButton
               id="batch-accept-all"
               variant="secondary"
-              :disabled="selectable.length === 0 || saveInFlight"
+              :disabled="batchConfirmableCount === 0 || saveInFlight"
               :loading="saveInFlight"
+              aria-describedby="batch-accept-all-scope"
               @click="confirmBatchAcceptAll"
             >
-              保存并确认全部
+              保存并确认全部 {{ batchConfirmableCount }} 部
             </BaseButton>
           </div>
         </div>
@@ -1811,6 +1840,20 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 .batch-selected-count {
   color: var(--color-text-muted);
   font-size: 0.84rem;
+}
+
+/* US-347: the confirm-all scope is stated in visible copy next to its button
+   and is also the button's accessible description. */
+.batch-accept-scope {
+  color: var(--color-text-muted);
+  flex-basis: 100%;
+  font-size: 0.84rem;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.batch-accept-scope.is-blocked {
+  color: #8d2f20;
 }
 
 .batch-accept-actions {

@@ -1,13 +1,14 @@
 # Ralph 当前状态
 
-Stage 43（搜索入口与候选选择视觉收口）执行材料已准备，尚未开发。
+Stage 43（搜索入口与候选选择视觉收口）执行中：WP-43-A/US-347 已实现并定向验证通过，
+待独立审核；US-348 尚未开始，B～E 未开始。
 功能基线：334c8e69dbcc7c27be8ab482f8ccb142081db0b7。
 分支：ralph/stage43-add-anime-entry-visual；实时状态以 git 核对。
 执行 PRD：docs/MiGuOrca_stage43_add_anime_entry_visual_PRD.md。
 总体 PRD：docs/MiGuOrca_stage43_45_add_anime_visual_PRD.md。
 决策台账：docs/development/add-anime-visual-prd-handoff-2026-09-18.md。
 D-01 当前已确认（2026-09-18）：全局共享主题与基础控件对齐 Token V1，并做四页回归；
-不改其他页面业务。Stage 43 产品前置已满足，按 A→B→C→D→E 闭环推进，尚未启动开发。
+不改其他页面业务。Stage 43 产品前置已满足，按 A→B→C→D→E 闭环推进。
 以下准备记录中的 D-01 待决描述为当时历史状态，以本条和决策台账为准。
 
 Stage 42 原 JSON/progress 已在 scripts/ralph/archive/2026-09-18-stage42-global-notification/
@@ -16,7 +17,8 @@ Stage 41 证据在 scripts/ralph/archive/2026-09-18-stage41-add-anime-ux/。
 
 ## Codebase Patterns
 
-- all 省略 item_ids 只处理请求 items 描述符，不会由服务端补筛选隐藏项。
+- all 省略 item_ids 只处理请求描述符集合，服务端不会补筛选隐藏项；因此 all 的资格集合、
+  计数与描述符必须统一取自完整批次 itemConfirmability，可见性与勾选只影响浏览。
 - 草案 authority/CAS 与自动调度已完成，视觉改动只回归；版本消费服务端返回值。
 - 未知保存结果保留原 body/key/revision/集合；不能以新筛选/资格重算重放。
 - 一轮一个 story，同原子包复用 Agent；不运行 ralph.sh、不固定三故事一批。
@@ -58,3 +60,51 @@ Stage 41 证据在 scripts/ralph/archive/2026-09-18-stage41-add-anime-ux/。
   四页口径一致；Stage42归档与334c8e6基线活动文件逐字一致；结果PASS。
 - 实际执行git diff --check通过。仅文档检查，未运行功能测试、typecheck、构建或浏览器。
 - 实际协作模式：单主Agent文档更新；未启动开发/测试/审核/修复/C，不push/PR/merge。
+
+## 2026-09-18 - WP-43-A / US-347 确认全部使用完整批次可确认集合
+
+- 范围：本轮只做 US-347，未开始 US-348。all 的资格集合由「当前可见可确认项」改为完整批次的
+  items.filter(itemConfirmability)，按钮可用性、M 计数、弹窗数量与描述符同源；请求沿用现行 all 约定
+  （描述符覆盖完整批次有资格项、省略 item_ids），每条用行内最新服务端 draft_id/base_revision。
+  筛选、N 部入口与「全选当前可见可确认项」保持原可见口径，隐藏勾选不清除。
+  未改 API/OpenAPI/generated client、后端逻辑、草案 authority/CAS、未知冻结 body/key/revision/集合、
+  外部写与 AnimeDraftEditor。
+- 实现文件：frontend/src/features/workbench/BatchWorkbenchView.vue（batchConfirmable /
+  batchConfirmableCount / batchHiddenConfirmableCount / batchAcceptAllScope、confirmBatchAcceptAll、
+  常驻 #batch-accept-all-scope 文案并作为全部按钮的 aria-describedby、按钮文案显示 M 部）；
+  frontend/src/features/workbench/batchWorkbench.ts（纯 helper batchAcceptAllScopeText）。
+- 测试文件：BatchWorkbenchView.test.ts（新增 US-347 组 5 例）、batchWorkbench.test.ts（helper 3 例）、
+  tests/browser/test_app_batch_workbench.py（TestAppBatchAccept 新增 7 例）。
+- 先红后绿证据：新增 4 例在未修改实现前实际失败——筛选仅见 B 时请求 items 只含 item-b；
+  可见零项时 #batch-accept-all 因 selectable 为空而被禁用；#batch-accept-all-scope 不存在。
+  窄修后同一批用例全部转绿，未删除或放宽任何既有资格/敏感断言。
+- 实际命令与结果（分支 ralph/stage43-add-anime-entry-visual，未 push/PR/merge）：
+  - cd frontend && npm run test:unit -- --run src/features/workbench/BatchWorkbenchView.test.ts
+    src/features/workbench/batchWorkbench.test.ts → 2 files passed, 64 passed（46 + 18）。
+  - cd frontend && npm run typecheck → 通过；npm run lint（--max-warnings 0）→ 通过；
+    npm run build → 通过；npm run api:check → 无生成漂移。
+  - uv run pytest tests/api_contract/test_save_confirm_service.py -q -k
+    'batch_save_confirm_coordinator_preserves_order or batch_save_confirm_coordinator_item_ids'
+    → 2 passed。
+  - uv run pytest src/apps/migu_orca_web/views_test.py -q -k
+    'batch_save_confirm_api_item_ids_selects or batch_save_confirm_api_returns_partial_success'
+    → 2 passed，362.75s。该时长由 views_test 的收集/导入开销占绝大部分；本 story 未改任何 Python 源，
+    故非本次改动引入。若后续仍需重复跑该文件，建议单独立项排查收集成本，不要用提高超时掩盖。
+  - uv run pytest tests/browser/test_app_batch_workbench.py -q → 25 passed（原 18 + 新 7）。
+    新增节点：TestAppBatchAccept::test_accept_all_covers_filter_hidden_eligible_items、
+    ::test_accept_all_stays_available_when_the_filter_hides_every_item、
+    ::test_accept_all_is_disabled_with_a_visible_reason_when_nothing_is_confirmable、
+    ::test_accept_all_scope_copy_is_reachable_at_desktop_sizes[1280-720-1 / 1440-900-1 / 1920-1080-1 / 1280-720-2]。
+    外部依赖全部用 page.route mock（含 held/fulfill），未发起真实 MiKan 或 AB 调用；
+    捕获的 POST body 断言键集合为 {items, storage_dir}、每项为
+    {item_id, draft_id, base_revision, idempotency_key}，并在被筛选隐藏的条目上注入敏感 canary 后
+    确认 save-confirm body 与页面文本都不含该值。
+- 运行数据隔离：browser 测试的 autouse fixture 已把 Web 存储根指向 tmp，仓库运行数据无需搬移；
+  运行后核对 .migu_orca/storage/tracking_migrations/schema-v1.json 的 mtime 仍为 09-15，未被写入。
+- 可复用结论：表达「当前视图」的计数（当前筛选/已选且可确认/可确认/需处理/重算中）继续用
+  visibleItems 口径；只有 all 的资格、计数与描述符必须统一取自完整批次的 itemConfirmability。
+  两类集合不要互相引用，否则筛选会再次改写保存范围。
+- 遗留风险：all 弹窗目前只在打开时读取一次数量与集合，确认前尚未复核 draft/revision/batch 与资格
+  变化，也没有弹窗内存 intent 冻结——这些是 US-348 的验收内容，本轮不做，也不据此放宽任何口径。
+- 实际协作：本轮为用户指定的单写入开发 Agent（Claude Fable 5，本机 model id claude-fable-5[1M]）
+  实现并自查；主 Agent 独立审核，未启动测试/修复/发布 Agent。

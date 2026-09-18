@@ -57,6 +57,17 @@ def _preview_request(title: str, request_id: str) -> dict[str, Any]:
     return {**generated["request"], "request_id": request_id}
 
 
+def _preview_request_without_resources(title: str, request_id: str) -> dict[str, Any]:
+    """A DRAFT preview whose confirmable config has no effective seed (US-347).
+
+    Such an item is a real DRAFT card that the shared confirmability gate must
+    keep out of the 保存并确认全部 scope.
+    """
+    preview = _preview_request(title, request_id)
+    preview["confirmable_config"]["effective_seed_names"] = []
+    return preview
+
+
 def _batch_item(
     item_id: str,
     raw_title: str,
@@ -832,6 +843,199 @@ class TestAppBatchAccept:
         first_card.locator(".batch-card-checkbox-row").uncheck()
         expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选且可确认 1 项")
         expect(page.locator("#batch-select-all-checkbox")).not_to_be_checked()
+
+    def test_accept_all_covers_filter_hidden_eligible_items(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """AC (US-347)：筛选只影响浏览；确认全部覆盖完整批次的可确认集合。"""
+        accept_calls: list[dict[str, Any]] = []
+
+        def _accept(route: Any, request: Any) -> None:
+            accept_calls.append(json.loads(request.post_data or "{}"))
+            _accept_route_handler({"item-a", "item-b"})(route, request)
+
+        hidden = _batch_item("item-a", "甲S1", status="DRAFT", canonical_title="甲 第一季", preview_request=_preview_request("咒术回战", "req-hidden-a"))
+        # 被筛选隐藏的条目也要带上真实敏感 canary：它进入客户端内存后，
+        # 扩大范围后的 save-confirm body 仍只能包含生成的能力描述符。
+        hidden["error"] = {"token": "stage43-hidden-token", "raw_html": "<html>stage43 hidden</html>"}
+        page.route("**/api/v1/batches/batch-spa/save-confirm*", _accept)
+        page.route(
+            "**/api/v1/batches/parse",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result(
+                    [
+                        hidden,
+                        _batch_item("item-b", "乙S1", status="DRAFT", canonical_title="乙 第一季", preview_request=_preview_request("咒术回战", "req-visible-b")),
+                        _batch_item("item-c", "丙S1", status="DRAFT", canonical_title="丙 第一季", preview_request=_preview_request_without_resources("咒术回战", "req-no-resources")),
+                    ]
+                ),
+            ),
+        )
+        _goto_batch(page, live_server_url)
+        page.fill("#batch-raw-input", "甲S1\n乙S1\n丙S1")
+        page.click("#batch-parse-submit")
+        expect(page.locator(".batch-draft-card")).to_have_count(3)
+
+        # 只浏览乙：甲被筛选隐藏，且没有任何勾选。
+        page.fill("#batch-review-search", "乙")
+        expect(page.locator(".batch-draft-card")).to_have_count(1)
+        expect(page.locator(".batch-draft-card .batch-card-checkbox-row")).not_to_be_checked()
+        # 全部入口与 M 计数来自完整批次的可确认集合（甲/乙），而不是可见项。
+        expect(page.locator("#batch-accept-all")).to_be_enabled()
+        expect(page.locator("#batch-accept-all")).to_contain_text("2 部")
+        expect(page.locator("#batch-accept-all-scope")).to_contain_text("完整批次 3 项中的 2 项可确认条目")
+        expect(page.locator("#batch-accept-all-scope")).to_contain_text("其中 1 项当前被筛选隐藏")
+        expect(page.locator("#batch-accept-all-scope")).to_contain_text("排除 1 项")
+
+        page.click("#batch-accept-all")
+        page.wait_for_selector(".confirm-dialog", timeout=5000)
+        expect(page.locator(".confirm-dialog")).to_contain_text("完整批次中的 2 个可确认批量草案")
+        expect(page.locator(".confirm-dialog")).to_contain_text("1 个当前被筛选隐藏")
+        page.locator(".confirm-dialog .primary-button").click()
+        page.wait_for_selector(".global-notification:not(:empty)", timeout=5000)
+
+        payload = accept_calls[-1]
+        assert "item_ids" not in payload
+        assert [item["item_id"] for item in payload["items"]] == ["item-a", "item-b"]
+        assert all(item["draft_id"] for item in payload["items"])
+        assert all(item["base_revision"] == 1 for item in payload["items"])
+        assert payload["storage_dir"] is None
+        # 扩大的集合仍只发送生成的能力描述符，不带完整 Request 或额外字段。
+        assert set(payload) == {"items", "storage_dir"}
+        assert all(
+            set(item) == {"item_id", "draft_id", "base_revision", "idempotency_key"}
+            for item in payload["items"]
+        )
+        serialized = json.dumps(payload)
+        assert "stage43-hidden-token" not in serialized
+        assert "stage43 hidden" not in serialized
+
+    def test_accept_all_stays_available_when_the_filter_hides_every_item(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """AC (US-347)：可见零项但隐藏项有资格时，全部仍可用并覆盖完整批次。"""
+        accept_calls: list[dict[str, Any]] = []
+
+        def _accept(route: Any, request: Any) -> None:
+            accept_calls.append(json.loads(request.post_data or "{}"))
+            _accept_route_handler({"item-a", "item-b"})(route, request)
+
+        page.route("**/api/v1/batches/batch-spa/save-confirm*", _accept)
+        page.route(
+            "**/api/v1/batches/parse",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result(
+                    [
+                        _batch_item("item-a", "甲S1", status="DRAFT", canonical_title="甲 第一季", preview_request=_preview_request("咒术回战", "req-zero-a")),
+                        _batch_item("item-b", "乙S1", status="DRAFT", canonical_title="乙 第一季", preview_request=_preview_request("咒术回战", "req-zero-b")),
+                    ]
+                ),
+            ),
+        )
+        _goto_batch(page, live_server_url)
+        page.fill("#batch-raw-input", "甲S1\n乙S1")
+        page.click("#batch-parse-submit")
+        expect(page.locator(".batch-draft-card")).to_have_count(2)
+
+        page.fill("#batch-review-search", "没有这个标题")
+        expect(page.locator(".batch-draft-card")).to_have_count(0)
+        # 可见项为空只影响浏览；全选入口没有可见项可操作，全部入口不因此禁用。
+        expect(page.locator("#batch-select-all-checkbox")).to_be_disabled()
+        expect(page.locator("#batch-accept-all")).to_be_enabled()
+        expect(page.locator("#batch-accept-all-scope")).to_contain_text("完整批次 2 项中的 2 项可确认条目")
+
+        page.click("#batch-accept-all")
+        page.wait_for_selector(".confirm-dialog", timeout=5000)
+        page.locator(".confirm-dialog .primary-button").click()
+        page.wait_for_selector(".global-notification:not(:empty)", timeout=5000)
+
+        payload = accept_calls[-1]
+        assert "item_ids" not in payload
+        assert [item["item_id"] for item in payload["items"]] == ["item-a", "item-b"]
+
+    def test_accept_all_is_disabled_with_a_visible_reason_when_nothing_is_confirmable(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """AC (US-347)：完整批次无资格时禁用，并在附近给出可见中文原因。"""
+        accept_calls: list[dict[str, Any]] = []
+
+        def _accept(route: Any, request: Any) -> None:
+            accept_calls.append(json.loads(request.post_data or "{}"))
+            _accept_route_handler(set())(route, request)
+
+        page.route("**/api/v1/batches/batch-spa/save-confirm*", _accept)
+        page.route(
+            "**/api/v1/batches/parse",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result(
+                    [
+                        _batch_item("item-a", "甲S1", status="DRAFT", canonical_title="甲 第一季", preview_request=_preview_request_without_resources("咒术回战", "req-nr-a")),
+                        _batch_item("item-b", "乙S1", status="DRAFT", canonical_title="乙 第一季", preview_request=_preview_request_without_resources("咒术回战", "req-nr-b")),
+                    ]
+                ),
+            ),
+        )
+        _goto_batch(page, live_server_url)
+        page.fill("#batch-raw-input", "甲S1\n乙S1")
+        page.click("#batch-parse-submit")
+        expect(page.locator(".batch-draft-card")).to_have_count(2)
+
+        expect(page.locator("#batch-accept-all")).to_be_disabled()
+        expect(page.locator("#batch-accept-all")).to_contain_text("0 部")
+        # 原因常驻可见，并同时作为按钮的可访问描述，而不是只有悬停提示。
+        scope = page.locator("#batch-accept-all-scope")
+        expect(scope).to_be_visible()
+        expect(scope).to_contain_text("完整批次 2 项均不可确认")
+        assert page.locator("#batch-accept-all").get_attribute("aria-describedby") == "batch-accept-all-scope"
+        # 排除口径与原资格门一致：没有有效资源的草案仍给出就地原因。
+        expect(
+            page.locator(".batch-draft-card").first.locator(".batch-card-selection-help")
+        ).to_contain_text("没有有效资源")
+        assert accept_calls == []
+
+    @pytest.mark.parametrize(
+        "width,height,zoom",
+        [(1280, 720, 1), (1440, 900, 1), (1920, 1080, 1), (1280, 720, 2)],
+    )
+    def test_accept_all_scope_copy_is_reachable_at_desktop_sizes(
+        self, page: Page, live_server_url: str, width: int, height: int, zoom: int
+    ) -> None:
+        """AC (US-347)：全部范围/禁用说明常驻可见，三档桌面与缩放可达且不裁切。"""
+        page.route(
+            "**/api/v1/batches/parse",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result(
+                    [
+                        _batch_item("item-a", "甲S1", status="DRAFT", canonical_title="甲 第一季", preview_request=_preview_request_without_resources("咒术回战", "req-size-a")),
+                        _batch_item("item-b", "乙S1", status="DRAFT", canonical_title="乙 第一季", preview_request=_preview_request_without_resources("咒术回战", "req-size-b")),
+                    ]
+                ),
+            ),
+        )
+        _goto_batch(page, live_server_url)
+        page.set_viewport_size({"width": width, "height": height})
+        page.fill("#batch-raw-input", "甲S1\n乙S1")
+        page.click("#batch-parse-submit")
+        expect(page.locator(".batch-draft-card")).to_have_count(2)
+        if zoom == 2:
+            page.evaluate("() => { document.documentElement.style.zoom = '2' }")
+
+        scope = page.locator("#batch-accept-all-scope")
+        scope.scroll_into_view_if_needed()
+        expect(scope).to_be_visible()
+        expect(scope).to_contain_text("完整批次 2 项均不可确认")
+        # 键盘可达：按钮聚焦后，这条常驻文案就是它的可访问描述。
+        page.locator("#batch-accept-all").focus()
+        assert page.locator("#batch-accept-all").get_attribute("aria-describedby") == "batch-accept-all-scope"
+        assert page.evaluate("() => document.body.scrollWidth <= window.innerWidth")
 
     def test_accept_failure_preserves_cards_with_safe_error(
         self, page: Page, live_server_url: str
