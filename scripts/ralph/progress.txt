@@ -4,10 +4,10 @@ Stage 41 已于 2026-09-17 经 [PR #69](https://github.com/Ghostning233/migu_orc
 合并至 `main`（merge `ab333cf`）；其 Ralph 快照已归档至
 `scripts/ralph/archive/2026-09-18-stage41-add-anime-ux/`。
 
-Stage 42 当前计划为 WP-42-A / US-346（F5 悬浮全局提示收尾）。执行分支为
-`ralph/stage42-global-notification`，基线为 `origin/main` 的 `ab333cf`。
-US-346 已通过开发验证和主 Agent 独立审核，`passes=true`；改动仅在本地工作区，
-未提交、未 push、未建 PR、未合并，待用户另行授权发布。
+Stage 42（WP-42-A / US-346，F5 悬浮全局提示收尾）已于 2026-09-17 经
+[PR #70](https://github.com/Ghostning233/migu_orca/pull/70) 合并至 `main`
+（merge `cb45b245e774e05121b109b8c47229ae615164dc`）。其 Ralph 快照已归档至
+`scripts/ralph/archive/2026-09-18-stage42-global-notification/`。
 
 ## 2026-09-18 - Stage 42 规划
 
@@ -21,7 +21,7 @@ US-346 已通过开发验证和主 Agent 独立审核，`passes=true`；改动�
 - 最小验证已冻结为 store/GlobalNotification/App Vitest、typecheck/lint/build 与定向真实 Chromium；
   完整后端、前端和 Chromium 门禁仅在 Stage 42 收尾执行一次。
 
-## 2026-09-18 - WP-42-A / US-346 开发与定向验证（待独立审核）
+## 2026-09-18 - WP-42-A / US-346 开发与定向验证
 
 - 范围与落点：只改 `frontend/src/app/stores/notification.ts`、
   `frontend/src/components/feedback/GlobalNotification.vue`、受影响 Vitest（`App.test.ts`、
@@ -83,3 +83,11 @@ US-346 已通过开发验证和主 Agent 独立审核，`passes=true`；改动�
     DOM 顺序使模态压在其上；行为已核对但未加自动化断言，属可接受的产品选择。
   - 容器 `pointer-events: none` 使 toast 文案不可用鼠标选中复制；这是换取「绝不吞掉
     页面点击」的取舍，关闭按钮与键盘仍完全可用。
+
+## 2026-09-18 - Stage 42 发布与归档收尾
+
+- PR #70 的 rebase 后 HEAD 通过三项 CI：Static checks & non-browser tests、Frontend
+  (typecheck, lint, unit, build)、Real Chromium browser suite 均为 SUCCESS；随后 squash merge。
+- 没有 Stage 42 范围内的未解决阻断项。仅保留两项非阻断的已知取舍：Toast 文案不可鼠标复制，
+  以及其与模态同用 overlay z-index 的既有 DOM 顺序依赖；均不改变主流程、安全边界或恢复入口。
+- Stage 42 完成后不自动创建 Stage 43；新的产品开发须来自用户审核反馈及新的执行 PRD。
