@@ -226,7 +226,7 @@ class TestAppWorkbenchSingleSearch:
         # 动作）；合集编号与解析搜索词是诊断信息，折叠在「高级信息」内。
         assert "季度证据" in text
         # 候选默认层只放公开决策证据：封面、标题、季度证据、总集数与选择动作。
-        assert "播出进度：待开发 / 28 集" in text
+        assert "总集数：28 集" in text
         assert "选择此合集" in text
         expect(page.locator(".candidate-card").first.locator(".candidate-poster")).to_have_count(1)
         assert "MiKan ID: 2353" not in text

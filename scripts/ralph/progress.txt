@@ -254,3 +254,11 @@ Stage 41 证据在 scripts/ralph/archive/2026-09-18-stage41-add-anime-ux/。
   - `uv run pytest tests/browser/test_app_batch_workbench.py -q` → 27 passed（真实 Chromium、held route、临时 storage、外部依赖 mock，无 sleep/外网）。
 - 变更文件：`frontend/src/features/workbench/{WorkbenchView.vue,WorkbenchView.test.ts,BatchWorkbenchView.vue,AnimeTitleInput.vue}`、`tests/browser/test_app_batch_workbench.py`、`scripts/ralph/prd.json`、`scripts/ralph/progress.txt`。
 - 协作记录：本轮唯一写入 Agent 为可用默认 `gpt-5.6-luna`；用户指定 Fable CLI 环境卡住，未假称 Fable；未启动 E 或 C Agent。遗留风险：未新增专门重搜确认浏览器用例，现有批量确认/取消与 held 回归通过；未生成截图/trace。
+
+## 2026-09-18 WP-43-E / US-352 共享候选比较布局与 Stage43 收尾
+
+- 实现：继续复用 `CandidateCollectionList`/`CandidateCard` 唯一选择逻辑；列表新增 `compact` 宿主输入，单番候选以自适应比较网格呈现，批量右栏显式紧凑单列。卡片默认层保留公开标题、同源 opaque poster 或坏图占位、季度证据、独立总集数与选择动作，高级匹配继续折叠；移除“播出进度：待开发”混合表达，不推算更新集数；长标题/证据自然换行，选择按钮 accessible name 含候选名。CONFLICT/NEEDS_CONFIRMATION、唯一候选不自动选、就地 loading/失败重试、本 item 锁与其他批量 item 操作、未保存 safe-info 边界均沿用现有共享逻辑。
+- 先补最小红测后实现：`CandidateCollectionList.test.ts` 新增总集数/无播出进度、候选名 accessible name、坏图占位 2 例；同步既有候选 helper、宿主和 Chromium 文案断言。候选 DTO/输出契约回归：`uv run pytest tests/api_contract/test_dto_contracts.py -q -k 'mikan_candidate or candidate'` → 2 passed；`uv run pytest src/apps/migu_orca_web/views_test.py -q -k 'candidate_search_api or candidate_context'` → 16 passed。
+- 定向验证：候选相关 5 files/145 Vitest passed；`npm run typecheck`、`lint`、`build`、`api:check`、`git diff --check` → 通过；`uv run pytest tests/browser/test_app_workbench.py tests/browser/test_app_batch_workbench.py -q` → 73 passed（真实 Chromium、held 生成与另一批量条目可操作既有覆盖、临时 storage、外部依赖 mock）。
+- Stage43 §9 完整门禁实际结果：compileall/ruff/openapi → 通过；`uv run pytest -q -m 'not browser'` → 1528 passed/239 deselected；前端全量 → 49 files/620 passed，typecheck/lint/api:check/build 通过；`uv run pytest tests/browser/ -q` → 238 passed、1 failed。唯一失败为既有 `test_app_global_notification.py::TestAppGlobalNotificationFloating::test_toast_is_fixed_and_leaves_the_page_layout_alone`，Toast 关闭后页面锚点位移 50px，涉及 Stage42 GlobalNotification/shell，未在本工作包越界修复；定向候选浏览器全部通过。
+- 实际协作/模型：本轮唯一写入开发 Agent 为 gpt-5.6-luna（Fable CLI 环境失败后的替代）；先红测再窄修，未启动额外测试/修复/提交 Agent；未 push/PR/merge，不进入 Stage44/45。变更未涉及 API/OpenAPI/generated、后端、草案/CAS/save/external。遗留风险：Stage43 全 Chromium 门禁保留上述 1 个与本 diff 无关的 Stage42 Toast 几何失败，需后续独立工作包处理。

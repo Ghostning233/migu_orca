@@ -248,7 +248,7 @@ export function batchCandidateNeedsConfirmation(candidate: BatchCandidate): bool
 /** Episode-progress display text for a batch card (same as single-search). */
 export function batchEpisodeProgressText(totalEpisodes: number | null | undefined): string {
   const total = Number(totalEpisodes)
-  return Number.isInteger(total) && total > 0 ? `播出进度：待开发 / ${total} 集` : '播出进度：待开发 / 未知'
+  return Number.isInteger(total) && total > 0 ? `总集数：${total} 集` : '总集数：未知'
 }
 
 /** Build the create-request payload for a selected batch candidate. */

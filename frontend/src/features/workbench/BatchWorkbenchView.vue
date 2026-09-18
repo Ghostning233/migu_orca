@@ -1549,7 +1549,8 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                 class="batch-candidate-list"
                 :candidates="detailItem.candidates ?? []"
                 :query="batchCardTitle(detailItem)"
-                  :disabled="operationLocks(detailItem.item_id ?? '')"
+                compact
+                :disabled="operationLocks(detailItem.item_id ?? '')"
                 :loading-candidate-id="generatingCandidateIdFor(detailItem.item_id ?? '')"
                 :candidate-errors="candidateErrorsFor(detailItem.item_id ?? '')"
                 :confirmed-seasons="seasonConfirmations"

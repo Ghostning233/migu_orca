@@ -228,7 +228,7 @@ describe('BatchWorkbenchView parse (US-205)', () => {
     await wrapper.find('#batch-parse-submit').trigger('click')
 
     expect(apiPost).toHaveBeenCalledTimes(1)
-    expect(wrapper.find('#batch-parse-result').text()).toContain('逐项处理')
+    expect(wrapper.find('#batch-parse-result').text()).toContain('整体搜索进行中')
     expect(wrapper.find('#batch-parse-result').text()).toContain('数分钟')
     resolveParse(parseResult())
     await flushPromises()

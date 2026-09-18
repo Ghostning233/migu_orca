@@ -19,7 +19,7 @@
 // passes `loading` only for the clicked candidate, so the others stay disabled
 // without being marked as loading). `error` keeps a sanitized generation
 // failure beside this candidate and re-offers the action as a retry.
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
 import BaseButton from '@/components/forms/BaseButton.vue'
 
@@ -69,11 +69,18 @@ const posterSrc = computed(() => {
   const url = props.candidate.poster_url
   return url && /^\/api\/v1\/mikan\/posters\//.test(url) ? url : null
 })
+const posterFailed = ref(false)
+const showPoster = computed(() => posterSrc.value !== null && !posterFailed.value)
+const candidateTitle = computed(() => props.candidate.title || '未命名合集')
+
+function onPosterError(): void {
+  posterFailed.value = true
+}
 </script>
 
 <template>
   <li class="candidate-card" :class="{ 'is-generating': loading }">
-    <strong class="candidate-title">{{ candidate.title || '未命名合集' }}</strong>
+    <strong class="candidate-title">{{ candidateTitle }}</strong>
 
     <span v-if="candidate.recommendation" class="candidate-recommendation">
       {{ candidate.recommendation }}
@@ -82,12 +89,13 @@ const posterSrc = computed(() => {
     <div class="candidate-progress">{{ episodeProgressText(candidate.total_episodes) }}</div>
 
     <img
-      v-if="posterSrc"
+      v-if="showPoster"
       class="candidate-poster"
-      :src="posterSrc"
+      :src="posterSrc ?? undefined"
       alt=""
       loading="lazy"
       decoding="async"
+      @error="onPosterError"
     >
     <div v-else class="candidate-poster candidate-poster-placeholder">暂无封面</div>
 
@@ -117,6 +125,7 @@ const posterSrc = computed(() => {
       :loading="loading"
       loading-label="正在生成草案…"
       :aria-disabled="String(disabled || blocked || loading)"
+      :aria-label="`${error ? '重试生成草案' : '选择此合集'}：${candidateTitle}`"
       :aria-describedby="error ? errorId : undefined"
       @click="emit('select')"
     >
@@ -154,6 +163,7 @@ const posterSrc = computed(() => {
 
 .candidate-title {
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .candidate-recommendation {
@@ -170,6 +180,7 @@ const posterSrc = computed(() => {
 .candidate-season-evidence {
   font-size: 0.875rem;
   color: var(--color-text-muted);
+  overflow-wrap: anywhere;
 }
 
 .candidate-advanced {
@@ -205,7 +216,10 @@ const posterSrc = computed(() => {
 }
 
 .candidate-poster {
+  width: min(8rem, 100%);
   max-width: 8rem;
+  height: 8rem;
+  object-fit: cover;
   border-radius: 4px;
 }
 
@@ -234,6 +248,7 @@ const posterSrc = computed(() => {
 
 .candidate-select {
   justify-self: start;
+  max-width: 100%;
 }
 
 .candidate-generating-status,

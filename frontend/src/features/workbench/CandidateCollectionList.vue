@@ -20,11 +20,13 @@ const props = withDefaults(defineProps<{
   confirmedSeasons?: Record<string, number | null>
   loadingCandidateId?: string | null
   candidateErrors?: Record<string, string>
+  compact?: boolean
 }>(), {
   disabled: false,
   confirmedSeasons: () => ({}),
   loadingCandidateId: null,
   candidateErrors: () => ({}),
+  compact: false,
 })
 
 /** True when this candidate owns the in-flight generation. */
@@ -44,7 +46,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <ul class="candidate-list" aria-label="MiKan 候选合集">
+  <ul class="candidate-list" :class="{ 'is-compact': compact }" aria-label="MiKan 候选合集">
     <CandidateCard
       v-for="candidate in candidates"
       :key="candidate.bangumi_id"
@@ -59,3 +61,19 @@ const emit = defineEmits<{
     />
   </ul>
 </template>
+
+<style scoped>
+.candidate-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+  gap: 0.75rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.candidate-list.is-compact {
+  grid-template-columns: 1fr;
+  gap: 0.5rem;
+}
+</style>

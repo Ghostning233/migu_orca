@@ -303,7 +303,7 @@ describe('WorkbenchView single search (US-204)', () => {
     expect(cards).toHaveLength(1)
     expect(cards[0]!.text()).toContain('葬送的芙莉莲')
     expect(cards[0]!.text()).toContain('选择此合集')
-    expect(cards[0]!.find('.candidate-progress').text()).toContain('播出进度')
+    expect(cards[0]!.find('.candidate-progress').text()).toContain('总集数')
     // F4/US-345: the collection id and the parse search query are diagnostics.
     // They stay in the collapsed 高级信息 details, so the real browser's
     // rendered default layer never shows them (asserted in Chromium).

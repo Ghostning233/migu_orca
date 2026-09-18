@@ -114,8 +114,8 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "WP-43-E/US-352（2026-09-18，唯一写入 Agent 为 gpt-5.6-luna；用户指定 Fable CLI 环境失败，未假称 Fable）。CandidateCollectionList/Card 继续作为单番与批量唯一选择边界；CandidateCollectionList 新增 compact 输入，单番候选采用自适应比较网格，批量右栏紧凑单列。CandidateCard 默认仅显示公开标题、同源 opaque poster/坏图占位、独立总集数（未知明确标注）、季度证据、高级信息折叠与选择动作；移除播出进度/更新推算表达，按钮 aria-label 包含候选名，长标题/证据可换行。CONFLICT/NEEDS_CONFIRMATION、唯一不自动选、就地 loading/失败重试、本 item 锁与其他批量 item 操作、safe-info 不新增调用均沿用共享逻辑。先补最小红测（总集数/无播出进度、accessible name、坏图占位）后转绿；候选 DTO/output contract 回归：test_dto_contracts 2 passed、views candidate/context 16 passed。定向 Vitest 5 files/145 passed；定向 workbench + batch Chromium 73 passed（含 held 生成、坏图/长标题及批量另一 item 现有回归）；全 Stage 门禁：compileall/ruff/openapi 通过，非浏览器 pytest 1528 passed，前端 49 files/620 passed、typecheck/lint/api:check/build 通过，Chromium 238 passed/1 failed。唯一失败为既有 tests/browser/test_app_global_notification.py::TestAppGlobalNotificationFloating::test_toast_is_fixed_and_leaves_the_page_layout_alone，Toast 关闭后锚点位移 50px，涉及 Stage42 GlobalNotification/shell，未在 US-352 范围修复；定向候选浏览器全部通过。未改 API/OpenAPI/generated、后端、草案/CAS/save/external、Stage44/45；未 push/PR/merge。"
     }
   ]
 }
