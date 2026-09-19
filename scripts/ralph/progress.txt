@@ -262,3 +262,16 @@ Stage 41 证据在 scripts/ralph/archive/2026-09-18-stage41-add-anime-ux/。
 - 定向验证：候选相关 5 files/145 Vitest passed；`npm run typecheck`、`lint`、`build`、`api:check`、`git diff --check` → 通过；`uv run pytest tests/browser/test_app_workbench.py tests/browser/test_app_batch_workbench.py -q` → 73 passed（真实 Chromium、held 生成与另一批量条目可操作既有覆盖、临时 storage、外部依赖 mock）。
 - Stage43 §9 完整门禁实际结果：compileall/ruff/openapi → 通过；`uv run pytest -q -m 'not browser'` → 1528 passed/239 deselected；前端全量 → 49 files/620 passed，typecheck/lint/api:check/build 通过；`uv run pytest tests/browser/ -q` → 238 passed、1 failed。唯一失败为既有 `test_app_global_notification.py::TestAppGlobalNotificationFloating::test_toast_is_fixed_and_leaves_the_page_layout_alone`，Toast 关闭后页面锚点位移 50px，涉及 Stage42 GlobalNotification/shell，未在本工作包越界修复；定向候选浏览器全部通过。
 - 实际协作/模型：本轮唯一写入开发 Agent 为 gpt-5.6-luna（Fable CLI 环境失败后的替代）；先红测再窄修，未启动额外测试/修复/提交 Agent；未 push/PR/merge，不进入 Stage44/45。变更未涉及 API/OpenAPI/generated、后端、草案/CAS/save/external。遗留风险：Stage43 全 Chromium 门禁保留上述 1 个与本 diff 无关的 Stage42 Toast 几何失败，需后续独立工作包处理。
+
+## 2026-09-19 - WP-43-E / Stage 43 独立审核与最终门禁闭环
+
+- 审核结论：US-352 复用 CandidateCollectionList/Card 的选择、冲突、显式确认、就地加载/失败重试与单项锁；
+  自适应单番网格和批量紧凑布局未复制业务规则或引入自动选择。公开候选标题、季度/总集数、坏图占位、
+  长标题与可访问名称均留在既有安全 DTO 边界，未新增 safe-info/API/后端能力。
+- Stage 全门禁初次发现 Toast 关闭使候选结果锚点移动 15px，不能以“非US352”忽略。修复先后收窄至
+  `eaf1b53`：仅Toast可见生命周期内保存并临时抑制滚动锚定/平滑，手动关闭、自动清除、替换和卸载均恢复
+  原行内策略、history与viewport；不改store/timer。主Agent复验通知套件 8 passed，最终
+  `uv run pytest tests/browser/ -q` → 239 passed（109.43s）。
+- 完整阶段证据：后端非browser 1528 passed，前端 620 passed、typecheck/lint/api:check/build通过；最终
+  Chromium 239 passed。已审核HEAD `eaf1b53`，工作区干净；未push/PR/merge。D-02～D-04仍留后续Stage，
+  仅可按handoff编写Stage44资料，不自动开发。
