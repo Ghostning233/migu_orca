@@ -1,13 +1,13 @@
 {
   "project": "MiGuOrca",
   "branchName": "ralph/stage44-shared-draft-review",
-  "description": "Stage 44：共享草案审核；基线 Stage43 merge 36ba540。D-03 未决，WP-44-A 不得开发；不改 D-02/D-04、API、CAS、safe-info 或外部写，不使用 ralph.sh。执行 PRD docs/MiGuOrca_stage44_shared_draft_review_PRD.md。",
+  "description": "Stage 44：共享草案审核；基线 Stage43 merge 36ba540。D-03已于2026-09-19确认默认最多3条安全标题、完整按需展开、单番/批量同口径；不改D-02/D-04、API、CAS、safe-info或外部写，不使用ralph.sh。执行PRD docs/MiGuOrca_stage44_shared_draft_review_PRD.md。",
   "userStories": [
     {
       "id": "US-353",
       "title": "合集身份、资源与筛选审核层级",
       "description": "作为审核草案的用户，我希望先看到已选真实合集及公开证据，再理解字幕、筛选和资源结果。",
-      "acceptanceCriteria": ["D-03获用户明确决定后才可开发；批量只传实际选中公开候选摘要", "不从别名、解析、Request或其他候选推断季度、封面或总集数", "资源计数同源、敏感白名单/Canary、状态恢复与真实Chromium/契约回归通过"],
+      "acceptanceCriteria": ["D-03已确认：默认最多3条安全标题、完整按需展开、单番/批量同口径；批量只传实际选中公开候选摘要", "不从别名、解析、Request或其他候选推断季度、封面或总集数", "资源计数同源、敏感白名单/Canary、状态恢复与真实Chromium/契约回归通过"],
       "priority": 1,
       "passes": false,
       "notes": ""

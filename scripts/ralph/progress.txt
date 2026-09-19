@@ -1,13 +1,13 @@
 # Ralph 当前状态
 
-Stage 44（共享草案审核）尚未启动开发。准备分支：`ralph/stage44-shared-draft-review`；实际基线：
+Stage 44（共享草案审核）已完成开发准备、尚未启动开发。准备分支：`ralph/stage44-shared-draft-review`；实际基线：
 `origin/main` 的 Stage 43 合并 `36ba5400dddc981a6dcd72fb69f1fc9ace30de73`。
 
 执行 PRD：`docs/MiGuOrca_stage44_shared_draft_review_PRD.md`。
 
 ## 决策门与范围
 
-- D-03（默认安全资源样例数量/完整展开）仍待用户决定，因此 US-353/WP-44-A 不得启动；建议不等于批准。
+- D-03 已于2026-09-19确认：默认最多3条安全标题，完整列表按需展开，单番/批量同口径；US-353 可在获得开发授权后启动。
 - D-02（隐藏手工勾选参与 N）与 D-04（全部完成导航）留 Stage 45，不顺带实现。
 - 保留服务端草案 authority、CAS、scheduler、防抖、flush、save-confirm、unknown 恢复、safe-info边界与两次确认；本阶段不新增 API、持久化或外部写。
 
