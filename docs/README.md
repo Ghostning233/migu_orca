@@ -34,9 +34,8 @@
   完成 F-D（US-284～US-293）并归档；Stage 37 已完成 F-E（US-294～US-302）并归档；Stage 38
   已完成 F-F（US-303～US-317）并归档；F-G 已由 Stage 39 完成并归档（US-318～US-340）。
   前端体验重构的用户审核已形成问题清单；Stage 40（FE-01）与 Stage 41（D0、F2～F4）
-  与 F5/WP-42-A 均已完成并合并。当前 Stage 43 执行材料已准备，US-347～US-352尚未开发；
-  D-01已批准全局共享主题与基础控件对齐Token V1并做四页回归，可按工作包依赖顺序开发。Stage 44/45仍需前阶段交接后
-  编写独立执行PRD，不把总体规划当作已授权的全部Stage开发。
+  与 F5/WP-42-A 均已完成并合并。Stage 43（US-347～US-352）与 Stage 44（US-353～US-354）均已完成并合并；
+  Stage 45 已具备独立执行 PRD，D-02/D-04 已确认，尚待开发授权。总体规划不等于全部 Stage 的开发授权。
   工作目标、候选 Stage、设计决策门和 Agent 协作顺序见
   [前端体验重构：工作目标与协作流程](frontend-ux-refactor-work-goals.md)。
 - 页面体验设计与视觉评审已经作为独立工作完成。后续必须先完成后端支撑和前端分片 PRD、
@@ -91,7 +90,8 @@ Stage 42 已完成 WP-42-A / US-346，并经 PR #70 合并至 `main`（merge `cb
 - Stage 40～41：[添加番剧可靠性与体验改版](MiGuOrca_stage40_add_anime_reliability_and_ux_PRD.md)（US-341 与 WP-41-A～D 已完成）
 - Stage 42：[悬浮全局提示收尾](MiGuOrca_stage42_global_notification_PRD.md)（WP-42-A / US-346 已完成并经 PR #70 合并）
 - Stage 43：[搜索入口与候选选择视觉收口](MiGuOrca_stage43_add_anime_entry_visual_PRD.md)（US-347～US-352 已完成并经 PR #72 合并）
-- Stage 44：[共享草案审核执行 PRD](MiGuOrca_stage44_shared_draft_review_PRD.md)（US-353～US-354 已编写，D-03 已确认，等待新会话开发授权）；Stage 45 仍以[总体 PRD](MiGuOrca_stage43_45_add_anime_visual_PRD.md)与[决策/交接](development/add-anime-visual-prd-handoff-2026-09-18.md)为编写入口
+- Stage 44：[共享草案审核执行 PRD](MiGuOrca_stage44_shared_draft_review_PRD.md)（US-353～US-354 已完成并经 PR #73 合并）
+- Stage 45：[批量确认范围、结果恢复与完成导航执行 PRD](MiGuOrca_stage45_batch_confirmation_PRD.md)（US-355～US-357 已编写，D-02/D-04 已确认，等待开发授权）；总体边界见[总体 PRD](MiGuOrca_stage43_45_add_anime_visual_PRD.md)，决策来源见[决策/交接](development/add-anime-visual-prd-handoff-2026-09-18.md)
 
 Stage PRD 记录单一阶段的范围、非目标、决策和验收结果。已完成阶段的 Ralph 执行快照位于 `../scripts/ralph/archive/`。
 
