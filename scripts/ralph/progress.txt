@@ -34,6 +34,13 @@ Stage 44（共享草案审核）已完成开发准备、尚未启动开发。准
 - 实际验证：`npm run test:unit -- --run src/features/workbench/WorkbenchView.test.ts src/features/workbench/AnimeDraftEditor.test.ts`（54 passed）；`npm run test:unit -- --run src/features/workbench/BatchWorkbenchView.test.ts src/features/requests/RequestDetailPanel.test.ts`（88 passed）；`npm run typecheck`、`npm run lint`、`npm run api:check`、`npm run build` 均通过；`uv run pytest tests/browser/test_app_workbench.py tests/browser/test_app_batch_workbench.py -q`（74 passed in 44.50s）。
 - 遗留风险：未运行 Stage 44 完整后端/前端/Chromium 门禁（按普通 story 范围）；未新增独立浏览器用例，既有单番/批量真实 Chromium 套件覆盖通过。
 
+## 2026-09-19 - Stage 44 Chromium 时序修复（PR #73 冻结 HEAD 复核）
+
+- CI `35427861964` 的完整 Chromium 门禁仅失败 `test_profile_change_while_app_is_mounted_invalidates_held_old_list[chromium]`：首次 profile-a `reload()` 后 5 秒内未出现数量 2 的 `.pending-badge`；失败发生在测试前置条件，非 profile-b 切换或 held 旧响应断言。
+- 原因：测试仅等待 DOM 徽标，未明确同步首次 profile-a tracking 请求及真实 envelope 响应；页面壳已渲染不代表列表响应已完成，导致 reload 时序在 CI 中暴露。
+- 修复：测试按 profile-a 查询 URL 使用 `expect_response`，核对 `ok=true` 与两条真实响应 items 后再断言徽标；进入 tracking 前使用精确 `expect_request` 确认 held 的 profile-a 请求已建立，并保留其真实 envelope 延迟返回与 profile-b 刷新后旧响应不得覆盖新值的断言。未修改生产代码/API/业务语义，未改任何 passes 字段。
+- 验证：该测试连续 5 次通过（每次 1 passed）；`uv run pytest tests/browser/test_stage39_global_status.py -q`（15 passed）。
+
 ## 2026-09-19 - US-353 集中修复与复审
 
 - 修复 `AnimeDraftEditor`：草案默认层仅从用户实际选择的内存候选摘要展示合集身份；直连/缺失摘要固定显示“未提供”，保存模式保留既有公开标题回退。

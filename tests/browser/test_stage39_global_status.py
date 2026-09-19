@@ -192,9 +192,28 @@ def test_profile_change_while_app_is_mounted_invalidates_held_old_list(page: Pag
     # global badge; the tracking route then supplies the held old request.
     page.goto(f"{live_server_url}/app/add")
     page.evaluate("localStorage.setItem('miguOrca.web.storageDir', 'profile-a')")
-    page.reload()
+    with page.expect_response(
+        lambda response: (
+            response.request.method == "GET"
+            and "storage_dir=profile-a" in response.url
+            and "/api/v1/tracking/items" in response.url
+            and response.ok
+        )
+    ) as profile_a_response:
+        page.reload()
+    payload = profile_a_response.value.json()
+    assert payload["ok"] is True
+    assert len(payload["result"]["items"]) == 2
     expect(page.locator(".pending-badge")).to_have_text("2")
-    page.goto(f"{live_server_url}/app/tracking")
+    with page.expect_request(
+        lambda request: (
+            request.method == "GET"
+            and "storage_dir=profile-a" in request.url
+            and "/api/v1/tracking/items" in request.url
+        )
+    ):
+        page.goto(f"{live_server_url}/app/tracking")
+    assert len(held_old) == 1
 
     # Change the profile through the real Settings form while keeping the SPA alive.
     page.locator(".workspace-status").press("Enter")
