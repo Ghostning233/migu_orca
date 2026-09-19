@@ -16,3 +16,11 @@ Stage 44（共享草案审核）已完成开发准备、尚未启动开发。准
 - Stage 43 经 PR #72 合并，merge `36ba540`；最终门禁为后端1528、前端620、Chromium239通过。旧 Stage 43 分支保留，未删除。
 - 新执行 PRD分为 US-353（合集身份、资源与筛选审核层级）与 US-354（修改状态与单番本地确认层级），初始均 passes=false/notes空。
 - 已从实际 `origin/main` 建立准备分支并取消其发布 upstream；本轮仅文档/JSON/分支整理，未运行功能测试、未开始开发、未 push/PR/merge。
+
+## 2026-09-19 - US-353 合集身份、资源与筛选审核层级
+
+- 修改 `ResourceSummary.vue`：有效资源默认只展示前三条安全标题，更多资源保留在嵌套按需展开层；完整资源继续按字幕组一级、标题二级分组，计数沿用现有来源，不做相减推算。
+- 修改 `BatchWorkbenchView.vue`：仅在用户点击候选并成功生成草案后，以内存中的公开候选摘要传给共享 `AnimeDraftEditor`；不从 Request、解析/别名或其他候选补值，缺失季度/总集数继续显示未知。
+- 补充 `ResourceSummary.test.ts`、`BatchWorkbenchView.test.ts`，并将 `US-353` 标记为 `passes=true`。
+- 实际验证：`npm run test:unit -- --run src/features/workbench/ResourceSummary.test.ts src/features/workbench/AnimeDraftEditor.test.ts src/features/workbench/BatchWorkbenchView.test.ts`（69 passed）；`npm run typecheck`、`npm run lint`、`npm run api:check`、`npm run build` 均通过；`uv run pytest tests/browser/test_app_workbench.py tests/browser/test_app_batch_workbench.py -q`（73 passed in 44.91s）。
+- 遗留风险：未新增浏览器测试用例，现有单番/批量套件覆盖已通过；Stage 44 另一故事 US-354 未启动。

@@ -47,6 +47,23 @@ describe('ResourceSummary', () => {
     expect(wrapper.find('.complete-seed-groups > .seed-list').exists()).toBe(false)
   })
 
+  it('shows at most three effective titles by default and expands the rest on demand', async () => {
+    const wrapper = mount(ResourceSummary, {
+      props: {
+        selectedGroupName: '字幕组',
+        effectiveSeeds: ['01.mkv', '02.mkv', '03.mkv', '04.mkv'],
+        completeGroups: [],
+        excludedSeeds: [],
+      },
+    })
+
+    const effective = wrapper.find('.effective-seed-group')
+    expect(effective.findAll(':scope > .seed-list > li')).toHaveLength(3)
+    expect(effective.findAll(':scope > .seed-list > li').map((item) => item.text())).not.toContain('04.mkv')
+    await effective.find('.effective-seed-more summary').trigger('click')
+    expect(effective.find('.effective-seed-more').text()).toContain('04.mkv')
+  })
+
   it('does not render URL or magnet-like seed values', () => {
     const wrapper = mount(ResourceSummary, {
       props: {

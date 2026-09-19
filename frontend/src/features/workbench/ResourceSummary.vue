@@ -4,6 +4,7 @@
 // Controlled public resource projection for draft review. Callers must pass
 // the results of the shared request-detail helpers; this component does not
 // inspect a Request, duplicate filtering rules, or call an API.
+import { computed } from 'vue'
 import type { CompleteSeedGroup, ExcludedSeed } from '@/features/requests/requestDetail'
 
 const props = defineProps<{
@@ -14,6 +15,9 @@ const props = defineProps<{
 }>()
 
 const completeTotal = () => props.completeGroups.reduce((sum, group) => sum + group.seedNames.length, 0)
+const previewLimit = 3
+const previewEffectiveSeeds = computed(() => props.effectiveSeeds.slice(0, previewLimit))
+const hasMoreEffectiveSeeds = computed(() => props.effectiveSeeds.length > previewLimit)
 
 // URL-like / magnet values are replaced by a generic label.
 const URL_LIKE_SEED = /^(?:magnet:|[a-z][a-z0-9+.-]*:\/\/)/i
@@ -44,11 +48,17 @@ function safeReason(value: string): string {
     </dl>
 
     <details class="seed-details seed-group effective-seed-group" open>
-      <summary>有效种子（当前选中字幕组：{{ props.selectedGroupName }}）({{ props.effectiveSeeds.length }})</summary>
+      <summary>有效资源（当前选中字幕组：{{ props.selectedGroupName }}）({{ props.effectiveSeeds.length }})</summary>
       <ul v-if="props.effectiveSeeds.length" class="seed-list">
-        <li v-for="seed in props.effectiveSeeds" :key="seed">{{ safeSeedTitle(seed) }}</li>
+        <li v-for="seed in previewEffectiveSeeds" :key="seed">{{ safeSeedTitle(seed) }}</li>
       </ul>
       <p v-else class="muted-text">无有效种子标题。</p>
+      <details v-if="hasMoreEffectiveSeeds" class="effective-seed-more">
+        <summary>展开全部有效资源（{{ props.effectiveSeeds.length }}）</summary>
+        <ul class="seed-list">
+          <li v-for="seed in props.effectiveSeeds" :key="`all-${seed}`">{{ safeSeedTitle(seed) }}</li>
+        </ul>
+      </details>
     </details>
 
     <details class="seed-details complete-seed-details">
@@ -100,6 +110,8 @@ function safeReason(value: string): string {
 .subgroup-seed-group > summary { font-weight: 500; cursor: pointer; }
 .subgroup-seed-group .seed-list { padding-left: 1.6rem; }
 .seed-list li { overflow-wrap: anywhere; }
+.effective-seed-more { margin-top: 0.5rem; padding-top: 0.35rem; border-top: 1px solid var(--color-border); }
+.effective-seed-more summary { cursor: pointer; color: var(--color-text-muted); }
 .excluded-seed-list .seed-exclude-reason, .muted-text { color: var(--color-text-muted); }
 .muted-text { margin: 0.25rem 0 0; }
 @media (max-width: 720px) {
