@@ -385,19 +385,6 @@ defineExpose({ session, editor, leaveGuard })
 
     <div id="request-detail-container">
       <p v-if="journey.state.phase === 'review'" class="review-summary preview-mode-note" role="status">订阅草案（未保存）：当前修改只保留在本次页面操作中。</p>
-      <div class="review-confirmation-block" aria-live="polite">
-        <BaseButton v-if="journey.state.phase === 'review'" id="single-review-save-button" variant="primary" :loading="confirmLoading" :disabled="saveButtonDisabled" aria-describedby="single-review-save-blockers" @click="saveAndConfirm">保存并确认</BaseButton>
-        <BaseButton v-else-if="journey.state.phase === 'saved_pending_confirm'" id="single-review-retry-accept" variant="primary" :loading="confirmLoading" :disabled="confirmLoading" @click="retrySavedConfirmation">重试确认</BaseButton>
-        <BaseButton v-if="journey.state.phase === 'verification_pending' || journey.state.phase === 'confirmed_pending_tracking'" id="single-review-retry-locate" variant="secondary" :loading="confirmLoading" :disabled="confirmLoading" @click="retryTrackingLocation">重试定位</BaseButton>
-        <BaseButton v-if="journey.state.phase === 'confirmed_pending_tracking'" id="single-review-open-unlocated" variant="secondary" :disabled="confirmLoading" @click="openUnlocatedTracking">打开无定位追番管理</BaseButton>
-        <p v-if="trackingLocated" id="single-review-tracking-success" class="field-help" role="status">订阅方案已确认，并已定位到追番记录。</p>
-        <p v-else-if="confirmedRequestId" id="single-review-save-success" class="field-help" role="status">订阅方案已经确认，正在准备后续定位。</p>
-        <p v-else-if="journey.state.phase === 'saved_pending_confirm'" id="single-review-accept-recovery" class="field-help" role="status">订阅方案已保存但确认未完成，可直接重试确认；不会重复保存。</p>
-        <p v-else-if="confirmError" id="single-review-save-error" class="field-error" role="alert">{{ confirmError }}</p>
-        <p v-if="acceptError" id="single-review-accept-error" class="field-error" role="alert">{{ acceptError }}</p>
-        <p v-else id="single-review-save-blockers" class="field-help">保存并确认{{ saveBlockers.length ? `暂不可用：${saveBlockers.join('；')}` : '可用' }}。</p>
-      </div>
-
       <AnimeDraftEditor
         ref="editor"
         :request="draftSnapshot"
@@ -418,9 +405,25 @@ defineExpose({ session, editor, leaveGuard })
         @reset="resetFailedModify"
       >
         <template #review-note>
-          <p class="review-note">字幕组会立即重新计算；筛选规则在停止输入 1.5 秒后自动更新；目录名只在「保存修改」时提交。以上都只更新服务端内存草案，保存并确认只提交当前草案能力、版本和本次操作的内存幂等键，不会回传订阅方案快照或触发外部订阅动作。</p>
+          <p class="review-note">字幕组会立即重新计算；筛选规则在停止输入 1.5 秒后自动更新；目录名只在「保存修改」时提交。保存修改仅更新当前服务端草案，不会保存本地方案或触发外部订阅动作。</p>
         </template>
       </AnimeDraftEditor>
+
+      <!-- 最终确认必须在完整审核内容之后；这是保存本地方案的入口，
+           追番管理仍会再次要求用户确认外部提交。 -->
+      <div class="review-confirmation-block" aria-live="polite">
+        <p class="review-confirmation-boundary">仅保存本地方案、追番管理再次确认外部提交。</p>
+        <BaseButton v-if="journey.state.phase === 'review'" id="single-review-save-button" variant="primary" :loading="confirmLoading" :disabled="saveButtonDisabled" aria-describedby="single-review-save-blockers" @click="saveAndConfirm">保存并确认</BaseButton>
+        <BaseButton v-else-if="journey.state.phase === 'saved_pending_confirm'" id="single-review-retry-accept" variant="primary" :loading="confirmLoading" :disabled="confirmLoading" @click="retrySavedConfirmation">重试确认</BaseButton>
+        <BaseButton v-if="journey.state.phase === 'verification_pending' || journey.state.phase === 'confirmed_pending_tracking'" id="single-review-retry-locate" variant="secondary" :loading="confirmLoading" :disabled="confirmLoading" @click="retryTrackingLocation">重试定位</BaseButton>
+        <BaseButton v-if="journey.state.phase === 'confirmed_pending_tracking'" id="single-review-open-unlocated" variant="secondary" :disabled="confirmLoading" @click="openUnlocatedTracking">打开无定位追番管理</BaseButton>
+        <p v-if="trackingLocated" id="single-review-tracking-success" class="field-help" role="status">订阅方案已确认，并已定位到追番记录。</p>
+        <p v-else-if="confirmedRequestId" id="single-review-save-success" class="field-help" role="status">订阅方案已经确认，正在准备后续定位。</p>
+        <p v-else-if="journey.state.phase === 'saved_pending_confirm'" id="single-review-accept-recovery" class="field-help" role="status">订阅方案已保存但确认未完成，可直接重试确认；不会重复保存。</p>
+        <p v-else-if="confirmError" id="single-review-save-error" class="field-error" role="alert">{{ confirmError }}</p>
+        <p v-if="acceptError" id="single-review-accept-error" class="field-error" role="alert">{{ acceptError }}</p>
+        <p v-else id="single-review-save-blockers" class="field-help">保存并确认{{ saveBlockers.length ? `暂不可用：${saveBlockers.join('；')}` : '可用' }}。</p>
+      </div>
     </div>
     <LoadingState v-if="navigationLoading" message="正在处理返回操作..." />
     <ConfirmDialog ref="confirmDialog" />

@@ -18,8 +18,8 @@
       "description": "作为审核草案的用户，我希望区分保存修改与本地保存确认。",
       "acceptanceCriteria": ["保存修改次操作与pending/失败/恢复语义不变；单番说明本地/外部两次边界", "批量详情不新增最终保存按钮；unknown/saved pending/部分成功仍用既有恢复", "已保存模式与真实Chromium、Vitest、契约回归通过"],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "US-354 完成：单番最终确认移至完整 AnimeDraftEditor 审核内容之后，邻近同源资格阻断原因，并明确“仅保存本地方案、追番管理再次确认外部提交”；保存修改说明明确仅更新当前服务端草案且继续由 scheduler 负责防抖/flush/CAS。批量详情未增加最终保存按钮；AnimeDraftEditor saved 模式调用者与人工 apply 回归保持不变。定向 Vitest 142 passed、typecheck、lint、api:check、build 与单番/批量 Chromium 74 passed。"
     }
   ]
 }
