@@ -14,7 +14,7 @@
 // sanitized by the caller (api/client.ts + notification store): no endpoints,
 // tokens, cookies, raw bodies, absolute paths or full Requests.
 import { storeToRefs } from 'pinia'
-import { computed, onBeforeUnmount, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted } from 'vue'
 
 import { useNotificationStore } from '@/app/stores/notification'
 
@@ -27,8 +27,18 @@ const isPolite = computed(
   () => current.value?.kind === 'success' || current.value?.kind === 'info',
 )
 
-watch(current, (value) => {
-  if (value) document.documentElement.style.scrollBehavior = 'auto'
+const htmlStyle = document.documentElement.style
+const bodyStyle = document.body.style
+const initialStyles = {
+  scrollBehavior: htmlStyle.scrollBehavior,
+  htmlOverflowAnchor: htmlStyle.overflowAnchor,
+  bodyOverflowAnchor: bodyStyle.overflowAnchor,
+}
+
+onMounted(() => {
+  htmlStyle.scrollBehavior = 'auto'
+  htmlStyle.overflowAnchor = 'none'
+  bodyStyle.overflowAnchor = 'none'
 })
 
 function dismiss(): void {
@@ -36,9 +46,8 @@ function dismiss(): void {
   // even though the toast is outside document flow. Preserve the viewport so
   // dismissing a summary cannot move the page it is announcing.
   const { scrollX, scrollY } = window
-  document.documentElement.style.scrollBehavior = 'auto'
-  document.documentElement.style.overflowAnchor = 'none'
-  document.body.style.overflowAnchor = 'none'
+  const previousScrollRestoration = history.scrollRestoration
+  history.scrollRestoration = 'manual'
   if (document.activeElement instanceof HTMLElement) {
     document.activeElement.blur()
   }
@@ -46,6 +55,15 @@ function dismiss(): void {
   restoreViewport(scrollX, scrollY)
   requestAnimationFrame(() => {
     restoreViewport(scrollX, scrollY)
+    window.setTimeout(() => {
+      requestAnimationFrame(() => {
+        htmlStyle.scrollBehavior = initialStyles.scrollBehavior
+        htmlStyle.overflowAnchor = initialStyles.htmlOverflowAnchor
+        bodyStyle.overflowAnchor = initialStyles.bodyOverflowAnchor
+        history.scrollRestoration = previousScrollRestoration
+        restoreViewport(scrollX, scrollY)
+      })
+    }, 100)
   })
   window.setTimeout(() => {
     restoreViewport(scrollX, scrollY)
