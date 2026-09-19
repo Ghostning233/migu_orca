@@ -14,7 +14,7 @@
 // sanitized by the caller (api/client.ts + notification store): no endpoints,
 // tokens, cookies, raw bodies, absolute paths or full Requests.
 import { storeToRefs } from 'pinia'
-import { computed, onBeforeUnmount, onMounted } from 'vue'
+import { computed, onBeforeUnmount, watch } from 'vue'
 
 import { useNotificationStore } from '@/app/stores/notification'
 
@@ -27,47 +27,66 @@ const isPolite = computed(
   () => current.value?.kind === 'success' || current.value?.kind === 'info',
 )
 
-const htmlStyle = document.documentElement.style
-const bodyStyle = document.body.style
-const initialStyles = {
-  scrollBehavior: htmlStyle.scrollBehavior,
-  htmlOverflowAnchor: htmlStyle.overflowAnchor,
-  bodyOverflowAnchor: bodyStyle.overflowAnchor,
+type ToastViewport = { x: number; y: number }
+type ToastEnvironment = {
+  viewport: ToastViewport
+  scrollBehavior: string
+  htmlOverflowAnchor: string
+  bodyOverflowAnchor: string
+  scrollRestoration: ScrollRestoration
 }
 
-onMounted(() => {
+let toastEnvironment: ToastEnvironment | null = null
+
+function captureToastEnvironment(): void {
+  if (toastEnvironment) return
+  const htmlStyle = document.documentElement.style
+  const bodyStyle = document.body.style
+  toastEnvironment = {
+    viewport: { x: window.scrollX, y: window.scrollY },
+    scrollBehavior: htmlStyle.scrollBehavior,
+    htmlOverflowAnchor: htmlStyle.overflowAnchor,
+    bodyOverflowAnchor: bodyStyle.overflowAnchor,
+    scrollRestoration: history.scrollRestoration,
+  }
   htmlStyle.scrollBehavior = 'auto'
   htmlStyle.overflowAnchor = 'none'
   bodyStyle.overflowAnchor = 'none'
-})
+  history.scrollRestoration = 'manual'
+}
+
+function restoreToastEnvironment(): void {
+  const saved = toastEnvironment
+  if (!saved) return
+  const htmlStyle = document.documentElement.style
+  const bodyStyle = document.body.style
+  restoreViewport(saved.viewport.x, saved.viewport.y)
+  htmlStyle.scrollBehavior = saved.scrollBehavior
+  htmlStyle.overflowAnchor = saved.htmlOverflowAnchor
+  bodyStyle.overflowAnchor = saved.bodyOverflowAnchor
+  history.scrollRestoration = saved.scrollRestoration
+  restoreViewport(saved.viewport.x, saved.viewport.y)
+  toastEnvironment = null
+}
+
+watch(current, (value) => {
+  if (value) captureToastEnvironment()
+  else restoreToastEnvironment()
+}, { flush: 'sync' })
 
 function dismiss(): void {
   // Removing a focused fixed element can trigger Chromium's scroll anchoring
   // even though the toast is outside document flow. Preserve the viewport so
   // dismissing a summary cannot move the page it is announcing.
-  const { scrollX, scrollY } = window
-  const previousScrollRestoration = history.scrollRestoration
-  history.scrollRestoration = 'manual'
+  captureToastEnvironment()
+  if (toastEnvironment) {
+    toastEnvironment.viewport = { x: window.scrollX, y: window.scrollY }
+  }
   if (document.activeElement instanceof HTMLElement) {
     document.activeElement.blur()
   }
   notificationStore.clear()
-  restoreViewport(scrollX, scrollY)
-  requestAnimationFrame(() => {
-    restoreViewport(scrollX, scrollY)
-    window.setTimeout(() => {
-      requestAnimationFrame(() => {
-        htmlStyle.scrollBehavior = initialStyles.scrollBehavior
-        htmlStyle.overflowAnchor = initialStyles.htmlOverflowAnchor
-        bodyStyle.overflowAnchor = initialStyles.bodyOverflowAnchor
-        history.scrollRestoration = previousScrollRestoration
-        restoreViewport(scrollX, scrollY)
-      })
-    }, 100)
-  })
-  window.setTimeout(() => {
-    restoreViewport(scrollX, scrollY)
-  }, 0)
+  requestAnimationFrame(() => restoreToastEnvironment())
 }
 
 function restoreViewport(scrollX: number, scrollY: number): void {
@@ -85,6 +104,7 @@ function restoreViewport(scrollX: number, scrollY: number): void {
 // The store owns the auto-close timers; unmounting has to take the pending one
 // with it so it cannot outlive the toast and mutate the shell afterwards.
 onBeforeUnmount(() => {
+  restoreToastEnvironment()
   notificationStore.clear()
 })
 </script>
