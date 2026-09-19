@@ -139,6 +139,37 @@ def _register_generation_capture(
 class TestAppWorkbenchSingleSearch:
     """AC: 单个搜索迁移——loading、候选卡片、空状态、失败重试与旧页 parity."""
 
+    def test_single_entry_has_one_task_heading_steps_and_search_summary(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        page.route(
+            "**/api/v1/mikan/candidates",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_candidate_result_json(
+                    "芙莉莲",
+                    [_candidate(bangumi_id="2353", title="葬送的芙莉莲", mikan_url="https://mikan.example/Home/Bangumi/2353")],
+                ),
+            ),
+        )
+        _goto_workbench(page, live_server_url)
+
+        expect(page.locator("#workbench-heading")).to_have_text("添加番剧")
+        expect(page.locator(".journey-steps")).to_contain_text("输入名称")
+        expect(page.locator(".journey-steps")).to_contain_text("选择真实合集")
+        expect(page.locator(".journey-steps")).to_contain_text("审核并保存确认")
+        expect(page.locator("#mikan-candidate-search-submit")).to_contain_text("搜索候选合集")
+        assert "外部提交" not in page.locator("body").inner_text()
+
+        page.fill("#mikan-candidate-query", "芙莉莲")
+        page.click("#mikan-candidate-search-submit")
+        expect(page.locator(".search-summary-actions")).to_contain_text("搜索摘要")
+        expect(page.locator("#mikan-edit-search")).to_be_visible()
+        expect(page.locator("#mikan-candidate-query")).to_have_count(0)
+        page.click("#mikan-edit-search")
+        expect(page.locator("#mikan-candidate-query")).to_be_focused()
+
     def test_shell_focuses_single_anime_input_on_entry(self, page: Page, live_server_url: str) -> None:
         _goto_workbench(page, live_server_url)
         expect(page.locator("#mikan-candidate-query")).to_be_focused()
@@ -195,7 +226,7 @@ class TestAppWorkbenchSingleSearch:
         # 动作）；合集编号与解析搜索词是诊断信息，折叠在「高级信息」内。
         assert "季度证据" in text
         # 候选默认层只放公开决策证据：封面、标题、季度证据、总集数与选择动作。
-        assert "播出进度：待开发 / 28 集" in text
+        assert "总集数：28 集" in text
         assert "选择此合集" in text
         expect(page.locator(".candidate-card").first.locator(".candidate-poster")).to_have_count(1)
         assert "MiKan ID: 2353" not in text

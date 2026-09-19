@@ -53,11 +53,11 @@ describe('candidateSearch validation helpers', () => {
     expect(validateFallbackValue('http://mikan.example/42')).toBeNull()
   })
 
-  it('formats episode progress with explicit or unknown totals', () => {
-    expect(episodeProgressText(28)).toBe('播出进度：待开发 / 28 集')
-    expect(episodeProgressText(null)).toBe('播出进度：待开发 / 未知')
-    expect(episodeProgressText('invalid' as never)).toBe('播出进度：待开发 / 未知')
-    expect(episodeProgressText(0)).toBe('播出进度：待开发 / 未知')
+  it('formats independent total-episode evidence with explicit or unknown totals', () => {
+    expect(episodeProgressText(28)).toBe('总集数：28 集')
+    expect(episodeProgressText(null)).toBe('总集数：未知')
+    expect(episodeProgressText('invalid' as never)).toBe('总集数：未知')
+    expect(episodeProgressText(0)).toBe('总集数：未知')
   })
 })
 

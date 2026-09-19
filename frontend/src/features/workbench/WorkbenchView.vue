@@ -52,6 +52,7 @@ import {
   type CandidateSearchResult,
   type MikanCandidate,
 } from '@/features/workbench/candidateSearch'
+import { batchItemCount, validateBatchRawInput } from '@/features/workbench/batchWorkbench'
 import { displayValue } from '@/features/requests/requestDetail'
 import type { RequestSnapshot } from '@/features/requests/requestDetail'
 import { currentStorageDir, storageQuery } from '@/features/requests/requestStorage'
@@ -75,6 +76,8 @@ const batchQuery = ref('')
 const mode = ref<AnimeMode>('single')
 const singleInput = ref<InstanceType<typeof AnimeTitleInput> | null>(null)
 const batchInput = ref<InstanceType<typeof AnimeTitleInput> | null>(null)
+const batchWorkbench = ref<InstanceType<typeof BatchWorkbenchView> | null>(null)
+const batchSearchSubmitting = ref(false)
 const selections = ref<Record<AnimeMode, { start: number; end: number }>>({
   single: { start: 0, end: 0 },
   batch: { start: 0, end: 0 },
@@ -92,6 +95,19 @@ const lastSearchQuery = ref('')
 const searchStarted = computed(
   () => searchLoading.value || Boolean(searchError.value) || searchResult.value !== null,
 )
+const batchCount = computed(() => batchItemCount(batchQuery.value))
+const batchValidationError = computed(() => validateBatchRawInput(batchQuery.value))
+const batchSearchDisabled = computed(() => batchSearchSubmitting.value || Boolean(batchValidationError.value))
+
+async function submitBatchSearch(): Promise<void> {
+  if (batchSearchDisabled.value) return
+  batchSearchSubmitting.value = true
+  try {
+    await batchWorkbench.value?.parseBatch()
+  } finally {
+    batchSearchSubmitting.value = false
+  }
+}
 
 /** A started search that is no longer in flight and produced no candidates. */
 const searchSettled = computed(
@@ -421,22 +437,33 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 </script>
 
 <template>
-  <h2 id="workbench-heading" class="workbench-title">订阅方案工作台</h2>
+  <h1 id="workbench-heading" class="workbench-title">添加番剧</h1>
 
-  <PanelSection title="创建订阅方案" class="workbench-panel">
+  <PanelSection title="搜索候选合集" class="workbench-panel">
+    <ol class="journey-steps" aria-label="添加番剧步骤">
+      <li class="is-current">输入名称</li>
+      <li>选择真实合集</li>
+      <li>审核并保存确认</li>
+    </ol>
     <!-- ── single search ──────────────────────────────────────────── -->
     <AnimeModeSwitch :model-value="mode" :disabled="singleBusy" @update:model-value="changeMode" />
 
     <form v-if="mode === 'single' && !hasResults" id="mikan-candidate-search-form" class="workbench-search-form" @submit.prevent="searchCandidates">
-      <p class="step-label">步骤 1 · 搜索番剧</p>
-      <label for="mikan-candidate-query">番剧标题</label>
-      <AnimeTitleInput
-        ref="singleInput"
-        id="mikan-candidate-query"
-        v-model="query"
-        mode="single"
-        :disabled="singleBusy"
-      />
+      <div class="search-control-row">
+        <div class="search-field">
+          <label for="mikan-candidate-query">番剧标题</label>
+          <AnimeTitleInput
+            ref="singleInput"
+            id="mikan-candidate-query"
+            v-model="query"
+            mode="single"
+            :disabled="singleBusy"
+          />
+        </div>
+        <BaseButton id="mikan-candidate-search-submit" type="submit" variant="primary" :loading="searchLoading" :disabled="singleBusy || !query.trim()">
+          搜索候选合集
+        </BaseButton>
+      </div>
       <p class="field-help" id="mikan-candidate-help">
         输入番剧标题，从真实 MiKan 搜索候选合集。候选不会自动选择，需手动点击「选择此合集」生成订阅草案。
       </p>
@@ -446,11 +473,6 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
       <p v-if="searchError" id="mikan-candidate-search-error" class="field-error" role="alert">
         {{ searchError }}
       </p>
-      <div class="notification-actions">
-        <BaseButton id="mikan-candidate-search-submit" type="submit" variant="primary" :loading="searchLoading" :disabled="singleBusy || !query.trim()">
-          搜索番剧
-        </BaseButton>
-      </div>
     </form>
   </PanelSection>
 
@@ -515,10 +537,13 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
         </section>
         <template v-if="searchResult && hasResults">
           <p class="step-label">步骤 2 · 选择合集</p>
-          <p class="candidate-search-summary" role="status">
-            已搜索「{{ searchResult.query }}」，请选择要审核的 MiKan 合集。
+          <p class="candidate-search-summary" role="status" aria-live="polite">
+            已搜索「{{ searchResult.query }}」，请选择要审核的真实 MiKan 合集。
           </p>
-          <BaseButton id="mikan-edit-search" variant="secondary" @click="editSearch">修改搜索</BaseButton>
+          <div class="search-summary-actions">
+            <span class="search-summary-label">搜索摘要</span>
+            <BaseButton id="mikan-edit-search" variant="secondary" @click="editSearch">修改搜索</BaseButton>
+          </div>
           <details class="title-parse-summary">
             <summary>标题解析摘要（诊断信息）</summary>
             <dl class="detail-grid">
@@ -577,28 +602,105 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 
   <!-- ── batch workbench (US-205) ────────────────────────────────── -->
   <template v-if="mode === 'batch'">
-    <label for="batch-raw-input">批量番剧名称</label>
-    <AnimeTitleInput ref="batchInput" id="batch-raw-input" v-model="batchQuery" mode="batch" />
-    <p class="field-help" id="batch-raw-input-help">每行一个番剧简称或不完整标题；系统会逐项解析并搜索候选合集，结果需人工审核。</p>
-    <BatchWorkbenchView class="batch-workbench-section" v-model:raw-input="batchQuery" hide-input />
+    <form id="batch-parse-form" class="batch-parse-form" @submit.prevent="submitBatchSearch">
+      <label for="batch-raw-input">批量番剧名称</label>
+      <AnimeTitleInput
+        ref="batchInput"
+        id="batch-raw-input"
+        v-model="batchQuery"
+        mode="batch"
+        :disabled="batchSearchSubmitting"
+        aria-describedby="batch-raw-input-help batch-input-count"
+      />
+      <p class="field-help" id="batch-raw-input-help">每行一个番剧简称或不完整标题；系统会逐项解析并搜索候选合集，结果需人工审核。</p>
+      <p id="batch-input-count" class="batch-input-count" role="status">
+        当前 {{ batchCount }} 部；可输入 1～36 部。{{ batchValidationError || '输入有效，可以开始搜索。' }}
+      </p>
+      <p v-if="batchValidationError" id="batch-input-validation" class="field-error" role="alert">{{ batchValidationError }}</p>
+      <div class="notification-actions">
+        <BaseButton id="batch-parse-submit" type="submit" variant="primary" :loading="batchSearchSubmitting" :disabled="batchSearchDisabled">
+          搜索候选合集
+        </BaseButton>
+      </div>
+    </form>
+    <BatchWorkbenchView
+      ref="batchWorkbench"
+      class="batch-workbench-section"
+      v-model:raw-input="batchQuery"
+      hide-input
+      @restore-search-focus="batchInput?.focusInput()"
+    />
   </template>
 </template>
 
 <style scoped>
 .workbench-search-form,
+.batch-parse-form,
 .candidate-fallback-form {
   display: grid;
   gap: 0.75rem;
 }
 
 .workbench-search-form label,
+.batch-parse-form label,
 .candidate-fallback-form label {
   font-weight: 500;
   font-size: 0.875rem;
 }
 
+.batch-input-count {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
 .workbench-title {
   margin: 0;
+}
+
+.search-control-row {
+  display: flex;
+  align-items: end;
+  gap: var(--space-3);
+}
+
+.search-field {
+  display: grid;
+  flex: 1 1 24rem;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.search-control-row > button {
+  flex: 0 0 auto;
+}
+
+.journey-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  color: var(--color-text-muted);
+  list-style-position: inside;
+}
+
+.journey-steps .is-current {
+  color: var(--color-text);
+  font-weight: var(--font-weight-semibold);
+}
+
+.search-summary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.search-summary-label {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
 }
 
 .candidate-list-wrapper {
@@ -684,6 +786,15 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 }
 
 @media (max-width: 720px) {
+  .search-control-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .search-control-row > button {
+    width: 100%;
+  }
+
   .detail-grid {
     grid-template-columns: 1fr;
     gap: 0.2rem;

@@ -1,27 +1,121 @@
 {
   "project": "MiGuOrca",
-  "branchName": "ralph/stage42-global-notification",
-  "description": "Stage 42 / WP-42-A（US-346）：F5 悬浮全局提示收尾。仅收敛既有单一 notification store 与 GlobalNotification 的短时非关键反馈生命周期、固定悬浮布局和可访问性；不替换关键就地错误/重试，不改业务 API、外部写或敏感脱敏边界。",
+  "branchName": "ralph/stage43-add-anime-entry-visual",
+  "description": "Stage 43：搜索入口与候选选择视觉收口。WP-43-A先修完整批次确认全部与弹窗意图；D-01已于2026-09-18批准全局共享主题与基础控件对齐Token V1并做四页回归，不改其他页业务；按A→B→C→D→E闭环推进。执行PRD docs/MiGuOrca_stage43_add_anime_entry_visual_PRD.md；决策台账 docs/development/add-anime-visual-prd-handoff-2026-09-18.md。仅准备未启动；保持既有草案/保存/安全契约，不使用ralph.sh、不实现Stage44/45。",
   "userStories": [
     {
-      "id": "US-346",
-      "title": "F5 悬浮全局提示收尾",
-      "description": "作为使用工作台的用户，我希望非关键的成功、信息和全局错误摘要以可关闭、自动消失且不推挤页面的悬浮提示呈现，同时关键的字段、候选、草案和批量恢复入口仍留在原位置。",
+      "id": "US-347",
+      "title": "确认全部使用完整批次可确认集合",
+      "description": "作为批量审核用户，我希望筛选只影响浏览，保存并确认全部覆盖完整批次中全部当前可确认条目。",
       "acceptanceCriteria": [
-        "复用单一 useNotificationStore 与 GlobalNotification；success/info 默认 10 秒、error 默认 20 秒，手动关闭立即清理；加载型短时提示仅在存在既有合法调用场景时加入，必须在对应成功、失败、失效或离开时按消息 id 清理，不新增第二套提示通道",
-        "新消息替换旧消息时，旧 timer 只能清理自己的消息 id，绝不能关闭新消息；clear、替换、组件卸载均不留下 timer 或状态泄漏；通知不持久化到 localStorage、sessionStorage、URL 或 history",
-        "提示固定悬浮、不参与正文布局、不推挤或遮挡主要确认操作；关闭按钮可鼠标与键盘操作，通知不抢焦点；保留 success/info=polite status、error=assertive alert、aria-atomic 与中文可访问文字",
-        "字段校验、候选/草案/批量条目失败和重试、save-confirm 阻断、结果未知与外部写确认继续在原位置呈现；不得用 Toast 取代关键恢复入口，也不得把 HTTP 成功误作业务成功",
-        "不改变 notification 的既有预脱敏责任、API/OpenAPI/generated client、草案 draft_id + revision、保存确认、批量部分成功或任何外部写语义；Toast DOM、样式、console、URL/history 与浏览器存储不得泄露 URL、RSS、magnet、绝对路径、Cookie、凭据、原始响应、草案能力或完整 Request",
-        "定向 Vitest 覆盖 store fake timers（10/20 秒、手动关闭、替换与旧 timer 隔离、卸载/clear）和 GlobalNotification（fixed 不占布局、role/aria、关闭）；受影响 App/feature 断言同步更新",
-        "typecheck、lint、受影响 Vitest 与 npm run build 通过；真实 Chromium 使用 route mock 与隔离 tmp storage 覆盖固定悬浮不造成布局位移、关闭与键盘焦点、关键就地反馈仍可见、DOM/URL/history/storage/console canary；Stage 收尾再运行一次完整门禁",
+        "先固化隐藏项最小红测：A/B均可确认、筛选仅见B且不勾选时，确认全部请求items仍包含A/B；可见零项但隐藏有资格时全部可用",
+        "完整批次集合复用itemConfirmability；全部按钮资格、M计数、弹窗数量和描述符同源，排除未生成、待编辑、防抖/目录等待、重算、失败未恢复、零资源、失效、已确认、已保存待确认和未知结果项",
+        "保留确认全部、N部与全选当前可见可确认项；N当前可见勾选口径不变，隐藏勾选不清除；all描述符覆盖完整资格集合并省略item_ids",
+        "每条请求使用最新服务端draft_id/base_revision，不发完整Request；成功项不重提，未知恢复不改变原body/key/revision/集合，添加页不外部写",
+        "全部禁用原因与业务错误/恢复常驻原位置，隐藏失败先可见化再聚焦；1280/1440/1920、桌面缩放和键盘范围说明可达",
+        "完成执行PRD §4 US-347所列Vitest、batch coordinator与views契约定向分支、真实Chromium请求捕获及canary，不修改API/OpenAPI/generated",
         "Verify in browser using dev-browser skill",
-        "Typecheck passes",
-        "Tests pass"
+        "Tests pass",
+        "Typecheck passes"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "执行 PRD：docs/MiGuOrca_stage42_global_notification_PRD.md。基线 origin/main ab333cf612a6a4c56c39db8ee97a4245430bddf0（Stage 41 PR #69 已合并）。2026-09-18 完成开发、独立审核与收尾门禁：单一 store 增加按 kind 的 10/20 秒自动关闭、按消息 id 隔离的替换/clear/卸载清理、未定义 kind 不取得默认时长；GlobalNotification 改为 fixed 悬浮 + 点击穿透（关闭按钮 opt-in），保留 status/polite 与 alert/assertive + aria-atomic。实际验证：受影响 Vitest 3 files/20 passed；全量 `npm run test:unit -- --run` 49 files/593 passed；`npm run typecheck`、`npm run lint`、`npm run build` 通过；`uv run pytest tests/browser/test_app_global_notification.py -q` 8 passed；既有 5 个 toast 浏览器文件 138 passed；`uv run ruff check tests/browser/test_app_global_notification.py` 与 `git diff --check` 通过。红/绿变异验证证明 timer、fixed 布局与鼠标关闭断言不空转。2026-09-17 经 PR #70 合并至 main（merge cb45b245e774e05121b109b8c47229ae615164dc），静态/非浏览器、前端和真实 Chromium 三项 CI 全部成功。"
+      "notes": "WP-43-A/US-347（2026-09-18，实现在 ralph/stage43-add-anime-entry-visual）。改动：BatchWorkbenchView.vue 新增完整批次资格集合 batchConfirmable（复用 itemConfirmability），「保存并确认全部」的按钮可用性、按钮与范围文案中的 M 计数、弹窗数量、描述符全部同源；confirmBatchAcceptAll 改用该集合并省略 item_ids；新增常驻可见范围/禁用原因 #batch-accept-all-scope 并作为按钮 aria-describedby；batchWorkbench.ts 新增纯 helper batchAcceptAllScopeText。筛选、N 部入口与「全选当前可见可确认项」保持可见口径，隐藏勾选不清除；未改 API/OpenAPI/generated、后端、草案 authority/CAS、external 写与 AnimeDraftEditor。先红后绿：BatchWorkbenchView.test.ts 新增 5 例（先确认 4 例在旧实现下失败，含筛选仅见 B 时请求仍含 A/B、零可见仍可用、全批无资格禁用+中文原因、混合资格排除、隐藏失败可见化并聚焦且成功项退出全部范围）；batchWorkbench.test.ts 新增 batchAcceptAllScopeText 3 例。Chromium test_app_batch_workbench.py 新增 7 例（筛选隐藏/零可见/禁用原因+7 项描述符键集合与隐藏项敏感 canary，3 档桌面+200% 缩放可达），真实捕获 POST body，全部外部依赖 route mock。实际命令与结果：npm run test:unit -- --run BatchWorkbenchView.test.ts batchWorkbench.test.ts → 64 passed（46+18）；pytest tests/browser/test_app_batch_workbench.py -q → 25 passed；npm run typecheck / lint / build 通过；npm run api:check 无漂移；uv run pytest tests/api_contract/test_save_confirm_service.py -q -k 'batch_save_confirm_coordinator_preserves_order or batch_save_confirm_coordinator_item_ids' → 2 passed；uv run pytest src/apps/migu_orca_web/views_test.py -q -k 'batch_save_confirm_api_item_ids_selects or batch_save_confirm_api_returns_partial_success' → 2 passed（该次 362s 属既有收集/导入开销，非本改动引入）。运行数据隔离：browser 测试经 autouse fixture 指向 tmp 存储根，.migu_orca/storage 未被写入（mtime 仍为 09-15）。未做（属 US-348）：弹窗内存 intent 冻结与 draft/revision/batch 变化后的复核拒绝；本 story 仅保证弹窗数量来自完整批次集合。变更文件：frontend/src/features/workbench/{BatchWorkbenchView.vue,BatchWorkbenchView.test.ts,batchWorkbench.ts,batchWorkbench.test.ts}、tests/browser/test_app_batch_workbench.py。passes 仅表示本 story 列明验收与定向验证已实际执行，不替代独立审核。"
+    },
+    {
+      "id": "US-348",
+      "title": "确认全部弹窗冻结意图并复核资格版本",
+      "description": "作为确认用户，我希望二次确认的数量和集合与实际请求一致，状态变化时要求重新确认。",
+      "acceptanceCriteria": [
+        "依赖US-347完成；打开all弹窗在内存捕获batch、参与项标识、draft_id和base_revision，能力不展示/持久化",
+        "弹窗与确认按钮写明全部M部，说明完整批次、隐藏参与H部、排除项、仅保存本地方案及外部提交需追番管理再次确认",
+        "最终确认复核完整资格集合及draft/revision/batch绑定；变化时零save-confirm POST并在原固定业务区常驻说明重新确认，不能缩减旧rows或补新rows后直接发送",
+        "仅可见性或勾选改变不影响all集合；取消不发请求不改现场；函数入口防重；通过复核后由现有saveOperation冻结请求",
+        "RESPONSE_UNKNOWN重试沿用原冻结body而不新建intent/换键换版本；N部弹窗行为不变；ConfirmDialog trap/Escape/关闭恢复焦点通过",
+        "完成执行PRD §4 US-348 deferred/held响应在模态期间改变资格/版本的红绿验证、未变化精确body与取消/防重用例，关键反馈不能只Toast",
+        "Verify in browser using dev-browser skill",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "US-348（2026-09-18，依赖 US-347 已完成；分支 ralph/stage43-add-anime-entry-visual）。实现：BatchWorkbenchView.vue 打开「保存并确认全部」时把完整批次参与集合（item_id/draft_id/base_revision）与计数冻结成内存 intent（confirmBatchAcceptAll 的 route-local 闭包值，不持久化/不展示）；确认前 acceptAllIntentIsCurrent 复核 batch_id、资格集合增删（长度相等+逐条命中，既不缩减旧 rows 也不补新 rows）与每条 draft/revision 绑定，任一变化即零请求，并在固定业务区常驻 #batch-accept-all-recheck 说明（不是 Toast）且获得焦点、不自动重开确认；未变化则按冻结参与者发送并交现有 saveOperation 冻结与未知重试。弹窗标题与确认按钮写明「保存并确认全部 M 部」，正文说明完整批次、隐藏参与 H 部（仍一并确认）、排除项、仅保存本地方案与外部提交需追番管理再次确认；文案由 batchWorkbench.ts 纯 helper batchAcceptAllConfirmCopy 生成。函数入口 acceptAllDialogOpen 防重，不只依赖 disabled。N 部弹窗与请求、RESPONSE_UNKNOWN 冻结重试、ConfirmDialog 全局焦点机制均未改动；未改 API/OpenAPI/generated、后端、草案 CAS/authority、外部写与 AnimeDraftEditor。先红后绿：新增 8 例中 4 例在实际未修改实现时失败（弹窗标题/按钮未写明 M 部；版本变化后仍发出 1 次 save-confirm；新增资格后仍发送；重复打开会用新资格覆盖已打开的确认文案）；Escape 取消、重新解析、取消不改现场、未知重试沿用冻结 body 4 例为行为保持/补充覆盖，其红态未单独观察，不做过度声明。实际命令与结果：cd frontend && npm run test:unit -- --run → 49 files, 612 passed（BatchWorkbenchView 55、batchWorkbench 22）；npm run typecheck / lint（--max-warnings 0）/ build 通过；npm run api:check 无生成漂移；uv run pytest tests/browser/test_app_batch_workbench.py -q → 27 passed（新增 ::test_accept_all_rechecks_a_scope_change_while_the_dialog_is_open 与 ::test_accept_all_cancel_sends_nothing_and_keeps_the_scene，均为真实 Chromium）；uv run pytest tests/api_contract/test_save_confirm_service.py -q -k 'batch_save_confirm_coordinator_preserves_order or batch_save_confirm_coordinator_item_ids' → 2 passed；uv run pytest src/apps/migu_orca_web/views_test.py -q -k 'batch_save_confirm_api_item_ids_selects or batch_save_confirm_api_returns_partial_success' → 2 passed（412.61s，收集开销同 US-347）。Chromium 用 held route 保留在途草案生成响应，在模态打开期间 fulfill 让第三个条目加入资格集合，确认后捕获零 save-confirm POST；外部依赖全部 route mock，无真实 MiKan/AB 调用；模态期间不要求用户操作背景（focus trap 使背景 inert），版本变化一类由 Vitest 的 deferred preview-modify 响应覆盖。变更文件：frontend/src/features/workbench/{BatchWorkbenchView.vue,BatchWorkbenchView.test.ts,batchWorkbench.ts,batchWorkbench.test.ts}、tests/browser/test_app_batch_workbench.py。"
+    },
+    {
+      "id": "US-349",
+      "title": "全局共享主题与基础控件对齐Token V1",
+      "description": "作为使用者，我希望搜索、候选、控件和状态遵循一致的已批准视觉基线。",
+      "acceptanceCriteria": [
+        "前置WP-43-A独立审核闭环；读取决策台账记录D-01已于2026-09-18批准全局共享主题与基础控件对齐Token V1及四页回归，不改其他页业务",
+        "在全局共享层通过现有语义Token映射V1画布/文字/主色/状态/焦点/字号/行高/间距/圆角/尺寸/动效，不逐页散落色值；主要控件44px、首页搜索52px",
+        "共享主题/基础控件对齐并对添加番剧、追番方案、追番管理、设置四页各正常及错误/禁用态定向回归；模态/Teleport使用同一共享视觉基线，不新增添加页独立主题或修改其他页业务",
+        "正文对比4.5:1、控件边界3:1、可见焦点不裁剪；disabled旁有原因、loading有文字；三档桌面和200%缩放可达，reduced-motion取消非必要位移",
+        "不重做Toast store/timer或品牌/导航业务；真实命中验证导航/底栏/模态/Toast层级、键盘及中文反馈",
+        "完成执行PRD §5列明受影响styles/基础组件/App Vitest、typecheck/lint/build与四页定向Chromium，不以Token字符串测试代替真实可读性",
+        "Verify in browser using dev-browser skill",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "US-349（2026-09-18，WP-43-B；D-01已确认，未改四页业务流程/状态/路由/API）。全局 tokens.css 对齐 Token V1：画布/表面、文字/状态、深海蓝主色、珊瑚强调、统一焦点、字号行高、4/8/12/16/20/24/32/40/48/64 间距、6/10/14 圆角、44/52px 控件、阴影/z 层级及 reduced-motion；保留现有语义兼容别名，未逐页复制色值。main.css 与 BaseButton/BaseInput/BaseSelect/BaseTextarea/CheckboxRow 使用共享几何和焦点基线；首页 #mikan-candidate-query 为 52px；GlobalNotification 仅修正包裹导航时的共享顶部安全间距，未改 store/timer。新增 tokens.test.ts 的 V1 映射/几何断言。实际验证：cd frontend && npm run test:unit -- --run src/styles/tokens.test.ts src/components/forms/BaseFormControls.test.ts → 2 files/21 passed；npm run typecheck → 通过；npm run lint → 通过；npm run build → 通过；uv run pytest tests/browser/test_app_global_notification.py tests/browser/test_app_shell.py tests/browser/test_app_responsive_a11y.py tests/browser/test_app_workbench.py tests/browser/test_app_requests.py tests/browser/test_app_tracking.py tests/browser/test_app_settings.py -q → 首轮 128 passed/1 failed（Toast 与 1280 包裹导航 4.6px 重叠），修正共享顶部间距后复跑定向集合 → 122 passed；浏览器使用 Flask test server、真实 Chromium、外部接口 route mock、tmp storage fixture，覆盖四页 shell/正常错误禁用反馈、导航/Toast/模态层级、键盘焦点、三档桌面与 200% 缩放。浏览器/测试未触碰真实 MiKan、AB、外部写；未改 Toast 行为、AnimeDraftEditor、后端、契约。变更文件：frontend/src/styles/{tokens.css,tokens.test.ts,main.css}、frontend/src/components/forms/{BaseButton,BaseInput,BaseSelect,BaseTextarea,CheckboxRow}.vue、frontend/src/components/feedback/GlobalNotification.vue。实际协作：本轮唯一写入 Agent 为 gpt-5.6-luna 替代 Fable CLI（Fable 两次环境卡住、无改动后终止），未假称 Fable；未启动 C～E。风险：本轮浏览器为现有四页定向集合，未新增截图/trace；颜色对比按 Token V1 色值及真实页面回归验证，未引入独立自动对比度扫描。"
+    },
+    {
+      "id": "US-350",
+      "title": "单番搜索入口与搜索摘要层级",
+      "description": "作为单番添加用户，我希望一个搜索操作组明确当前任务，并理解接下来仍需人工选择真实合集。",
+      "acceptanceCriteria": [
+        "前置WP-43-B闭环；页面任务主标题添加番剧，去重复容器标题；模式邻近输入，可见标签/输入/按钮为操作组，宽桌面限行长且缩放可换行",
+        "显示输入名称→选择真实合集→审核并保存确认三步，不加入外部提交步骤；FOUND后集中搜索摘要/修改搜索并恢复原文焦点",
+        "初始无空结果/直连大面板；EMPTY/FAILED/请求失败分别就地表达，既有直连救援条件和恢复保持，不把HTTP200 FAILED当空",
+        "模式切换保留原文光标，搜索进行诚实等待/防重，不自动选择唯一候选；草案宿主不因标题重排丢状态",
+        "首次输入焦点、键盘模式切换/搜索、成功候选标题或首候选焦点、修改回输入及aria-live通过；三视口/缩放/长标题/reduced-motion/canary通过",
+        "完成执行PRD §6受影响WorkbenchView/AnimeModeSwitch/AnimeTitleInput Vitest、候选契约定向分支与workbench/mode Chromium；不重排草案编辑器",
+        "Verify in browser using dev-browser skill",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "WP-43-C/US-350（2026-09-18，单写入 Agent：gpt-5.6-luna；US349 的 Fable CLI 两次环境卡住且无改动，本轮按可用默认模型替代）。WorkbenchView 改为唯一任务主标题“添加番剧”，移除重复容器标题；增加输入名称→选择真实合集→审核并保存确认三步、单番搜索操作组与宽桌面限行/窄屏换行；FOUND 后集中搜索摘要/修改搜索入口并保留原焦点恢复；未改变既有 EMPTY/FAILED/请求失败、直连救援、HTTP200 FAILED、唯一候选不自动选择、模式光标和草案宿主状态。未改 AnimeDraftEditor、业务/API/OpenAPI/generated、后端/CAS/保存/外部写/N部语义。先补最小红测后转绿：WorkbenchView Vitest 45 passed（含新增任务层级与摘要焦点 2 例），真实 Chromium `uv run pytest tests/browser/test_app_workbench.py tests/browser/test_app_mode_input.py -q` 47 passed；typecheck、lint、build、api:check 均通过；git diff --check 通过。浏览器使用 route mock/tmp storage，无真实 MiKan/AB/外部写，未发现敏感值泄漏。未更新 AnimeModeSwitch/AnimeTitleInput 实现，因现有键盘/光标行为已满足 AC；未新增截图/trace。"
+    },
+    {
+      "id": "US-351",
+      "title": "批量输入容量与整体搜索等待",
+      "description": "作为批量用户，我希望在同一区域检查有效行数和容量，再开始真实候选搜索。",
+      "acceptanceCriteria": [
+        "前置WP-43-C闭环；现有宿主输入与子组件搜索动作为一个操作区域，仅一个v-model输入来源；动作搜索候选合集",
+        "计数复用batchItemCount/splitter并保留原文；0/37+禁用且关联说明，1/36可搜索，函数入口仍校验，不截断",
+        "首次无完整空工作台；搜索中原文/提交规模/整体不定进行态可见，无逐条实时进度/假百分比；结束才呈现实际混合结果",
+        "单项EMPTY/FAILED保留其他结果，不承诺单项重搜；有未保存候选/草案/勾选现场重搜先ConfirmDialog说明舍弃，取消全现场不变、确认才清除",
+        "沿用自动增高/内部滚动，36行说明/错误/动作可达；计数关联textarea不过度播报，完成聚焦工作台标题，重搜取消恢复触发焦点",
+        "完成执行PRD §7受影响宿主/input/helper Vitest、batch容量/逐项失败契约、held等待/混合/重搜取消Chromium与canary；不新增恢复会话",
+        "Verify in browser using dev-browser skill",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "WP-43-D/US-351（2026-09-18，唯一写入 Agent 为 gpt-5.6-luna；用户指定 Fable CLI 环境卡住，未假称 Fable）。WorkbenchView 现在唯一持有批量输入、容量说明与搜索动作，BatchWorkbenchView hideInput 时不再渲染第二输入/表单，仅一个 v-model；计数复用 batchItemCount/validateBatchRawInput，0/37+入口禁用且关联说明，函数入口仍校验并保留原文。初始不渲染完整空结果；进行态展示原文、提交规模与整体不定等待，完成后统一渲染真实 FOUND/EMPTY/FAILED 混合结果；重搜对未保存候选/草案/勾选现场使用 ConfirmDialog，取消恢复原提交文本与焦点，确认才清除；完成聚焦批量工作台标题。AnimeTitleInput 增加焦点入口。先补最小宿主红测后转绿；未改 API/OpenAPI/generated、backend/CAS/save/external、N 部语义、恢复会话或逐项重搜。实际验证：cd frontend && npm run test:unit -- --run src/features/workbench/BatchWorkbenchView.test.ts src/features/workbench/WorkbenchView.test.ts src/features/workbench/AnimeTitleInput.test.ts src/features/workbench/batchWorkbench.test.ts → 4 files/121 passed；npm run typecheck、lint、build、api:check 均通过；git diff --check 通过；uv run pytest tests/browser/test_app_batch_workbench.py -q → 27 passed（真实 Chromium、held route、tmp storage、外部依赖 mock，无 sleep/外网）。变更文件：frontend/src/features/workbench/{WorkbenchView.vue,WorkbenchView.test.ts,BatchWorkbenchView.vue,AnimeTitleInput.vue}、tests/browser/test_app_batch_workbench.py。遗留风险：未新增专门重搜确认浏览器用例，现有批量确认/取消与 held 等浏览器回归通过；未生成截图/trace。"
+    },
+    {
+      "id": "US-352",
+      "title": "共享候选比较布局与Stage43收尾",
+      "description": "作为合集选择用户，我希望比较标题和季度证据，识别正在生成的候选并在失败时就地恢复。",
+      "acceptanceCriteria": [
+        "前置WP-43-D闭环；复用CandidateCollectionList/Card，以宿主布局或容器响应适配单番比较/批量紧凑，不复制选择逻辑或强制三列",
+        "默认公开标题、安全同源opaque封面或失败占位、季度证据、独立总集数与选择动作；高级匹配按需展开，候选无有效资源/更新推算",
+        "CONFLICT禁选、NEEDS_CONFIRMATION显式确认、唯一候选不自动选；长标题证据换行且按钮不挤出，未知总集数标未知，不跨候选猜封面",
+        "被点击卡就地文字加载，单番同会话防重、批量本item锁且其他item可操作；失败候选旁错误/重试，成功聚焦审核，不自动勾选其他项",
+        "按钮可访问名称含候选名、键盘/reduced-motion/三视口/缩放/坏图与canary通过；未保存safe-info无新增调用",
+        "完成执行PRD §8受影响candidate/两个宿主Vitest、候选DTO/输出契约及held生成/另item Chromium；所有工作包复审后按§9执行一次完整Stage门禁并记录真实交接，不进入Stage44/45",
+        "Verify in browser using dev-browser skill",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "WP-43-E/US-352（2026-09-18，唯一写入 Agent 为 gpt-5.6-luna；用户指定 Fable CLI 环境失败，未假称 Fable）。CandidateCollectionList/Card 继续作为单番与批量唯一选择边界；CandidateCollectionList 新增 compact 输入，单番候选采用自适应比较网格，批量右栏紧凑单列。CandidateCard 默认仅显示公开标题、同源 opaque poster/坏图占位、独立总集数（未知明确标注）、季度证据、高级信息折叠与选择动作；移除播出进度/更新推算表达，按钮 aria-label 包含候选名，长标题/证据可换行。CONFLICT/NEEDS_CONFIRMATION、唯一不自动选、就地 loading/失败重试、本 item 锁与其他批量 item 操作、safe-info 不新增调用均沿用共享逻辑。先补最小红测（总集数/无播出进度、accessible name、坏图占位）后转绿；候选 DTO/output contract 回归：test_dto_contracts 2 passed、views candidate/context 16 passed。定向 Vitest 5 files/145 passed；定向 workbench + batch Chromium 73 passed（含 held 生成、坏图/长标题及批量另一 item 现有回归）；全 Stage 门禁：compileall/ruff/openapi 通过，非浏览器 pytest 1528 passed，前端 49 files/620 passed、typecheck/lint/api:check/build 通过，Chromium 238 passed/1 failed。唯一失败为既有 tests/browser/test_app_global_notification.py::TestAppGlobalNotificationFloating::test_toast_is_fixed_and_leaves_the_page_layout_alone，Toast 关闭后锚点位移 50px，涉及 Stage42 GlobalNotification/shell，未在 US-352 范围修复；定向候选浏览器全部通过。未改 API/OpenAPI/generated、后端、草案/CAS/save/external、Stage44/45；未 push/PR/merge。"
     }
   ]
 }

@@ -220,6 +220,35 @@ describe('WorkbenchView single search (US-204)', () => {
     expect(apiPost).not.toHaveBeenCalled()
   })
 
+  it('presents one add-anime task heading, three steps, and a grouped search action', async () => {
+    const { wrapper } = await mountWorkbench()
+
+    expect(wrapper.find('#workbench-heading').element.tagName).toBe('H1')
+    expect(wrapper.find('#workbench-heading').text()).toBe('添加番剧')
+    expect(wrapper.find('.journey-steps').text()).toContain('输入名称')
+    expect(wrapper.find('.journey-steps').text()).toContain('选择真实合集')
+    expect(wrapper.find('.journey-steps').text()).toContain('审核并保存确认')
+    expect(wrapper.find('.search-control-row #mikan-candidate-query').exists()).toBe(true)
+    expect(wrapper.find('.search-control-row #mikan-candidate-search-submit').text()).toContain('搜索候选合集')
+    expect(wrapper.text()).not.toContain('外部提交')
+  })
+
+  it('collapses a found search into a summary with a focused edit action', async () => {
+    apiPost.mockResolvedValue(candidateResult())
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#mikan-candidate-query').exists()).toBe(false)
+    expect(wrapper.find('.search-summary-actions').text()).toContain('搜索摘要')
+    expect(wrapper.find('#mikan-edit-search').exists()).toBe(true)
+    await wrapper.find('#mikan-edit-search').trigger('click')
+    await nextTick()
+    expect(document.activeElement).toBe(wrapper.find('#mikan-candidate-query').element)
+  })
+
   it('offers the direct-collection rescue only after a search found no candidates', async () => {
     apiPost.mockResolvedValueOnce(candidateResult({ candidates: [] }))
     const { wrapper } = await mountWorkbench()
@@ -274,7 +303,7 @@ describe('WorkbenchView single search (US-204)', () => {
     expect(cards).toHaveLength(1)
     expect(cards[0]!.text()).toContain('葬送的芙莉莲')
     expect(cards[0]!.text()).toContain('选择此合集')
-    expect(cards[0]!.find('.candidate-progress').text()).toContain('播出进度')
+    expect(cards[0]!.find('.candidate-progress').text()).toContain('总集数')
     // F4/US-345: the collection id and the parse search query are diagnostics.
     // They stay in the collapsed 高级信息 details, so the real browser's
     // rendered default layer never shows them (asserted in Chromium).
@@ -555,6 +584,31 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     await wrapper.find('#anime-mode-single').trigger('click')
     await nextTick()
     expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(true)
+  })
+
+  it('keeps batch input, capacity feedback, and search in one operation area', async () => {
+    apiPost.mockResolvedValue({ batch_id: 'batch-capacity', raw_input: '甲', items: [] } as never)
+    const { wrapper } = await mountWorkbench()
+    await wrapper.find('#anime-mode-batch').trigger('click')
+    await nextTick()
+
+    expect(wrapper.findAll('#batch-raw-input')).toHaveLength(1)
+    expect(wrapper.findAll('#batch-parse-form')).toHaveLength(1)
+    expect(wrapper.find('#batch-input-count').text()).toContain('当前 0 部')
+    expect(wrapper.find('#batch-parse-submit').attributes('disabled')).toBeDefined()
+
+    const rawInput = Array.from({ length: 37 }, (_, index) => `番剧${index}`).join('\n')
+    await wrapper.find('#batch-raw-input').setValue(rawInput)
+    expect(wrapper.find('#batch-input-count').text()).toContain('当前 37 部')
+    expect(wrapper.find('#batch-parse-submit').attributes('disabled')).toBeDefined()
+
+    await wrapper.find('#batch-raw-input').setValue('甲\n乙')
+    expect(wrapper.find('#batch-parse-submit').attributes('disabled')).toBeUndefined()
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    expect(apiPost).toHaveBeenCalledWith('/api/v1/batches/parse', expect.objectContaining({
+      body: expect.objectContaining({ raw_input: '甲\n乙' }),
+    }))
   })
 
   it('restores the single input cursor after switching modes', async () => {

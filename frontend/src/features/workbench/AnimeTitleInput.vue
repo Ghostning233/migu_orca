@@ -54,6 +54,7 @@ watch(
 
 defineExpose({
   focus: () => nativeInput()?.focus(),
+  focusInput: () => nativeInput()?.focus(),
   selection: () => ({
     start: nativeInput()?.selectionStart ?? 0,
     end: nativeInput()?.selectionEnd ?? 0,

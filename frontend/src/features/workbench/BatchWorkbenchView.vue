@@ -47,6 +47,8 @@ import CandidateCollectionList from '@/features/workbench/CandidateCollectionLis
 import { useDraftEditScheduler, type DraftEditScheduler } from '@/features/workbench/draftEditScheduler'
 
 import {
+  batchAcceptAllConfirmCopy,
+  batchAcceptAllScopeText,
   batchSaveConfirmErrorLabel,
   batchSaveConfirmRecoveryAllowed,
   batchSaveConfirmSucceeded,
@@ -68,6 +70,7 @@ import {
   orderBatchItemsForReview,
   nextBatchException,
   validateBatchRawInput,
+  type BatchAcceptAllCounts,
   type BatchSaveConfirmDescriptor,
   type BatchSaveConfirmResult,
   type BatchCandidate,
@@ -99,10 +102,16 @@ const confirmDialog = ref<InstanceType<typeof ConfirmDialog> | null>(null)
 const journey = useBatchReviewJourney()
 
 const props = withDefaults(defineProps<{ rawInput?: string; hideInput?: boolean }>(), { rawInput: '', hideInput: false })
-const emit = defineEmits<{ (event: 'update:rawInput', value: string): void }>()
+const emit = defineEmits<{
+  (event: 'update:rawInput', value: string): void
+  (event: 'restore-search-focus'): void
+}>()
 
 // Batch parse state.
 const rawInput = ref(props.rawInput)
+const parseStarted = ref(false)
+const previousRawInput = ref(props.rawInput)
+const inputControl = ref<InstanceType<typeof AnimeTitleInput> | null>(null)
 
 watch(() => props.rawInput, (value) => {
   if (value !== rawInput.value) rawInput.value = value
@@ -340,6 +349,32 @@ const visibleItems = computed(() => items.value.filter((item) =>
     exceptionsOnly: exceptionsOnly.value,
   }),
 ))
+// US-347: 保存并确认全部 的范围是完整批次，不是当前可见子集。筛选和
+// 「全选当前可见可确认项」只改变浏览，因此 all 的资格集合、按钮可用性、M 计数、
+// 弹窗数量和描述符都必须来自下面同一个完整批次集合。
+const batchConfirmable = computed(() => items.value.filter((item) => itemConfirmability(item.item_id ?? '').confirmable))
+const batchConfirmableCount = computed(() => batchConfirmable.value.length)
+const batchHiddenConfirmableCount = computed(() => {
+  const visibleIds = new Set(visibleItems.value.map((item) => item.item_id))
+  return batchConfirmable.value.filter((item) => !visibleIds.has(item.item_id)).length
+})
+const batchAcceptAllScope = computed(() => batchAcceptAllScopeText({
+  total: items.value.length,
+  confirmable: batchConfirmableCount.value,
+  hidden: batchHiddenConfirmableCount.value,
+}))
+
+// US-348: 打开「保存并确认全部」时把完整批次参与集合与绑定版本冻结成内存 intent
+// （confirmBatchAcceptAll 的 route-local 闭包值），确认前重新核对，任何资格/版本/batch
+// 变化都不发送。draft_id 等能力只存在于该对象，不展示、不持久化、不进入 URL 或存储。
+interface BatchAcceptAllIntent {
+  batchId: string
+  participants: Array<{ itemId: string; draftId: string; baseRevision: number }>
+  counts: BatchAcceptAllCounts
+}
+const acceptAllDialogOpen = ref(false)
+const acceptAllRecheckNotice = ref('')
+const acceptAllRecheckElement = ref<HTMLElement | null>(null)
 
 function saveReviewScrollPosition(): void {
   if (reviewList.value) reviewScrollPositions.set(reviewFilterKey.value, reviewList.value.scrollTop)
@@ -468,18 +503,32 @@ async function parseBatch(): Promise<void> {
   if (validationError) {
     parseError.value = validationError
     parseResult.value = null
-    items.value = []
-    batchId.value = ''
     notification.error('校验失败', validationError)
     return
   }
+  if (items.value.length && hasUnsafeBatchWork() && !acceptAllDialogOpen.value) {
+    const confirmed = await confirmDialog.value?.confirm({
+      title: '重新搜索批量条目',
+      message: '重新搜索将舍弃当前候选、草案和勾选现场，只保留新的批量输入。是否继续？',
+      confirmLabel: '舍弃现场并搜索',
+      cancelLabel: '取消',
+    })
+    if (!confirmed) {
+      rawInput.value = previousRawInput.value
+      await nextTick()
+      inputControl.value?.focusInput()
+      emit('restore-search-focus')
+      return
+    }
+  }
   parseError.value = ''
   clearBatchRouteLocalState()
-    parseLoading.value = true
+  parseStarted.value = true
+  parseLoading.value = true
   journey.dispatch({ type: 'parse_started' })
   const count = batchItemCount(rawInput.value)
   parseCount.value = count
-  loadingMessage.value = `正在逐项搜索 ${count} 个批量条目的 MiKan 候选；系统会逐项处理，较大的批量可能需要数分钟，请耐心等待。`
+  loadingMessage.value = `正在逐项搜索 ${count} 个批量条目的 MiKan 候选；整体结果将在批量完成后统一展示，较大的批量可能需要数分钟，请耐心等待。`
   try {
     const payload = buildBatchParsePayload(rawInput.value, currentStorageDir())
     const result = await api.post<BatchParseResult>('/api/v1/batches/parse', {
@@ -487,6 +536,7 @@ async function parseBatch(): Promise<void> {
       timeoutMs: batchParseTimeoutMs(count),
     })
     parseResult.value = result
+    previousRawInput.value = rawInput.value
     journey.dispatch({ type: 'parse_succeeded', result })
     const parsedItems = result.items ?? []
     inputItemOrder.value = new Map(
@@ -505,6 +555,8 @@ async function parseBatch(): Promise<void> {
     savingItemIds.value = new Set()
     seasonConfirmations.value = {}
     notification.success('批量搜索完成', `已返回 ${items.value.length} 个条目的候选搜索状态。`)
+    await nextTick()
+    document.querySelector<HTMLElement>('#panel-section-批量工作台')?.focus()
   } catch (error) {
     void error
     journey.dispatch({ type: 'parse_failed', error })
@@ -1017,16 +1069,80 @@ async function confirmBatchAcceptSelected(): Promise<void> {
   await submitBatchSaveConfirm(rows, rows.map((row) => row.item_id ?? ''))
 }
 
-async function confirmBatchAcceptAll(): Promise<void> {
-  const rows = selectable.value
-  if (!rows.length || saveInFlight.value) return
-  const ok = await confirmDialog.value?.confirm({
-    title: '批量保存确认',
-    message: '确认保存并确认全部可确认的批量草案？',
-    confirmLabel: '保存并确认',
+/** Freeze the complete batch's confirmable set as the confirm-all intent. */
+function buildAcceptAllIntent(): BatchAcceptAllIntent | null {
+  const rows = batchConfirmable.value
+  if (!rows.length) return null
+  const participants = rows.map((row) => ({
+    itemId: row.item_id ?? '',
+    draftId: row.draft_id ?? '',
+    baseRevision: row.draft_revision ?? 1,
+  }))
+  if (participants.some((participant) => !participant.itemId || !participant.draftId)) return null
+  return {
+    batchId: batchId.value,
+    participants,
+    counts: {
+      total: items.value.length,
+      confirmable: rows.length,
+      hidden: batchHiddenConfirmableCount.value,
+    },
+  }
+}
+
+/**
+ * True only while the frozen intent is exactly what would be sent now: the same
+ * batch, the same eligible rows (neither added nor removed) and the same
+ * draft/revision binding per participant. A changed scope always requires a new
+ * confirmation instead of silently filtering or padding the old one.
+ */
+function acceptAllIntentIsCurrent(intent: BatchAcceptAllIntent): boolean {
+  if (batchId.value !== intent.batchId) return false
+  const rows = batchConfirmable.value
+  if (rows.length !== intent.participants.length) return false
+  return intent.participants.every((participant) => {
+    const row = rows.find((item) => item.item_id === participant.itemId)
+    if (!row) return false
+    return row.draft_id === participant.draftId && (row.draft_revision ?? 1) === participant.baseRevision
   })
-  if (!ok) return
-  await submitBatchSaveConfirm(rows, null)
+}
+
+async function confirmBatchAcceptAll(): Promise<void> {
+  // US-348: the dialog shows one frozen intent, and what it shows is what the
+  // request sends. The function-level guard (not only the disabled state) keeps
+  // a second invocation from replacing an open confirmation with a different
+  // scope.
+  if (acceptAllDialogOpen.value || saveInFlight.value) return
+  acceptAllRecheckNotice.value = ''
+  const intent = buildAcceptAllIntent()
+  if (!intent) return
+  acceptAllDialogOpen.value = true
+  try {
+    const copy = batchAcceptAllConfirmCopy(intent.counts)
+    const ok = await confirmDialog.value?.confirm({
+      title: copy.title,
+      message: copy.message,
+      confirmLabel: copy.confirmLabel,
+    })
+    if (!ok) return
+    if (!acceptAllIntentIsCurrent(intent)) {
+      // The frozen set or a bound version moved while the dialog was open. Send
+      // nothing, keep the scene, and leave a persistent explanation next to the
+      // entry instead of a toast; the user confirms again explicitly.
+      acceptAllRecheckNotice.value = '完整批次的资格或草案版本已变化，本次未发送任何请求；请核对后重新确认全部。'
+      await nextTick()
+      acceptAllRecheckElement.value?.focus()
+      return
+    }
+    // Send exactly the frozen participants; submitBatchSaveConfirm still
+    // re-checks every one of them and freezes the request for an unknown result.
+    const rows = intent.participants
+      .map((participant) => items.value.find((item) => item.item_id === participant.itemId))
+      .filter((row): row is BatchItem => Boolean(row))
+    await submitBatchSaveConfirm(rows, null)
+  } finally {
+    acceptAllDialogOpen.value = false
+  }
 }
 
 function selectForBatch(itemId: string): void {
@@ -1159,6 +1275,10 @@ onMounted(() => {
     // card grid itself is never persisted server-side, so a refresh can only
     // restore the queue context, not the cards.
   }
+  void nextTick(() => {
+    const heading = document.querySelector<HTMLElement>('#panel-section-批量工作台')
+    heading?.setAttribute('tabindex', '-1')
+  })
 })
 
 onUnmounted(() => {
@@ -1171,9 +1291,10 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 
 <template>
   <PanelSection title="批量工作台" class="batch-workbench-panel">
-    <form id="batch-parse-form" class="batch-parse-form" @submit.prevent="parseBatch">
+    <form v-if="!props.hideInput" id="batch-parse-form" class="batch-parse-form" @submit.prevent="parseBatch">
       <label v-if="!props.hideInput" for="batch-raw-input">批量番剧名称</label>
       <AnimeTitleInput
+        ref="inputControl"
         v-if="!props.hideInput"
         id="batch-raw-input"
         v-model="rawInput"
@@ -1193,8 +1314,11 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
       </div>
     </form>
 
-    <div id="batch-parse-result" class="batch-parse-result" aria-live="polite" aria-relevant="additions text">
+    <div v-if="parseStarted || parseLoading || parseError || items.length" id="batch-parse-result" class="batch-parse-result" aria-live="polite" aria-relevant="additions text">
       <LoadingState v-if="parseLoading" :message="loadingMessage" />
+      <p v-if="parseLoading" id="batch-parse-loading-summary" class="batch-parse-loading-summary" role="status">
+        原文：{{ rawInput }}；本次提交规模：{{ parseCount }} 部；整体搜索进行中，暂不展示逐项进度。
+      </p>
       <ErrorState
         v-else-if="parseError && !items.length"
         title="批量草案获取失败"
@@ -1425,7 +1549,8 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                 class="batch-candidate-list"
                 :candidates="detailItem.candidates ?? []"
                 :query="batchCardTitle(detailItem)"
-                  :disabled="operationLocks(detailItem.item_id ?? '')"
+                compact
+                :disabled="operationLocks(detailItem.item_id ?? '')"
                 :loading-candidate-id="generatingCandidateIdFor(detailItem.item_id ?? '')"
                 :candidate-errors="candidateErrorsFor(detailItem.item_id ?? '')"
                 :confirmed-seasons="seasonConfirmations"
@@ -1498,6 +1623,25 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
           <span id="batch-accept-selected-count" class="batch-selected-count">
             全部 {{ items.length }} 项；当前筛选 {{ visibleItems.length }} 项；已选且可确认 {{ selectedCount }} 项；可确认 {{ confirmableCount }} 项；需处理 {{ needsProcessingCount }} 项；重算中 {{ processingCount }} 项；请求 {{ saveSummary.requested ?? 0 }} 项；已确认 {{ saveSummary.confirmed ?? 0 }} 项；失败 {{ saveSummary.failed ?? 0 }} 项
           </span>
+          <p
+            id="batch-accept-all-scope"
+            class="batch-accept-scope"
+            :class="{ 'is-blocked': batchConfirmableCount === 0 }"
+          >
+            {{ batchAcceptAllScope }}
+          </p>
+          <!-- US-348: 确认前复核失败时，说明常驻在固定业务区（不是 Toast），
+               并获得焦点；不会自动再次打开确认。 -->
+          <p
+            v-if="acceptAllRecheckNotice"
+            id="batch-accept-all-recheck"
+            ref="acceptAllRecheckElement"
+            class="batch-accept-recheck"
+            role="status"
+            tabindex="-1"
+          >
+            {{ acceptAllRecheckNotice }}
+          </p>
           <BaseButton
             v-if="saveOperation?.phase === 'response_unknown'"
             id="batch-retry-frozen-operation"
@@ -1519,11 +1663,12 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
             <BaseButton
               id="batch-accept-all"
               variant="secondary"
-              :disabled="selectable.length === 0 || saveInFlight"
+              :disabled="batchConfirmableCount === 0 || saveInFlight"
               :loading="saveInFlight"
+              :aria-describedby="acceptAllRecheckNotice ? 'batch-accept-all-scope batch-accept-all-recheck' : 'batch-accept-all-scope'"
               @click="confirmBatchAcceptAll"
             >
-              保存并确认全部
+              保存并确认全部 {{ batchConfirmableCount }} 部
             </BaseButton>
           </div>
         </div>
@@ -1811,6 +1956,35 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 .batch-selected-count {
   color: var(--color-text-muted);
   font-size: 0.84rem;
+}
+
+/* US-347: the confirm-all scope is stated in visible copy next to its button
+   and is also the button's accessible description. */
+.batch-accept-scope {
+  color: var(--color-text-muted);
+  flex-basis: 100%;
+  font-size: 0.84rem;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.batch-accept-scope.is-blocked {
+  color: #8d2f20;
+}
+
+/* US-348: the rejection of a stale confirmation is permanent business-area
+   copy, so it is focusable and always shows a visible focus ring. */
+.batch-accept-recheck {
+  color: #8d2f20;
+  flex-basis: 100%;
+  font-size: 0.84rem;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.batch-accept-recheck:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
 .batch-accept-actions {

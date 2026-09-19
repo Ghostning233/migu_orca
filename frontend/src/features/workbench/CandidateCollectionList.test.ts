@@ -114,4 +114,24 @@ describe('CandidateCollectionList', () => {
     expect(button.attributes('aria-busy')).toBeUndefined()
     expect((button.element as HTMLButtonElement).disabled).toBe(false)
   })
+
+  it('exposes decision evidence without播出进度 and names each choice', () => {
+    const wrapper = mount(CandidateCollectionList, {
+      props: { candidates: [candidate({ total_episodes: null })], query: '芙莉莲' },
+    })
+
+    expect(wrapper.text()).toContain('总集数：未知')
+    expect(wrapper.text()).not.toContain('播出进度')
+    expect(wrapper.find('.candidate-select').attributes('aria-label')).toContain('葬送的芙莉莲 第四季')
+  })
+
+  it('falls back to an in-place poster placeholder when the image fails', async () => {
+    const wrapper = mount(CandidateCollectionList, {
+      props: { candidates: [candidate({ poster_url: '/api/v1/mikan/posters/opaque-1' })], query: '芙莉莲' },
+    })
+
+    await wrapper.find('img.candidate-poster').trigger('error')
+    expect(wrapper.find('img.candidate-poster').exists()).toBe(false)
+    expect(wrapper.find('.candidate-poster-placeholder').text()).toContain('暂无封面')
+  })
 })

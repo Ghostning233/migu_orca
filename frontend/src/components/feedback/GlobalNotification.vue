@@ -14,7 +14,7 @@
 // sanitized by the caller (api/client.ts + notification store): no endpoints,
 // tokens, cookies, raw bodies, absolute paths or full Requests.
 import { storeToRefs } from 'pinia'
-import { computed, onBeforeUnmount } from 'vue'
+import { computed, onBeforeUnmount, watch } from 'vue'
 
 import { useNotificationStore } from '@/app/stores/notification'
 
@@ -27,9 +27,84 @@ const isPolite = computed(
   () => current.value?.kind === 'success' || current.value?.kind === 'info',
 )
 
+type ToastViewport = { x: number; y: number }
+type ToastEnvironment = {
+  viewport: ToastViewport
+  scrollBehavior: string
+  htmlOverflowAnchor: string
+  bodyOverflowAnchor: string
+  scrollRestoration: ScrollRestoration
+}
+
+let toastEnvironment: ToastEnvironment | null = null
+
+function captureToastEnvironment(): void {
+  if (toastEnvironment) return
+  const htmlStyle = document.documentElement.style
+  const bodyStyle = document.body.style
+  toastEnvironment = {
+    viewport: { x: window.scrollX, y: window.scrollY },
+    scrollBehavior: htmlStyle.scrollBehavior,
+    htmlOverflowAnchor: htmlStyle.overflowAnchor,
+    bodyOverflowAnchor: bodyStyle.overflowAnchor,
+    scrollRestoration: history.scrollRestoration,
+  }
+  htmlStyle.scrollBehavior = 'auto'
+  htmlStyle.overflowAnchor = 'none'
+  bodyStyle.overflowAnchor = 'none'
+  history.scrollRestoration = 'manual'
+}
+
+function restoreToastEnvironment(): void {
+  const saved = toastEnvironment
+  if (!saved) return
+  const htmlStyle = document.documentElement.style
+  const bodyStyle = document.body.style
+  restoreViewport(saved.viewport.x, saved.viewport.y)
+  htmlStyle.scrollBehavior = saved.scrollBehavior
+  htmlStyle.overflowAnchor = saved.htmlOverflowAnchor
+  bodyStyle.overflowAnchor = saved.bodyOverflowAnchor
+  history.scrollRestoration = saved.scrollRestoration
+  restoreViewport(saved.viewport.x, saved.viewport.y)
+  toastEnvironment = null
+}
+
+watch(current, (value) => {
+  if (value) captureToastEnvironment()
+  else restoreToastEnvironment()
+}, { flush: 'sync' })
+
+function dismiss(): void {
+  // Removing a focused fixed element can trigger Chromium's scroll anchoring
+  // even though the toast is outside document flow. Preserve the viewport so
+  // dismissing a summary cannot move the page it is announcing.
+  captureToastEnvironment()
+  if (toastEnvironment) {
+    toastEnvironment.viewport = { x: window.scrollX, y: window.scrollY }
+  }
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur()
+  }
+  notificationStore.clear()
+  requestAnimationFrame(() => restoreToastEnvironment())
+}
+
+function restoreViewport(scrollX: number, scrollY: number): void {
+  if (navigator.userAgent.toLowerCase().includes('jsdom')) return
+  try {
+    window.scrollTo({ left: scrollX, top: scrollY, behavior: 'instant' })
+  } catch {
+    // jsdom does not implement scrolling; the browser path above is the
+    // layout-preserving behavior.
+  }
+  document.documentElement.scrollTop = scrollY
+  document.body.scrollTop = scrollY
+}
+
 // The store owns the auto-close timers; unmounting has to take the pending one
 // with it so it cannot outlive the toast and mutate the shell afterwards.
 onBeforeUnmount(() => {
+  restoreToastEnvironment()
   notificationStore.clear()
 })
 </script>
@@ -52,7 +127,7 @@ onBeforeUnmount(() => {
     <button
       type="button"
       class="secondary-button global-notification-close"
-      @click="notificationStore.clear()"
+      @click="dismiss"
     >
       关闭
     </button>
@@ -64,7 +139,9 @@ onBeforeUnmount(() => {
    corner opposite the batch toolbar's fixed save/confirm actions. */
 .global-notification {
   position: fixed;
-  top: calc(var(--size-shell-header) + var(--space-4));
+  /* Keep the fixed layer below wrapped desktop navigation as well as the
+     nominal 72px shell height. */
+  top: calc(var(--size-shell-header) + var(--space-6));
   right: var(--space-5);
   z-index: var(--z-overlay);
   display: flex;
