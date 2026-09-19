@@ -30,6 +30,7 @@ Stage 44（共享草案审核）已完成开发准备、尚未启动开发。准
 - 修改 `SingleAnimeReviewPanel.vue`：将单番最终确认块移到完整 `AnimeDraftEditor` 审核内容之后，紧邻资格阻断原因；增加“仅保存本地方案、追番管理再次确认外部提交”边界说明。
 - 更新单番审核说明：明确“保存修改”仅更新当前服务端草案；未改 scheduler、1.5 秒防抖、flush、CAS、unknown/saved pending/定位恢复或批量固定工具栏。
 - 增加 `WorkbenchView.test.ts` 层级与文案回归；`AnimeDraftEditor` saved 模式调用者与人工保存行为保持原状。
+- 审核后补充 `WorkbenchView.test.ts` 单番操作层级回归：断言 `#preview-apply-button` 为 secondary、`#single-review-save-button` 为 primary；该回归在当前 HEAD 直接通过（并非红测），因更早提交已具备 `apply-variant="secondary"`。
 - 实际验证：`npm run test:unit -- --run src/features/workbench/WorkbenchView.test.ts src/features/workbench/AnimeDraftEditor.test.ts`（54 passed）；`npm run test:unit -- --run src/features/workbench/BatchWorkbenchView.test.ts src/features/requests/RequestDetailPanel.test.ts`（88 passed）；`npm run typecheck`、`npm run lint`、`npm run api:check`、`npm run build` 均通过；`uv run pytest tests/browser/test_app_workbench.py tests/browser/test_app_batch_workbench.py -q`（74 passed in 44.50s）。
 - 遗留风险：未运行 Stage 44 完整后端/前端/Chromium 门禁（按普通 story 范围）；未新增独立浏览器用例，既有单番/批量真实 Chromium 套件覆盖通过。
 
