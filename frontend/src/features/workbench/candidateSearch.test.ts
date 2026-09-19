@@ -9,6 +9,7 @@ import {
   needsSeasonConfirmation,
   parseSeasonNumber,
   parseSourceLabel,
+  selectedCollectionSummary,
   validateCandidateQuery,
   validateFallbackValue,
   type MikanCandidate,
@@ -105,6 +106,15 @@ describe('candidateSearch season evidence helpers', () => {
 
   it('never blocks candidates without season evidence', () => {
     expect(candidateSelectionIsBlocked(candidate(), null)).toBe(false)
+  })
+})
+
+describe('candidateSearch selected collection projection', () => {
+  it('keeps only same-origin opaque poster paths and treats missing or external posters as absent', () => {
+    expect(selectedCollectionSummary(candidate({ poster_url: null }), null).posterUrl).toBeNull()
+    expect(selectedCollectionSummary(candidate({ poster_url: 'https://external.example/poster.jpg' }), null).posterUrl).toBeNull()
+    expect(selectedCollectionSummary(candidate({ poster_url: '/api/v1/mikan/posters/opaque-1' }), null).posterUrl)
+      .toBe('/api/v1/mikan/posters/opaque-1')
   })
 })
 

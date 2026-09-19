@@ -116,7 +116,7 @@ describe('AnimeDraftEditor', () => {
     const wrapper = mount(AnimeDraftEditor, {
       props: {
         request,
-        candidateSummary: { title: '葬送的芙莉莲 第二季', season: 2, totalEpisodes: 28 },
+        candidateSummary: { title: '葬送的芙莉莲 第二季', season: 2, totalEpisodes: 28, posterUrl: null },
       },
     })
 
@@ -146,6 +146,36 @@ describe('AnimeDraftEditor', () => {
     expect(summary.text()).toContain('已选合集')
     expect(summary.text()).toContain('未提供')
     expect(summary.text()).toContain('未知')
+  })
+
+  it('does not infer the selected collection from request titles when the projection is absent', () => {
+    const wrapper = mount(AnimeDraftEditor, { props: { request, candidateSummary: null } })
+    const selectedRow = wrapper.findAll('.draft-review-summary .detail-row').find(
+      (row) => row.find('dt').text() === '已选合集',
+    )
+
+    expect(selectedRow).toBeDefined()
+    const selectedValue = selectedRow?.find('dd').text() ?? ''
+    expect(selectedValue).toContain('未提供')
+    expect(selectedValue).not.toContain('葬送的芙莉莲')
+  })
+
+  it('shows an explicit missing-poster value for a public candidate without a poster', () => {
+    const wrapper = mount(AnimeDraftEditor, {
+      props: {
+        request,
+        candidateSummary: {
+          title: '公开候选合集',
+          season: null,
+          totalEpisodes: null,
+          posterUrl: null,
+        } as never,
+      },
+    })
+
+    const summary = wrapper.find('.draft-review-summary')
+    expect(summary.text()).toContain('封面')
+    expect(summary.text()).toContain('未提供')
   })
 
   it('renders its own submit as secondary when the host owns the primary action', () => {

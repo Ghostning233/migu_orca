@@ -425,6 +425,10 @@ describe('BatchWorkbenchView candidate & draft (US-205)', () => {
       timeoutMs: 240000,
     }))
     expect(card.find('.batch-card-status').text()).toContain('草案')
+    // US-353: only the clicked public candidate is projected into the shared
+    // review header; the Request snapshot is not used to invent season data.
+    expect(wrapper.find('.draft-review-summary').text()).toContain('关于我转生变成史莱姆这档事 第四季')
+    expect(wrapper.find('.draft-review-summary').text()).toContain('未知')
     // The draft_id never enters the DOM.
     expect(wrapper.text()).not.toContain('opaque-draft')
   })

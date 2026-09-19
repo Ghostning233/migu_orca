@@ -101,6 +101,13 @@ export interface SelectedCollectionSummary {
   title: string
   season: number | null
   totalEpisodes: number | null
+  /** Same-origin opaque poster key, never an external URL. */
+  posterUrl: string | null
+}
+
+function publicPosterPath(value: unknown): string | null {
+  const path = typeof value === 'string' ? value : ''
+  return /^\/api\/v1\/mikan\/posters\/[A-Za-z0-9_-]+$/.test(path) ? path : null
 }
 
 /** Project the chosen candidate into the review header summary. */
@@ -114,6 +121,7 @@ export function selectedCollectionSummary(
     title: String(candidate.title ?? '').trim() || '未命名合集',
     season: season !== null && season >= 1 && season <= 99 ? season : null,
     totalEpisodes: Number.isInteger(total) && total > 0 ? total : null,
+    posterUrl: publicPosterPath(candidate.poster_url),
   }
 }
 

@@ -78,7 +78,7 @@ import {
   type BatchParseResult,
 } from '@/features/workbench/batchWorkbench'
 import { displayValue, type RequestSnapshot } from '@/features/requests/requestDetail'
-import type { PreviewEditState } from '@/features/workbench/candidateSearch'
+import { selectedCollectionSummary, type PreviewEditState, type SelectedCollectionSummary } from '@/features/workbench/candidateSearch'
 import { currentStorageDir, storageQuery } from '@/features/requests/requestStorage'
 import { isPublicRouteIdentifier, routeLocation } from '@/app/router/catalog'
 import {
@@ -106,6 +106,11 @@ const emit = defineEmits<{
   (event: 'update:rawInput', value: string): void
   (event: 'restore-search-focus'): void
 }>()
+
+// The selected candidate is a display-only, in-memory projection. It is set
+// only from the candidate the user clicked and is never reconstructed from a
+// Request snapshot, parser hint, alias, or another candidate.
+const selectedCollectionByItem = ref<Record<string, SelectedCollectionSummary>>({})
 
 // Batch parse state.
 const rawInput = ref(props.rawInput)
@@ -309,6 +314,7 @@ function clearBatchRouteLocalState(): void {
   draftCreateItemIds.value = new Set()
   draftCreateCandidateIds.value = {}
   draftCreateErrors.value = {}
+  selectedCollectionByItem.value = {}
   selectedItemIds.value = new Set()
   journey.dispatch({ type: 'clear_route' })
 }
@@ -644,6 +650,10 @@ async function generateDraftFromCandidate(candidate: BatchCandidate): Promise<vo
     const draftId = result?.draft_id ?? ''
     const draftRevision =
       typeof result?.draft_revision === 'number' ? result.draft_revision : 1
+    selectedCollectionByItem.value = {
+      ...selectedCollectionByItem.value,
+      [itemId]: selectedCollectionSummary(candidate, seasonConfirmations.value[candidate.bangumi_id] ?? null),
+    }
     journey.dispatch({ type: 'set_draft', itemId: item.item_id ?? '', draftId, revision: draftRevision })
     items.value = items.value.map((current) =>
       current.item_id === item.item_id
@@ -716,6 +726,9 @@ function deleteBatchCard(itemId: string): void {
   const feedback = { ...acceptFeedback.value }
   delete feedback[itemId]
   acceptFeedback.value = feedback
+  const selectedCollections = { ...selectedCollectionByItem.value }
+  delete selectedCollections[itemId]
+  selectedCollectionByItem.value = selectedCollections
   items.value = items.value.filter((item) => item.item_id !== itemId)
 }
 
@@ -1564,6 +1577,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                   ref="detailEditor"
                   :key="`detail-${detailItem.item_id ?? detailItem.raw_title ?? ''}`"
                   :request="(ensureDraftSession(detailItem)?.request.value ?? batchCardRequest(detailItem)) as RequestSnapshot"
+                  :candidate-summary="selectedCollectionByItem[detailItem.item_id ?? ''] ?? null"
                   id-prefix="batch-preview"
                   form-id="detail-preview-edit-form"
                   container-id="request-detail-container"

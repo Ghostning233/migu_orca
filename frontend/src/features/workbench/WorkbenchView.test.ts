@@ -538,6 +538,11 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(true)
     expect(wrapper.find('.preview-mode-note').text()).toContain('订阅草案（未保存）')
     expect(wrapper.find('#single-review-save-button').exists()).toBe(true)
+    expect(wrapper.find('#preview-apply-button').classes()).toContain('secondary-button')
+    expect(wrapper.find('#single-review-save-button').classes()).toContain('primary-button')
+    expect(wrapper.find('.review-note').text()).toContain('保存修改仅更新当前服务端草案')
+    expect(wrapper.find('.review-confirmation-boundary').text()).toContain('仅保存本地方案、追番管理再次确认外部提交')
+    expect(wrapper.find('#detail-preview-edit-form').element.compareDocumentPosition(wrapper.find('#single-review-save-button').element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     // The draft_id never enters the DOM.
     expect(wrapper.text()).not.toContain('opaque-draft-token')
   })
