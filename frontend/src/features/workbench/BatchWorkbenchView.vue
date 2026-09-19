@@ -49,17 +49,17 @@ import { useDraftEditScheduler, type DraftEditScheduler } from '@/features/workb
 import {
   batchAcceptAllConfirmCopy,
   batchAcceptAllScopeText,
+  batchCardAuxiliaryFacts,
+  batchCardNextStep,
   batchSaveConfirmErrorLabel,
   batchSaveConfirmRecoveryAllowed,
   batchSaveConfirmSucceeded,
   findBatchTrackingItem,
   batchCardNeedsReview,
-  batchCardPreferenceSummary,
   batchCardRequest,
   batchCardSeedSummary,
   batchCardTitle,
   batchItemMatchesReviewFilters,
-  batchEpisodeProgressText,
   batchItemCount,
   batchStatusLabel,
   buildBatchSaveConfirmPayload,
@@ -71,6 +71,7 @@ import {
   nextBatchException,
   validateBatchRawInput,
   type BatchAcceptAllCounts,
+  type BatchCardFact,
   type BatchSaveConfirmDescriptor,
   type BatchSaveConfirmResult,
   type BatchCandidate,
@@ -326,6 +327,7 @@ const reviewStatus = ref('')
 const exceptionsOnly = ref(false)
 const exceptionSorted = ref(false)
 const reviewList = ref<HTMLElement | null>(null)
+const cardGrid = ref<HTMLElement | null>(null)
 const reviewScrollPositions = new Map<string, number>()
 const cardElements = new Map<string, HTMLElement>()
 const temporarilyShownItemId = ref<string | null>(null)
@@ -434,6 +436,43 @@ function setCardElement(itemId: string | null | undefined, element: unknown): vo
   else cardElements.delete(itemId)
 }
 
+// US-355: the card's default layer answers 「这是什么 / 现在什么状态 / 卡在哪里 /
+// 下一步做什么」. Aliases and preference details move behind 「辅助信息」, while the
+// blockers, failures, unknown results and recovery actions stay in this layer.
+function itemBlockers(itemId: string): string[] {
+  return itemConfirmability(itemId).blockers
+}
+
+/** The card's single next step, derived from public state only. */
+function cardNextStep(item: BatchItem): string {
+  return batchCardNextStep({
+    status: item.status,
+    hasCandidates: canChooseBatchCandidate(item),
+    hasDraft: canExpandBatchCard(item) && Boolean(batchCardRequest(item)),
+    blocker: itemConfirmability(item.item_id ?? '').blockers[0] ?? null,
+    resultUnknown: String(item.status ?? '') === 'RESPONSE_UNKNOWN',
+    savedPendingConfirm: String(item.status ?? '') === 'SAVED_PENDING_CONFIRM',
+    trackingLocated: Boolean(batchItemTrackingId(item)),
+    generating: Boolean(generatingCandidateIdFor(item.item_id ?? '')),
+  })
+}
+
+function cardAuxiliaryFacts(item: BatchItem): BatchCardFact[] {
+  return batchCardAuxiliaryFacts(item)
+}
+
+/**
+ * US-355: a manually checked item that is currently blocked keeps its intent —
+ * it stays checked and explained — but is excluded from the confirmable set
+ * until its blocker clears. Terminal cards never claim a pending intent.
+ */
+function cardIntentIsExcluded(item: BatchItem): boolean {
+  const itemId = item.item_id ?? ''
+  if (!selectedItemIds.value.has(itemId)) return false
+  if (['CONFIRMED', 'SAVED_PENDING_CONFIRM'].includes(String(item.status ?? ''))) return false
+  return !itemConfirmability(itemId).confirmable
+}
+
 function focusCard(itemId: string): void {
   void nextTick(() => {
     const card = cardElements.get(itemId)
@@ -443,6 +482,25 @@ function focusCard(itemId: string): void {
     if (typeof card.scrollIntoView === 'function') {
       card.scrollIntoView({ block: 'nearest', behavior: reducedMotion ? 'auto' : 'smooth' })
     }
+  })
+}
+
+/**
+ * US-355: deleting a temporary card must not drop focus. Focus moves to the
+ * next visible card, then to the previous one, and finally to the list heading
+ * (the panel title, which keeps focus inside the batch workbench) so the
+ * keyboard user always lands on a real, described element.
+ */
+function focusAfterCardRemoval(candidateItemIds: readonly string[]): void {
+  void nextTick(() => {
+    const target = candidateItemIds.map((itemId) => cardElements.get(itemId)).find((element) => Boolean(element))
+    if (target) {
+      target.focus({ preventScroll: true })
+      if (typeof target.scrollIntoView === 'function') target.scrollIntoView({ block: 'nearest', behavior: 'auto' })
+      return
+    }
+    const heading = cardGrid.value ?? document.querySelector<HTMLElement>('#panel-section-批量工作台')
+    heading?.focus({ preventScroll: true })
   })
 }
 
@@ -464,7 +522,11 @@ function moveCardFocus(item: BatchItem, direction: 1 | -1): void {
   focusCard(next.item_id ?? '')
 }
 
+// US-355: the card shortcut only owns keys pressed on the card itself. Any
+// key that belongs to an inner form control (checkbox, 字幕组 select, action
+// button) must stay with that control instead of moving or activating the card.
 function onCardKeydown(event: KeyboardEvent, item: BatchItem): void {
+  if (event.target !== event.currentTarget) return
   if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
     event.preventDefault()
     moveCardFocus(item, 1)
@@ -713,6 +775,14 @@ function openDraftDetail(item: BatchItem): void {
 }
 
 function deleteBatchCard(itemId: string): void {
+  // US-355: capture the removal neighbourhood before the card leaves the list,
+  // so focus can land on the next card, then the previous one, then the list.
+  const visible = visibleItems.value
+  const removedIndex = visible.findIndex((item) => item.item_id === itemId)
+  const focusTargets = removedIndex < 0
+    ? []
+    : [visible[removedIndex + 1]?.item_id, visible[removedIndex - 1]?.item_id]
+      .filter((candidate): candidate is string => Boolean(candidate))
   disposeScheduler(itemId)
   draftSessions.get(itemId)?.invalidate()
   draftSessions.delete(itemId)
@@ -730,6 +800,7 @@ function deleteBatchCard(itemId: string): void {
   delete selectedCollections[itemId]
   selectedCollectionByItem.value = selectedCollections
   items.value = items.value.filter((item) => item.item_id !== itemId)
+  focusAfterCardRemoval(focusTargets)
 }
 
 function operationLocks(itemId: string): boolean {
@@ -1345,8 +1416,11 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
       />
       <template v-else>
         <div class="batch-review-layout">
-          <div ref="reviewList" class="batch-card-grid-wrapper">
-            <div class="batch-review-filters" aria-label="批量结果筛选">
+          <!-- US-355: 左列 = 筛选控件 + 卡片列表。控件留在滚动区之外，因此清除
+               筛选入口始终可达；滚动区只包含卡片本身，卡片焦点环不会被裁掉。 -->
+          <div class="batch-review-list-column">
+            <div class="batch-review-controls">
+              <div class="batch-review-filters" aria-label="批量结果筛选">
               <label class="batch-review-search">
                 标题搜索
                 <input id="batch-review-search" v-model="reviewQuery" type="search" placeholder="搜索标题" />
@@ -1384,28 +1458,43 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
             <p v-if="detailItem && !visibleItems.some((item) => item.item_id === detailItem?.item_id)" class="batch-filter-hidden" role="status">
               当前条目已被筛选隐藏，详情仍保持显示。
             </p>
-            <div class="batch-card-grid" role="list" aria-label="批量草案卡片">
+            <!-- US-355: 筛选无匹配是「当前条件没有命中」，不是空批次；数据和勾选都还在。 -->
+            <p v-if="items.length && !visibleItems.length" id="batch-review-no-match" class="batch-review-no-match" role="status">
+              没有符合当前筛选条件的条目；本批次仍有 {{ items.length }} 部，数据、勾选与右栏详情均未改变。请调整或清除筛选条件后继续。
+            </p>
+            </div>
+            <div ref="reviewList" class="batch-card-grid-wrapper">
+              <div
+                ref="cardGrid"
+                class="batch-card-grid"
+                role="list"
+                aria-label="批量草案卡片"
+                tabindex="-1"
+              >
             <article
               v-for="item in visibleItems"
               :key="item.item_id ?? item.raw_title ?? ''"
               class="batch-draft-card"
               :class="{ 'is-current': currentItemId === item.item_id }"
               :data-item-id="item.item_id ?? ''"
+              :aria-label="`查看条目：${batchCardTitle(item)}（${batchStatusLabel(item.status)}）`"
               role="listitem"
               tabindex="0"
               :ref="(element) => setCardElement(item.item_id, element)"
               @click="selectCurrentItem(item)"
               @keydown="onCardKeydown($event, item)"
             >
-              <CheckboxRow
-                class="batch-card-checkbox-row"
-                :class="{ 'is-selected': selectedItemIds.has(item.item_id ?? '') }"
-                :label="`选择 ${item.raw_title ?? '批量条目'}`"
-                :checked="selectedItemIds.has(item.item_id ?? '')"
-                :disabled="!itemConfirmability(item.item_id ?? '').confirmable || operationLocks(item.item_id ?? '')"
-                @click.stop
-                @update:checked="(value: boolean) => toggleItemSelection(item.item_id ?? '', value)"
-              />
+              <div class="batch-card-checkbox-cell">
+                <CheckboxRow
+                  class="batch-card-checkbox-row"
+                  :class="{ 'is-selected': selectedItemIds.has(item.item_id ?? '') }"
+                  :label="`选择 ${item.raw_title ?? '批量条目'}`"
+                  :checked="selectedItemIds.has(item.item_id ?? '')"
+                  :disabled="!itemConfirmability(item.item_id ?? '').confirmable || operationLocks(item.item_id ?? '')"
+                  @click.stop
+                  @update:checked="(value: boolean) => toggleItemSelection(item.item_id ?? '', value)"
+                />
+              </div>
               <button
                 v-if="!['CONFIRMED', 'SAVED_PENDING_CONFIRM'].includes(String(item.status ?? ''))"
                 type="button"
@@ -1420,137 +1509,172 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
               </button>
 
               <div class="batch-card-poster">
-                <span v-if="canChooseBatchCandidate(item)" class="batch-card-poster-placeholder" data-poster-state="unselected">
-                  待选择合集
-                </span>
-                <span v-else class="batch-card-poster-placeholder" data-poster-state="unavailable">
-                  暂无封面
-                </span>
-              </div>
-
-              <div class="batch-card-status-row">
-                <span class="batch-status batch-card-status">{{ batchStatusLabel(item.status) }}</span>
-                <span v-if="batchCardNeedsReview(item)" class="batch-status batch-card-review-status">
-                  需人工核对
-                </span>
-              </div>
-
-              <strong class="batch-card-title">{{ batchCardTitle(item) }}</strong>
-              <div class="batch-card-raw-title">输入：{{ displayValue(item.raw_title) }}</div>
-              <div class="batch-card-source">候选来源：{{ canChooseBatchCandidate(item) || batchCardRequest(item) ? 'MiKan 候选搜索' : 'MiKan 候选搜索' }}</div>
-              <div class="batch-card-preference">{{ batchCardPreferenceSummary(item) }}</div>
-              <div v-if="canExpandBatchCard(item) && batchCardRequest(item)" class="batch-card-subtitle-group" @click.stop>
-                <label :for="`batch-card-subtitle-${item.item_id}`">字幕组快捷修改</label>
-                <select
-                  :id="`batch-card-subtitle-${item.item_id}`"
-                  :value="cardSubtitleGroupValue(item)"
-                  :disabled="operationLocks(item.item_id ?? '') || draftSessions.get(item.item_id ?? '')?.applying.value"
-                  @change="applyCardSubtitleGroup(item, ($event.target as HTMLSelectElement).value)"
-                >
-                  <option value="">保持当前选择</option>
-                  <option v-for="option in subtitleGroupOptions(item)" :key="option.value" :value="option.value">{{ option.label }}</option>
-                </select>
-                <p v-if="draftApplyErrors[item.item_id ?? '']" class="batch-card-reason">{{ draftApplyErrors[item.item_id ?? ''] }}</p>
-                <p v-if="draftSessions.get(item.item_id ?? '')?.applying.value" class="field-help" aria-live="polite">正在重新计算资源...</p>
-                <BaseButton
-                  v-if="draftSessions.get(item.item_id ?? '')?.canRetry.value"
-                  variant="secondary"
-                  :disabled="savingItemIds.has(item.item_id ?? '') || draftSessions.get(item.item_id ?? '')?.applying.value"
-                  @click.stop="retryCardModify(item)"
-                >重试修改</BaseButton>
-              </div>
-              <!-- US-343: the candidate step shows no resource count; the
-                   effective seed count appears only once a draft exists. -->
-              <div v-if="batchCardRequest(item)" class="batch-card-seeds">有效种子数：{{ batchCardSeedSummary(item) }}</div>
-              <div class="batch-card-progress">{{ batchEpisodeProgressText(undefined) }}</div>
-
-              <p
-                v-if="generatingCandidateIdFor(item.item_id ?? '')"
-                class="batch-card-generating-status"
-                role="status"
-              >
-                正在生成订阅草案…
-              </p>
-
-              <p v-if="String(item.status ?? '') === 'EMPTY'" class="batch-candidate-feedback">
-                未找到匹配的 MiKan 合集。
-              </p>
-              <p v-else-if="String(item.status ?? '') === 'FAILED'" class="batch-candidate-feedback">
-                {{ batchItemFailureMessage(item) }}
-              </p>
-              <p
-                v-if="!['CONFIRMED', 'SAVED_PENDING_CONFIRM'].includes(String(item.status ?? '')) && !itemConfirmability(item.item_id ?? '').confirmable"
-                class="batch-card-selection-help"
-              >
-                {{ itemConfirmability(item.item_id ?? '').blockers[0] ?? '当前条目暂不可加入批量确认。' }}
-              </p>
-
-              <p
-                v-if="item.review_hints?.length"
-                class="batch-card-preference-note"
-              >
-                {{ item.review_hints.join('；') }}
-              </p>
-
-              <div v-if="acceptFeedback[item.item_id ?? '']" class="batch-card-reason">
-                {{ acceptFeedback[item.item_id ?? ''] }}
-              </div>
-
-              <div class="batch-card-actions">
-                <BaseButton
-                  v-if="String(item.status ?? '') === 'SAVED_PENDING_CONFIRM'"
-                  :id="`batch-retry-accept-${item.item_id}`"
-                  variant="primary"
-                  :loading="recoveryLoadingItemIds.has(item.item_id ?? '')"
-                  :disabled="recoveryLoadingItemIds.has(item.item_id ?? '') || !batchItemRequestId(item)"
-                  @click.stop="retrySavedConfirmation(item)"
-                >重试确认</BaseButton>
-                <BaseButton
-                  v-if="String(item.status ?? '') === 'CONFIRMED' && batchItemTrackingId(item)"
-                  :id="`batch-open-tracking-${item.item_id}`"
-                  variant="secondary"
-                  @click.stop="router.replace(routeLocation('tracking', { tracking_id: batchItemTrackingId(item) }))"
-                >打开追番记录</BaseButton>
-                <BaseButton
-                  v-if="['CONFIRMED', 'RESPONSE_UNKNOWN'].includes(String(item.status ?? '')) && !batchItemTrackingId(item)"
-                  :id="`batch-retry-locate-${item.item_id}`"
-                  variant="secondary"
-                  :loading="recoveryLoadingItemIds.has(item.item_id ?? '')"
-                  :disabled="recoveryLoadingItemIds.has(item.item_id ?? '') || !batchItemRequestId(item)"
-                  @click.stop="retryBatchTrackingLocation(item)"
-                >重试定位</BaseButton>
-                <BaseButton
+                <span
                   v-if="canChooseBatchCandidate(item)"
-                  :class="{ 'batch-card-expand': true }"
-                  :aria-expanded="detailItemId === item.item_id ? 'true' : 'false'"
-                  aria-controls="batch-detail-pane"
-                  :aria-label="`查看候选：${item.raw_title ?? '批量条目'}`"
-                  :disabled="savingItemIds.has(item.item_id ?? '')"
-                  @click.stop
-                  @click="selectCurrentItem(item)"
+                  class="batch-card-poster-placeholder"
+                  data-poster-state="unselected"
+                  title="待选择真实 MiKan 合集"
                 >
-                  查看候选
-                </BaseButton>
-                <BaseButton
-                  v-else-if="canExpandBatchCard(item)"
-                  class="batch-card-expand"
-                  :aria-expanded="detailItemId === item.item_id ? 'true' : 'false'"
-                  aria-controls="request-detail-panel"
-                  :aria-label="`查看草案：${item.raw_title ?? '批量条目'}`"
-                  :disabled="operationLocks(item.item_id ?? '')"
-                  @click.stop
-                  @click="openDraftDetail(item)"
+                  待选择
+                </span>
+                <span
+                  v-else
+                  class="batch-card-poster-placeholder"
+                  data-poster-state="unavailable"
+                  title="暂无封面"
                 >
-                  查看草案
-                </BaseButton>
-                <BaseButton v-else class="batch-card-expand" disabled title="当前条目没有可选择的候选合集">
-                  查看候选
-                </BaseButton>
+                  无封面
+                </span>
               </div>
-              <p v-if="recoveryFeedback[item.item_id ?? '']" class="batch-card-reason" role="status">
-                {{ recoveryFeedback[item.item_id ?? ''] }}
-              </p>
+
+              <!-- 默认层：标题、中文状态、阻断/错误、下一步。别名与偏好等辅助
+                   信息进下面的「辅助信息」折叠，失败与恢复动作永不折叠。 -->
+              <div class="batch-card-main">
+                <div class="batch-card-headline">
+                  <strong class="batch-card-title">{{ batchCardTitle(item) }}</strong>
+                  <span class="batch-status batch-card-status">{{ batchStatusLabel(item.status) }}</span>
+                  <span v-if="batchCardNeedsReview(item)" class="batch-status batch-card-review-status">
+                    需人工核对
+                  </span>
+                </div>
+                <p class="batch-card-meta">
+                  <span class="batch-card-raw-title">输入：{{ displayValue(item.raw_title) }}</span>
+                  <span v-if="batchCardRequest(item)" class="batch-card-seeds">有效种子数：{{ batchCardSeedSummary(item) }}</span>
+                </p>
+
+                <p
+                  v-if="generatingCandidateIdFor(item.item_id ?? '')"
+                  class="batch-card-generating-status"
+                  role="status"
+                >
+                  正在生成订阅草案…
+                </p>
+
+                <p v-if="String(item.status ?? '') === 'EMPTY'" class="batch-candidate-feedback">
+                  未找到匹配的 MiKan 合集。
+                </p>
+                <p v-else-if="String(item.status ?? '') === 'FAILED'" class="batch-candidate-feedback">
+                  {{ batchItemFailureMessage(item) }}
+                </p>
+
+                <p v-if="draftApplyErrors[item.item_id ?? '']" class="batch-card-reason">
+                  {{ draftApplyErrors[item.item_id ?? ''] }}
+                </p>
+                <p v-if="acceptFeedback[item.item_id ?? '']" class="batch-card-reason">
+                  {{ acceptFeedback[item.item_id ?? ''] }}
+                </p>
+                <p v-if="recoveryFeedback[item.item_id ?? '']" class="batch-card-reason" role="status">
+                  {{ recoveryFeedback[item.item_id ?? ''] }}
+                </p>
+                <p
+                  v-if="item.review_hints?.length"
+                  class="batch-card-preference-note"
+                >
+                  {{ item.review_hints.join('；') }}
+                </p>
+
+                <p v-if="cardIntentIsExcluded(item)" class="batch-card-intent-note" role="status">
+                  已勾选，但当前不可确认：{{ itemBlockers(item.item_id ?? '')[0] ?? '暂不可确认' }}；解决后仍会参与保存确认。
+                </p>
+                <p
+                  v-else-if="!['CONFIRMED', 'SAVED_PENDING_CONFIRM', 'FAILED', 'EMPTY'].includes(String(item.status ?? '')) && !itemConfirmability(item.item_id ?? '').confirmable"
+                  class="batch-card-selection-help"
+                >
+                  {{ itemBlockers(item.item_id ?? '')[0] ?? '当前条目暂不可加入批量确认。' }}
+                </p>
+
+                <p class="batch-card-next-step">下一步：{{ cardNextStep(item) }}</p>
+
+                <div v-if="canExpandBatchCard(item) && batchCardRequest(item)" class="batch-card-subtitle-group" @click.stop>
+                  <label :for="`batch-card-subtitle-${item.item_id}`">字幕组</label>
+                  <select
+                    :id="`batch-card-subtitle-${item.item_id}`"
+                    :value="cardSubtitleGroupValue(item)"
+                    :disabled="operationLocks(item.item_id ?? '') || draftSessions.get(item.item_id ?? '')?.applying.value"
+                    @change="applyCardSubtitleGroup(item, ($event.target as HTMLSelectElement).value)"
+                  >
+                    <option value="">保持当前选择</option>
+                    <option v-for="option in subtitleGroupOptions(item)" :key="option.value" :value="option.value">{{ option.label }}</option>
+                  </select>
+                  <p v-if="draftSessions.get(item.item_id ?? '')?.applying.value" class="field-help" aria-live="polite">正在重新计算资源...</p>
+                  <BaseButton
+                    v-if="draftSessions.get(item.item_id ?? '')?.canRetry.value"
+                    variant="secondary"
+                    :disabled="savingItemIds.has(item.item_id ?? '') || draftSessions.get(item.item_id ?? '')?.applying.value"
+                    @click.stop="retryCardModify(item)"
+                  >重试修改</BaseButton>
+                </div>
+
+                <div class="batch-card-actions">
+                  <BaseButton
+                    v-if="String(item.status ?? '') === 'SAVED_PENDING_CONFIRM'"
+                    :id="`batch-retry-accept-${item.item_id}`"
+                    variant="primary"
+                    :loading="recoveryLoadingItemIds.has(item.item_id ?? '')"
+                    :disabled="recoveryLoadingItemIds.has(item.item_id ?? '') || !batchItemRequestId(item)"
+                    @click.stop="retrySavedConfirmation(item)"
+                  >重试确认</BaseButton>
+                  <BaseButton
+                    v-if="String(item.status ?? '') === 'CONFIRMED' && batchItemTrackingId(item)"
+                    :id="`batch-open-tracking-${item.item_id}`"
+                    variant="secondary"
+                    @click.stop="router.replace(routeLocation('tracking', { tracking_id: batchItemTrackingId(item) }))"
+                  >打开追番记录</BaseButton>
+                  <BaseButton
+                    v-if="['CONFIRMED', 'RESPONSE_UNKNOWN'].includes(String(item.status ?? '')) && !batchItemTrackingId(item)"
+                    :id="`batch-retry-locate-${item.item_id}`"
+                    variant="secondary"
+                    :loading="recoveryLoadingItemIds.has(item.item_id ?? '')"
+                    :disabled="recoveryLoadingItemIds.has(item.item_id ?? '') || !batchItemRequestId(item)"
+                    @click.stop="retryBatchTrackingLocation(item)"
+                  >重试定位</BaseButton>
+                  <BaseButton
+                    v-if="canChooseBatchCandidate(item)"
+                    :class="{ 'batch-card-expand': true }"
+                    :aria-expanded="detailItemId === item.item_id ? 'true' : 'false'"
+                    aria-controls="batch-detail-pane"
+                    :aria-label="`查看候选：${item.raw_title ?? '批量条目'}`"
+                    :disabled="savingItemIds.has(item.item_id ?? '')"
+                    @click.stop
+                    @click="selectCurrentItem(item)"
+                  >
+                    查看候选
+                  </BaseButton>
+                  <BaseButton
+                    v-else-if="canExpandBatchCard(item)"
+                    class="batch-card-expand"
+                    :aria-expanded="detailItemId === item.item_id ? 'true' : 'false'"
+                    aria-controls="request-detail-panel"
+                    :aria-label="`查看草案：${item.raw_title ?? '批量条目'}`"
+                    :disabled="operationLocks(item.item_id ?? '')"
+                    @click.stop
+                    @click="openDraftDetail(item)"
+                  >
+                    查看草案
+                  </BaseButton>
+                  <BaseButton
+                    v-else
+                    class="batch-card-expand"
+                    disabled
+                    :aria-label="`查看候选：${item.raw_title ?? '批量条目'}`"
+                    title="当前条目没有可选择的候选合集"
+                  >
+                    查看候选
+                  </BaseButton>
+                </div>
+
+                <details class="batch-card-more">
+                  <summary>辅助信息</summary>
+                  <dl class="batch-card-facts">
+                    <template v-for="fact in cardAuxiliaryFacts(item)" :key="fact.label">
+                      <dt>{{ fact.label }}</dt>
+                      <dd>{{ fact.value }}</dd>
+                    </template>
+                  </dl>
+                </details>
+              </div>
             </article>
+              </div>
             </div>
           </div>
 
@@ -1711,22 +1835,26 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   margin-top: 1rem;
 }
 
+/* US-355: the list scrolls on its own; filters, counts and the clear-filter
+   entry stay outside it (always reachable), and the horizontal padding leaves
+   room for the 3px focus ring so card focus is never clipped. */
 .batch-card-grid-wrapper {
   max-height: 640px;
   overflow-y: auto;
-  padding-right: 2px;
+  padding: 6px;
+}
+
+.batch-review-controls {
+  display: grid;
+  min-width: 0;
 }
 
 .batch-review-filters {
   align-items: end;
-  background: var(--color-bg);
   display: flex;
   flex-wrap: wrap;
   gap: 0.6rem;
-  padding: 0 0 0.75rem;
-  position: sticky;
-  top: 0;
-  z-index: 1;
+  padding: 0 0 0.5rem;
 }
 
 .batch-review-filters label {
@@ -1755,7 +1883,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 .batch-filter-hidden {
   color: var(--color-text-muted);
   font-size: 0.84rem;
-  margin: 0 0 0.75rem;
+  margin: 0 0 0.5rem;
 }
 
 .batch-review-navigation {
@@ -1763,7 +1891,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   display: flex;
   flex-wrap: wrap;
   gap: 0.6rem;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.5rem;
 }
 
 .batch-review-navigation [role='status'] {
@@ -1775,11 +1903,24 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   color: #8a5a13;
 }
 
+/* US-355: 筛选无匹配不是空批次，必须与空批次的 EmptyState 明确区分。 */
+.batch-review-no-match {
+  color: #8a5a13;
+  font-size: 0.84rem;
+  margin: 0 0 0.5rem;
+  overflow-wrap: anywhere;
+}
+
 .batch-review-layout {
   align-items: start;
   display: grid;
   gap: 1rem;
   grid-template-columns: minmax(260px, 36%) minmax(0, 64%);
+}
+
+.batch-review-list-column {
+  display: grid;
+  min-width: 0;
 }
 
 .batch-detail-pane {
@@ -1822,22 +1963,35 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 
 .batch-card-grid {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   grid-template-columns: 1fr;
   margin: 0;
   padding: 0;
 }
 
+.batch-card-grid:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: calc(-1 * var(--focus-ring-width));
+}
+
+/* US-355 紧凑左卡：默认层只有标题、中文状态、阻断/错误、下一步与动作；
+   别名与偏好进 .batch-card-more，因此 1440×900 能同屏看到多张完整卡。 */
 .batch-draft-card {
   background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: 6px;
   display: grid;
-  grid-template-columns: 76px minmax(0, 1fr);
-  gap: 8px;
+  grid-template-columns: auto 48px minmax(0, 1fr);
+  gap: 3px 6px;
   min-width: 0;
-  padding: 10px;
+  padding: 6px 8px;
   position: relative;
+  scroll-margin: 8px;
+}
+
+.batch-draft-card:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .batch-draft-card.is-current {
@@ -1847,52 +2001,69 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 
 .batch-card-poster {
   align-items: center;
-  aspect-ratio: auto;
   background: var(--color-bg-muted);
   border: 1px solid var(--color-border);
   border-radius: 4px;
   color: var(--color-text-muted);
   display: flex;
-  font-size: 0.82rem;
+  font-size: 0.68rem;
   font-weight: 700;
-  justify-content: center;
-  grid-column: 1;
-  grid-row: 1 / span 8;
-  height: 82px;
-  margin-top: 1.8rem;
+  grid-column: 2;
+  grid-row: 1;
+  height: 44px;
   overflow: hidden;
   text-align: center;
 }
 
 .batch-card-poster-placeholder {
-  padding: 8px;
+  padding: 2px;
+}
+
+.batch-card-main {
+  display: grid;
+  gap: 3px;
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  min-width: 0;
+}
+
+.batch-card-headline {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
 }
 
 .batch-card-title {
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.35;
   overflow-wrap: anywhere;
-  grid-column: 2;
+}
+
+.batch-card-meta {
+  color: var(--color-text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  gap: 0.25rem 0.75rem;
+  margin: 0;
 }
 
 .batch-card-raw-title,
-.batch-card-source,
-.batch-card-preference,
 .batch-card-seeds,
-.batch-card-generating-status,
-.batch-card-progress {
+.batch-card-generating-status {
   color: var(--color-text-muted);
-  font-size: 0.84rem;
+  font-size: 0.78rem;
   overflow-wrap: anywhere;
-  grid-column: 2;
 }
 
 /* The generating item is marked in place; the candidates it owns carry the
    aria-busy loading state in the detail pane. */
 .batch-card-generating-status {
   color: var(--color-action-primary);
-}
-
-.batch-card-preference {
-  color: #3f6b8f;
+  margin: 0;
 }
 
 .batch-card-review-status {
@@ -1901,19 +2072,82 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   color: #8a5a13;
 }
 
-.batch-card-status-row {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  grid-column: 2;
+/* US-355: 默认层常驻的下一步。 */
+.batch-card-next-step {
+  color: var(--color-text);
+  font-size: 0.82rem;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* US-355: 已勾选但当前被阻断的条目保留手工意图，并在卡片原位说明为什么被排除。 */
+.batch-card-intent-note {
+  color: #8a5a13;
+  font-size: 0.82rem;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .batch-card-checkbox-row {
+  min-width: 1.25rem;
+}
+
+/* US-355: 快捷字幕组编辑与右栏共用同一个 scheduler，改完就地重算；它是紧凑层
+   里的快捷动作，因此不进入「辅助信息」折叠。 */
+.batch-card-subtitle-group {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.batch-card-subtitle-group label {
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+}
+
+.batch-card-subtitle-group select {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text);
+  font-size: 0.82rem;
+  min-height: 1.9rem;
+  min-width: 9rem;
+  padding: 0.15rem 0.4rem;
+}
+
+.batch-card-subtitle-group .field-help,
+.batch-card-subtitle-group .batch-card-reason {
+  flex-basis: 100%;
+}
+
+/* CheckboxRow 把 class 透传到原生 input，因此卡片里的这一格由外层 cell 承担。 */
+.batch-card-checkbox-cell {
   grid-column: 1;
   grid-row: 1;
+  min-width: 1.5rem;
   position: relative;
   z-index: 1;
+}
+
+/* 紧凑列表里的复选框按桌面尺寸呈现（touch 目标尺寸留给移动端布局）。 */
+.batch-card-checkbox-cell :deep(.base-checkbox) {
+  margin-top: 0.1rem;
+  min-height: 1.25rem;
+  min-width: 1.25rem;
+}
+
+/* 复选框的可访问名称仍是「选择 <条目>」，视觉上只保留控件本身，避免在紧凑
+   列表里重复条目名称。 */
+.batch-card-checkbox-cell :deep(.checkbox-row-label) {
+  border: 0;
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
 }
 
 .batch-card-queue-status {
@@ -1929,27 +2163,70 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   font-size: 0.82rem;
   overflow-wrap: anywhere;
   margin: 0;
-  grid-column: 2;
 }
 
 .batch-card-selection-help {
   color: var(--color-text-muted);
-  margin: 0;
+}
+
+/* US-355: 长错误/长阻断原因自然增高，不裁切也不截断。 */
+.batch-card-reason,
+.batch-card-preference-note,
+.batch-card-intent-note,
+.batch-card-next-step {
+  max-height: none;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .batch-card-delete {
   min-height: 30px;
   min-width: 30px;
   position: absolute;
-  right: 8px;
-  top: 8px;
+  right: 6px;
+  top: 6px;
 }
 
 .batch-card-actions {
+  align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  grid-column: 2;
+}
+
+/* US-355: 按需展开的辅助信息（别名、检索词、季数、偏好、种子与集数）。 */
+.batch-card-more {
+  font-size: 0.75rem;
+}
+
+.batch-card-more > summary {
+  color: var(--color-text-muted);
+  cursor: pointer;
+  line-height: 1.3;
+  width: fit-content;
+}
+
+.batch-card-more > summary:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.batch-card-facts {
+  color: var(--color-text-muted);
+  display: grid;
+  gap: 2px 8px;
+  grid-template-columns: auto minmax(0, 1fr);
+  margin: 4px 0 0;
+}
+
+.batch-card-facts dt {
+  font-weight: 550;
+}
+
+.batch-card-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .batch-accept-toolbar {

@@ -195,6 +195,85 @@ export function batchItemIsException(item: BatchItem): boolean {
   return String(item.status ?? '') === 'FAILED' || String(item.status ?? '') === 'EMPTY' || batchCardNeedsReview(item)
 }
 
+/** One label/value pair of the card's on-demand auxiliary layer. */
+export interface BatchCardFact {
+  label: string
+  value: string
+}
+
+/**
+ * US-355: the auxiliary card facts (aliases, queries, season hint, preference
+ * resolution, candidate count and episode placeholder).
+ *
+ * These are the facts a reviewer only needs while investigating a card, so the
+ * default layer stays compact. Everything that decides whether an item is
+ * blocked — status, blockers, failures, unknown results and recovery actions —
+ * is rendered outside this list and is therefore never hidden by it.
+ */
+export function batchCardAuxiliaryFacts(item: BatchItem): BatchCardFact[] {
+  const facts: BatchCardFact[] = []
+  const title = batchCardTitle(item)
+  const aliases = (item.canonical_title_candidates ?? [])
+    .filter((alias): alias is string => typeof alias === 'string' && Boolean(alias.trim()) && alias !== title)
+  if (aliases.length) facts.push({ label: '别名', value: aliases.join('、') })
+  const queries = (item.search_queries ?? []).filter((query): query is string => typeof query === 'string' && Boolean(query.trim()))
+  if (queries.length) facts.push({ label: '检索关键词', value: queries.join('、') })
+  if (item.season_hint) facts.push({ label: '季数提示', value: String(item.season_hint) })
+  const candidates = item.candidates?.length ?? 0
+  if (candidates) facts.push({ label: '候选合集', value: `${candidates} 个` })
+  facts.push({ label: '偏好', value: batchCardPreferenceSummary(item) })
+  facts.push({ label: '总集数', value: batchEpisodeProgressText(undefined).replace('总集数：', '') })
+  return facts
+}
+
+/** Public, decision-relevant inputs of one card's single next step. */
+export interface BatchCardGuidance {
+  status: string | null | undefined
+  /** The card is still at the real-collection step and has choices to show. */
+  hasCandidates: boolean
+  /** The card owns a server-authoritative draft that can still be confirmed. */
+  hasDraft: boolean
+  /** First blocker of the shared confirmability gate, when the card is blocked. */
+  blocker: string | null
+  /** The last save result still has to be verified against the frozen request. */
+  resultUnknown: boolean
+  /** The plan is saved locally and its confirmation is still open. */
+  savedPendingConfirm: boolean
+  /** The confirmed plan is already bound to a real tracking record. */
+  trackingLocated: boolean
+  /** A draft generation for this card is in flight. */
+  generating: boolean
+}
+
+/**
+ * US-355: the one action the reviewer should take for this card.
+ *
+ * Pure copy over public state only: recovery and terminal states win over the
+ * generic branches so the card never suggests regenerating a draft that is
+ * actually waiting for a retry of an already-frozen request.
+ */
+export function batchCardNextStep(guidance: BatchCardGuidance): string {
+  const status = String(guidance.status ?? '')
+  if (guidance.generating) return '等待当前候选的订阅草案生成完成。'
+  if (guidance.resultUnknown || status === 'RESPONSE_UNKNOWN') {
+    return '用「使用相同操作重试」或「重试定位」核验本条结果。'
+  }
+  if (guidance.savedPendingConfirm || status === 'SAVED_PENDING_CONFIRM') {
+    return '点「重试确认」完成确认；不会重复保存。'
+  }
+  if (status === 'CONFIRMED') {
+    return guidance.trackingLocated
+      ? '在追番管理中再次确认后提交外部订阅。'
+      : '点「重试定位」找回追番记录后继续。'
+  }
+  if (status === 'FAILED') return '删除该条目，或调整名称后重新获取批量草案。'
+  if (status === 'EMPTY') return '删除该条目，或改用更完整的名称后重新获取。'
+  if (guidance.hasCandidates) return '在右栏选择真实 MiKan 合集生成草案。'
+  if (guidance.blocker) return `先解决：${guidance.blocker}。`
+  if (guidance.hasDraft) return '勾选加入待确认，或用「保存并确认全部」。'
+  return '重新获取批量草案以生成可审核条目。'
+}
+
 /** Find the next exception after the current item, wrapping at the end. */
 export function nextBatchException(items: BatchItem[], currentItemId: string | null): BatchItem | null {
   const exceptions = items.filter(batchItemIsException)

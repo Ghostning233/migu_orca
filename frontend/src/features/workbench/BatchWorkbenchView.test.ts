@@ -1528,3 +1528,254 @@ describe('BatchWorkbenchView candidate loading feedback (US-343)', () => {
     expect(wrapper.find('#batch-parse-submit').attributes('disabled')).toBeUndefined()
   })
 })
+
+// Stage 45 / WP-45-A / US-355: 紧凑左卡把「查看」与「勾选待确认」分成两个互不
+// 影响的动作。默认层只回答「这是什么、现在什么状态、卡在哪里、下一步做什么」，
+// 别名/偏好等辅助信息按需展开；失败、未生效编辑、unknown 与恢复动作永不隐藏。
+describe('BatchWorkbenchView compact cards (US-355)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    apiPost.mockReset()
+    vi.mocked(api.get).mockReset()
+  })
+
+  const candidateFor = (bangumiId: string, title: string) => ({
+    bangumi_id: bangumiId,
+    title,
+    mikan_url: `https://mikan.example/Home/Bangumi/${bangumiId}`,
+  })
+
+  function draftItem(itemId: string, rawTitle: string, matchedTitle = '关于我转生变成史莱姆这档事 第四季') {
+    const request = previewRequest(`req-${itemId}`)
+    request.source_info.matched_bangumi.title = matchedTitle
+    return batchItem({
+      item_id: itemId,
+      raw_title: rawTitle,
+      status: 'DRAFT',
+      canonical_title_candidates: [],
+      preview_request: request,
+      draft_id: `draft-${itemId}`,
+      draft_revision: 1,
+    })
+  }
+
+  async function mountAndParse(items: unknown[], rawInput: string) {
+    apiPost.mockReset()
+    apiPost.mockResolvedValueOnce(parseResult({ items: items as never }))
+    const mounted = await mountBatch()
+    await mounted.wrapper.find('#batch-raw-input').setValue(rawInput)
+    await mounted.wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    return mounted
+  }
+
+  function cardOrder(wrapper: Awaited<ReturnType<typeof mountBatch>>['wrapper']): string[] {
+    return wrapper.findAll('.batch-draft-card').map((card) => card.attributes('data-item-id') ?? '')
+  }
+
+  it('answers title, Chinese status and next step by default and keeps auxiliary facts on demand', async () => {
+    const { wrapper } = await mountAndParse(
+      [
+        batchItem({
+          item_id: 'item-facts',
+          raw_title: '萌王S4',
+          status: 'DRAFT',
+          canonical_title_candidates: ['关于我转生变成史莱姆这档事 第四季', '转生史莱姆 第四季'],
+          search_queries: ['转生史莱姆 第四季'],
+          season_hint: 'S4',
+          preference_hits: [{ field: 'subtitle_groups', applied: true }],
+          preview_request: previewRequest('req-facts'),
+          draft_id: 'draft-facts',
+        }),
+      ],
+      '萌王S4',
+    )
+
+    const card = wrapper.find('.batch-draft-card[data-item-id="item-facts"]')
+    // 默认层：标题 + 中文状态 + 下一步。
+    expect(card.find('.batch-card-title').text()).toBe('关于我转生变成史莱姆这档事 第四季')
+    expect(card.find('.batch-card-status').text()).toBe('草案')
+    expect(card.find('.batch-card-next-step').text()).toContain('下一步：')
+    // 辅助信息（别名/检索词/季数/偏好）只在按需展开层里。
+    const more = card.find('.batch-card-more')
+    expect(more.exists()).toBe(true)
+    expect(more.element.tagName).toBe('DETAILS')
+    expect((more.element as HTMLDetailsElement).open).toBe(false)
+    const facts = more.find('.batch-card-facts').text()
+    expect(facts).toContain('别名')
+    expect(facts).toContain('转生史莱姆 第四季')
+    expect(facts).toContain('检索关键词')
+    expect(facts).toContain('季数提示')
+    expect(facts).toContain('偏好')
+    expect(card.find('.batch-card-next-step').text()).not.toContain('别名')
+  })
+
+  it('never folds failures, unapplied edits, unknown results or recovery actions', async () => {
+    const { wrapper } = await mountAndParse(
+      [
+        batchItem({ item_id: 'item-failed', raw_title: '路哥', canonical_title_candidates: [], status: 'FAILED' }),
+        batchItem({ item_id: 'item-empty', raw_title: '杖剑谭', canonical_title_candidates: [], status: 'EMPTY' }),
+        batchItem({
+          item_id: 'item-unknown',
+          raw_title: '待核验',
+          canonical_title_candidates: [],
+          status: 'RESPONSE_UNKNOWN',
+          preview_request: previewRequest('req-unknown'),
+          draft_id: 'draft-unknown',
+          request_id: 'req-unknown',
+        }),
+      ],
+      '路哥\n杖剑谭\n待核验',
+    )
+    const failed = wrapper.find('.batch-draft-card[data-item-id="item-failed"]')
+    expect(failed.find('.batch-candidate-feedback').text()).toContain('候选搜索失败')
+    expect(failed.find('.batch-candidate-feedback').element.closest('details')).toBeNull()
+    const empty = wrapper.find('.batch-draft-card[data-item-id="item-empty"]')
+    expect(empty.find('.batch-candidate-feedback').element.closest('details')).toBeNull()
+    // unknown 状态与它的恢复动作都留在默认层。
+    const unknown = wrapper.find('.batch-draft-card[data-item-id="item-unknown"]')
+    expect(unknown.find('.batch-card-status').text()).toContain('结果待核验')
+    expect(unknown.find('.batch-card-status').element.closest('details')).toBeNull()
+    const recover = unknown.find('#batch-retry-locate-item-unknown')
+    expect(recover.exists()).toBe(true)
+    expect(recover.element.closest('details')).toBeNull()
+  })
+
+  it('keeps a candidate-step card uncheckable with a visible reason and next step', async () => {
+    const { wrapper } = await mountAndParse(
+      [batchItem({ item_id: 'item-cand', raw_title: '萌王S4', status: 'FOUND', candidates: [candidateFor('42', '史莱姆 第四季')] })],
+      '萌王S4',
+    )
+    const card = wrapper.find('.batch-draft-card[data-item-id="item-cand"]')
+    expect((card.find('input[type="checkbox"]').element as HTMLInputElement).disabled).toBe(true)
+    expect(card.find('.batch-card-selection-help').text()).toContain('需先生成可审核草案')
+    expect(card.find('.batch-card-next-step').text()).toContain('右栏')
+    expect(card.find('.batch-card-next-step').text()).toContain('MiKan 合集')
+  })
+
+  it('keeps a checked card whose intent survives a recalculation block while excluding it', async () => {
+    const { wrapper } = await mountAndParse([draftItem('item-blocked', '萌王S4')], '萌王S4')
+
+    const card = wrapper.find('.batch-draft-card[data-item-id="item-blocked"]')
+    await card.find('input[type="checkbox"]').setValue(true)
+    await nextTick()
+    expect(wrapper.find('#batch-accept-selected-count').text()).toContain('已选且可确认 1 项')
+
+    // 打开右栏并制造一个尚未应用的编辑：条目被重算阻断。
+    await card.find('.batch-card-expand').trigger('click')
+    await wrapper.find('#batch-preview-must-contain').setValue('未应用修改')
+    await nextTick()
+
+    expect((card.find('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(true)
+    expect((card.find('input[type="checkbox"]').element as HTMLInputElement).disabled).toBe(true)
+    expect(wrapper.find('#batch-accept-selected-count').text()).toContain('已选且可确认 0 项')
+    const note = card.find('.batch-card-intent-note')
+    expect(note.exists()).toBe(true)
+    expect(note.text()).toContain('已勾选')
+    expect(note.text()).toContain('当前不可确认')
+    expect(note.text()).toContain('尚未应用的编辑')
+
+    wrapper.unmount()
+  })
+
+  it('keeps the parsed card order when an item is repaired', async () => {
+    apiPost
+      .mockResolvedValueOnce(parseResult({
+        items: [
+          batchItem({ item_id: 'item-a', raw_title: '甲', status: 'FOUND', canonical_title_candidates: [], candidates: [candidateFor('42', '甲合集')] }),
+          draftItem('item-b', '乙'),
+        ],
+      }))
+      .mockResolvedValueOnce({ request: previewRequest('req-a'), summary: {}, draft_id: 'draft-new-a', draft_revision: 1 })
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('甲\n乙')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+
+    expect(cardOrder(wrapper)).toEqual(['item-a', 'item-b'])
+    await wrapper.find('.batch-draft-card[data-item-id="item-a"] .batch-card-expand').trigger('click')
+    await nextTick()
+    await wrapper.find('#batch-detail-pane .candidate-select').trigger('click')
+    await flushPromises()
+
+    expect(cardOrder(wrapper)).toEqual(['item-a', 'item-b'])
+    expect(wrapper.find('.batch-draft-card[data-item-id="item-a"] .batch-card-status').text()).toContain('草案')
+  })
+
+  it('never presents a filter with no match as an empty batch', async () => {
+    const { wrapper } = await mountAndParse([draftItem('item-a', '甲'), draftItem('item-b', '乙')], '甲\n乙')
+
+    await wrapper.find('#batch-review-search').setValue('不存在的标题')
+    await nextTick()
+
+    expect(wrapper.findAll('.batch-draft-card')).toHaveLength(0)
+    const notice = wrapper.find('#batch-review-no-match')
+    expect(notice.exists()).toBe(true)
+    expect(notice.text()).toContain('没有符合当前筛选条件')
+    expect(notice.text()).toContain('2 部')
+    // 空批次文案不能被复用，清除筛选入口仍然可达。
+    expect(wrapper.text()).not.toContain('粘贴多行番剧名称后获取解析结果。')
+    expect(wrapper.find('#batch-review-clear').attributes('disabled')).toBeUndefined()
+    await wrapper.find('#batch-review-clear').trigger('click')
+    await nextTick()
+    expect(wrapper.findAll('.batch-draft-card')).toHaveLength(2)
+    expect(wrapper.find('#batch-review-no-match').exists()).toBe(false)
+  })
+
+  it('moves focus to the next, previous or list heading after deleting a temporary card', async () => {
+    const { wrapper } = await mountAndParse(
+      [draftItem('item-a', '甲'), draftItem('item-b', '乙'), draftItem('item-c', '丙')],
+      '甲\n乙\n丙',
+    )
+
+    await wrapper.find('.batch-draft-card[data-item-id="item-b"] .batch-card-delete').trigger('click')
+    await nextTick()
+    await flushPromises()
+    expect(document.activeElement).toBe(wrapper.find('.batch-draft-card[data-item-id="item-c"]').element)
+
+    await wrapper.find('.batch-draft-card[data-item-id="item-c"] .batch-card-delete').trigger('click')
+    await nextTick()
+    await flushPromises()
+    expect(document.activeElement).toBe(wrapper.find('.batch-draft-card[data-item-id="item-a"]').element)
+
+    await wrapper.find('.batch-draft-card[data-item-id="item-a"] .batch-card-delete').trigger('click')
+    await nextTick()
+    await flushPromises()
+    expect(wrapper.findAll('.batch-draft-card')).toHaveLength(0)
+    // 列表已空：焦点落到批量工作台的列表标题，而不是掉回 body。
+    expect(document.activeElement).toBe(document.getElementById('panel-section-批量工作台'))
+    expect(document.activeElement).not.toBe(document.body)
+  })
+
+  it('never lets the card shortcut intercept an inner form control', async () => {
+    const { wrapper } = await mountAndParse(
+      [draftItem('item-a', '甲', '甲的合集'), draftItem('item-b', '乙', '乙的合集')],
+      '甲\n乙',
+    )
+
+    // item-b 是当前查看项；item-a 卡片里的快捷字幕组表单不得被卡片方向键/回车截获。
+    await wrapper.find('.batch-draft-card[data-item-id="item-b"] .batch-card-expand').trigger('click')
+    await nextTick()
+    expect(wrapper.find('.batch-draft-card[data-item-id="item-b"]').classes()).toContain('is-current')
+
+    const select = wrapper.find('.batch-draft-card[data-item-id="item-a"] .batch-card-subtitle-group select')
+    expect(select.exists()).toBe(true)
+    await select.trigger('keydown', { key: 'ArrowDown' })
+    await nextTick()
+    await select.trigger('keydown', { key: 'Enter' })
+    await nextTick()
+
+    expect(wrapper.find('.batch-draft-card[data-item-id="item-b"]').classes()).toContain('is-current')
+    expect(wrapper.find('.batch-draft-card[data-item-id="item-a"]').classes()).not.toContain('is-current')
+    expect(wrapper.find('#batch-detail-pane').text()).toContain('乙的合集')
+  })
+
+  it('separates the view and check affordances for assistive technology', async () => {
+    const { wrapper } = await mountAndParse([draftItem('item-a', '甲')], '甲')
+
+    const card = wrapper.find('.batch-draft-card[data-item-id="item-a"]')
+    expect(card.attributes('aria-label')).toContain('查看条目')
+    expect(card.find('.checkbox-row-label').text()).toContain('选择')
+    expect(card.find('.batch-card-expand').attributes('aria-label')).toContain('查看草案')
+  })
+})

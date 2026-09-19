@@ -5,7 +5,9 @@ import {
   batchAcceptAllConfirmCopy,
   batchAcceptAllScopeText,
   batchCandidateSelectionIsBlocked,
+  batchCardAuxiliaryFacts,
   batchCardNeedsReview,
+  batchCardNextStep,
   batchCardPreferenceSummary,
   batchCardSeedSummary,
   batchCardTitle,
@@ -24,6 +26,7 @@ import {
   canExpandBatchCard,
   orderBatchItemsForReview,
   validateBatchRawInput,
+  type BatchCardGuidance,
   type BatchItem,
 } from '@/features/workbench/batchWorkbench'
 
@@ -295,5 +298,65 @@ describe('batch confirm-all confirm copy (US-348)', () => {
     expect(copy.title).toBe('保存并确认全部 2 部')
     expect(copy.message).toContain('其中 2 部被筛选隐藏')
     expect(copy.message).not.toContain('已排除')
+  })
+})
+
+describe('batch card default layer (US-355)', () => {
+  function guidance(overrides: Partial<BatchCardGuidance> = {}): BatchCardGuidance {
+    return {
+      status: 'DRAFT',
+      hasCandidates: false,
+      hasDraft: true,
+      blocker: null,
+      resultUnknown: false,
+      savedPendingConfirm: false,
+      trackingLocated: false,
+      generating: false,
+      ...overrides,
+    }
+  }
+
+  it('lists only on-demand auxiliary facts and never repeats the card title', () => {
+    const facts = batchCardAuxiliaryFacts(
+      batchItem({
+        canonical_title_candidates: ['关于我转生变成史莱姆这档事 第四季', '转生史莱姆 第四季'],
+        search_queries: ['转生史莱姆 第四季'],
+        season_hint: 'S4',
+        candidates: [{ bangumi_id: '42' }],
+        status: 'DRAFT',
+        preview_request: previewRequest(),
+      }),
+    )
+    const byLabel = Object.fromEntries(facts.map((fact) => [fact.label, fact.value]))
+    expect(byLabel['别名']).toBe('转生史莱姆 第四季')
+    expect(byLabel['别名']).not.toContain('关于我转生变成史莱姆这档事 第四季')
+    expect(byLabel['检索关键词']).toBe('转生史莱姆 第四季')
+    expect(byLabel['季数提示']).toBe('S4')
+    expect(byLabel['候选合集']).toBe('1 个')
+    expect(byLabel['偏好']).toBe('未配置偏好，使用默认流程')
+    expect(byLabel['总集数']).toBe('未知')
+    expect(batchCardAuxiliaryFacts(batchItem())).toEqual([
+      { label: '检索关键词', value: '转生史莱姆 第四季' },
+      { label: '季数提示', value: 'S4' },
+      { label: '偏好', value: '未配置偏好，使用默认流程' },
+      { label: '总集数', value: '未知' },
+    ])
+  })
+
+  it('names exactly one next step for every actionable card state', () => {
+    expect(batchCardNextStep(guidance({ generating: true }))).toContain('等待当前候选')
+    expect(batchCardNextStep(guidance({ resultUnknown: true }))).toContain('使用相同操作重试')
+    expect(batchCardNextStep(guidance({ status: 'RESPONSE_UNKNOWN', hasDraft: false }))).toContain('重试定位')
+    expect(batchCardNextStep(guidance({ savedPendingConfirm: true }))).toContain('重试确认')
+    expect(batchCardNextStep(guidance({ status: 'SAVED_PENDING_CONFIRM' }))).toContain('不会重复保存')
+    expect(batchCardNextStep(guidance({ status: 'CONFIRMED', trackingLocated: true, hasDraft: false }))).toContain('追番管理')
+    expect(batchCardNextStep(guidance({ status: 'CONFIRMED', hasDraft: false }))).toContain('重试定位')
+    expect(batchCardNextStep(guidance({ status: 'FAILED', blocker: '需先生成可审核草案', hasDraft: false }))).toContain('删除该条目')
+    expect(batchCardNextStep(guidance({ status: 'EMPTY', blocker: '需先生成可审核草案', hasDraft: false }))).toContain('更完整的名称')
+    expect(batchCardNextStep(guidance({ hasCandidates: true, hasDraft: false, blocker: '需先生成可审核草案' })))
+      .toBe('在右栏选择真实 MiKan 合集生成草案。')
+    expect(batchCardNextStep(guidance({ blocker: '有尚未应用的编辑' }))).toBe('先解决：有尚未应用的编辑。')
+    expect(batchCardNextStep(guidance())).toContain('保存并确认全部')
+    expect(batchCardNextStep(guidance({ hasDraft: false }))).toContain('重新获取批量草案')
   })
 })

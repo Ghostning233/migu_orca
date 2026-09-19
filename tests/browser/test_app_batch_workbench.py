@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -1330,6 +1331,9 @@ class TestAppBatchSensitiveBoundary:
         page.fill("#batch-raw-input", "萌王S4")
         page.click("#batch-parse-submit")
         expect(page.locator(".batch-draft-card")).to_have_count(1)
+        # US-355: 按需展开的辅助信息层同样不得泄漏敏感值。
+        page.locator(".batch-draft-card .batch-card-more summary").first.click()
+        expect(page.locator(".batch-draft-card .batch-card-facts")).to_be_visible()
 
         browser_state = page.evaluate(
             """() => ({
@@ -1349,3 +1353,470 @@ class TestAppBatchSensitiveBoundary:
             assert value not in browser_state["sessionStorage"]
             assert value not in browser_state["bodyText"]
             assert value not in persisted_json
+
+
+def _compact_items(count: int, *, prefix: str = "番剧") -> list[dict[str, Any]]:
+    """US-355 fixture: a continuous list of ordinary short-title draft cards."""
+    return [
+        _batch_item(
+            f"item-{index:02d}",
+            f"{prefix}{index:02d}",
+            status="DRAFT",
+            canonical_title=f"{prefix}{index:02d} 第 1 季",
+            preview_request=_preview_request(f"{prefix}{index:02d}", f"req-compact-{index:02d}"),
+        )
+        for index in range(count)
+    ]
+
+
+def _route_parse(page: Page, items: list[dict[str, Any]]) -> None:
+    page.route(
+        "**/api/v1/batches/parse",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=_batch_parse_result(items),
+        ),
+    )
+
+
+def _open_compact_list(page: Page, live_server_url: str, items: list[dict[str, Any]]) -> None:
+    _route_parse(page, items)
+    _goto_batch(page, live_server_url)
+    page.fill("#batch-raw-input", "\n".join(str(item["raw_title"]) for item in items))
+    page.click("#batch-parse-submit")
+    expect(page.locator(".batch-draft-card")).to_have_count(len(items))
+
+
+def _cards_fully_inside_list(page: Page) -> list[str]:
+    """data-item-id of every card wholly inside the list scroll viewport."""
+    return page.evaluate(
+        """() => {
+            const wrapper = document.querySelector('.batch-card-grid-wrapper')
+            if (!wrapper) return []
+            const box = wrapper.getBoundingClientRect()
+            return Array.from(document.querySelectorAll('.batch-draft-card'))
+                .filter((card) => {
+                    const rect = card.getBoundingClientRect()
+                    return rect.top >= box.top - 0.5 && rect.bottom <= box.bottom + 0.5
+                })
+                .map((card) => card.dataset.itemId)
+        }"""
+    )
+
+
+def _active_item_id(page: Page) -> str | None:
+    return page.evaluate("() => document.activeElement && document.activeElement.dataset.itemId")
+
+
+class TestAppBatchCompactList:
+    """AC (US-355)：默认左卡只回答「标题 / 中文状态 / 阻断或错误 / 下一步」，
+    别名与偏好按需展开；1/12/36 连续列表不引入分页或虚拟滚动；查看与勾选分离；
+    键盘、焦点、长内容、缩放、reduced-motion 与敏感 canary 都必须在真实 Chromium 通过。"""
+
+    def test_default_layer_shows_title_status_blocker_and_next_step(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        items = [
+            _batch_item(
+                "item-draft",
+                "甲S1",
+                status="DRAFT",
+                canonical_title="甲 第一季",
+                preview_request=_preview_request("咒术回战", "req-layer-a"),
+            ),
+            _batch_item(
+                "item-found",
+                "乙S1",
+                status="FOUND",
+                canonical_title="乙 第一季",
+                candidates=[_candidate(bangumi_id="42", title="乙 第一季", mikan_url="https://mikan.example/Home/Bangumi/42")],
+            ),
+            _batch_item(
+                "item-failed",
+                "丙S1",
+                status="FAILED",
+                error={"error_type": "mikan_unavailable", "error_message": "raw upstream canary"},
+            ),
+        ]
+        _open_compact_list(page, live_server_url, items)
+
+        draft = page.locator('.batch-draft-card[data-item-id="item-draft"]')
+        expect(draft.locator(".batch-card-title")).to_have_text("甲 第一季")
+        expect(draft.locator(".batch-card-status")).to_have_text("草案")
+        expect(draft.locator(".batch-card-next-step")).to_contain_text("下一步：")
+        # 辅助信息默认折叠，但仍在按需层里可读。
+        expect(draft.locator(".batch-card-facts")).not_to_be_visible()
+        expect(draft.locator(".batch-card-facts")).to_contain_text("偏好")
+        expect(draft.locator(".batch-card-more summary")).to_be_visible()
+
+        # 待选合集不可勾选，并就地说明原因与下一步。
+        found = page.locator('.batch-draft-card[data-item-id="item-found"]')
+        expect(found.locator(".batch-card-checkbox-row")).to_be_disabled()
+        expect(found.locator(".batch-card-selection-help")).to_contain_text("需先生成可审核草案")
+        expect(found.locator(".batch-card-next-step")).to_contain_text("MiKan 合集")
+
+        # 失败信息与它的下一步都在默认层，不进入折叠。
+        failed = page.locator('.batch-draft-card[data-item-id="item-failed"]')
+        expect(failed.locator(".batch-candidate-feedback")).to_be_visible()
+        expect(failed.locator(".batch-candidate-feedback")).to_contain_text("该条目候选搜索失败")
+        expect(failed.locator(".batch-card-next-step")).to_contain_text("删除该条目")
+        assert "raw upstream canary" not in page.locator("body").inner_text()
+
+    def test_auxiliary_layer_opens_on_demand_without_leaking(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        item = _batch_item(
+            "item-facts",
+            "萌王S4",
+            status="DRAFT",
+            canonical_title="关于我转生变成史莱姆这档事 第四季",
+            season_hint="S4",
+            search_queries=["转生史莱姆 第四季"],
+            preview_request=_preview_request("咒术回战", "req-facts-b"),
+        )
+        item["canonical_title_candidates"] = ["关于我转生变成史莱姆这档事 第四季", "转生史莱姆 第四季"]
+        _open_compact_list(page, live_server_url, [item])
+
+        card = page.locator('.batch-draft-card[data-item-id="item-facts"]')
+        summary = card.locator(".batch-card-more summary")
+        expect(summary).to_have_text("辅助信息")
+        summary.click()
+        facts = card.locator(".batch-card-facts")
+        expect(facts).to_be_visible()
+        expect(facts).to_contain_text("别名")
+        expect(facts).to_contain_text("转生史莱姆 第四季")
+        expect(facts).to_contain_text("检索关键词")
+        expect(facts).to_contain_text("季数提示")
+        expect(facts).to_contain_text("偏好")
+        expect(facts).to_contain_text("总集数")
+
+    @pytest.mark.parametrize("count", [1, 12, 36])
+    def test_continuous_lists_render_without_pagination(
+        self, page: Page, live_server_url: str, count: int
+    ) -> None:
+        items = _compact_items(count)
+        _open_compact_list(page, live_server_url, items)
+
+        # 全部条目同时存在于 DOM：没有分页，也没有默认虚拟滚动。
+        expect(page.locator(".batch-draft-card")).to_have_count(count)
+        assert page.locator(".batch-pagination, .virtual-list, nav[aria-label*='分页']").count() == 0
+        expect(page.locator(".batch-card-next-step")).to_have_count(count)
+        page.locator(".batch-draft-card").last.scroll_into_view_if_needed()
+        expect(page.locator(".batch-draft-card").last).to_be_visible()
+        assert page.evaluate("() => document.body.scrollWidth <= window.innerWidth")
+
+    def test_three_complete_cards_fit_the_list_at_1440x900(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """AC: 1440×900 的 12 项普通短标题夹具在列表可视区内至少同屏三张完整卡，
+        且卡片不被列表容器裁切（列表本身仍按既有整页布局滚动）。"""
+        items = _compact_items(12)
+        _route_parse(page, items)
+        _goto_batch(page, live_server_url)
+        page.set_viewport_size({"width": 1440, "height": 900})
+        page.fill("#batch-raw-input", "\n".join(str(item["raw_title"]) for item in items))
+        page.click("#batch-parse-submit")
+        expect(page.locator(".batch-draft-card")).to_have_count(12)
+
+        box = page.locator(".batch-card-grid-wrapper").bounding_box()
+        assert box is not None
+        fully = _cards_fully_inside_list(page)
+        assert fully[:3] == ["item-00", "item-01", "item-02"], f"列表开头至少同屏三张完整卡，实际完整卡 {fully}"
+        heights = page.evaluate(
+            """() => Array.from(document.querySelectorAll('.batch-draft-card'))
+                .slice(0, 3)
+                .map((card) => card.getBoundingClientRect().height)"""
+        )
+        assert box["height"] >= sum(heights) + 20, f"列表可视区装不下三张完整卡：{box['height']} vs {heights}"
+
+    def test_two_hundred_percent_zoom_keeps_the_compact_list_operable(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        items = _compact_items(12)
+        _route_parse(page, items)
+        _goto_batch(page, live_server_url)
+        page.set_viewport_size({"width": 1440, "height": 900})
+        page.evaluate("() => { document.documentElement.style.zoom = '2' }")
+        page.fill("#batch-raw-input", "\n".join(str(item["raw_title"]) for item in items))
+        page.click("#batch-parse-submit")
+        expect(page.locator(".batch-draft-card")).to_have_count(12)
+
+        assert len(_cards_fully_inside_list(page)) >= 1
+        assert page.evaluate("() => document.body.scrollWidth <= window.innerWidth")
+        expect(page.locator("#batch-accept-all")).to_be_visible()
+        expect(page.locator(".batch-card-next-step").first).to_be_visible()
+
+    def test_long_content_grows_the_card_without_clipping(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        long_hint = "该条目候选标题与输入差异较大，请在确认前核对季数与字幕组。" * 6
+        long_title = "非常长的官方合集标题" * 6
+        items = [
+            _batch_item(
+                "item-short",
+                "短S1",
+                status="DRAFT",
+                canonical_title="短 第一季",
+                preview_request=_preview_request("咒术回战", "req-short"),
+            ),
+            _batch_item(
+                "item-long",
+                "长S1",
+                status="DRAFT",
+                canonical_title=long_title,
+                review_hints=[long_hint],
+                preview_request=_preview_request("咒术回战", "req-long"),
+            ),
+        ]
+        _open_compact_list(page, live_server_url, items)
+
+        short_box = page.locator('.batch-draft-card[data-item-id="item-short"]').bounding_box()
+        long_box = page.locator('.batch-draft-card[data-item-id="item-long"]').bounding_box()
+        assert short_box is not None and long_box is not None
+        assert long_box["height"] > short_box["height"], "长错误/长标题必须自然增高，而不是被裁切"
+
+        clipped = page.evaluate(
+            """() => {
+                const card = document.querySelector('.batch-draft-card[data-item-id="item-long"]')
+                const nodes = [card, ...card.querySelectorAll('p')]
+                return nodes.some((node) => {
+                    const style = getComputedStyle(node)
+                    return node.scrollHeight > node.clientHeight + 1 ||
+                        node.scrollWidth > node.clientWidth + 1 ||
+                        style.textOverflow === 'ellipsis' ||
+                        (style.webkitLineClamp && style.webkitLineClamp !== 'none')
+                })
+            }"""
+        )
+        assert clipped is False, "长内容不得被裁切、截断或省略"
+
+    def test_keyboard_keeps_card_shortcuts_out_of_inner_forms(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        items = _compact_items(2, prefix="条目")
+        _open_compact_list(page, live_server_url, items)
+        cards = page.locator(".batch-draft-card")
+
+        # 读屏可区分：卡片本身是「查看条目」，复选框是「选择 <条目>」。
+        card_label = cards.nth(0).get_attribute("aria-label") or ""
+        assert "查看条目" in card_label
+        assert (cards.nth(0).locator(".checkbox-row-label").text_content() or "").strip() == "选择 条目00"
+        assert "查看草案" in (cards.nth(0).locator(".batch-card-expand").get_attribute("aria-label") or "")
+
+        # 卡片自身仍由方向键移动「当前查看」。
+        cards.nth(1).locator(".batch-card-expand").click()
+        expect(cards.nth(1).locator(".batch-card-expand")).to_have_attribute("aria-expanded", "true")
+        cards.nth(1).focus()
+        page.keyboard.press("ArrowUp")
+        expect(cards.nth(0).locator(".batch-card-expand")).to_have_attribute("aria-expanded", "true")
+
+        # 卡片内部快捷字幕组表单由它自己消费键盘，不再被卡片快捷键截获。
+        select = cards.nth(1).locator(".batch-card-subtitle-group select")
+        expect(select).to_be_visible()
+        select.focus()
+        page.keyboard.press("Enter")
+        page.keyboard.press("ArrowDown")
+        expect(cards.nth(0).locator(".batch-card-expand")).to_have_attribute("aria-expanded", "true")
+        expect(cards.nth(1).locator(".batch-card-expand")).to_have_attribute("aria-expanded", "false")
+
+        # 复选框同理，并且勾选只改变待确认集合。
+        checkbox = cards.nth(1).locator(".batch-card-checkbox-row")
+        checkbox.focus()
+        page.keyboard.press("Space")
+        expect(cards.nth(1).locator(".batch-card-checkbox-row")).to_be_checked()
+        expect(cards.nth(0).locator(".batch-card-expand")).to_have_attribute("aria-expanded", "true")
+        expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选且可确认 1 项")
+
+    def test_focus_ring_is_not_clipped_inside_the_scrolling_list(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        items = _compact_items(12)
+        _open_compact_list(page, live_server_url, items)
+
+        # 键盘模态下聚焦最后一张卡，并把列表滚到底：焦点环仍在滚动区内。
+        page.keyboard.press("Tab")
+        page.evaluate(
+            """() => {
+                const wrapper = document.querySelector('.batch-card-grid-wrapper')
+                wrapper.scrollTop = wrapper.scrollHeight
+                const cards = document.querySelectorAll('.batch-draft-card')
+                cards[cards.length - 1].focus()
+            }"""
+        )
+        ring = page.evaluate(
+            """() => {
+                const wrapper = document.querySelector('.batch-card-grid-wrapper')
+                const card = document.activeElement
+                const style = getComputedStyle(card)
+                const width = parseFloat(style.outlineWidth) || 0
+                const offset = parseFloat(style.outlineOffset) || 0
+                const rect = card.getBoundingClientRect()
+                const box = wrapper.getBoundingClientRect()
+                return {
+                    style: style.outlineStyle,
+                    ring: {
+                        top: rect.top - width - offset,
+                        bottom: rect.bottom + width + offset,
+                        left: rect.left - width - offset,
+                        right: rect.right + width + offset,
+                    },
+                    box: { top: box.top, bottom: box.bottom, left: box.left, right: box.right },
+                    itemId: card.dataset.itemId,
+                }
+            }"""
+        )
+        assert ring["itemId"] == "item-11"
+        assert ring["style"] != "none", "键盘聚焦的卡片必须有可见焦点环"
+        assert ring["ring"]["top"] >= ring["box"]["top"] - 0.5, ring
+        assert ring["ring"]["bottom"] <= ring["box"]["bottom"] + 0.5, ring
+        assert ring["ring"]["left"] >= ring["box"]["left"] - 0.5, ring
+        assert ring["ring"]["right"] <= ring["box"]["right"] + 0.5, ring
+
+    def test_deleting_a_card_keeps_focus_in_the_list(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        items = _compact_items(3)
+        _open_compact_list(page, live_server_url, items)
+        cards = page.locator(".batch-draft-card")
+
+        cards.nth(1).locator(".batch-card-delete").click()
+        expect(cards).to_have_count(2)
+        assert _active_item_id(page) == "item-02", "删除后焦点应落到下一项"
+
+        cards.nth(1).locator(".batch-card-delete").click()
+        expect(cards).to_have_count(1)
+        assert _active_item_id(page) == "item-00", "末尾删除后焦点应落到上一项"
+
+        cards.nth(0).locator(".batch-card-delete").click()
+        expect(cards).to_have_count(0)
+        assert page.evaluate("() => document.activeElement && document.activeElement.id") == "panel-section-批量工作台"
+
+    def test_next_exception_reveals_then_focuses_a_hidden_item(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """AC: 下一个异常先让被筛选隐藏的条目可见，再定位、查看并聚焦。"""
+        items = [
+            _compact_items(1, prefix="正常")[0],
+            _batch_item(
+                "item-failed",
+                "异常S1",
+                status="FAILED",
+                canonical_title="异常 第一季",
+                error={"error_type": "mikan_unavailable", "error_message": "x"},
+            ),
+        ]
+        _open_compact_list(page, live_server_url, items)
+
+        page.locator('.batch-draft-card[data-item-id="item-00"] .batch-card-expand').click()
+        expect(page.locator('.batch-draft-card[data-item-id="item-00"] .batch-card-expand')).to_have_attribute(
+            "aria-expanded", "true"
+        )
+        page.fill("#batch-review-search", "正常00")
+        expect(page.locator(".batch-draft-card")).to_have_count(1)
+
+        page.click("#batch-next-exception")
+
+        failed = page.locator('.batch-draft-card[data-item-id="item-failed"]')
+        expect(failed).to_be_visible()
+        expect(page.locator(".batch-review-navigation")).to_contain_text("已临时显示异常条目")
+        assert _active_item_id(page) == "item-failed", "异常项必须获得焦点"
+        expect(page.locator("#batch-detail-pane")).to_contain_text("异常 第一季")
+
+    def test_filter_without_match_is_never_an_empty_batch(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        items = _compact_items(2)
+        _open_compact_list(page, live_server_url, items)
+
+        page.locator(".batch-draft-card").nth(1).locator(".batch-card-title").click()
+        expect(page.locator("#batch-detail-pane")).to_contain_text("加入批量确认")
+        page.locator(".batch-draft-card").nth(0).locator(".batch-card-checkbox-row").check()
+        page.fill("#batch-review-search", "不存在的标题")
+
+        expect(page.locator(".batch-draft-card")).to_have_count(0)
+        no_match = page.locator("#batch-review-no-match")
+        expect(no_match).to_be_visible()
+        expect(no_match).to_contain_text("没有符合当前筛选条件")
+        expect(no_match).to_contain_text("2 部")
+        # 不能被当成空批次。
+        expect(page.locator(".empty-state")).to_have_count(0)
+        expect(page.locator(".batch-review-count")).to_contain_text("共 2 部，当前显示 0 部")
+        # 右栏详情与勾选都还在，清除筛选入口可达。
+        expect(page.locator("#batch-detail-pane")).to_contain_text("加入批量确认")
+        expect(page.locator(".batch-filter-hidden")).to_be_visible()
+        clear = page.locator("#batch-review-clear")
+        clear.scroll_into_view_if_needed()
+        expect(clear).to_be_enabled()
+        clear.click()
+
+        expect(page.locator(".batch-draft-card")).to_have_count(2)
+        expect(page.locator("#batch-review-no-match")).to_have_count(0)
+        expect(page.locator(".batch-draft-card").nth(0).locator(".batch-card-checkbox-row")).to_be_checked()
+
+    def test_order_changes_only_on_an_explicit_sort(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        items = [
+            _batch_item(
+                "item-found",
+                "甲S1",
+                status="FOUND",
+                canonical_title="甲 第一季",
+                candidates=[_candidate(bangumi_id="42", title="甲 第一季", mikan_url="https://mikan.example/Home/Bangumi/42")],
+            ),
+            _compact_items(1, prefix="乙")[0],
+        ]
+        _route_parse(page, items)
+        page.route(
+            "**/api/v1/requests",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "ok": True,
+                        "result": {
+                            "request": _preview_request("咒术回战", "req-order-a"),
+                            "draft_id": "draft-order-a",
+                            "draft_revision": 1,
+                            "summary": {},
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+            ),
+        )
+        _goto_batch(page, live_server_url)
+        page.fill("#batch-raw-input", "甲S1\n乙S1")
+        page.click("#batch-parse-submit")
+        expect(page.locator(".batch-draft-card")).to_have_count(2)
+        order = lambda: page.locator(".batch-draft-card").evaluate_all(  # noqa: E731
+            "cards => cards.map((card) => card.dataset.itemId)"
+        )
+        assert order() == ["item-found", "item-00"]
+
+        # 生成草案属于「修复」，它不自动跳位。
+        page.locator('.batch-draft-card[data-item-id="item-found"] .batch-card-expand').click()
+        page.locator("#batch-detail-pane .candidate-select").click()
+        expect(page.locator('.batch-draft-card[data-item-id="item-found"] .batch-card-status')).to_contain_text("草案")
+        assert order() == ["item-found", "item-00"]
+        expect(page.locator(".batch-review-count")).not_to_contain_text("已按异常排序")
+
+        # 只有显式排序才重排。
+        page.click("#batch-review-sort-exceptions")
+        expect(page.locator(".batch-review-count")).to_contain_text("已按异常排序")
+
+    def test_reduced_motion_keeps_the_list_navigable(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        page.emulate_media(reduced_motion="reduce")
+        items = _compact_items(6)
+        _open_compact_list(page, live_server_url, items)
+
+        expect(page.locator(".batch-draft-card").first).to_have_css("scroll-behavior", "auto")
+        cards = page.locator(".batch-draft-card")
+        cards.nth(0).focus()
+        page.keyboard.press("ArrowDown")
+        expect(cards.nth(1)).to_have_class(re.compile(r"\bis-current\b"))
+        expect(cards.nth(1).locator(".batch-card-expand")).to_have_attribute("aria-expanded", "true")

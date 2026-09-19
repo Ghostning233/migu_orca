@@ -1,6 +1,8 @@
 # Ralph 当前状态
 
-Stage 45（批量确认范围、结果恢复与完成导航）已完成执行材料准备，尚未获开发授权。
+Stage 45（批量确认范围、结果恢复与完成导航）：US-355 已按用户授权由唯一写入开发
+Agent 完成开发与定向验证；US-356/US-357 尚未开始，必须等本包独立审核、红测、集中修复
+与复审闭环后再进入。
 准备分支：`ralph/stage45-batch-confirmation`；实际基线：Stage 44 PR #73 merge
 `9073fed30d3edd481ad5f4339c4b44b04d235a5e`（以实时 git 为准）。
 
@@ -20,3 +22,75 @@ Stage 45（批量确认范围、结果恢复与完成导航）已完成执行材
 - 已先逐字归档活动 Stage 44 `prd.json` 与 `progress.txt` 至 `scripts/ralph/archive/2026-09-19-stage44-shared-draft-review/`，保留原 Stage 44 执行证据；随后才切换活动 Ralph 状态。
 - 已依据 Stage 44 实际合并 `9073fed`、总体 PRD §6 和用户确认的 D-02/D-04，创建独立执行 PRD、三条初始 `passes=false`/空 notes 的故事、索引和决策台账同步。尚无代码、测试、审核、修复、提交、push、PR 或合并。
 - 本轮只应做文档/JSON一致性核验；不得将该准备记录视为 Vitest、typecheck、lint、build、后端或 Chromium 验证通过。
+
+## 2026-09-19 - US-355 紧凑列表与查看、勾选分离（WP-45-A）
+
+协作模式：用户指定 Claude Fable（实际模型 `claude-fable-5[1M]`）作为唯一写入开发 Agent，
+无子 Agent、无团队调度；单 Agent 内完成红测 → 实现 → 定向验证。
+
+实现范围（只改既有批量前端与其测试，未动 API/OpenAPI/generated/后端/持久化/外部写）：
+
+- 默认左卡重排为紧凑层：标题（加粗）+ 中文状态 + 需人工核对 + 输入行 + 有效种子数 +
+  阻断/错误（EMPTY/FAILED 反馈、草案修改失败、保存确认失败、结果恢复反馈、复核提示）+
+  「下一步：…」+ 快捷字幕组编辑 + 动作行；别名、检索关键词、季数提示、候选数、偏好、
+  总集数移入 `<details class="batch-card-more">` 的「辅助信息」。失败、未生效编辑、
+  unknown（`RESPONSE_UNKNOWN`）与全部恢复动作都留在折叠之外。
+- 新增纯 helper：`batchCardAuxiliaryFacts()`（辅助事实，排除已作为标题的首个别名）与
+  `batchCardNextStep()`（默认层唯一「下一步」，恢复/终态优先于通用分支）。
+- 卡片快捷键只处理落在卡片自身的事件（`event.target !== event.currentTarget` 直接返回），
+  复选框、快捷字幕组 select、动作按钮不再被 Arrow/Enter 截获。
+- 「已勾选但当前不可确认」的条目保留勾选与手工意图，通过 `.batch-card-intent-note` 就地
+  说明首个阻断原因并说明解决后仍参与保存确认；计数仍按「可确认」口径排除它。
+- 删除临时卡先记录删除位置，再按「下一项 → 上一项 → 列表标题（批量工作台面板标题）」
+  恢复焦点；列表为空时焦点不回落到 body。
+- 筛选无匹配新增 `#batch-review-no-match` 常驻提示（说明本批次仍有 N 部、数据/勾选/右栏
+  未变），不复用空批次 EmptyState；筛选控件与计数移出滚动区，清除筛选入口始终可达。
+- 滚动区只包含卡片列表并留出焦点环空间（wrapper 6px padding + 卡片 scroll-margin 8px），
+  卡片 `:focus-visible` 用 3px/offset 2px 令牌描边；卡片网格与列表容器都可作为焦点落点。
+- 紧凑尺寸：卡片 padding 6/8px、行距 3px、海报占位 48×44、桌面尺寸复选框；重排后
+  1440×900 的 12 项短标题夹具在列表可视区内可完整显示 3 张卡片。
+- 卡片 `aria-label` 为「查看条目：<标题>（<中文状态>）」，复选框可访问名称仍为
+  「选择 <输入标题>」（视觉隐藏标签、保留原生 input），查看与勾选对读屏可区分。
+
+实际验证命令与结果（全部在本机真实运行）：
+
+- `cd frontend && npx vitest run` → 49 文件 / 635 用例通过（含新增 7 个 US-355 视图用例、
+  2 个 helper 用例；新增用例先按红测写就并在实现前实际失败）。
+- `npm run typecheck` → 通过；`npm run lint` → 通过（`eslint . --max-warnings 0`）。
+- `npm run build` → 通过（Vite 生产构建，供浏览器套件使用）。
+- `npm run api:check` → 通过，`docs/api/openapi.json` → `src/api/generated/api.ts` 无漂移。
+- `uv run pytest tests/api_contract/test_dto_contracts.py test_save_confirm_service.py
+  test_openapi_generation.py test_openapi_runtime_consistency.py test_draft_store.py -q`
+  → 98 通过。
+- `uv run pytest tests/browser/ -q` → 255 通过（真实 Chromium；含 `test_app_batch_workbench.py`
+  新增 `TestAppBatchCompactList` 15 个用例：默认层/辅助层、1/12/36 连续列表无分页、
+  1440×900 三张完整卡、200% 缩放、长标题与长错误自然增高不裁切、键盘不被内部表单截获、
+  焦点环不被滚动容器裁切、删除后焦点落点、下一个异常先可见化再聚焦、筛选无匹配、
+  只在显式排序时重排、reduced-motion、敏感 canary 扩展覆盖辅助信息层）。
+- 浏览器验证全部使用 route mock / 临时 storage；未访问真实 MiKan、Auto Bangumi 或 qBittorrent；
+  未新增敏感截图/trace 入库（临时截图写在 /tmp 并已删除临时用例文件）。
+
+保留的既有行为（未改动）：服务端草案 authority、`draft_id + base_revision`、CAS、
+1.5 秒防抖 scheduler 与 flush、save-confirm、unknown 冻结恢复（原 body/key/revision/集合）、
+safe-info 边界、本地保存与外部提交两次确认、`AnimeDraftEditor` saved 模式与人工保存调用者。
+
+遗留风险与交接：
+
+- 列表底部的固定操作栏仍以 sticky 形式覆盖滚动区下缘（截图可复现）。这是 US-356 的
+  验收项（「固定栏按实际多行高度预留滚动空间，最后卡片不被遮挡」），本包未越界处理；
+  US-355 的「同屏三张完整卡」按列表可视区（滚动容器 640px）判定，未被容器裁切。
+- 1440×900 下 12 行批量输入会把整页推高，列表本身通常位于首屏之下；这是既有批量输入
+  区域高度，属 US-351 范围，本包未改。
+- 交互式复算（切换字幕组 / 未应用筛选）后重新计数的路径仍由既有 scheduler 驱动，
+  本包只增加「保留意图 + 排除资格 + 就地说明」，未改 CAS 语义。
+
+可复用结论：
+
+- `CheckboxRow` 在 `inheritAttrs: false` 下把 `class` 通过 `v-bind="attrs"` 落到原生
+  `input`，因此卡片布局必须给复选框加一层 cell 容器；直接给 CheckboxRow 加布局类不会
+  作用到包装元素。
+- 列表滚动区与筛选控件分离后，`#batch-review-clear` 常驻可达，且卡片焦点环不再与容器
+  overflow 或 sticky 控件冲突；这是同时满足「清除筛选可达」和「焦点环不裁切」的最省改动。
+
+提交：`feat: [US-355] - 紧凑列表与查看、勾选分离`（只暂存本 story 的 5 个文件 + prd.json
++ progress.txt）。未 push、未建 PR、未合并、未强推、未删分支、未运行 `ralph.sh`、未 `git add .`。
