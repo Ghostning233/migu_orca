@@ -24,3 +24,10 @@ Stage 44（共享草案审核）已完成开发准备、尚未启动开发。准
 - 补充 `ResourceSummary.test.ts`、`BatchWorkbenchView.test.ts`，并将 `US-353` 标记为 `passes=true`。
 - 实际验证：`npm run test:unit -- --run src/features/workbench/ResourceSummary.test.ts src/features/workbench/AnimeDraftEditor.test.ts src/features/workbench/BatchWorkbenchView.test.ts`（69 passed）；`npm run typecheck`、`npm run lint`、`npm run api:check`、`npm run build` 均通过；`uv run pytest tests/browser/test_app_workbench.py tests/browser/test_app_batch_workbench.py -q`（73 passed in 44.91s）。
 - 遗留风险：未新增浏览器测试用例，现有单番/批量套件覆盖已通过；Stage 44 另一故事 US-354 未启动。
+
+## 2026-09-19 - US-353 集中修复与复审
+
+- 修复 `AnimeDraftEditor`：草案默认层仅从用户实际选择的内存候选摘要展示合集身份；直连/缺失摘要固定显示“未提供”，保存模式保留既有公开标题回退。
+- 扩展 `SelectedCollectionSummary` 的 poster 白名单投影，仅接受同源 `/api/v1/mikan/posters/...` opaque 路径；默认层只显示封面状态，不把路径或外链写入 DOM；批量重搜和删除条目清理旧投影。
+- 新增直连真实 Chromium 缺省身份断言，并调整已有浏览器断言按季度/总集数字段核对，避免与独立封面缺省文案冲突。
+- 验证：`npm run test:unit -- --run src/features/workbench/AnimeDraftEditor.test.ts src/features/workbench/candidateSearch.test.ts src/features/workbench/BatchWorkbenchView.test.ts src/features/workbench/WorkbenchView.test.ts`（127 passed）；`npm run typecheck`、`npm run lint`、`npm run api:check`、`npm run build` 通过；`uv run pytest tests/browser/test_app_workbench.py tests/browser/test_app_batch_workbench.py -q`（74 passed）。

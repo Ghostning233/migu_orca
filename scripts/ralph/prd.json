@@ -10,7 +10,7 @@
       "acceptanceCriteria": ["D-03已确认：默认最多3条安全标题、完整按需展开、单番/批量同口径；批量只传实际选中公开候选摘要", "不从别名、解析、Request或其他候选推断季度、封面或总集数", "资源计数同源、敏感白名单/Canary、状态恢复与真实Chromium/契约回归通过"],
       "priority": 1,
       "passes": true,
-      "notes": "US-353 完成：共享资源摘要默认最多3条安全标题并按需展开；批量仅将用户点击的公开候选摘要以内存投影传入 AnimeDraftEditor；未提供字段保持未知。定向 Vitest、typecheck、lint、build、api:check 与单番/批量 Chromium 通过。"
+      "notes": "US-353 完成：共享资源摘要默认最多3条安全标题并按需展开；批量仅将用户点击的公开候选摘要以内存投影传入 AnimeDraftEditor；直连草案无候选投影时合集身份固定未提供；poster 仅保留同源 opaque 白名单并以已提供/未提供状态展示；批量重搜/删除清理旧投影。定向 Vitest、typecheck、lint、build、api:check 与单番/批量 Chromium 通过。"
     },
     {
       "id": "US-354",

@@ -1265,6 +1265,28 @@ class TestAppWorkbenchDirectFallback:
         expect(page.locator("#mikan-candidate-search-result")).to_have_count(0)
         assert "request_id=" not in page.url
 
+    def test_direct_draft_does_not_infer_selected_collection_from_request_titles(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        """直连草案没有候选投影时，默认层不冒认 Request 标题为已选合集。"""
+        preview = _preview_request("芙莉莲", "req-wb-fb-identity")
+        preview["input"]["raw_title"] = "请求原始标题"
+        preview["source_info"]["matched_bangumi"] = {"title": "请求匹配标题"}
+        _register_generation_capture(page, [], body=preview_result_json(preview))
+
+        set_storage_preferences(page, storage_dir)
+        _goto_workbench(page, live_server_url)
+        self._reach_fallback_entry(page)
+        page.check("#mikan-fallback-enabled")
+        page.fill("#mikan-fallback-bangumi", "2353")
+        page.click("#mikan-fallback-generate")
+        page.wait_for_selector("#detail-preview-edit-form", timeout=5000)
+
+        selected = page.locator(".draft-review-summary .detail-row").filter(has_text="已选合集")
+        expect(selected).to_contain_text("未提供")
+        expect(selected).not_to_contain_text("请求匹配标题")
+        expect(selected).not_to_contain_text("请求原始标题")
+
     def test_invalid_fallback_value_shows_validation_without_api_call(
         self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:
@@ -2445,8 +2467,10 @@ class TestAppWorkbenchReviewHierarchy:
         assert "筛选规则" in summary_text
 
         # 未保存草案没有服务端季度/总集数字段：显示真实投影而不是伪造值。
-        assert "未提供" not in summary_text
-        assert "未知" not in summary_text
+        # 封面缺省可以同时合法显示“未提供”，因此按字段断言，避免把
+        # 独立的 poster 缺省误当成季度/总集证据。
+        expect(summary.locator(".detail-row").filter(has_text="季度")).to_contain_text("第 2 季")
+        expect(summary.locator(".detail-row").filter(has_text="总集数")).to_contain_text("28 集")
 
         # 资源摘要留在默认层，「筛后有什么」无需展开技术层。
         expect(detail.locator(".resource-summary")).to_be_visible()

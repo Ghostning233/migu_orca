@@ -314,6 +314,7 @@ function clearBatchRouteLocalState(): void {
   draftCreateItemIds.value = new Set()
   draftCreateCandidateIds.value = {}
   draftCreateErrors.value = {}
+  selectedCollectionByItem.value = {}
   selectedItemIds.value = new Set()
   journey.dispatch({ type: 'clear_route' })
 }
@@ -725,6 +726,9 @@ function deleteBatchCard(itemId: string): void {
   const feedback = { ...acceptFeedback.value }
   delete feedback[itemId]
   acceptFeedback.value = feedback
+  const selectedCollections = { ...selectedCollectionByItem.value }
+  delete selectedCollections[itemId]
+  selectedCollectionByItem.value = selectedCollections
   items.value = items.value.filter((item) => item.item_id !== itemId)
 }
 

@@ -228,8 +228,7 @@ const selectedGroupName = computed(
 const selectedCollectionTitle = computed(
   () =>
     props.candidateSummary?.title ||
-    props.request.source_info?.matched_bangumi?.title ||
-    props.request.input?.raw_title ||
+    (editorMode.value === 'saved' ? props.request.source_info?.matched_bangumi?.title || props.request.input?.raw_title : '') ||
     '未提供',
 )
 
@@ -294,6 +293,10 @@ defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
           <div class="detail-row">
             <dt>总集数</dt>
             <dd>{{ candidateSummary?.totalEpisodes ? `${candidateSummary.totalEpisodes} 集` : '未知' }}</dd>
+          </div>
+          <div class="detail-row">
+            <dt>封面</dt>
+            <dd>{{ candidateSummary?.posterUrl ? '已提供' : '未提供' }}</dd>
           </div>
           <div class="detail-row">
             <dt>字幕组</dt>
