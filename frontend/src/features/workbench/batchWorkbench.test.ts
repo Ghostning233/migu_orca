@@ -11,9 +11,12 @@ import {
   batchCardPreferenceSummary,
   batchCardSeedSummary,
   batchCardTitle,
+  batchConfirmDisabledReason,
   batchItemCount,
   batchItemIsException,
   batchItemMatchesReviewFilters,
+  batchSelectedConfirmCopy,
+  batchSelectedScopeText,
   batchStatusLabel,
   batchSaveConfirmErrorLabel,
   batchSaveConfirmRecoveryAllowed,
@@ -27,6 +30,7 @@ import {
   orderBatchItemsForReview,
   validateBatchRawInput,
   type BatchCardGuidance,
+  type BatchConfirmScopeCounts,
   type BatchItem,
 } from '@/features/workbench/batchWorkbench'
 
@@ -358,5 +362,80 @@ describe('batch card default layer (US-355)', () => {
     expect(batchCardNextStep(guidance({ blocker: '有尚未应用的编辑' }))).toBe('先解决：有尚未应用的编辑。')
     expect(batchCardNextStep(guidance())).toContain('保存并确认全部')
     expect(batchCardNextStep(guidance({ hasDraft: false }))).toContain('重新获取批量草案')
+  })
+})
+
+// Stage 45 / WP-45-B / US-356: N 部（手工勾选且有资格）与确认全部的两种范围必须由
+// 同一份计数派生；两入口的可见禁用原因常驻，不依赖 title。
+describe('batch N-part selection scope (US-356)', () => {
+  const scope = (overrides: Partial<BatchConfirmScopeCounts> = {}): BatchConfirmScopeCounts => ({
+    total: 3,
+    visible: 2,
+    selected: 2,
+    selectedHidden: 1,
+    selectedExcluded: 0,
+    confirmable: 3,
+    hidden: 1,
+    needsProcessing: 0,
+    ...overrides,
+  })
+
+  it('states the checked-and-eligible complete-batch range with hidden participants', () => {
+    expect(batchSelectedScopeText(scope())).toBe(
+      '保存并确认 2 部来自完整批次 3 部中已勾选且当前可确认的条目，其中 1 部当前被筛选隐藏、仍会一并保存；筛选与可见全选不改变本集合。',
+    )
+    expect(batchSelectedScopeText(scope({ selectedHidden: 0, hidden: 0 }))).toBe(
+      '保存并确认 2 部来自完整批次 3 部中已勾选且当前可确认的条目；筛选与可见全选不改变本集合。',
+    )
+  })
+
+  it('states a visible reason when nothing checked can be confirmed', () => {
+    expect(batchSelectedScopeText(scope({ selected: 0, selectedHidden: 0 }))).toContain('请先在卡片上勾选')
+    expect(batchSelectedScopeText(scope({ selected: 0, selectedHidden: 0, selectedExcluded: 2 }))).toContain(
+      '已勾选但当前不可确认的 2 部被排除',
+    )
+    expect(batchSelectedScopeText(scope({ total: 0, visible: 0, selected: 0, confirmable: 0, selectedHidden: 0 }))).toBe('')
+  })
+
+  it('never reports counts outside the batch bounds', () => {
+    const clamped = batchSelectedScopeText(scope({ total: 2, selected: 9, selectedHidden: 9, selectedExcluded: 9 }))
+    expect(clamped).toContain('保存并确认 2 部')
+    expect(clamped).toContain('其中 2 部当前被筛选隐藏')
+    expect(clamped).not.toContain('9')
+  })
+
+  it('names the frozen N count in the title, the safety list and the confirm button', () => {
+    const copy = batchSelectedConfirmCopy(scope(), ['甲 第一季', '乙 第一季'])
+    expect(copy.title).toBe('保存并确认 2 部')
+    expect(copy.confirmLabel).toBe('保存并确认 2 部')
+    expect(copy.items).toEqual(['甲 第一季', '乙 第一季'])
+    expect(copy.itemsLabel).toBe('本次将保存并确认的 2 部')
+    expect(copy.message).toContain('完整批次 3 部中已勾选且当前可确认的 2 部')
+    expect(copy.message).toContain('其中 1 部被筛选隐藏，仍会一并保存并确认')
+    expect(copy.message).toContain('仅保存本地订阅方案，不会提交到 Auto Bangumi')
+    expect(copy.message).toContain('外部提交需在追番管理再次确认')
+    expect(copy.message).not.toContain('draft')
+  })
+
+  it('states the exclusions of the N scope without naming capabilities', () => {
+    const copy = batchSelectedConfirmCopy(scope({ selectedExcluded: 1, selected: 1, selectedHidden: 0 }), ['甲 第一季'])
+    expect(copy.title).toBe('保存并确认 1 部')
+    expect(copy.message).toContain('已勾选但当前不可确认的 1 部被排除')
+    expect(copy.items).toEqual(['甲 第一季'])
+  })
+
+  it('lists the same frozen set as the confirm-all safety list', () => {
+    const copy = batchAcceptAllConfirmCopy({ total: 3, confirmable: 2, hidden: 1 }, ['甲 第一季', '乙 第一季'])
+    expect(copy.items).toEqual(['甲 第一季', '乙 第一季'])
+    expect(copy.itemsLabel).toBe('本次将保存并确认的 2 部')
+  })
+})
+
+describe('batch confirm disabled reasons (US-356)', () => {
+  it('always explains a disabled entry with persistent copy instead of a title', () => {
+    expect(batchConfirmDisabledReason({ saving: false, pendingVerification: false })).toBe('')
+    expect(batchConfirmDisabledReason({ saving: true, pendingVerification: false })).toContain('正在保存确认')
+    expect(batchConfirmDisabledReason({ saving: false, pendingVerification: true })).toContain('待核验')
+    expect(batchConfirmDisabledReason({ saving: true, pendingVerification: true })).toContain('待核验')
   })
 })

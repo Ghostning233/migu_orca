@@ -365,6 +365,28 @@ export interface BatchAcceptAllCounts {
   hidden: number
 }
 
+/**
+ * US-356: the one count model both save entries are described by.
+ *
+ * `confirmable`/`hidden` describe the complete batch's 保存并确认全部 scope;
+ * `selected`/`selectedHidden`/`selectedExcluded` describe the D-02 scope of
+ * 保存并确认 N 部 (manually checked *and* currently eligible items of the
+ * complete batch — a review filter never removes a manual intent, and a checked
+ * item that is not currently eligible never enters the request).
+ */
+export interface BatchConfirmScopeCounts extends BatchAcceptAllCounts {
+  /** Items the active review filter currently shows. */
+  visible: number
+  /** Complete-batch items that are checked and currently eligible (N). */
+  selected: number
+  /** Of `selected`, those the active review filter hides but that still travel. */
+  selectedHidden: number
+  /** Checked items that are currently not eligible, so excluded from N. */
+  selectedExcluded: number
+  /** Complete-batch items that still need processing before they can confirm. */
+  needsProcessing: number
+}
+
 /** Clamp the confirm-all counts to the batch they describe. */
 function normalizeAcceptAllCounts(counts: BatchAcceptAllCounts): {
   total: number
@@ -376,6 +398,91 @@ function normalizeAcceptAllCounts(counts: BatchAcceptAllCounts): {
   const confirmable = Math.max(0, Math.min(Math.trunc(counts.confirmable), total))
   const hidden = Math.max(0, Math.min(Math.trunc(counts.hidden), confirmable))
   return { total, confirmable, hidden, excluded: total - confirmable }
+}
+
+/** Clamp every scope count to the set it is derived from. */
+function normalizeConfirmScopeCounts(counts: BatchConfirmScopeCounts): {
+  total: number
+  visible: number
+  selected: number
+  selectedHidden: number
+  selectedExcluded: number
+  confirmable: number
+  hidden: number
+  excluded: number
+  needsProcessing: number
+} {
+  const base = normalizeAcceptAllCounts(counts)
+  const visible = Math.max(0, Math.min(Math.trunc(counts.visible), base.total))
+  const selected = Math.max(0, Math.min(Math.trunc(counts.selected), base.total))
+  const selectedExcluded = Math.max(0, Math.min(Math.trunc(counts.selectedExcluded), base.total - selected))
+  const selectedHidden = Math.max(0, Math.min(Math.trunc(counts.selectedHidden), selected))
+  return { ...base, visible, selected, selectedHidden, selectedExcluded, needsProcessing: base.excluded }
+}
+
+/**
+ * US-356: visible scope line for the 保存并确认 N 部 entry.
+ *
+ * N is the complete batch's manually checked *and* currently eligible set
+ * (D-02): a review filter only changes what the user browses, so it never drops
+ * a manual intent, and a checked item that is currently blocked keeps its check
+ * but is excluded from the request. The copy states the batch total, that same
+ * N, how many of the N items the filter hides, and how many checked items are
+ * excluded, so the entry is described by visible copy and not only by a title.
+ */
+export function batchSelectedScopeText(counts: BatchConfirmScopeCounts): string {
+  const { total, selected, selectedHidden, selectedExcluded } = normalizeConfirmScopeCounts(counts)
+  if (total === 0) return ''
+  if (selected === 0) {
+    const excluded = selectedExcluded
+      ? `已勾选但当前不可确认的 ${selectedExcluded} 部被排除：请先解决各自的阻断原因。`
+      : ''
+    return `完整批次 ${total} 部中没有已勾选且可确认的条目：请先在卡片上勾选当前可确认的条目。${excluded}`
+  }
+  const details = [`保存并确认 ${selected} 部来自完整批次 ${total} 部中已勾选且当前可确认的条目`]
+  if (selectedHidden) details.push(`其中 ${selectedHidden} 部当前被筛选隐藏、仍会一并保存`)
+  if (selectedExcluded) details.push(`已勾选但当前不可确认的 ${selectedExcluded} 部被排除`)
+  return `${details.join('，')}；筛选与可见全选不改变本集合。`
+}
+
+export interface BatchConfirmDialogCopy {
+  title: string
+  message: string
+  confirmLabel: string
+  /** Heading for the safety title list; empty when there is no list. */
+  itemsLabel: string
+  /** The frozen, display-safe titles of exactly the items that will be sent. */
+  items: string[]
+}
+
+export type BatchAcceptAllConfirmCopy = BatchConfirmDialogCopy
+
+/**
+ * US-356: dialog copy for one frozen N-part intent.
+ *
+ * The title and the confirm button both state N so the number the user saw on
+ * the entry is the number the button promises; the body states that the set
+ * comes from the complete batch, the hidden participants that still travel with
+ * the request, the checked items that were excluded, and that this only saves a
+ * local plan — the external Auto Bangumi submit is a separate, later
+ * confirmation. The title list is exactly the frozen participant set.
+ */
+export function batchSelectedConfirmCopy(
+  counts: BatchConfirmScopeCounts,
+  titles: readonly string[] = [],
+): BatchConfirmDialogCopy {
+  const { total, selected, selectedHidden, selectedExcluded } = normalizeConfirmScopeCounts(counts)
+  const clauses = [`本次保存并确认完整批次 ${total} 部中已勾选且当前可确认的 ${selected} 部`]
+  if (selectedHidden) clauses.push(`其中 ${selectedHidden} 部被筛选隐藏，仍会一并保存并确认`)
+  const exclusion = selectedExcluded ? `已勾选但当前不可确认的 ${selectedExcluded} 部被排除。` : ''
+  const label = `保存并确认 ${selected} 部`
+  return {
+    title: label,
+    confirmLabel: label,
+    itemsLabel: titles.length ? `本次将保存并确认的 ${titles.length} 部` : '',
+    items: [...titles],
+    message: `${clauses.join('，')}。${exclusion}仅保存本地订阅方案，不会提交到 Auto Bangumi；外部提交需在追番管理再次确认。`,
+  }
 }
 
 /**
@@ -399,14 +506,8 @@ export function batchAcceptAllScopeText(counts: BatchAcceptAllCounts): string {
   return `${details.join('，')}；不受筛选或勾选影响。`
 }
 
-export interface BatchAcceptAllConfirmCopy {
-  title: string
-  message: string
-  confirmLabel: string
-}
-
 /**
- * US-348: dialog copy for one frozen confirm-all intent.
+ * US-348 / US-356: dialog copy for one frozen confirm-all intent.
  *
  * The title and the confirm button both state M so the number the user saw is
  * the number the button promises; the body states the complete batch, the
@@ -414,7 +515,10 @@ export interface BatchAcceptAllConfirmCopy {
  * and that this only saves a local plan — the external Auto Bangumi submit is
  * a separate, later confirmation.
  */
-export function batchAcceptAllConfirmCopy(counts: BatchAcceptAllCounts): BatchAcceptAllConfirmCopy {
+export function batchAcceptAllConfirmCopy(
+  counts: BatchAcceptAllCounts,
+  titles: readonly string[] = [],
+): BatchConfirmDialogCopy {
   const { total, confirmable, hidden, excluded } = normalizeAcceptAllCounts(counts)
   const clauses = [`完整批次 ${total} 部中当前可确认 ${confirmable} 部`]
   if (hidden) clauses.push(`其中 ${hidden} 部被筛选隐藏，仍会一并保存并确认`)
@@ -422,9 +526,27 @@ export function batchAcceptAllConfirmCopy(counts: BatchAcceptAllCounts): BatchAc
   const label = `保存并确认全部 ${confirmable} 部`
   return {
     title: label,
-    message: `${clauses.join('，')}。${exclusion}仅保存本地订阅方案，不会提交到 Auto Bangumi；外部提交需在追番管理再次确认。`,
     confirmLabel: label,
+    itemsLabel: titles.length ? `本次将保存并确认的 ${titles.length} 部` : '',
+    items: [...titles],
+    message: `${clauses.join('，')}。${exclusion}仅保存本地订阅方案，不会提交到 Auto Bangumi；外部提交需在追番管理再次确认。`,
   }
+}
+
+/**
+ * US-356: the persistent, visible reason both save entries are disabled by.
+ *
+ * A disabled entry must always carry this copy in the business area; the
+ * `title` attribute is never the only explanation. It returns an empty string
+ * exactly when no transport-level block applies — an empty scope is explained
+ * by that entry's own scope line instead.
+ */
+export function batchConfirmDisabledReason(state: { saving: boolean; pendingVerification: boolean }): string {
+  if (state.pendingVerification) {
+    return '上一次批量保存结果待核验：请先用「使用相同操作重试」核验后再发起新的确认，不会重复保存。'
+  }
+  if (state.saving) return '正在保存确认：请等待本次请求完成后再次提交。'
+  return ''
 }
 
 /** Build the generated save-confirm body; capabilities never leave this payload. */

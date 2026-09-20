@@ -51,9 +51,12 @@ import {
   batchAcceptAllScopeText,
   batchCardAuxiliaryFacts,
   batchCardNextStep,
+  batchConfirmDisabledReason,
   batchSaveConfirmErrorLabel,
   batchSaveConfirmRecoveryAllowed,
   batchSaveConfirmSucceeded,
+  batchSelectedConfirmCopy,
+  batchSelectedScopeText,
   findBatchTrackingItem,
   batchCardNeedsReview,
   batchCardRequest,
@@ -70,7 +73,7 @@ import {
   orderBatchItemsForReview,
   nextBatchException,
   validateBatchRawInput,
-  type BatchAcceptAllCounts,
+  type BatchConfirmScopeCounts,
   type BatchCardFact,
   type BatchSaveConfirmDescriptor,
   type BatchSaveConfirmResult,
@@ -335,15 +338,56 @@ const focusAnnouncement = ref('')
 const reviewFilterKey = computed(() => `${reviewQuery.value}\u0000${reviewStatus.value}\u0000${exceptionsOnly.value}`)
 
 const selectable = computed(() => visibleItems.value.filter((item) => itemConfirmability(item.item_id ?? '').confirmable))
-const selectedCount = computed(
-  () => visibleItems.value.filter((item) => selectedItemIds.value.has(item.item_id ?? '') && itemConfirmability(item.item_id ?? '').confirmable).length,
-)
 const processingCount = computed(() => items.value.filter((item) => draftSessions.get(item.item_id ?? '')?.applying.value).length)
-const confirmableCount = computed(() => visibleItems.value.filter((item) => itemConfirmability(item.item_id ?? '').confirmable).length)
-const needsProcessingCount = computed(() => visibleItems.value.filter((item) => !itemConfirmability(item.item_id ?? '').confirmable).length)
 const allSelected = computed(
   () => selectable.value.length > 0 && selectable.value.every((item) => selectedItemIds.value.has(item.item_id ?? '')),
 )
+
+// US-356 / D-02: N 部（保存并确认 N 部）的资格集合是「完整批次中手工勾选且当前可确认」
+// 的条目。筛选只改变浏览：被隐藏的勾选仍参与，被阻断的勾选保留意图但不进入请求。
+const checkedItemCount = computed(() => items.value.filter((item) => selectedItemIds.value.has(item.item_id ?? '')).length)
+const selectedEligibleItems = computed(() => items.value.filter(
+  (item) => selectedItemIds.value.has(item.item_id ?? '') && itemConfirmability(item.item_id ?? '').confirmable,
+))
+const selectedEligibleCount = computed(() => selectedEligibleItems.value.length)
+const selectedExcludedCount = computed(() => Math.max(0, checkedItemCount.value - selectedEligibleCount.value))
+const visibleItemIds = computed(() => new Set(visibleItems.value.map((item) => item.item_id)))
+const selectedHiddenCount = computed(
+  () => selectedEligibleItems.value.filter((item) => !visibleItemIds.value.has(item.item_id)).length,
+)
+
+// US-347: 保存并确认全部 的范围是完整批次，不是当前可见子集。筛选和
+// 「全选当前可见可确认项」只改变浏览，因此 all 的资格集合、按钮可用性、M 计数、
+// 弹窗数量和描述符都必须来自下面同一个完整批次集合。
+const batchConfirmable = computed(() => items.value.filter((item) => itemConfirmability(item.item_id ?? '').confirmable))
+const batchConfirmableCount = computed(() => batchConfirmable.value.length)
+const batchNeedsProcessingCount = computed(() => Math.max(0, items.value.length - batchConfirmableCount.value))
+const batchHiddenConfirmableCount = computed(
+  () => batchConfirmable.value.filter((item) => !visibleItemIds.value.has(item.item_id)).length,
+)
+
+// US-356: 两个入口的数量、范围文案、弹窗安全清单、描述符与 item_ids 都从这一份计数派生。
+const batchConfirmScope = computed<BatchConfirmScopeCounts>(() => ({
+  total: items.value.length,
+  visible: visibleItems.value.length,
+  selected: selectedEligibleCount.value,
+  selectedHidden: selectedHiddenCount.value,
+  selectedExcluded: selectedExcludedCount.value,
+  confirmable: batchConfirmableCount.value,
+  hidden: batchHiddenConfirmableCount.value,
+  needsProcessing: batchNeedsProcessingCount.value,
+}))
+const batchSelectedScope = computed(() => batchSelectedScopeText(batchConfirmScope.value))
+const batchAcceptAllScope = computed(() => batchAcceptAllScopeText(batchConfirmScope.value))
+
+// US-356: 保存中或上一次结果待核验时两个入口都不可用，并在固定栏常驻同一条可见原因，
+// 不依赖按钮的 title。空集合的原因由各自的 scope 文案给出。
+const batchSaveOperationalReason = computed(() => batchConfirmDisabledReason({
+  saving: saveInFlight.value,
+  pendingVerification: saveOperation.value?.phase === 'response_unknown',
+}))
+const canConfirmSelected = computed(() => selectedEligibleCount.value > 0 && !batchSaveOperationalReason.value)
+const canConfirmAll = computed(() => batchConfirmableCount.value > 0 && !batchSaveOperationalReason.value)
 
 const detailItem = computed(() =>
   (detailItemId.value || currentItemId.value)
@@ -357,20 +401,6 @@ const visibleItems = computed(() => items.value.filter((item) =>
     exceptionsOnly: exceptionsOnly.value,
   }),
 ))
-// US-347: 保存并确认全部 的范围是完整批次，不是当前可见子集。筛选和
-// 「全选当前可见可确认项」只改变浏览，因此 all 的资格集合、按钮可用性、M 计数、
-// 弹窗数量和描述符都必须来自下面同一个完整批次集合。
-const batchConfirmable = computed(() => items.value.filter((item) => itemConfirmability(item.item_id ?? '').confirmable))
-const batchConfirmableCount = computed(() => batchConfirmable.value.length)
-const batchHiddenConfirmableCount = computed(() => {
-  const visibleIds = new Set(visibleItems.value.map((item) => item.item_id))
-  return batchConfirmable.value.filter((item) => !visibleIds.has(item.item_id)).length
-})
-const batchAcceptAllScope = computed(() => batchAcceptAllScopeText({
-  total: items.value.length,
-  confirmable: batchConfirmableCount.value,
-  hidden: batchHiddenConfirmableCount.value,
-}))
 
 // US-348: 打开「保存并确认全部」时把完整批次参与集合与绑定版本冻结成内存 intent
 // （confirmBatchAcceptAll 的 route-local 闭包值），确认前重新核对，任何资格/版本/batch
@@ -378,7 +408,8 @@ const batchAcceptAllScope = computed(() => batchAcceptAllScopeText({
 interface BatchAcceptAllIntent {
   batchId: string
   participants: Array<{ itemId: string; draftId: string; baseRevision: number }>
-  counts: BatchAcceptAllCounts
+  counts: BatchConfirmScopeCounts
+  titles: string[]
 }
 const acceptAllDialogOpen = ref(false)
 const acceptAllRecheckNotice = ref('')
@@ -574,7 +605,7 @@ async function parseBatch(): Promise<void> {
     notification.error('校验失败', validationError)
     return
   }
-  if (items.value.length && hasUnsafeBatchWork() && !acceptAllDialogOpen.value) {
+  if (items.value.length && hasUnsafeBatchWork() && !acceptAllDialogOpen.value && !selectedDialogOpen.value) {
     const confirmed = await confirmDialog.value?.confirm({
       title: '重新搜索批量条目',
       message: '重新搜索将舍弃当前候选、草案和勾选现场，只保留新的批量输入。是否继续？',
@@ -1141,16 +1172,116 @@ async function retryFrozenBatchSaveConfirm(): Promise<void> {
   await submitBatchSaveConfirm(rows, operation.body.item_ids ?? null)
 }
 
-async function confirmBatchAcceptSelected(): Promise<void> {
-  const rows = visibleItems.value.filter((item) => selectedItemIds.value.has(item.item_id ?? '') && itemConfirmability(item.item_id ?? '').confirmable)
-  if (!rows.length || saveInFlight.value) return
-  const ok = await confirmDialog.value?.confirm({
-    title: '批量保存确认',
-    message: `确认保存并确认选中的 ${rows.length} 个批量草案？`,
-    confirmLabel: '保存并确认',
+// US-356: 打开「保存并确认 N 部」时把 D-02 的完整勾选资格集合、绑定版本与安全标题清单
+// 冻结成内存 intent，确认前重新核对；之后任何筛选或可见性变化都不得改写它。
+interface BatchSelectedIntent {
+  batchId: string
+  participants: Array<{ itemId: string; draftId: string; baseRevision: number }>
+  itemIds: string[]
+  counts: BatchConfirmScopeCounts
+  titles: string[]
+}
+const selectedDialogOpen = ref(false)
+const selectedRecheckNotice = ref('')
+const selectedRecheckElement = ref<HTMLElement | null>(null)
+
+// US-356: 固定操作栏是 sticky 的，会浮在批量内容之上；它的真实渲染高度（多行范围文案与
+// 禁用原因换行后会变高）作为 CSS 变量发布，布局据此预留底部滚动空间，卡片聚焦或滚动
+// 定位时也把固定栏让出来，末卡/字段/错误因此不会被遮挡。
+const acceptToolbarElement = ref<HTMLElement | null>(null)
+const acceptToolbarHeight = ref(0)
+let acceptToolbarObserver: ResizeObserver | null = null
+
+function measureAcceptToolbar(): void {
+  acceptToolbarHeight.value = Math.ceil(acceptToolbarElement.value?.getBoundingClientRect().height ?? 0)
+}
+
+function setAcceptToolbarElement(element: unknown): void {
+  acceptToolbarObserver?.disconnect()
+  acceptToolbarObserver = null
+  acceptToolbarElement.value = element instanceof HTMLElement ? element : null
+  if (acceptToolbarElement.value && typeof ResizeObserver !== 'undefined') {
+    acceptToolbarObserver = new ResizeObserver(() => measureAcceptToolbar())
+    acceptToolbarObserver.observe(acceptToolbarElement.value)
+  }
+  measureAcceptToolbar()
+}
+
+// 两个入口的可访问描述始终包含自己的范围文案，并追加当前的常驻说明/禁用原因。
+const selectedEntryDescription = computed(() => [
+  'batch-accept-selected-scope',
+  ...(selectedRecheckNotice.value ? ['batch-accept-selected-recheck'] : []),
+  ...(batchSaveOperationalReason.value ? ['batch-accept-selected-reason'] : []),
+].join(' '))
+const allEntryDescription = computed(() => [
+  'batch-accept-all-scope',
+  ...(acceptAllRecheckNotice.value ? ['batch-accept-all-recheck'] : []),
+  ...(batchSaveOperationalReason.value ? ['batch-accept-all-reason'] : []),
+].join(' '))
+
+/** Freeze the complete batch's manually checked eligible set as the N intent. */
+function buildSelectedIntent(): BatchSelectedIntent | null {
+  const rows = selectedEligibleItems.value
+  if (!rows.length) return null
+  const participants = rows.map((row) => ({
+    itemId: row.item_id ?? '',
+    draftId: row.draft_id ?? '',
+    baseRevision: row.draft_revision ?? 1,
+  }))
+  if (participants.some((participant) => !participant.itemId || !participant.draftId)) return null
+  return {
+    batchId: batchId.value,
+    participants,
+    itemIds: participants.map((participant) => participant.itemId),
+    counts: batchConfirmScope.value,
+    // 安全标题清单与描述符、item_ids 同源：同一批次顺序、同一冻结集合。
+    titles: rows.map((row) => displayValue(batchCardTitle(row))),
+  }
+}
+
+/** True only while the frozen N intent is exactly what would be sent now. */
+function selectedIntentIsCurrent(intent: BatchSelectedIntent): boolean {
+  if (batchId.value !== intent.batchId) return false
+  const rows = selectedEligibleItems.value
+  if (rows.length !== intent.participants.length) return false
+  return intent.participants.every((participant) => {
+    const row = rows.find((item) => item.item_id === participant.itemId)
+    if (!row) return false
+    return row.draft_id === participant.draftId && (row.draft_revision ?? 1) === participant.baseRevision
   })
-  if (!ok) return
-  await submitBatchSaveConfirm(rows, rows.map((row) => row.item_id ?? ''))
+}
+
+async function confirmBatchAcceptSelected(): Promise<void> {
+  // 与全部入口相同：函数入口先挡住重复调用，避免第二次点击替换一个已打开的确认。
+  if (selectedDialogOpen.value || saveInFlight.value) return
+  selectedRecheckNotice.value = ''
+  const intent = buildSelectedIntent()
+  if (!intent) return
+  selectedDialogOpen.value = true
+  try {
+    const copy = batchSelectedConfirmCopy(intent.counts, intent.titles)
+    const ok = await confirmDialog.value?.confirm({
+      title: copy.title,
+      message: copy.message,
+      confirmLabel: copy.confirmLabel,
+      items: copy.items,
+      itemsLabel: copy.itemsLabel,
+    })
+    if (!ok) return
+    if (!selectedIntentIsCurrent(intent)) {
+      // 弹窗期间资格、draft_id、revision 或批次绑定变化：零请求，常驻说明并要求重新确认。
+      selectedRecheckNotice.value = '已勾选条目的资格或草案版本已变化，本次未发送任何请求；请核对后重新确认。'
+      await nextTick()
+      selectedRecheckElement.value?.focus()
+      return
+    }
+    const rows = intent.participants
+      .map((participant) => items.value.find((item) => item.item_id === participant.itemId))
+      .filter((row): row is BatchItem => Boolean(row))
+    await submitBatchSaveConfirm(rows, intent.itemIds)
+  } finally {
+    selectedDialogOpen.value = false
+  }
 }
 
 /** Freeze the complete batch's confirmable set as the confirm-all intent. */
@@ -1166,11 +1297,9 @@ function buildAcceptAllIntent(): BatchAcceptAllIntent | null {
   return {
     batchId: batchId.value,
     participants,
-    counts: {
-      total: items.value.length,
-      confirmable: rows.length,
-      hidden: batchHiddenConfirmableCount.value,
-    },
+    counts: batchConfirmScope.value,
+    // US-356: 安全标题清单与描述符、item_ids 同源（同一冻结集合、同一批次顺序）。
+    titles: rows.map((row) => displayValue(batchCardTitle(row))),
   }
 }
 
@@ -1202,11 +1331,13 @@ async function confirmBatchAcceptAll(): Promise<void> {
   if (!intent) return
   acceptAllDialogOpen.value = true
   try {
-    const copy = batchAcceptAllConfirmCopy(intent.counts)
+    const copy = batchAcceptAllConfirmCopy(intent.counts, intent.titles)
     const ok = await confirmDialog.value?.confirm({
       title: copy.title,
       message: copy.message,
       confirmLabel: copy.confirmLabel,
+      items: copy.items,
+      itemsLabel: copy.itemsLabel,
     })
     if (!ok) return
     if (!acceptAllIntentIsCurrent(intent)) {
@@ -1366,6 +1497,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  acceptToolbarObserver?.disconnect()
+  acceptToolbarObserver = null
   for (const { scheduler } of editSchedulers.values()) scheduler.dispose()
   editSchedulers.clear()
 })
@@ -1398,7 +1531,14 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
       </div>
     </form>
 
-    <div v-if="parseStarted || parseLoading || parseError || items.length" id="batch-parse-result" class="batch-parse-result" aria-live="polite" aria-relevant="additions text">
+    <div
+      v-if="parseStarted || parseLoading || parseError || items.length"
+      id="batch-parse-result"
+      class="batch-parse-result"
+      aria-live="polite"
+      aria-relevant="additions text"
+      :style="{ '--batch-accept-toolbar-height': `${acceptToolbarHeight}px` }"
+    >
       <LoadingState v-if="parseLoading" :message="loadingMessage" />
       <p v-if="parseLoading" id="batch-parse-loading-summary" class="batch-parse-loading-summary" role="status">
         原文：{{ rawInput }}；本次提交规模：{{ parseCount }} 部；整体搜索进行中，暂不展示逐项进度。
@@ -1734,6 +1874,14 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                   >加入批量确认</BaseButton>
                   <BaseButton id="batch-detail-delete" variant="danger" :disabled="savingItemIds.has(detailItem.item_id ?? '')" @click="onDraftDeleted(detailItem.item_id ?? '')">删除当前批量卡片</BaseButton>
                 </div>
+                <!-- US-356: 禁用原因常驻可见，不只挂在 title 上。 -->
+                <p
+                  v-if="!itemConfirmability(detailItem.item_id ?? '').confirmable"
+                  class="field-help batch-detail-blocker"
+                  role="status"
+                >
+                  当前条目暂不可加入批量确认：{{ itemConfirmability(detailItem.item_id ?? '').blockers.join('；') }}。
+                </p>
               </div>
             </template>
             <template v-else-if="detailItem">
@@ -1750,7 +1898,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
           解析完成：{{ items.length }} / {{ parseCount }} 部；异常条目已置顶，条目顺序已固定。
         </p>
 
-        <div id="batch-accept-toolbar" class="batch-accept-toolbar">
+        <div id="batch-accept-toolbar" :ref="setAcceptToolbarElement" class="batch-accept-toolbar">
           <CheckboxRow
             id="batch-select-all-checkbox"
             :label="'全选当前可见可确认项'"
@@ -1758,15 +1906,56 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
             :disabled="selectable.length === 0 || saveInFlight"
             @update:checked="setAllSelected"
           />
-          <span id="batch-accept-selected-count" class="batch-selected-count">
-            全部 {{ items.length }} 项；当前筛选 {{ visibleItems.length }} 项；已选且可确认 {{ selectedCount }} 项；可确认 {{ confirmableCount }} 项；需处理 {{ needsProcessingCount }} 项；重算中 {{ processingCount }} 项；请求 {{ saveSummary.requested ?? 0 }} 项；已确认 {{ saveSummary.confirmed ?? 0 }} 项；失败 {{ saveSummary.failed ?? 0 }} 项
+          <span id="batch-accept-selected-count" class="batch-selected-count" role="status">
+            <span class="batch-count-group" data-scope="complete-batch">完整批次 {{ items.length }} 部；可确认 {{ batchConfirmableCount }} 部；需处理 {{ batchNeedsProcessingCount }} 部</span>
+            <span class="batch-count-group" data-scope="visible">当前可见 {{ visibleItems.length }} 部</span>
+            <span class="batch-count-group" data-scope="selection">已勾选 {{ checkedItemCount }} 部；已选且可确认 {{ selectedEligibleCount }} 项；其中被筛选隐藏仍参与 {{ selectedHiddenCount }} 项；已排除 {{ selectedExcludedCount }} 项</span>
+            <span v-if="processingCount" class="batch-count-group" data-scope="recalculating">重算中 {{ processingCount }} 部</span>
+            <span v-if="saveSummary.requested" class="batch-count-group" data-scope="last-save">
+              上次请求 {{ saveSummary.requested ?? 0 }} 项；已确认 {{ saveSummary.confirmed ?? 0 }} 项；失败 {{ saveSummary.failed ?? 0 }} 项
+            </span>
           </span>
+          <!-- US-356: 两个入口的范围常驻可见，并同时是按钮的可访问描述。 -->
+          <p
+            id="batch-accept-selected-scope"
+            class="batch-accept-scope"
+            :class="{ 'is-blocked': selectedEligibleCount === 0 }"
+          >
+            {{ batchSelectedScope }}
+          </p>
+          <p
+            v-if="batchSaveOperationalReason"
+            id="batch-accept-selected-reason"
+            class="batch-accept-reason"
+            role="status"
+          >
+            保存并确认勾选条目暂不可用：{{ batchSaveOperationalReason }}
+          </p>
+          <!-- US-356: 弹窗打开后资格/版本/批次变化时零请求，常驻说明并要求重新确认。 -->
+          <p
+            v-if="selectedRecheckNotice"
+            id="batch-accept-selected-recheck"
+            ref="selectedRecheckElement"
+            class="batch-accept-recheck"
+            role="status"
+            tabindex="-1"
+          >
+            {{ selectedRecheckNotice }}
+          </p>
           <p
             id="batch-accept-all-scope"
             class="batch-accept-scope"
             :class="{ 'is-blocked': batchConfirmableCount === 0 }"
           >
             {{ batchAcceptAllScope }}
+          </p>
+          <p
+            v-if="batchSaveOperationalReason"
+            id="batch-accept-all-reason"
+            class="batch-accept-reason"
+            role="status"
+          >
+            保存并确认全部暂不可用：{{ batchSaveOperationalReason }}
           </p>
           <!-- US-348: 确认前复核失败时，说明常驻在固定业务区（不是 Toast），
                并获得焦点；不会自动再次打开确认。 -->
@@ -1792,18 +1981,19 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
             <BaseButton
               id="batch-accept-submit"
               variant="primary"
-              :disabled="selectedCount === 0 || saveInFlight"
+              :disabled="!canConfirmSelected"
               :loading="saveInFlight"
+              :aria-describedby="selectedEntryDescription"
               @click="confirmBatchAcceptSelected"
             >
-              保存并确认 {{ selectedCount }} 部
+              保存并确认 {{ selectedEligibleCount }} 部
             </BaseButton>
             <BaseButton
               id="batch-accept-all"
               variant="secondary"
-              :disabled="batchConfirmableCount === 0 || saveInFlight"
+              :disabled="!canConfirmAll"
               :loading="saveInFlight"
-              :aria-describedby="acceptAllRecheckNotice ? 'batch-accept-all-scope batch-accept-all-recheck' : 'batch-accept-all-scope'"
+              :aria-describedby="allEntryDescription"
               @click="confirmBatchAcceptAll"
             >
               保存并确认全部 {{ batchConfirmableCount }} 部
@@ -1916,6 +2106,9 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   display: grid;
   gap: 1rem;
   grid-template-columns: minmax(260px, 36%) minmax(0, 64%);
+  /* US-356: 固定操作栏的真实多行高度作为底部滚动空间预留，末卡、字段与错误
+     可以滚到固定栏之上，不被遮挡。 */
+  padding-bottom: var(--batch-accept-toolbar-height, 0px);
 }
 
 .batch-review-list-column {
@@ -1941,6 +2134,12 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 .batch-detail-empty {
   color: var(--color-text-muted);
   margin: 0;
+}
+
+.batch-detail-blocker {
+  color: #8a5a13;
+  margin: 0.5rem 0 0;
+  overflow-wrap: anywhere;
 }
 
 .batch-detail-pane :deep(.batch-draft-panel) {
@@ -1986,7 +2185,9 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   min-width: 0;
   padding: 6px 8px;
   position: relative;
-  scroll-margin: 8px;
+  /* US-355 的 8px 焦点环余量 + US-356 的固定栏高度：卡片被聚焦或滚动定位时
+     让出固定栏，末卡不会被粘住的保存栏遮住。 */
+  scroll-margin: 8px 8px calc(8px + var(--batch-accept-toolbar-height, 0px));
 }
 
 .batch-draft-card:focus-visible {
@@ -2246,7 +2447,20 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 
 .batch-selected-count {
   color: var(--color-text-muted);
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
   font-size: 0.84rem;
+  gap: 0.3rem 0.5rem;
+  min-width: 0;
+}
+
+/* US-356: 完整批次 / 当前可见 / 已勾选 / 重算中 / 上次保存各自成组，组内文案自带
+   作用域名称，不再是一行难以分辨的连续数字。 */
+.batch-count-group {
+  background: var(--color-bg-muted);
+  border-radius: 4px;
+  padding: 0.1rem 0.45rem;
 }
 
 /* US-347: the confirm-all scope is stated in visible copy next to its button
@@ -2261,6 +2475,16 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 
 .batch-accept-scope.is-blocked {
   color: #8d2f20;
+}
+
+/* US-356: 保存中/待核验时两个入口都不可用，这条常驻原因与各自的条目相邻，
+   不依赖 title。 */
+.batch-accept-reason {
+  color: #8a5a13;
+  flex-basis: 100%;
+  font-size: 0.84rem;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 /* US-348: the rejection of a stale confirmation is permanent business-area

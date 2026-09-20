@@ -573,8 +573,12 @@ describe('BatchWorkbenchView accept (US-205)', () => {
 
     await wrapper.find('#batch-accept-submit').trigger('click')
     await nextTick()
-    // ConfirmDialog (teleport stub renders inline) must be confirmed.
-    expect(wrapper.find('.confirm-dialog').text()).toContain('确认保存并确认选中的 1 个批量草案')
+    // US-356: N 部弹窗写明数量、完整批次来源、排除项与本地保存边界，并列出安全标题清单。
+    const dialog = wrapper.find('.confirm-dialog')
+    expect(dialog.find('.confirm-dialog-title').text()).toBe('保存并确认 1 部')
+    expect(dialog.find('.confirm-dialog-message').text()).toContain('完整批次 3 部中已勾选且当前可确认的 1 部')
+    expect(dialog.find('.confirm-dialog-message').text()).toContain('仅保存本地订阅方案')
+    expect(dialog.findAll('.confirm-dialog-items li').map((entry) => entry.text())).toHaveLength(1)
     await wrapper.find('.confirm-dialog .primary-button').trigger('click')
     await flushPromises()
 
@@ -1777,5 +1781,292 @@ describe('BatchWorkbenchView compact cards (US-355)', () => {
     expect(card.attributes('aria-label')).toContain('查看条目')
     expect(card.find('.checkbox-row-label').text()).toContain('选择')
     expect(card.find('.batch-card-expand').attributes('aria-label')).toContain('查看草案')
+  })
+})
+
+// Stage 45 / WP-45-B / US-356: 固定操作栏与两种确认范围。
+// D-02：N 部的资格集合是「完整批次中手工勾选且当前可确认」的条目，筛选隐藏的勾选仍参与；
+// 「全选当前可见可确认项」只改变可见项。两入口的数量、安全标题清单、描述符与 item_ids
+// 必须同源，打开弹窗后任何资格/版本/批次变化都要零请求并要求重新确认。
+describe('BatchWorkbenchView selection scope (US-356)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    apiPost.mockReset()
+  })
+
+  let wrapperUnderTest: Awaited<ReturnType<typeof mountBatch>>['wrapper']
+
+  function draftItem(itemId: string, rawTitle: string, canonical = `${rawTitle} 第一季`) {
+    return batchItem({
+      item_id: itemId,
+      raw_title: rawTitle,
+      status: 'DRAFT',
+      canonical_title_candidates: [canonical],
+      preview_request: previewRequest(`req-${itemId}`),
+      draft_id: `draft-${itemId}`,
+      draft_revision: 1,
+    })
+  }
+
+  function confirmedResults(itemIds: readonly string[]) {
+    return saveConfirmResult({
+      results: itemIds.map((itemId) => ({
+        item_id: itemId,
+        outcome: 'CONFIRMED',
+        request_id: `req-${itemId}`,
+        status: 'CONFIRMED',
+        error_type: null,
+        error_message: null,
+        tracking_id: `tracking-${itemId}`,
+        tracking_ready: true,
+      })),
+      summary: { requested: itemIds.length, confirmed: itemIds.length, failed: 0 },
+    })
+  }
+
+  function saveConfirmCalls() {
+    return apiPost.mock.calls.filter(([path]) => path === '/api/v1/batches/{batch_id}/save-confirm')
+  }
+
+  async function mountAndParse(items: unknown[], rawInput: string) {
+    if (items.length) apiPost.mockResolvedValueOnce(parseResult({ items: items as never }))
+    const mounted = await mountBatch()
+    wrapperUnderTest = mounted.wrapper
+    await wrapperUnderTest.find('#batch-raw-input').setValue(rawInput)
+    await wrapperUnderTest.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    return mounted
+  }
+
+  async function check(itemId: string) {
+    await wrapperUnderTest.find(`.batch-draft-card[data-item-id="${itemId}"] input[type="checkbox"]`).setValue(true)
+    await nextTick()
+  }
+
+  async function openSelectedDialog() {
+    await wrapperUnderTest.find('#batch-accept-submit').trigger('click')
+    await nextTick()
+  }
+
+  async function confirmDialog() {
+    await wrapperUnderTest.find('.confirm-dialog .primary-button').trigger('click')
+    await flushPromises()
+  }
+
+  it('keeps a filter-hidden checked item in the N scope and sends exactly that set', async () => {
+    await mountAndParse([draftItem('item-a', '甲'), draftItem('item-b', '乙')], '甲\n乙')
+    apiPost.mockResolvedValueOnce(confirmedResults(['item-a', 'item-b']))
+    await check('item-a')
+    await check('item-b')
+
+    await wrapperUnderTest.find('#batch-review-search').setValue('乙')
+    await nextTick()
+    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(1)
+
+    // D-02：筛选只影响浏览，隐藏的手工勾选仍进入 N 的完整集合。
+    const counts = wrapperUnderTest.find('#batch-accept-selected-count').text()
+    expect(counts).toContain('已选且可确认 2 项')
+    expect(counts).toContain('其中被筛选隐藏仍参与 1 项')
+    expect(wrapperUnderTest.find('#batch-accept-submit').text()).toContain('保存并确认 2 部')
+    expect(wrapperUnderTest.find('#batch-accept-submit').attributes('disabled')).toBeUndefined()
+
+    await openSelectedDialog()
+    const dialog = wrapperUnderTest.find('.confirm-dialog')
+    expect(dialog.find('.confirm-dialog-title').text()).toBe('保存并确认 2 部')
+    expect(dialog.find('.confirm-dialog-message').text()).toContain('其中 1 部被筛选隐藏，仍会一并保存并确认')
+    expect(dialog.findAll('.confirm-dialog-items li').map((entry) => entry.text())).toEqual(['甲 第一季', '乙 第一季'])
+    expect(dialog.text()).not.toContain('draft-a')
+
+    await confirmDialog()
+    expect(saveConfirmCalls()).toHaveLength(1)
+    const body = saveConfirmCalls()[0]![1]!.body as Record<string, unknown>
+    expect(body.item_ids).toEqual(['item-a', 'item-b'])
+    expect((body.items as Array<{ item_id: string }>).map((entry) => entry.item_id)).toEqual(['item-a', 'item-b'])
+  })
+
+  it('excludes a checked item that is not currently eligible and states the exclusion', async () => {
+    await mountAndParse([draftItem('item-a', '甲'), draftItem('item-c', '丙')], '甲\n丙')
+    apiPost.mockResolvedValueOnce(confirmedResults(['item-a']))
+    await check('item-a')
+    await check('item-c')
+    expect(wrapperUnderTest.find('#batch-accept-selected-count').text()).toContain('已选且可确认 2 项')
+
+    // 检查后制造一个尚未应用的编辑：该条目被重算阻断，保留勾选但退出 N 的资格集合。
+    await wrapperUnderTest.find('.batch-draft-card[data-item-id="item-c"] .batch-card-expand').trigger('click')
+    await nextTick()
+    await wrapperUnderTest.find('#batch-preview-must-contain').setValue('未应用修改')
+    await nextTick()
+    expect(wrapperUnderTest.find('.batch-draft-card[data-item-id="item-c"] .batch-card-intent-note').exists()).toBe(true)
+
+    const counts = wrapperUnderTest.find('#batch-accept-selected-count').text()
+    expect(counts).toContain('已选且可确认 1 项')
+    expect(counts).toContain('已排除 1 项')
+    expect(wrapperUnderTest.find('#batch-accept-selected-scope').text()).toContain('已勾选但当前不可确认的 1 部被排除')
+
+    await openSelectedDialog()
+    const dialog = wrapperUnderTest.find('.confirm-dialog')
+    expect(dialog.find('.confirm-dialog-title').text()).toBe('保存并确认 1 部')
+    const message = dialog.find('.confirm-dialog-message').text()
+    expect(message).toContain('已勾选但当前不可确认的 1 部被排除')
+    expect(message).toContain('仅保存本地订阅方案')
+    expect(message).toContain('追番管理再次确认')
+    expect(dialog.findAll('.confirm-dialog-items li').map((entry) => entry.text())).toEqual(['甲 第一季'])
+
+    await confirmDialog()
+    const body = saveConfirmCalls()[0]![1]!.body as Record<string, unknown>
+    expect(body.item_ids).toEqual(['item-a'])
+    expect((body.items as Array<{ item_id: string }>).map((entry) => entry.item_id)).toEqual(['item-a'])
+  })
+
+  it('keeps the N count, dialog list, descriptors and item_ids from the same eligible set', async () => {
+    await mountAndParse(
+      [draftItem('item-a', '甲'), draftItem('item-b', '乙'), draftItem('item-c', '丙')],
+      '甲\n乙\n丙',
+    )
+    apiPost.mockResolvedValueOnce(confirmedResults(['item-a', 'item-b', 'item-c']))
+    await check('item-a')
+    await check('item-b')
+    await check('item-c')
+
+    await openSelectedDialog()
+    const dialog = wrapperUnderTest.find('.confirm-dialog')
+    const titles = dialog.findAll('.confirm-dialog-items li').map((entry) => entry.text())
+    expect(titles).toEqual(['甲 第一季', '乙 第一季', '丙 第一季'])
+    expect(dialog.find('.confirm-dialog-title').text()).toBe(`保存并确认 ${titles.length} 部`)
+    expect(wrapperUnderTest.find('#batch-accept-submit').text()).toContain(`保存并确认 ${titles.length} 部`)
+
+    await confirmDialog()
+    const body = saveConfirmCalls()[0]![1]!.body as Record<string, unknown>
+    const items = body.items as Array<{ item_id: string; draft_id: string; base_revision: number }>
+    expect(body.item_ids).toEqual(items.map((entry) => entry.item_id))
+    expect(items).toHaveLength(titles.length)
+    expect(items.every((entry) => Boolean(entry.draft_id) && entry.base_revision === 1)).toBe(true)
+    expect(Object.keys(body).sort()).toEqual(['item_ids', 'items', 'storage_dir'])
+  })
+
+  it('refuses to send N when a bound draft revision changed while the dialog was open', async () => {
+    let resolveModify!: (value: unknown) => void
+    const pendingModify = new Promise((resolve) => { resolveModify = resolve })
+    await mountAndParse([draftItem('item-a', '甲'), draftItem('item-b', '乙')], '甲\n乙')
+    apiPost.mockImplementationOnce(() => pendingModify as never)
+    await check('item-a')
+    await check('item-b')
+    await wrapperUnderTest.find('.batch-draft-card[data-item-id="item-a"] .batch-card-expand').trigger('click')
+    await nextTick()
+
+    // 先发出修改并保持响应在途：甲被阻断，N 此刻只剩乙。
+    await wrapperUnderTest.find('#batch-preview-must-contain').setValue('新筛选')
+    await wrapperUnderTest.find('#detail-preview-edit-form').trigger('submit')
+    await nextTick()
+    expect(apiPost.mock.calls.filter(([path]) => path === '/api/v1/requests/preview-modify')).toHaveLength(1)
+    expect(wrapperUnderTest.find('#batch-accept-submit').text()).toContain('保存并确认 1 部')
+
+    await openSelectedDialog()
+    expect(wrapperUnderTest.find('.confirm-dialog').exists()).toBe(true)
+    expect(wrapperUnderTest.find('.confirm-dialog-title').text()).toBe('保存并确认 1 部')
+
+    // 弹窗打开期间，已在途的修改响应把该条目按新版本放回资格集合。
+    const applied = previewRequest('req-a')
+    applied.confirmable_config.filter_rule.must_contain = '新筛选'
+    resolveModify({ request: applied, draft_id: 'draft-a', draft_revision: 2 })
+    await flushPromises()
+
+    await confirmDialog()
+
+    expect(saveConfirmCalls()).toHaveLength(0)
+    expect(wrapperUnderTest.find('.confirm-dialog').exists()).toBe(false)
+    const notice = wrapperUnderTest.find('#batch-accept-selected-recheck')
+    expect(notice.exists()).toBe(true)
+    expect(notice.text()).toContain('资格或草案版本已变化')
+    expect(notice.text()).toContain('重新确认')
+    expect(document.activeElement).toBe(notice.element)
+    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(2)
+  })
+
+  it('refuses to send N when the batch was re-parsed while the dialog was open', async () => {
+    apiPost
+      .mockResolvedValueOnce(parseResult({ items: [draftItem('item-a', '甲'), draftItem('item-b', '乙')] }))
+      .mockResolvedValueOnce(parseResult({
+        batch_id: 'batch-2',
+        items: [draftItem('item-x', '新甲')],
+      }))
+    await mountAndParse([], '甲\n乙')
+    await check('item-a')
+    await openSelectedDialog()
+
+    await wrapperUnderTest.find('#batch-raw-input').setValue('新甲')
+    await wrapperUnderTest.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+
+    await confirmDialog()
+
+    expect(saveConfirmCalls()).toHaveLength(0)
+    expect(wrapperUnderTest.find('#batch-accept-selected-recheck').text()).toContain('资格或草案版本已变化')
+    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(1)
+  })
+
+  it('keeps the frozen N set when only the filter changes while the dialog is open', async () => {
+    await mountAndParse([draftItem('item-a', '甲'), draftItem('item-b', '乙')], '甲\n乙')
+    apiPost.mockResolvedValueOnce(confirmedResults(['item-a', 'item-b']))
+    await check('item-a')
+    await check('item-b')
+    await openSelectedDialog()
+
+    // 发送范围在弹窗打开时冻结：之后的筛选只改变浏览，不改写已确认的集合。
+    await wrapperUnderTest.find('#batch-review-search').setValue('乙')
+    await nextTick()
+
+    await confirmDialog()
+    expect(saveConfirmCalls()).toHaveLength(1)
+    const body = saveConfirmCalls()[0]![1]!.body as Record<string, unknown>
+    expect(body.item_ids).toEqual(['item-a', 'item-b'])
+  })
+
+  it('keeps an unknown N result on the original frozen request without a new intent', async () => {
+    await mountAndParse([draftItem('item-a', '甲'), draftItem('item-b', '乙')], '甲\n乙')
+    apiPost
+      .mockRejectedValueOnce({ network: true, type: 'network_error', message: 'network' })
+      .mockResolvedValueOnce(confirmedResults(['item-a']))
+    await check('item-a')
+    await openSelectedDialog()
+    await confirmDialog()
+
+    const first = saveConfirmCalls()[0]
+    expect(wrapperUnderTest.find('#batch-retry-frozen-operation').exists()).toBe(true)
+    expect(wrapperUnderTest.find('#batch-accept-selected-recheck').exists()).toBe(false)
+
+    await wrapperUnderTest.find('#batch-retry-frozen-operation').trigger('click')
+    await flushPromises()
+    // 未知重试沿用原冻结 body/key/revision 与集合，不新建 intent，也不再弹确认框。
+    expect(wrapperUnderTest.find('.confirm-dialog').exists()).toBe(false)
+    expect(saveConfirmCalls()).toHaveLength(2)
+    expect(saveConfirmCalls()[1]?.[1]).toEqual(first?.[1])
+  })
+
+  it('disables both entries with a persistent visible reason while a save result is unverified', async () => {
+    await mountAndParse([draftItem('item-a', '甲'), draftItem('item-b', '乙')], '甲\n乙')
+    apiPost.mockRejectedValueOnce({ network: true, type: 'network_error', message: 'network' })
+    await check('item-a')
+    await openSelectedDialog()
+    await confirmDialog()
+
+    expect(wrapperUnderTest.find('#batch-retry-frozen-operation').exists()).toBe(true)
+    expect(wrapperUnderTest.find('#batch-accept-submit').attributes('disabled')).toBeDefined()
+    expect(wrapperUnderTest.find('#batch-accept-all').attributes('disabled')).toBeDefined()
+    expect(wrapperUnderTest.find('#batch-accept-selected-reason').text()).toContain('待核验')
+    expect(wrapperUnderTest.find('#batch-accept-all-reason').text()).toContain('待核验')
+  })
+
+  it('states a persistent visible reason when nothing checked can be confirmed', async () => {
+    await mountAndParse([draftItem('item-a', '甲'), draftItem('item-b', '乙')], '甲\n乙')
+
+    expect(wrapperUnderTest.find('#batch-accept-submit').attributes('disabled')).toBeDefined()
+    expect(wrapperUnderTest.find('#batch-accept-selected-scope').text()).toContain('请先在卡片上勾选')
+    // 可见全选只改可见项：全选后 N 与全部的数量都来自同一个完整批次集合。
+    await wrapperUnderTest.find('#batch-select-all-checkbox').setValue(true)
+    await nextTick()
+    expect(wrapperUnderTest.find('#batch-accept-selected-scope').text()).toContain('保存并确认 2 部')
+    expect(wrapperUnderTest.find('#batch-accept-selected-count').text()).toContain('当前可见 2 部')
+    expect(wrapperUnderTest.find('#batch-accept-selected-count').text()).toContain('完整批次 2 部')
   })
 })

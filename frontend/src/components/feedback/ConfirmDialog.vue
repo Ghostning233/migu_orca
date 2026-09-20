@@ -24,6 +24,9 @@ interface ConfirmState {
   confirmLabel?: string
   cancelLabel?: string
   danger?: boolean
+  /** Optional frozen safety list (US-356); rendered as a real list element. */
+  items?: readonly string[]
+  itemsLabel?: string
   resolve: (value: boolean) => void
 }
 
@@ -34,9 +37,14 @@ let dialogGeneration = 0
 
 const titleId = useId()
 const bodyId = useId()
+const itemsId = useId()
+const itemsLabelId = useId()
 
 const confirmLabel = computed(() => state.value?.confirmLabel ?? '确认')
 const cancelLabel = computed(() => state.value?.cancelLabel ?? '取消')
+const describedBy = computed(() =>
+  state.value?.items?.length ? `${bodyId} ${itemsId}` : bodyId,
+)
 
 const { activate, deactivate } = useFocusTrap(dialogEl, () => {
   close(false)
@@ -48,6 +56,8 @@ function confirm(options: {
   confirmLabel?: string
   cancelLabel?: string
   danger?: boolean
+  items?: readonly string[]
+  itemsLabel?: string
 }): Promise<boolean> {
   const generation = ++dialogGeneration
   if (open.value) {
@@ -111,10 +121,25 @@ defineExpose({ confirm })
         role="alertdialog"
         aria-modal="true"
         :aria-labelledby="titleId"
-        :aria-describedby="bodyId"
+        :aria-describedby="describedBy"
       >
         <h2 :id="titleId" class="confirm-dialog-title">{{ state?.title }}</h2>
         <p :id="bodyId" class="confirm-dialog-message">{{ state?.message }}</p>
+        <!-- US-356: optional frozen safety list. It states exactly which items
+             the confirmed action covers, so the count in the title can be
+             checked item by item before the request is sent. -->
+        <div v-if="state?.items?.length" class="confirm-dialog-items-block">
+          <p v-if="state.itemsLabel" :id="itemsLabelId" class="confirm-dialog-items-label">
+            {{ state.itemsLabel }}
+          </p>
+          <ul
+            :id="itemsId"
+            class="confirm-dialog-items"
+            :aria-labelledby="state.itemsLabel ? itemsLabelId : undefined"
+          >
+            <li v-for="(item, index) in state.items" :key="`${index}-${item}`">{{ item }}</li>
+          </ul>
+        </div>
         <div class="confirm-dialog-actions">
           <button type="button" class="secondary-button" @click="onCancel">
             {{ cancelLabel }}
@@ -169,6 +194,33 @@ defineExpose({ confirm })
 .confirm-dialog-message {
   margin: 0;
   color: var(--color-text-muted);
+}
+
+.confirm-dialog-items-block {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.confirm-dialog-items-label {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+/* A long frozen set scrolls inside the dialog instead of growing past the
+   viewport; the action buttons stay reachable. */
+.confirm-dialog-items {
+  margin: 0;
+  padding-left: 1.25rem;
+  max-height: 30vh;
+  overflow-y: auto;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.confirm-dialog-items li + li {
+  margin-top: 0.15rem;
 }
 
 .confirm-dialog-actions {

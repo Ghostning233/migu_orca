@@ -1820,3 +1820,501 @@ class TestAppBatchCompactList:
         page.keyboard.press("ArrowDown")
         expect(cards.nth(1)).to_have_class(re.compile(r"\bis-current\b"))
         expect(cards.nth(1).locator(".batch-card-expand")).to_have_attribute("aria-expanded", "true")
+
+
+def _confirm_scope_items() -> list[dict[str, Any]]:
+    """US-356 fixture: three independent, confirmable draft cards."""
+    return [
+        _batch_item("item-a", "甲S1", status="DRAFT", canonical_title="甲 第一季", preview_request=_preview_request("咒术回战", "req-scope-a")),
+        _batch_item("item-b", "乙S1", status="DRAFT", canonical_title="乙 第一季", preview_request=_preview_request("咒术回战", "req-scope-b")),
+        _batch_item("item-c", "丙S1", status="DRAFT", canonical_title="丙 第一季", preview_request=_preview_request("咒术回战", "req-scope-c")),
+    ]
+
+
+class TestAppBatchConfirmScope:
+    """AC (US-356)：N 部（完整批次中手工勾选且当前可确认）与确认全部（完整批次资格）
+    是两个明确的范围；两入口的数量、安全标题清单、描述符与 item_ids 同源；弹窗打开后
+    任何资格/版本/批次变化都零请求并要求重新确认；固定栏按真实多行高度预留空间，
+    禁用原因常驻可见。"""
+
+    def _open(self, page: Page, live_server_url: str, items: list[dict[str, Any]], raw: str) -> None:
+        _route_parse(page, items)
+        _goto_batch(page, live_server_url)
+        page.fill("#batch-raw-input", raw)
+        page.click("#batch-parse-submit")
+        expect(page.locator(".batch-draft-card")).to_have_count(len(items))
+
+    def _check(self, page: Page, item_id: str) -> None:
+        page.locator(f'.batch-draft-card[data-item-id="{item_id}"] .batch-card-checkbox-row').check()
+
+    def test_n_covers_filter_hidden_checked_items_with_a_same_source_safety_list(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """AC (D-02)：筛选隐藏的手工勾选仍参与 N；弹窗的数量、清单、描述符与 item_ids 同源。"""
+        accept_calls: list[dict[str, Any]] = []
+
+        def _accept(route: Any, request: Any) -> None:
+            accept_calls.append(json.loads(request.post_data or "{}"))
+            _accept_route_handler({"item-a", "item-b"})(route, request)
+
+        page.route("**/api/v1/batches/batch-spa/save-confirm*", _accept)
+        items = _confirm_scope_items()
+        # 被隐藏的条目携带真实敏感 canary：它进入内存后，扩大范围后的请求仍只能带描述符。
+        items[0]["error"] = {"token": "stage45-hidden-token", "raw_html": "<html>stage45 hidden</html>"}
+        self._open(page, live_server_url, items, "甲S1\n乙S1\n丙S1")
+
+        self._check(page, "item-a")
+        self._check(page, "item-b")
+        page.fill("#batch-review-search", "乙")
+        expect(page.locator(".batch-draft-card")).to_have_count(1)
+
+        counts = page.locator("#batch-accept-selected-count")
+        expect(counts).to_contain_text("已选且可确认 2 项")
+        expect(counts).to_contain_text("其中被筛选隐藏仍参与 1 项")
+        expect(counts).to_contain_text("完整批次 3 部")
+        expect(page.locator("#batch-accept-submit")).to_be_enabled()
+        expect(page.locator("#batch-accept-submit")).to_contain_text("保存并确认 2 部")
+        expect(page.locator("#batch-accept-selected-scope")).to_contain_text("已勾选且当前可确认的条目")
+        expect(page.locator("#batch-accept-selected-scope")).to_contain_text("其中 1 部当前被筛选隐藏、仍会一并保存")
+
+        page.click("#batch-accept-submit")
+        page.wait_for_selector(".confirm-dialog", timeout=5000)
+        dialog = page.locator(".confirm-dialog")
+        expect(dialog.locator(".confirm-dialog-title")).to_have_text("保存并确认 2 部")
+        expect(dialog.locator(".confirm-dialog-message")).to_contain_text("完整批次 3 部中已勾选且当前可确认的 2 部")
+        expect(dialog.locator(".confirm-dialog-message")).to_contain_text("其中 1 部被筛选隐藏，仍会一并保存并确认")
+        expect(dialog.locator(".confirm-dialog-message")).to_contain_text("仅保存本地订阅方案")
+        expect(dialog.locator(".confirm-dialog-message")).to_contain_text("外部提交需在追番管理再次确认")
+        expect(dialog.locator(".confirm-dialog-items li")).to_have_count(2)
+        assert dialog.locator(".confirm-dialog-items li").all_inner_texts() == ["甲 第一季", "乙 第一季"]
+        # 草案能力只留在内存 intent 里，不进入弹窗。
+        assert "draft" not in dialog.inner_text()
+
+        dialog.locator(".primary-button").click()
+        page.wait_for_selector(".global-notification:not(:empty)", timeout=5000)
+
+        payload = accept_calls[-1]
+        assert payload["item_ids"] == ["item-a", "item-b"]
+        assert [item["item_id"] for item in payload["items"]] == ["item-a", "item-b"]
+        assert set(payload) == {"items", "storage_dir", "item_ids"}
+        assert all(
+            set(item) == {"item_id", "draft_id", "base_revision", "idempotency_key"}
+            for item in payload["items"]
+        )
+        serialized = json.dumps(payload)
+        assert "stage45-hidden-token" not in serialized
+        assert "stage45 hidden" not in serialized
+        assert "stage45-hidden-token" not in page.locator("body").inner_text()
+
+    def test_visible_select_all_only_changes_visible_items(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """AC：全选当前可见可确认项只改可见项；N 仍按完整批次的手工勾选集合计数。"""
+        _route_parse(page, _confirm_scope_items())
+        _goto_batch(page, live_server_url)
+        page.fill("#batch-raw-input", "甲S1\n乙S1\n丙S1")
+        page.click("#batch-parse-submit")
+        expect(page.locator(".batch-draft-card")).to_have_count(3)
+
+        page.check("#batch-select-all-checkbox")
+        expect(page.locator("#batch-accept-submit")).to_contain_text("保存并确认 3 部")
+        page.fill("#batch-review-search", "乙")
+        expect(page.locator(".batch-draft-card")).to_have_count(1)
+        # 可见只剩乙，但隐藏的勾选仍是 N 的一部分。
+        expect(page.locator("#batch-accept-submit")).to_contain_text("保存并确认 3 部")
+        expect(page.locator("#batch-accept-selected-count")).to_contain_text("当前可见 1 部")
+
+        # 取消可见全选只取消可见项：甲/丙 仍是手工勾选。
+        page.uncheck("#batch-select-all-checkbox")
+        expect(page.locator("#batch-accept-submit")).to_contain_text("保存并确认 2 部")
+        page.click("#batch-review-clear")
+        expect(page.locator(".batch-draft-card")).to_have_count(3)
+        checked = page.evaluate(
+            """() => Array.from(document.querySelectorAll('.batch-draft-card')).map((card) => [
+                card.dataset.itemId,
+                card.querySelector('input[type="checkbox"]').checked,
+            ])"""
+        )
+        assert checked == [["item-a", True], ["item-b", False], ["item-c", True]], checked
+
+    def test_n_dialog_rechecks_a_version_change_with_zero_requests(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """AC：弹窗后 revision 变化 → 零 save-confirm 请求 + 常驻重新确认；再确认才发送。"""
+        accept_calls: list[dict[str, Any]] = []
+        held: list[Any] = []
+
+        def _accept(route: Any, request: Any) -> None:
+            accept_calls.append(json.loads(request.post_data or "{}"))
+            _accept_route_handler({"item-a", "item-b"})(route, request)
+
+        def _hold_modify(route: Any, request: Any) -> None:
+            # held route：保留在途响应，断言后由测试显式 fulfill，不在 handler 里 sleep。
+            if request.method != "POST":
+                route.continue_()
+                return
+            held.append(route)
+
+        items = _confirm_scope_items()[:2]
+        page.route("**/api/v1/batches/batch-spa/save-confirm*", _accept)
+        page.route("**/api/v1/requests/preview-modify", _hold_modify)
+        self._open(page, live_server_url, items, "甲S1\n乙S1")
+        self._check(page, "item-a")
+        self._check(page, "item-b")
+
+        # 先发出修改并保持响应在途：甲被阻断，N 此刻只剩乙。
+        page.locator('.batch-draft-card[data-item-id="item-a"] .batch-card-expand').click()
+        page.fill("#batch-preview-must-contain", "新筛选")
+        page.locator("#detail-preview-edit-form").evaluate("form => form.requestSubmit()")
+        expect(page.locator("#batch-accept-submit")).to_contain_text("保存并确认 1 部")
+        assert held
+
+        page.click("#batch-accept-submit")
+        page.wait_for_selector(".confirm-dialog", timeout=5000)
+        expect(page.locator(".confirm-dialog-title")).to_have_text("保存并确认 1 部")
+
+        # 弹窗期间在途响应到达：甲带着新 revision 回到资格集合。
+        applied = _preview_request("咒术回战", "req-scope-a")
+        applied["confirmable_config"]["filter_rule"]["must_contain"] = "新筛选"
+        assert items[0]["draft_id"]
+        held[0].fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "ok": True,
+                    "result": {
+                        "request": applied,
+                        "summary": {},
+                        "draft_id": items[0]["draft_id"],
+                        "draft_revision": 2,
+                    },
+                },
+                ensure_ascii=False,
+            ),
+        )
+        expect(page.locator("#batch-accept-submit")).to_contain_text("保存并确认 2 部")
+
+        page.locator(".confirm-dialog .primary-button").click()
+
+        # 零 save-confirm POST：弹窗关闭，固定栏留下常驻说明并获得焦点。
+        expect(page.locator("#batch-accept-selected-recheck")).to_be_visible()
+        expect(page.locator("#batch-accept-selected-recheck")).to_contain_text("资格或草案版本已变化")
+        expect(page.locator(".confirm-dialog")).to_have_count(0)
+        assert accept_calls == []
+        assert page.evaluate("() => document.activeElement && document.activeElement.id") == "batch-accept-selected-recheck"
+        assert page.locator("#batch-accept-submit").get_attribute("aria-describedby") == (
+            "batch-accept-selected-scope batch-accept-selected-recheck"
+        )
+
+        # 明确重新确认后才按新的完整集合发送，并带上新版本。
+        page.click("#batch-accept-submit")
+        page.wait_for_selector(".confirm-dialog", timeout=5000)
+        expect(page.locator("#batch-accept-selected-recheck")).to_have_count(0)
+        expect(page.locator(".confirm-dialog-title")).to_have_text("保存并确认 2 部")
+        page.locator(".confirm-dialog .primary-button").click()
+        page.wait_for_selector(".global-notification:not(:empty)", timeout=5000)
+
+        payload = accept_calls[-1]
+        assert payload["item_ids"] == ["item-a", "item-b"]
+        assert [(item["item_id"], item["base_revision"]) for item in payload["items"]] == [
+            ("item-a", 2),
+            ("item-b", 1),
+        ]
+
+    def test_disabled_entries_always_state_a_visible_reason(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """AC：无勾选与待核验都有常驻可见的禁用原因，不依赖 title。"""
+        page.route("**/api/v1/batches/batch-spa/save-confirm*", lambda route: route.abort())
+        self._open(page, live_server_url, _confirm_scope_items()[:2], "甲S1\n乙S1")
+
+        submit = page.locator("#batch-accept-submit")
+        expect(submit).to_be_disabled()
+        assert submit.get_attribute("title") is None
+        expect(page.locator("#batch-accept-selected-scope")).to_be_visible()
+        expect(page.locator("#batch-accept-selected-scope")).to_contain_text("请先在卡片上勾选")
+        expect(page.locator("#batch-accept-selected-reason")).to_have_count(0)
+
+        # 勾选后发一次保存但结果未知：两个入口都禁用，并给出常驻原因。
+        self._check(page, "item-a")
+        expect(submit).to_be_enabled()
+        page.click("#batch-accept-submit")
+        page.wait_for_selector(".confirm-dialog", timeout=5000)
+        page.locator(".confirm-dialog .primary-button").click()
+        page.wait_for_selector("#batch-retry-frozen-operation", timeout=5000)
+
+        expect(page.locator("#batch-accept-submit")).to_be_disabled()
+        expect(page.locator("#batch-accept-all")).to_be_disabled()
+        expect(page.locator("#batch-accept-selected-reason")).to_be_visible()
+        expect(page.locator("#batch-accept-selected-reason")).to_contain_text("待核验")
+        expect(page.locator("#batch-accept-all-reason")).to_be_visible()
+        expect(page.locator("#batch-accept-all-reason")).to_contain_text("待核验")
+        assert page.locator("#batch-accept-submit").get_attribute("aria-describedby") == (
+            "batch-accept-selected-scope batch-accept-selected-reason"
+        )
+
+    def test_each_entry_keeps_its_safety_list_and_payload_in_step(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """AC：两入口的按钮数量、弹窗安全清单、描述符与 item_ids 同源（各自范围内一致）。"""
+        accept_calls: list[dict[str, Any]] = []
+
+        def _accept(route: Any, request: Any) -> None:
+            accept_calls.append(json.loads(request.post_data or "{}"))
+            _accept_route_handler({"item-a", "item-b", "item-c"})(route, request)
+
+        page.route("**/api/v1/batches/batch-spa/save-confirm*", _accept)
+        items = _confirm_scope_items()
+        # 被筛选隐藏的条目也要验证清单同源。
+        page.route(
+            "**/api/v1/batches/parse",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result(items),
+            ),
+        )
+        _goto_batch(page, live_server_url)
+        page.fill("#batch-raw-input", "甲S1\n乙S1\n丙S1")
+        page.click("#batch-parse-submit")
+        expect(page.locator(".batch-draft-card")).to_have_count(3)
+        self._check(page, "item-a")
+
+        # N：按钮 1 部 = 清单 1 项，取消后现场不变。
+        expect(page.locator("#batch-accept-submit")).to_contain_text("保存并确认 1 部")
+        page.click("#batch-accept-submit")
+        page.wait_for_selector(".confirm-dialog", timeout=5000)
+        expect(page.locator(".confirm-dialog-items li")).to_have_count(1)
+        page.locator(".confirm-dialog .secondary-button").click()
+        assert accept_calls == []
+
+        # 全部：按钮 3 部 = 清单 3 项 = 描述符 3 个，且不带 item_ids。
+        expect(page.locator("#batch-accept-all")).to_contain_text("保存并确认全部 3 部")
+        page.click("#batch-accept-all")
+        page.wait_for_selector(".confirm-dialog", timeout=5000)
+        expect(page.locator(".confirm-dialog-items li")).to_have_count(3)
+        page.locator(".confirm-dialog .primary-button").click()
+        page.wait_for_selector(".global-notification:not(:empty)", timeout=5000)
+        all_payload = accept_calls[-1]
+        assert "item_ids" not in all_payload
+        assert len(all_payload["items"]) == 3
+        assert all(item["draft_id"] for item in all_payload["items"])
+
+    def test_saving_entries_state_a_persistent_reason(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """AC：保存进行中两个入口都禁用，并在固定栏常驻可见原因（不是 title）。"""
+        held: list[Any] = []
+
+        def _hold_accept(route: Any, request: Any) -> None:
+            # held route：保留在途保存响应，断言后显式 fulfill。
+            held.append(route)
+
+        page.route("**/api/v1/batches/batch-spa/save-confirm*", _hold_accept)
+        self._open(page, live_server_url, _confirm_scope_items()[:2], "甲S1\n乙S1")
+        self._check(page, "item-a")
+        page.click("#batch-accept-submit")
+        page.wait_for_selector(".confirm-dialog", timeout=5000)
+        page.locator(".confirm-dialog .primary-button").click()
+        assert held
+
+        expect(page.locator("#batch-accept-submit")).to_be_disabled()
+        expect(page.locator("#batch-accept-all")).to_be_disabled()
+        expect(page.locator("#batch-accept-selected-reason")).to_be_visible()
+        expect(page.locator("#batch-accept-selected-reason")).to_contain_text("正在保存确认")
+        expect(page.locator("#batch-accept-all-reason")).to_contain_text("正在保存确认")
+
+        held[0].fulfill(
+            status=200,
+            content_type="application/json",
+            body=_batch_accept_result(
+                [{"item_id": "item-a", "outcome": "CONFIRMED", "request_id": "req-scope-a", "status": "CONFIRMED", "tracking_id": "tracking-scope-a", "tracking_ready": True}],
+                [],
+            ),
+        )
+        page.wait_for_selector(".global-notification:not(:empty)", timeout=5000)
+        expect(page.locator("#batch-accept-selected-reason")).to_have_count(0)
+        expect(page.locator("#batch-accept-all-reason")).to_have_count(0)
+
+    def test_fixed_toolbar_reserves_its_measured_multi_line_height(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """AC：固定栏按实际多行高度预留底部滚动空间，末卡与右栏末字段不被遮挡。"""
+        items = _compact_items(12)
+        _route_parse(page, items)
+        _goto_batch(page, live_server_url)
+        page.set_viewport_size({"width": 1440, "height": 900})
+        page.fill("#batch-raw-input", "\n".join(str(item["raw_title"]) for item in items))
+        page.click("#batch-parse-submit")
+        expect(page.locator(".batch-draft-card")).to_have_count(12)
+
+        geometry = page.evaluate(
+            """() => {
+                const toolbar = document.querySelector('#batch-accept-toolbar')
+                const layout = document.querySelector('.batch-review-layout')
+                const root = document.querySelector('#batch-parse-result')
+                return {
+                    measured: toolbar.getBoundingClientRect().height,
+                    published: parseFloat(root.style.getPropertyValue('--batch-accept-toolbar-height')),
+                    reserved: parseFloat(getComputedStyle(layout).paddingBottom),
+                    cardBottom: parseFloat(getComputedStyle(document.querySelector('.batch-draft-card')).scrollMarginBottom),
+                }
+            }"""
+        )
+        assert geometry["measured"] > 0
+        assert abs(geometry["published"] - geometry["measured"]) <= 1, geometry
+        assert geometry["reserved"] >= geometry["measured"] - 1, geometry
+        assert geometry["cardBottom"] >= geometry["measured"], geometry
+
+        # 列表滚到底 + 键盘聚焦最后一张卡：卡片与焦点环都在固定栏之上且在视口内。
+        page.evaluate(
+            """() => {
+                const wrapper = document.querySelector('.batch-card-grid-wrapper')
+                wrapper.scrollTop = wrapper.scrollHeight
+            }"""
+        )
+        page.locator(".batch-draft-card").last.focus()
+        focused = page.evaluate(
+            """() => {
+                const card = document.activeElement
+                const style = getComputedStyle(card)
+                const width = parseFloat(style.outlineWidth) || 0
+                const offset = parseFloat(style.outlineOffset) || 0
+                const rect = card.getBoundingClientRect()
+                const toolbar = document.querySelector('#batch-accept-toolbar').getBoundingClientRect()
+                return {
+                    id: card.dataset.itemId,
+                    ringBottom: rect.bottom + width + offset,
+                    top: rect.top,
+                    toolbarTop: toolbar.top,
+                }
+            }"""
+        )
+        assert focused["id"] == "item-11", focused
+        assert focused["ringBottom"] <= focused["toolbarTop"] + 0.5, focused
+        assert focused["top"] >= 0, focused
+
+        # 滚到页面末尾：右栏最后的字段/错误也在固定栏之上。
+        max_scroll = page.evaluate("() => document.documentElement.scrollHeight - window.innerHeight")
+        page.evaluate("(y) => window.scrollTo(0, y)", max_scroll)
+        bottom = page.evaluate(
+            """() => {
+                const toolbar = document.querySelector('#batch-accept-toolbar').getBoundingClientRect()
+                const pane = document.querySelector('#batch-detail-pane')
+                const rects = Array.from(pane.querySelectorAll('input, select, textarea, p, button'))
+                    .map((el) => el.getBoundingClientRect().bottom)
+                return {
+                    lastPaneBottom: rects.length ? Math.max(...rects) : null,
+                    toolbarTop: toolbar.top,
+                }
+            }"""
+        )
+        assert bottom["lastPaneBottom"] is not None
+        assert bottom["lastPaneBottom"] <= bottom["toolbarTop"] + 0.5, bottom
+
+    @pytest.mark.parametrize(
+        "width,height,zoom",
+        [(1280, 720, 1), (1440, 900, 1), (1920, 1080, 1), (1280, 720, 2)],
+    )
+    def test_confirm_scope_copy_is_reachable_at_desktop_sizes(
+        self, page: Page, live_server_url: str, width: int, height: int, zoom: int
+    ) -> None:
+        """AC：三档桌面与 200% 缩放下两个入口的范围文案与清单可达、不裁切、无横向溢出。"""
+        _route_parse(page, _confirm_scope_items())
+        _goto_batch(page, live_server_url)
+        page.set_viewport_size({"width": width, "height": height})
+        page.fill("#batch-raw-input", "甲S1\n乙S1\n丙S1")
+        page.click("#batch-parse-submit")
+        expect(page.locator(".batch-draft-card")).to_have_count(3)
+        if zoom == 2:
+            page.evaluate("() => { document.documentElement.style.zoom = '2' }")
+        self._check(page, "item-a")
+
+        scope = page.locator("#batch-accept-selected-scope")
+        scope.scroll_into_view_if_needed()
+        expect(scope).to_be_visible()
+        expect(scope).to_contain_text("保存并确认 1 部")
+        all_scope = page.locator("#batch-accept-all-scope")
+        expect(all_scope).to_be_visible()
+        expect(all_scope).to_contain_text("完整批次 3 项中的 3 项可确认条目")
+        assert page.locator("#batch-accept-submit").get_attribute("aria-describedby") == "batch-accept-selected-scope"
+
+        page.click("#batch-accept-submit")
+        page.wait_for_selector(".confirm-dialog", timeout=5000)
+        expect(page.locator(".confirm-dialog-items li")).to_have_count(1)
+        dialog_box = page.locator(".confirm-dialog").bounding_box()
+        assert dialog_box is not None
+        assert dialog_box["width"] <= width + 1
+        # 缩放下模态背景同样不可交互：固定栏仍在 inert 子树里。
+        zoom_layers = page.evaluate(
+            """() => {
+                const backdrop = document.querySelector('.confirm-dialog-backdrop')
+                const toolbar = document.querySelector('#batch-accept-toolbar')
+                const root = document.body
+                const children = Array.from(root.children)
+                return {
+                    backdrop: getComputedStyle(backdrop).zIndex,
+                    toolbar: getComputedStyle(toolbar).zIndex,
+                    toolbarInert: toolbar.closest('[inert]') !== null,
+                    backdropAfterApp: children.indexOf(backdrop) === children.length - 1,
+                }
+            }"""
+        )
+        assert int(zoom_layers["backdrop"]) > int(zoom_layers["toolbar"])
+        assert zoom_layers["toolbarInert"] is True
+        assert zoom_layers["backdropAfterApp"] is True
+        page.locator(".confirm-dialog .secondary-button").click()
+        assert page.evaluate("() => document.body.scrollWidth <= window.innerWidth + 1")
+
+    def test_confirm_dialog_traps_focus_and_restores_it(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """AC：ConfirmDialog 的 trap/Escape/焦点恢复沿用既有实现；弹窗期间背景不可交互。"""
+        accept_calls: list[dict[str, Any]] = []
+
+        def _accept(route: Any, request: Any) -> None:
+            accept_calls.append(json.loads(request.post_data or "{}"))
+            _accept_route_handler({"item-a"})(route, request)
+
+        page.route("**/api/v1/batches/batch-spa/save-confirm*", _accept)
+        self._open(page, live_server_url, _confirm_scope_items()[:2], "甲S1\n乙S1")
+        self._check(page, "item-a")
+
+        page.locator("#batch-accept-submit").focus()
+        page.keyboard.press("Enter")
+        page.wait_for_selector(".confirm-dialog", timeout=5000)
+        # 弹窗层级高于固定栏，且背景被 inert：模态期间无法再触发一次保存。
+        layers = page.evaluate(
+            """() => {
+                const backdrop = document.querySelector('.confirm-dialog-backdrop')
+                const toolbar = document.querySelector('#batch-accept-toolbar')
+                return {
+                    backdrop: getComputedStyle(backdrop).zIndex,
+                    toolbar: getComputedStyle(toolbar).zIndex,
+                    inertCount: document.querySelectorAll('[inert]').length,
+                    toolbarInert: toolbar.closest('[inert]') !== null,
+                    focusedInsideDialog: document.querySelector('.confirm-dialog').contains(document.activeElement),
+                }
+            }"""
+        )
+        assert int(layers["backdrop"]) > int(layers["toolbar"])
+        assert layers["toolbarInert"] is True
+        assert layers["focusedInsideDialog"] is True
+        assert layers["inertCount"] >= 1
+
+        page.keyboard.press("Tab")
+        page.keyboard.press("Shift+Tab")
+        assert page.evaluate("() => document.querySelector('.confirm-dialog').contains(document.activeElement)")
+
+        page.keyboard.press("Escape")
+        expect(page.locator(".confirm-dialog")).to_have_count(0)
+        assert accept_calls == []
+        assert page.evaluate("() => document.activeElement && document.activeElement.id") == "batch-accept-submit"
+        assert page.evaluate("() => document.querySelectorAll('[inert]').length") == 0
+
+        page.locator("#batch-accept-submit").click()
+        page.wait_for_selector(".confirm-dialog", timeout=5000)
+        page.locator(".confirm-dialog .primary-button").click()
+        page.wait_for_selector(".global-notification:not(:empty)", timeout=5000)
+        assert [item["item_id"] for item in accept_calls[-1]["items"]] == ["item-a"]

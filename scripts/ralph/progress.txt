@@ -1,8 +1,8 @@
 # Ralph 当前状态
 
-Stage 45（批量确认范围、结果恢复与完成导航）：US-355 已按用户授权由唯一写入开发
-Agent 完成开发与定向验证；US-356/US-357 尚未开始，必须等本包独立审核、红测、集中修复
-与复审闭环后再进入。
+Stage 45（批量确认范围、结果恢复与完成导航）：US-355 与 US-356 已按用户授权由唯一写入
+开发 Agent 完成开发与定向验证；US-357 尚未开始，必须等各自工作包的独立审核、红测、集中
+修复与复审闭环后再进入。
 准备分支：`ralph/stage45-batch-confirmation`；实际基线：Stage 44 PR #73 merge
 `9073fed30d3edd481ad5f4339c4b44b04d235a5e`（以实时 git 为准）。
 
@@ -96,3 +96,86 @@ safe-info 边界、本地保存与外部提交两次确认、`AnimeDraftEditor` 
 
 提交：`feat: [US-355] - 紧凑列表与查看、勾选分离`（只暂存本 story 的 5 个文件 + prd.json
 + progress.txt）。未 push、未建 PR、未合并、未强推、未删分支、未运行 `ralph.sh`、未 `git add .`。
+
+## 2026-09-20 - US-356 固定操作栏与两种确认范围（WP-45-B）
+
+协作模式：用户指定 Claude Fable（实际模型 `claude-fable-5[1M]`）作为唯一写入开发 Agent，
+无子 Agent、无团队调度；单 Agent 内完成最小红测 → 实现 → 定向验证。
+
+实现范围（既有批量前端 + 共享 `ConfirmDialog` 的可选安全清单；未动 API/OpenAPI/generated、
+后端、持久化、外部写、保存协调器、`AnimeDraftEditor` saved 模式或人工保存调用者）：
+
+- D-02：`#batch-accept-submit`（N 部）的资格集合改为「完整批次中手工勾选且当前可确认」的条目
+  （`selectedEligibleItems`）；筛选隐藏的勾选仍参与，被阻断的勾选保留意图但退出请求并计入「已排除」。
+  「全选当前可见可确认项」仍只改可见项（`selectable` 口径未变），all 仍用完整批次的 `batchConfirmable`。
+- 一份计数派生两条范围：新增 `batchConfirmScope`（total/visible/selected/selectedHidden/
+  selectedExcluded/confirmable/hidden/needsProcessing），N 与 all 的按钮数量、范围文案、弹窗数量、
+  安全标题清单、描述符与 `item_ids` 全部由它派生。工具栏计数改为分组呈现（完整批次/当前可见/已勾选/
+  重算中/上次保存，各带 `data-scope`），不再是一行难以分辨的连续数字。
+- 两个入口都冻结内存 intent 并在确认前复核：新增 `BatchSelectedIntent`（participants + itemIds +
+  counts + titles），与既有 `BatchAcceptAllIntent` 同构。弹窗打开后批次绑定、资格、`draft_id` 或
+  revision 变化一律零请求：关闭弹窗、在固定栏留下常驻说明 `#batch-accept-selected-recheck`
+  （all 仍为 `#batch-accept-all-recheck`）并聚焦，需用户再次明确确认；仅筛选变化不改写已冻结集合。
+- 弹窗文案：N 与 all 都声明完整批次来源、被筛选隐藏仍参与的数量、被排除的数量，以及
+  「仅保存本地订阅方案，不会提交到 Auto Bangumi；外部提交需在追番管理再次确认」。
+  `ConfirmDialog` 新增可选 `items/itemsLabel`，用真实 `<ul>` 渲染安全标题清单，`aria-describedby`
+  同时指向正文与清单；清单与描述符、`item_ids` 同源同序，只含公开标题（经 `displayValue` 脱敏），
+  草案能力仍只留在内存 intent 中。
+- 常驻禁用原因：新增 `batchConfirmDisabledReason`（保存中 / 结果待核验），两个入口共用；
+  `canConfirmSelected`/`canConfirmAll` 都定义为「集合非空 && 无操作阻断」，因此「按钮禁用」与
+  「存在可见原因」结构同源，不依赖 `title`。空集合与全批无资格的原因由各自的 scope 文案给出；
+  右栏「加入批量确认」也补上常驻可见的阻断原因。
+- 固定栏预留空间：`ResizeObserver` 把 `#batch-accept-toolbar` 的真实多行高度发布为
+  `--batch-accept-toolbar-height`（组件卸载时断开），`.batch-review-layout` 用它做 `padding-bottom`
+  预留底部滚动空间，卡片 `scroll-margin-bottom`（8px 焦点环余量 + 栏高）让聚焦与 `scrollIntoView`
+  把固定栏让出来。
+- 保留未改动：服务端草案 authority、`draft_id + base_revision`、CAS、scheduler/1.5 秒防抖与 flush、
+  save-confirm、unknown 冻结恢复（原 body/key/revision/集合，`#batch-retry-frozen-operation` 不新起
+  intent）、safe-info 与本地/外部两次确认。
+
+最小红测（先写、先失败）：新增 15 个用例后运行
+`cd frontend && npx vitest run src/features/workbench/BatchWorkbenchView.test.ts
+src/features/workbench/batchWorkbench.test.ts` → 14 failed / 89 passed，失败点正是 D-02 隐藏勾选范围、
+N 的弹窗同源清单、N 的版本变化零请求、以及「无勾选/待核验」常驻禁用原因缺失；实现后同命令全绿。
+
+实际验证命令与结果（全部在本机真实运行）：
+
+- `cd frontend && npx vitest run` → 49 文件 / 653 用例通过（新增 10 个 US-356 视图用例、
+  6 个 scope/禁用原因 helper 用例、2 个 ConfirmDialog 清单用例）。
+- `npm run typecheck` → 通过；`npm run lint` → 通过（`eslint . --max-warnings 0`）。
+- `npm run build` → 通过；`npm run api:check` → 通过，`docs/api/openapi.json` →
+  `src/api/generated/api.ts` 无漂移。
+- `uv run pytest tests/api_contract/test_dto_contracts.py tests/api_contract/test_save_confirm_service.py
+  tests/api_contract/test_openapi_generation.py tests/api_contract/test_openapi_runtime_consistency.py
+  tests/api_contract/test_draft_store.py -q` → 98 通过。
+- `uv run pytest tests/browser/ -q` → 267 通过（真实 Chromium；`test_app_batch_workbench.py`
+  新增 `TestAppBatchConfirmScope` 12 个用例：筛选隐藏勾选参与 N 且请求/清单/描述符/item_ids 同源、
+  可见全选只改可见项、held route 下的版本变化零请求与再次确认、保存中与待核验的常驻禁用原因、
+  固定栏按实测多行高度预留空间且末卡与右栏末字段不被遮挡、三档视口与 200% 缩放下范围文案与清单可达、
+  ConfirmDialog trap/Escape/焦点恢复与背景 inert、敏感 canary）。
+- 浏览器验证全部使用 route mock / held route / 临时 storage；未访问真实 MiKan、Auto Bangumi 或
+  qBittorrent；未新增敏感截图/trace 入库（临时探针用例与 /tmp 截图已删除）。
+- 运行数据隔离核对：`.migu_orca/` 下今日无被修改文件，浏览器套件使用每用例 tmp storage root。
+
+遗留风险与交接：
+
+- 固定栏在多行文案下高度约 226px（1440×900、12 项）；它仍是 sticky 浮层，中途滚动时内容会从其
+  后面经过，但预留空间与卡片 `scroll-margin-bottom` 保证末卡、右栏末字段与错误都能被滚到栏上方
+  （浏览器用例按实测几何断言）。若后续继续增大栏内文案，建议同步检查该用例。
+- 两个入口现在都可能因「待核验」禁用；`#batch-retry-frozen-operation` 是唯一的恢复入口，属既有
+  设计，本包未改其语义。
+- 原生 `<select>`（状态筛选、卡片快捷字幕组）使用浏览器原生弹层，不参与 z-index 竞争；模态与
+  Toast 仍共用 `--z-overlay`，靠 Teleport 顺序保证弹窗在上（浏览器用例已断言背景 inert 与层级）。
+
+可复用结论：
+
+- 需要「按钮禁用 ⟺ 存在可见原因」这种结构保证时，把禁用条件定义成「原因字符串非空」比在两个
+  地方分别维护 `:disabled` 与说明文案更省事，也不会出现只有 `title` 的禁用态。
+- `ResizeObserver` 发布实测高度 + `scroll-margin-bottom` 是让 sticky 底栏不遮挡可聚焦内容的
+  最小改动组合：前者预留滚动空间，后者让 `scrollIntoView`/聚焦主动避让。
+- jsdom 没有 `ResizeObserver`；组件内必须 `typeof ResizeObserver !== 'undefined'` 兜底，
+  否则 Vitest 挂载即失败。
+
+提交：`feat: [US-356] - 固定操作栏与两种确认范围`（只暂存本 story 的 7 个代码/测试文件 +
+prd.json + progress.txt）。未 push、未建 PR、未合并、未强推、未删分支、未运行 `ralph.sh`、
+未 `git add .`；US-357 未开始。
