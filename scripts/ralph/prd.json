@@ -1,10 +1,98 @@
 {
   "project": "MiGuOrca",
-  "branchName": "ralph/stage45-batch-confirmation",
-  "description": "Stage 45：批量确认范围、结果恢复与完成导航；基线 Stage44 PR #73 merge 9073fed。D-02已确认：隐藏的手工勾选且有资格项参与N部，可见全选只改可见项；D-04已确认：全部成功无剩余自动进追番管理，有失败/未处理留页定位。只改既有批量前端与测试，不改API/OpenAPI/generated、后端、CAS、unknown冻结恢复、safe-info或外部写；不使用ralph.sh。执行PRD docs/MiGuOrca_stage45_batch_confirmation_PRD.md。",
+  "branchName": "ralph/stage46-pixel-foundation",
+  "description": "Stage 46：为六张添加番剧设计图建立确定性像素比较与单番/批量视觉 fixture，并复刻六图共用的应用壳层和共享控件；基线为 Stage 45 PR #74 merge 75e1441。只改测试基础、共享壳层/控件及对应测试，不改页面专属结构、API、后端、草案状态机或外部写；不使用 ralph.sh。执行 PRD docs/MiGuOrca_stage46_pixel_foundation_PRD.md。",
   "userStories": [
-    {"id": "US-355", "title": "紧凑列表与查看、勾选分离", "description": "作为批量审核用户，我希望快速定位待处理项，并清楚区分右栏查看项与待确认集合。", "acceptanceCriteria": ["默认卡片突出标题、中文状态、阻断/错误与下一步；查看只改右栏，复选框只改待确认集合", "筛选保留数据/勾选，隐藏详情保留右栏及清除筛选；异常先可见化再定位聚焦；支持1/12/36连续列表", "待选合集不可确认，阻断项保留意图但排除资格；键盘/读屏/焦点及三视口、200%、长标题、reduced-motion和canary通过", "完成受影响Vitest、views/DTO/CAS契约与dev-browser真实Chromium定向验证；不改API/OpenAPI/generated或后端", "Verify in browser using dev-browser skill", "Tests pass", "Typecheck passes"], "priority": 1, "passes": true, "notes": "紧凑左卡默认层=标题/中文状态/阻断或错误/下一步，别名与偏好进「辅助信息」details；查看只改右栏、复选框只改待确认集合，快捷字幕组编辑与右栏同源 scheduler；卡片快捷键不再截获内部表单；阻断的已勾选项保留意图并就地说明；删除临时卡焦点落下一项/上一项/列表标题；筛选无匹配给出独立提示且保留右栏与清除入口。验证：Vitest 49 文件 635 用例、typecheck、lint、build、api:check、api_contract 5 文件 98 用例、真实 Chromium 255 用例（含新增 15 个 US-355 用例：1/12/36、1440x900 三张完整卡、200% 缩放、长内容不裁切、键盘/焦点环/删除焦点、reduced-motion、敏感 canary）全部通过。"},
-    {"id": "US-356", "title": "固定操作栏与两种确认范围", "description": "作为批量确认用户，我希望准确知道本次仅在本地保存哪些方案。", "acceptanceCriteria": ["N部使用隐藏的手工勾选且有资格完整集合，可见全选只改可见项；全部保留完整批次资格集合", "两入口的计数、安全清单、描述符与item_ids同源；弹窗说明隐藏参与、排除项和本地/外部两次确认", "资格、draft_id、revision或批次变化要求零请求重新确认；unknown恢复保留原body/key/revision/集合", "固定栏多行不遮挡末项；禁用原因常驻可见；ConfirmDialog焦点、三视口、200%、held route及canary通过", "完成最小红测、受影响Vitest、views/DTO/CAS契约与dev-browser真实Chromium；不改保存协调器、API或外部写", "Verify in browser using dev-browser skill", "Tests pass", "Typecheck passes"], "priority": 2, "passes": true, "notes": "N部=完整批次中手工勾选且当前可确认的条目（D-02）：筛选隐藏的勾选仍参与，被阻断的勾选保留手工意图但不进入请求并计入「已排除」；可见全选只改可见项，确认全部仍用完整批次资格。新增 batchConfirmScope 一份计数派生两入口的按钮数量、范围文案、弹窗数量、安全标题清单、描述符与 item_ids；N/all 各自冻结内存 intent（participants+itemIds+counts+titles）并在确认前复核，批次绑定、资格、draft_id 或 revision 变化一律零请求：常驻重新确认说明+聚焦，仅筛选变化不改写已冻结集合；unknown 恢复沿用原 body/key/revision/集合，不新起 intent。ConfirmDialog 新增可选 items/itemsLabel 渲染安全标题清单（aria-describedby 同时指向正文与清单）。两个入口的禁用条件与常驻可见原因同源（保存中/待核验），空集合与全批无资格由各自 scope 文案说明，不依赖 title；固定栏用 ResizeObserver 发布实测多行高度预留底部滚动空间，卡片 scroll-margin-bottom 让聚焦与滚动定位避让固定栏。验证：最小红测 14 failed/89 passed → 实现后全绿；Vitest 49 文件 653 用例、typecheck、lint、build、api:check、api_contract 5 文件 98 用例、真实 Chromium 267 用例（含新增 12 个 TestAppBatchConfirmScope）全部通过。"},
-    {"id": "US-357", "title": "部分成功、unknown 与完成导航", "description": "作为批量审核用户，我希望识别成功和剩余工作，并安全恢复或在真正完成后进入追番管理。", "acceptanceCriteria": ["以服务端results[]判结果，常驻汇总同时说明本次结果和批次剩余；成功项退出可确认集合且不重复保存", "失败、失效、saved pending、unknown和畸形200使用既有恢复；unknown保持原body/key/revision/集合，失败重试排除成功项", "首个失败先可见化再聚焦；无失败有未处理留页定位首项；全部成功无剩余自动进追番管理，且只用真实公开tracking标识", "结果摘要一次播报，焦点不落隐藏/销毁节点；不新增保存协调器或外部写", "完成最小红测、受影响Vitest、views/DTO/CAS契约与dev-browser真实Chromium（部分成功、held unknown、完成导航、三视口、200%、长标题、键盘、焦点、reduced-motion、canary）", "Verify in browser using dev-browser skill", "Tests pass", "Typecheck passes"], "priority": 3, "passes": true, "notes": "US-357 已实现并完成定向验证，详见本次 progress 记录。"}
+    {
+      "id": "US-358",
+      "title": "确定性像素比较基础",
+      "description": "作为视觉实现与审核者，我需要可重复且可解释的像素比较工具，以区分像素、几何和样式差异。",
+      "acceptanceCriteria": [
+        "Pillow仅加入Python dev dependency并更新uv.lock，不进入生产dependencies、wheel或前端bundle",
+        "helper保留六张源PNG不变，以固定LANCZOS参数归一化参考图并拒绝错误尺寸或损坏输入",
+        "实现RGB通道差值阈值12、差异统计、命名矩形掩码去重裁剪和默认35%总面积上限",
+        "输出不含绝对路径、像素内容、响应载荷或敏感值；可选diff只写pytest tmp_path且无产物入库",
+        "合成图片测试覆盖相同图、阈值边界、RGBA、重叠/非法/超限掩码、尺寸错误及连续三次确定性",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-359",
+      "title": "单番三状态视觉 fixture",
+      "description": "作为单番页面开发者，我需要确定性进入图01至03的真实业务状态，为Stage 47提供可信视觉红线。",
+      "acceptanceCriteria": [
+        "图01初始态、图02首候选held生成态、图03未保存草案审核态分别由真实契约形状的mock/held route进入",
+        "三状态共享安全构造器且不访问真实外部系统；候选阶段不出现资源数，草案阶段不调用saved Request safe-info",
+        "每态等待字体、图片、目标响应和双requestAnimationFrame后生成1440x900临时截图并调用US-358 helper",
+        "图01至03建立来自归一化设计图的命名锚点和掩码manifest，不从实现截图反写目标值",
+        "canary实际进入客户端边界后不落DOM/属性、URL/history、storage、console、screenshot或diff输出",
+        "连续三次截图尺寸、锚点和比较统计稳定；页面专属区域只记录诊断而不提交预期失败测试",
+        "Verify in browser using dev-browser skill",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-360",
+      "title": "批量三状态视觉 fixture",
+      "description": "作为批量页面开发者，我需要确定性进入图04至06的真实业务状态，并保留Stage 45确认范围语义。",
+      "acceptanceCriteria": [
+        "图04六行held搜索态、图05六项混合状态及当前候选held生成态、图06两项手工勾选可确认草案态均由真实契约形状进入",
+        "fixture沿用Stage45真实派生，不伪造逐条进度、勾选、资格、确认计数或D-02/D-04行为",
+        "每态按单番相同的字体/图片/网络/双帧稳定化和1440x900临时截图规则执行",
+        "图04至06建立来自归一化设计图的命名锚点和掩码manifest，不新增单项重搜、API或后端",
+        "连续三次尺寸、锚点和统计稳定，且构造器不破坏1/12/36边界与敏感canary",
+        "Verify in browser using dev-browser skill",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-361",
+      "title": "共享应用壳层复刻",
+      "description": "作为任一页面用户，我希望品牌、导航和连接状态符合设计稿，同时保持四页路由和状态可访问。",
+      "acceptanceCriteria": [
+        "1440x900下复刻文本式MiGuOrca品牌、四项导航、珊瑚红当前项/下划线和右侧连接胶囊，移除设计图没有的可见M方块与eyebrow",
+        "未配置显示紧凑中文状态，其他连接/待处理状态保留既有安全语义和设置链接，不展示endpoint、凭据或内部代码",
+        "页头关键锚点误差不超过2 CSS px，颜色/字号/边框/阴影消费共享token且稳定区域像素差满足Stage46门槛",
+        "当前路由、skip link、品牌返回、query-only焦点与/app/ history语义不变",
+        "1280x720、1920x1080、200%缩放、键盘焦点和reduced-motion可用；追番方案、追番管理、设置完成定向不回归",
+        "Verify in browser using dev-browser skill",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-362",
+      "title": "共享控件与模式切换复刻",
+      "description": "作为添加番剧用户，我希望模式切换、表单控件和反馈使用一致的设计系统，为后续页面复刻提供稳定组件。",
+      "acceptanceCriteria": [
+        "BaseButton/Input/Textarea/Select、Checkbox、共享状态/加载反馈和AnimeModeSwitch统一消费语义token，不在宿主复制视觉常量",
+        "默认控件44px、首页大控件52px、主要目标至少44x44px；模式切换支持鼠标、方向键、Enter/空格且不清输入或现场",
+        "primary/secondary/disabled/loading层级符合Token V1，loading保留尺寸与文字，珊瑚红不成为第二套普通主按钮",
+        "hover/focus/active/error/disabled/loading的computed style、3px焦点环、正文4.5:1和控件边界3:1均可验证",
+        "1280桌面、200%缩放、长中文与reduced-motion可用；不重排英雄区、候选卡、审核区或批量固定栏",
+        "四个一级页面调用者回归以及图01/04共享控件区域三层视觉门禁通过",
+        "Verify in browser using dev-browser skill",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    }
   ]
 }
