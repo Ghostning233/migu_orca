@@ -179,3 +179,35 @@ N 的弹窗同源清单、N 的版本变化零请求、以及「无勾选/待核
 提交：`feat: [US-356] - 固定操作栏与两种确认范围`（只暂存本 story 的 7 个代码/测试文件 +
 prd.json + progress.txt）。未 push、未建 PR、未合并、未强推、未删分支、未运行 `ralph.sh`、
 未 `git add .`；US-357 未开始。
+
+## 2026-09-20 - US-355 / US-356 独立审核闭环
+
+协作模式：主 Agent 独立审核；两个只读辅助审核 Agent 使用 `gpt-5.6-luna`，分别核对
+US-355 与 US-356。辅助审核未写文件，其结论不替代主 Agent 对代码、测试与 AC 的逐项判断。
+
+审核结论：
+
+- US-355 未发现业务语义、安全、焦点/键盘、筛选/勾选分离或测试真实性的阻断问题。
+  目标提交中 N 部仍按可见集合计算属于后续 US-356 的明确范围，当前 HEAD 已由 US-356
+  收敛为完整批次的手工勾选资格集合，不记作 US-355 缺陷。
+- US-356 未发现 D-02、N/all 同源、冻结 intent、版本变化零请求、unknown 原 body/key/revision/
+  集合、固定栏、ConfirmDialog 或安全清单的阻断问题。
+- 无审核代码问题需要新增红测或修复；因此本轮以“无问题独立审核 + 定向复跑”完成复审闭环，
+  不制造无对应缺陷的测试或代码改动。
+
+主 Agent 实际验证：
+
+- `cd frontend && npx vitest run src/features/workbench/BatchWorkbenchView.test.ts
+  src/features/workbench/batchWorkbench.test.ts src/components/feedback/ConfirmDialog.test.ts`
+  → 3 文件 / 116 用例通过。
+- `uv run pytest tests/browser/test_app_batch_workbench.py::TestAppBatchCompactList
+  tests/browser/test_app_batch_workbench.py::TestAppBatchConfirmScope -q`
+  → 27 用例通过（真实 Chromium，route mock / held route / 每用例临时 storage）。
+- 浏览器前核对 `.migu_orca/`：仅有既存历史数据与海报缓存，定向套件不读取该目录；未移动、
+  删除或改写用户数据。
+- Vitest 生成的仓库根未跟踪缓存 `node_modules/.vite/vitest/.../results.json` 已精确删除，
+  空目录一并移除；工作区恢复干净。
+
+Stage 收尾待办：执行材料 PRD/文档索引仍保留“等待开发”旧状态；`git diff --check
+origin/main...HEAD` 报告该 PRD 第 3～5 行 Markdown 行尾空格。二者不影响前两包实现，统一在
+US-357 审核闭环后的 Stage 收尾修正并纳入最终门禁。
