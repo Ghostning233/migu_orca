@@ -1045,6 +1045,29 @@ describe('BatchWorkbenchView outcome recovery (US-357)', () => {
     expect(wrapper.find('#batch-accept-all').text()).toContain('1 部')
   })
 
+  it('does not present a previous save summary as the current result after a later unknown response', async () => {
+    apiPost
+      .mockResolvedValueOnce(parseResult({ items: drafts(3) }))
+      .mockResolvedValueOnce(saveConfirmResult({
+        results: [result('item-1', 'CONFIRMED'), result('item-2', 'FAILED', { error_type: 'batch_error' })],
+        summary: { requested: 2, confirmed: 1, failed: 1 },
+      }))
+      .mockResolvedValueOnce({})
+    const { wrapper } = await mountBatch()
+    await parse(wrapper, '条目1\n条目2\n条目3')
+    await confirmSelected(wrapper, ['item-1', 'item-2'])
+
+    expect(wrapper.find('#batch-save-summary').text()).toContain('本次结果：已确认 1 项；失败 1 项；完整批次剩余 2 项。')
+
+    await wrapper.find('#batch-accept-all').trigger('click')
+    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#batch-save-summary').exists()).toBe(false)
+    expect(wrapper.find('#batch-accept-selected-reason').text()).toContain('结果待核验')
+    expect(wrapper.find('.batch-draft-card[data-item-id="item-2"] .batch-card-status').text()).toContain('结果待核验')
+  })
+
   it('when there is no new failure, stays on the page and focuses the first unprocessed item', async () => {
     apiPost
       .mockResolvedValueOnce(parseResult({ items: drafts(2) }))

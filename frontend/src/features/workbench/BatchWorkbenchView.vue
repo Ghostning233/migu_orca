@@ -1086,6 +1086,10 @@ async function submitBatchSaveConfirm(rows: BatchItem[], itemIds: string[] | nul
       return
     }
   }
+  // A later save attempt owns the next result summary. Never leave the
+  // previous batch response looking like the current operation while this
+  // request is in flight or awaiting verification.
+  saveSummary.value = null
   saveInFlight.value = true
   savingItemIds.value = new Set(rows.map((row) => row.item_id ?? '').filter(Boolean))
   // Undefined means this response still has work (or did not settle). Null is
@@ -1114,6 +1118,7 @@ async function submitBatchSaveConfirm(rows: BatchItem[], itemIds: string[] | nul
     })
     const resultItems = validateBatchSaveResult(result, rows.map((row) => row.item_id ?? ''))
     if (!resultItems) {
+      saveSummary.value = null
       if (saveOperation.value) saveOperation.value = { ...saveOperation.value, phase: 'response_unknown' }
       journey.dispatch({ type: 'save_response_unknown', itemIds: rows.map((row) => row.item_id ?? '') })
       items.value = items.value.map((item) => savingItemIds.value.has(item.item_id ?? '') ? { ...item, status: 'RESPONSE_UNKNOWN' } : item)
@@ -1174,6 +1179,7 @@ async function submitBatchSaveConfirm(rows: BatchItem[], itemIds: string[] | nul
       saveOperation.value = null
       notification.error('保存确认失败', '保存确认失败，请根据条目提示处理。')
     } else {
+      saveSummary.value = null
       if (saveOperation.value) saveOperation.value = { ...saveOperation.value, phase: 'response_unknown' }
       journey.dispatch({ type: 'save_response_unknown', itemIds: rows.map((row) => row.item_id ?? ''), error })
       items.value = items.value.map((item) => savingItemIds.value.has(item.item_id ?? '') ? { ...item, status: 'RESPONSE_UNKNOWN' } : item)
