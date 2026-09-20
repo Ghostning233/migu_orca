@@ -91,7 +91,7 @@ Stage 42 已完成 WP-42-A / US-346，并经 PR #70 合并至 `main`（merge `cb
 - Stage 42：[悬浮全局提示收尾](MiGuOrca_stage42_global_notification_PRD.md)（WP-42-A / US-346 已完成并经 PR #70 合并）
 - Stage 43：[搜索入口与候选选择视觉收口](MiGuOrca_stage43_add_anime_entry_visual_PRD.md)（US-347～US-352 已完成并经 PR #72 合并）
 - Stage 44：[共享草案审核执行 PRD](MiGuOrca_stage44_shared_draft_review_PRD.md)（US-353～US-354 已完成并经 PR #73 合并）
-- Stage 45：[批量确认范围、结果恢复与完成导航执行 PRD](MiGuOrca_stage45_batch_confirmation_PRD.md)（US-355～US-357 已编写，D-02/D-04 已确认，等待开发授权）；总体边界见[总体 PRD](MiGuOrca_stage43_45_add_anime_visual_PRD.md)，决策来源见[决策/交接](development/add-anime-visual-prd-handoff-2026-09-18.md)
+- Stage 45：[批量确认范围、结果恢复与完成导航执行 PRD](MiGuOrca_stage45_batch_confirmation_PRD.md)（US-355～US-357 本地开发与收尾门禁完成，待发布授权；D-02/D-04 已确认）；总体边界见[总体 PRD](MiGuOrca_stage43_45_add_anime_visual_PRD.md)，决策来源见[决策/交接](development/add-anime-visual-prd-handoff-2026-09-18.md)
 
 Stage PRD 记录单一阶段的范围、非目标、决策和验收结果。已完成阶段的 Ralph 执行快照位于 `../scripts/ralph/archive/`。
 

@@ -1,8 +1,8 @@
 # Ralph 当前状态
 
-Stage 45（批量确认范围、结果恢复与完成导航）：US-355 与 US-356 已按用户授权由唯一写入
-开发 Agent 完成开发与定向验证；US-357 尚未开始，必须等各自工作包的独立审核、红测、集中
-修复与复审闭环后再进入。
+Stage 45（批量确认范围、结果恢复与完成导航）：US-355～US-357 已完成开发、独立审核，
+US-357 审核问题已按红测集中修复并复审；完整后端、前端与真实 Chromium 收尾门禁通过，
+当前待用户明确发布授权。
 准备分支：`ralph/stage45-batch-confirmation`；实际基线：Stage 44 PR #73 merge
 `9073fed30d3edd481ad5f4339c4b44b04d235a5e`（以实时 git 为准）。
 
@@ -245,3 +245,22 @@ US-357 审核闭环后的 Stage 收尾修正并纳入最终门禁。
 - `git diff --check` → 通过；`.migu_orca` 无新增/修改文件。
 
 协作模式：唯一写入 Agent，实际模型 `gpt-5.6-luna`；无 Claude Fable 可用。未运行 `ralph.sh`，未 push/PR/merge/删分支。
+
+## 2026-09-20 - Stage 45 收尾门禁
+
+主 Agent 复审 US-357 审核修复后确认：新 save-confirm 和所有 response-unknown 分支均清空旧
+outcome summary；不改变 frozen body、幂等 key、revision、参与集合或 `#batch-retry-frozen-operation`。
+US-355～US-357 的 PRD AC 均已有代码、定向验证和独立审核证据。
+
+完整门禁实际结果：
+
+- `uv run python -m compileall -q src tests`、`uv run ruff check src tests`、
+  `uv run pytest -q -m "not browser"`、`uv run migu-orca-openapi --check`
+  → 全部通过；pytest 为 1528 passed / 271 deselected。
+- `cd frontend && npm run api:check && npm run typecheck && npm run lint &&
+  npm run test:unit -- --run && npm run build` → 全部通过；Vitest 为 49 文件 / 660 用例通过。
+- `uv run pytest tests/browser/ -q` → 271 passed（真实 Chromium，route mock / 临时 storage）。
+- `git diff --check origin/main...HEAD` → 通过；收尾前后核对 `.migu_orca/` 无当日新增/修改数据。
+
+文档同步：Stage PRD 与 docs 索引更新为“本地开发与收尾门禁完成，待发布授权”。未 push、未建
+PR、未合并、未强推、未删分支；Stage 46 仅有交接占位，尚无获批范围。
