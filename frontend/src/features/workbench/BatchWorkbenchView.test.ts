@@ -127,12 +127,13 @@ function queueItem(itemId: string, requestId: string, status = 'READY_TO_SUBMIT'
   }
 }
 
-async function mountBatch() {
+async function mountBatch(options: { tracking?: boolean } = {}) {
   const router = createRouter({
     history: createMemoryHistory('/app/'),
     routes: [
       { path: '/add', name: 'add', component: BatchWorkbenchView },
       { path: '/plans', name: 'plans', component: { template: '<p>requests</p>' } },
+      ...(options.tracking ? [{ path: '/tracking', name: 'tracking', component: { template: '<p>tracking</p>' } }] : []),
     ],
   })
   await router.push({ path: '/add' })
@@ -977,6 +978,102 @@ describe('BatchWorkbenchView accept (US-205)', () => {
 
     expect(wrapper.findAll('.batch-draft-card')).toHaveLength(2)
     expect(wrapper.text()).not.toContain('req-2')
+  })
+})
+
+describe('BatchWorkbenchView outcome recovery (US-357)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    apiPost.mockReset()
+  })
+
+  function drafts(count = 2) {
+    return Array.from({ length: count }, (_, index) => batchItem({
+      item_id: `item-${index + 1}`,
+      raw_title: `条目${index + 1}`,
+      canonical_title_candidates: [],
+      status: 'DRAFT',
+      preview_request: previewRequest(`req-${index + 1}`),
+      draft_id: `draft-${index + 1}`,
+      draft_revision: 1,
+    }))
+  }
+
+  function result(itemId: string, outcome: 'CONFIRMED' | 'FAILED', overrides: Record<string, unknown> = {}) {
+    return {
+      item_id: itemId,
+      outcome,
+      request_id: outcome === 'CONFIRMED' ? `req-${itemId.replace('item-', '')}` : null,
+      status: outcome === 'CONFIRMED' ? 'CONFIRMED' : null,
+      error_type: outcome === 'CONFIRMED' ? null : 'draft_expired',
+      error_message: null,
+      tracking_id: outcome === 'CONFIRMED' ? `tracking-${itemId.replace('item-', '')}` : null,
+      tracking_ready: outcome === 'CONFIRMED' ? true : null,
+      ...overrides,
+    }
+  }
+
+  async function parse(wrapper: Awaited<ReturnType<typeof mountBatch>>['wrapper'], input: string) {
+    await wrapper.find('#batch-raw-input').setValue(input)
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+  }
+
+  async function confirmSelected(wrapper: Awaited<ReturnType<typeof mountBatch>>['wrapper'], itemIds: string[]) {
+    for (const itemId of itemIds) {
+      await wrapper.find(`.batch-draft-card[data-item-id="${itemId}"] input[type="checkbox"]`).setValue(true)
+    }
+    await wrapper.find('#batch-accept-submit').trigger('click')
+    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
+    await flushPromises()
+  }
+
+  it('keeps a persistent result-and-remaining summary and removes successes from the confirmable set', async () => {
+    apiPost
+      .mockResolvedValueOnce(parseResult({ items: drafts(3) }))
+      .mockResolvedValueOnce(saveConfirmResult({
+        results: [result('item-1', 'CONFIRMED'), result('item-2', 'FAILED')],
+        summary: { requested: 2, confirmed: 1, failed: 1 },
+      }))
+    const { wrapper } = await mountBatch()
+    await parse(wrapper, '条目1\n条目2\n条目3')
+    await confirmSelected(wrapper, ['item-1', 'item-2'])
+
+    expect(wrapper.find('#batch-save-summary').text()).toContain('本次结果：已确认 1 项；失败 1 项；完整批次剩余 2 项。')
+    expect(wrapper.find('.batch-draft-card[data-item-id="item-1"] .batch-card-status').text()).toContain('已确认待提交')
+    expect(wrapper.find('.batch-draft-card[data-item-id="item-1"] input[type="checkbox"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('#batch-accept-all').text()).toContain('1 部')
+  })
+
+  it('when there is no new failure, stays on the page and focuses the first unprocessed item', async () => {
+    apiPost
+      .mockResolvedValueOnce(parseResult({ items: drafts(2) }))
+      .mockResolvedValueOnce(saveConfirmResult({
+        results: [result('item-1', 'CONFIRMED')],
+        summary: { requested: 1, confirmed: 1, failed: 0 },
+      }))
+    const { wrapper, router } = await mountBatch()
+    await parse(wrapper, '条目1\n条目2')
+    await confirmSelected(wrapper, ['item-1'])
+
+    expect(router.currentRoute.value.name).toBe('add')
+    expect(wrapper.find('.batch-review-navigation').text()).toContain('首个未处理条目')
+    expect(document.activeElement).toBe(wrapper.find('.batch-draft-card[data-item-id="item-2"]').element)
+  })
+
+  it('enters tracking management only with a real public tracking id after full completion', async () => {
+    apiPost
+      .mockResolvedValueOnce(parseResult({ items: drafts(1) }))
+      .mockResolvedValueOnce(saveConfirmResult({
+        results: [result('item-1', 'CONFIRMED', { tracking_id: 'tracking-public-1' })],
+        summary: { requested: 1, confirmed: 1, failed: 0 },
+      }))
+    const { wrapper, router } = await mountBatch({ tracking: true })
+    await parse(wrapper, '条目1')
+    await confirmSelected(wrapper, ['item-1'])
+
+    expect(router.currentRoute.value.name).toBe('tracking')
+    expect(router.currentRoute.value.query).toEqual({ tracking_id: 'tracking-public-1' })
   })
 })
 

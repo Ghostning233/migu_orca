@@ -53,8 +53,12 @@ import {
   batchCardNextStep,
   batchConfirmDisabledReason,
   batchSaveConfirmErrorLabel,
+  batchSaveConfirmNextFocus,
+  batchSaveConfirmOutcomeSummary,
+  batchSaveConfirmOutcomeSummaryText,
   batchSaveConfirmRecoveryAllowed,
   batchSaveConfirmSucceeded,
+  batchSaveConfirmTrackingId,
   batchSelectedConfirmCopy,
   batchSelectedScopeText,
   findBatchTrackingItem,
@@ -76,6 +80,7 @@ import {
   type BatchConfirmScopeCounts,
   type BatchCardFact,
   type BatchSaveConfirmDescriptor,
+  type BatchSaveConfirmOutcomeSummary,
   type BatchSaveConfirmResult,
   type BatchCandidate,
   type BatchItem,
@@ -162,7 +167,7 @@ const draftCreateErrors = ref<Record<string, Record<string, string>>>({})
 const saveInFlight = ref(false)
 const acceptFeedback = ref<Record<string, string>>({})
 const savingItemIds = ref<Set<string>>(new Set())
-const saveSummary = ref<Record<string, number>>({})
+const saveSummary = ref<BatchSaveConfirmOutcomeSummary | null>(null)
 type FrozenBatchSaveOperation = {
   itemIds: string[]
   body: ReturnType<typeof buildBatchSaveConfirmPayload>
@@ -650,7 +655,7 @@ async function parseBatch(): Promise<void> {
     currentItemId.value = items.value[0]?.item_id ?? null
     detailItemId.value = currentItemId.value
     acceptFeedback.value = {}
-    saveSummary.value = {}
+    saveSummary.value = null
     savingItemIds.value = new Set()
     seasonConfirmations.value = {}
     notification.success('批量搜索完成', `已返回 ${items.value.length} 个条目的候选搜索状态。`)
@@ -883,7 +888,11 @@ function validateBatchSaveResult(
   return seen.size === expected.size ? rows : null
 }
 
-function applySaveConfirmResult(result: BatchSaveConfirmResult): void {
+function applySaveConfirmResult(result: BatchSaveConfirmResult): {
+  summary: BatchSaveConfirmOutcomeSummary
+  nextFocus: ReturnType<typeof batchSaveConfirmNextFocus>
+  trackingId: string | null
+} {
   const feedback: Record<string, string> = {}
   const rawResultItems = result && Array.isArray((result as unknown as { results?: unknown }).results)
     ? (result as unknown as { results: unknown[] }).results
@@ -944,16 +953,22 @@ function applySaveConfirmResult(result: BatchSaveConfirmResult): void {
   })
   items.value = nextItems
   acceptFeedback.value = { ...acceptFeedback.value, ...feedback }
-  const firstFailed = resultItems.find((item) => !batchSaveConfirmSucceeded(item))?.item_id
-  const firstFailedRow = nextItems.find((item) => item.item_id === firstFailed)
-  if (firstFailed && firstFailedRow) {
-    const hidden = !visibleItems.value.some((item) => item.item_id === firstFailed)
-    temporarilyShownItemId.value = hidden ? firstFailed : null
-    selectCurrentItem(firstFailedRow)
-    focusAnnouncement.value = `已定位到首个失败条目：${batchCardTitle(firstFailedRow)}`
-    focusCard(firstFailed)
+  const summary = batchSaveConfirmOutcomeSummary(resultItems, nextItems)
+  const nextFocus = batchSaveConfirmNextFocus(resultItems, nextItems)
+  const trackingId = batchSaveConfirmTrackingId(resultItems)
+  if (nextFocus) {
+    const target = nextItems.find((item) => item.item_id === nextFocus.itemId)
+    if (target) {
+      const hidden = !visibleItems.value.some((item) => item.item_id === nextFocus.itemId)
+      temporarilyShownItemId.value = hidden ? nextFocus.itemId : null
+      selectCurrentItem(target)
+      focusAnnouncement.value = nextFocus.kind === 'failed'
+        ? `已定位到首个失败条目：${batchCardTitle(target)}`
+        : `已定位到首个未处理条目：${batchCardTitle(target)}`
+      focusCard(nextFocus.itemId)
+    }
   }
-
+  return { summary, nextFocus, trackingId }
 }
 
 function setRecoveryLoading(itemId: string, loading: boolean): void {
@@ -1073,6 +1088,9 @@ async function submitBatchSaveConfirm(rows: BatchItem[], itemIds: string[] | nul
   }
   saveInFlight.value = true
   savingItemIds.value = new Set(rows.map((row) => row.item_id ?? '').filter(Boolean))
+  // Undefined means this response still has work (or did not settle). Null is
+  // a completed batch whose tracking handoff has no usable public id.
+  let completionTrackingId: string | null | undefined
   try {
     let body: ReturnType<typeof buildBatchSaveConfirmPayload>
     if (frozen) {
@@ -1094,7 +1112,6 @@ async function submitBatchSaveConfirm(rows: BatchItem[], itemIds: string[] | nul
       path: { batch_id: batchId.value },
       body,
     })
-    saveSummary.value = result.summary ?? {}
     const resultItems = validateBatchSaveResult(result, rows.map((row) => row.item_id ?? ''))
     if (!resultItems) {
       if (saveOperation.value) saveOperation.value = { ...saveOperation.value, phase: 'response_unknown' }
@@ -1103,7 +1120,8 @@ async function submitBatchSaveConfirm(rows: BatchItem[], itemIds: string[] | nul
       notification.error('保存确认结果待核验', '响应未知，请使用相同操作重试。')
       return
     }
-    applySaveConfirmResult({ ...result, results: resultItems })
+    const applied = applySaveConfirmResult({ ...result, results: resultItems })
+    saveSummary.value = applied.summary
     const resultById = new Map(resultItems.map((resultItem) => [resultItem.item_id, resultItem]))
     for (const row of rows) {
       const itemId = row.item_id ?? ''
@@ -1111,10 +1129,15 @@ async function submitBatchSaveConfirm(rows: BatchItem[], itemIds: string[] | nul
       if (resultItem && batchSaveConfirmSucceeded(resultItem)) journey.dispatch({ type: 'save_succeeded', itemId, result: resultItem })
       else if (resultItem) journey.dispatch({ type: 'save_failed', itemId, error: resultItem })
     }
+    notification.show(
+      applied.summary.failed > 0 && applied.summary.confirmed === 0 ? 'error' : 'success',
+      '批量保存确认完成',
+      batchSaveConfirmOutcomeSummaryText(applied.summary),
+    )
     saveOperation.value = null
-    const confirmed = result.summary?.confirmed ?? 0
-    const failed = result.summary?.failed ?? 0
-    notification.show(failed && !confirmed ? 'error' : 'success', '批量保存确认完成', `已确认 ${confirmed} 项${failed ? `；${failed} 项需处理` : ''}。`)
+    if (applied.summary.remaining === 0) {
+      completionTrackingId = applied.trackingId
+    }
   } catch (error) {
     const safeError = toApiError(error)
     const nested = safeError.details?.details
@@ -1159,6 +1182,11 @@ async function submitBatchSaveConfirm(rows: BatchItem[], itemIds: string[] | nul
   } finally {
     saveInFlight.value = false
     savingItemIds.value = new Set()
+    if (completionTrackingId !== undefined && router.hasRoute('tracking')) {
+      // D-04: only use a server-provided public tracking id. If the handoff is
+      // not ready, enter the management page without inventing a query id.
+      await router.replace(routeLocation('tracking', completionTrackingId ? { tracking_id: completionTrackingId } : {}))
+    }
   }
 }
 
@@ -1906,13 +1934,13 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
             :disabled="selectable.length === 0 || saveInFlight"
             @update:checked="setAllSelected"
           />
-          <span id="batch-accept-selected-count" class="batch-selected-count" role="status">
+          <span id="batch-accept-selected-count" class="batch-selected-count" role="group">
             <span class="batch-count-group" data-scope="complete-batch">完整批次 {{ items.length }} 部；可确认 {{ batchConfirmableCount }} 部；需处理 {{ batchNeedsProcessingCount }} 部</span>
             <span class="batch-count-group" data-scope="visible">当前可见 {{ visibleItems.length }} 部</span>
             <span class="batch-count-group" data-scope="selection">已勾选 {{ checkedItemCount }} 部；已选且可确认 {{ selectedEligibleCount }} 项；其中被筛选隐藏仍参与 {{ selectedHiddenCount }} 项；已排除 {{ selectedExcludedCount }} 项</span>
             <span v-if="processingCount" class="batch-count-group" data-scope="recalculating">重算中 {{ processingCount }} 部</span>
-            <span v-if="saveSummary.requested" class="batch-count-group" data-scope="last-save">
-              上次请求 {{ saveSummary.requested ?? 0 }} 项；已确认 {{ saveSummary.confirmed ?? 0 }} 项；失败 {{ saveSummary.failed ?? 0 }} 项
+            <span v-if="saveSummary" id="batch-save-summary" class="batch-count-group" data-scope="last-save">
+              {{ batchSaveConfirmOutcomeSummaryText(saveSummary) }}
             </span>
           </span>
           <!-- US-356: 两个入口的范围常驻可见，并同时是按钮的可访问描述。 -->

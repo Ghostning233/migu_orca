@@ -21,6 +21,9 @@ import {
   batchSaveConfirmErrorLabel,
   batchSaveConfirmRecoveryAllowed,
   batchSaveConfirmSucceeded,
+  batchSaveConfirmOutcomeSummary,
+  batchSaveConfirmNextFocus,
+  batchSaveConfirmTrackingId,
   buildBatchSaveConfirmPayload,
   buildBatchCandidateCreatePayload,
   buildBatchParsePayload,
@@ -54,6 +57,48 @@ describe('batch save-confirm contract (US-290)', () => {
     expect(batchSaveConfirmRecoveryAllowed({ outcome: 'failed', error_type: 'save_confirm_failed', request_id: 'req-saved' } as never)).toBe(true)
     expect(batchSaveConfirmRecoveryAllowed({ outcome: 'SAVED_CONFIRM_FAILED', error_type: 'save_confirm_failed', request_id: 'req-saved' } as never)).toBe(false)
     expect(batchSaveConfirmRecoveryAllowed({ outcome: 'failed', error_type: 'save_confirm_failed', request_id: 'https://private.invalid' } as never)).toBe(false)
+  })
+})
+
+describe('batch save-confirm outcome recovery (US-357)', () => {
+  it('summarizes the server results together with remaining complete-batch work', () => {
+    const results = [
+      { item_id: 'item-a', outcome: 'CONFIRMED', request_id: 'req-a', tracking_id: 'tracking-a' },
+      { item_id: 'item-b', outcome: 'FAILED', error_type: 'draft_expired' },
+    ] as never
+    const items = [
+      batchItem({ item_id: 'item-a', status: 'DRAFT' }),
+      batchItem({ item_id: 'item-b', status: 'DRAFT' }),
+      batchItem({ item_id: 'item-c', status: 'DRAFT' }),
+    ]
+    expect(batchSaveConfirmOutcomeSummary(results, items)).toEqual({
+      requested: 2,
+      confirmed: 1,
+      failed: 1,
+      remaining: 2,
+      total: 3,
+    })
+  })
+
+  it('prioritizes a failed result, then the first remaining item, without choosing a hidden node', () => {
+    const items = [batchItem({ item_id: 'item-a', status: 'DRAFT' }), batchItem({ item_id: 'item-b', status: 'DRAFT' })]
+    expect(batchSaveConfirmNextFocus([
+      { item_id: 'item-a', outcome: 'CONFIRMED', request_id: 'req-a' },
+      { item_id: 'item-b', outcome: 'FAILED', error_type: 'draft_expired' },
+    ] as never, items)).toEqual({ kind: 'failed', itemId: 'item-b' })
+    expect(batchSaveConfirmNextFocus([
+      { item_id: 'item-a', outcome: 'CONFIRMED', request_id: 'req-a' },
+    ] as never, items)).toEqual({ kind: 'remaining', itemId: 'item-b' })
+  })
+
+  it('returns only a public tracking identifier for completion navigation', () => {
+    expect(batchSaveConfirmTrackingId([
+      { item_id: 'item-a', outcome: 'CONFIRMED', request_id: 'req-a', tracking_id: 'https://private.invalid' },
+      { item_id: 'item-b', outcome: 'CONFIRMED', request_id: 'req-b', tracking_id: 'tracking-b' },
+    ] as never)).toBe('tracking-b')
+    expect(batchSaveConfirmTrackingId([
+      { item_id: 'item-a', outcome: 'CONFIRMED', request_id: 'req-a', tracking_id: null },
+    ] as never)).toBeNull()
   })
 })
 

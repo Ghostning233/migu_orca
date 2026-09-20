@@ -2318,3 +2318,136 @@ class TestAppBatchConfirmScope:
         page.locator(".confirm-dialog .primary-button").click()
         page.wait_for_selector(".global-notification:not(:empty)", timeout=5000)
         assert [item["item_id"] for item in accept_calls[-1]["items"]] == ["item-a"]
+
+
+class TestAppBatchOutcomeRecovery:
+    """US-357：逐条 results[] 收敛、unknown 冻结恢复与完成导航。"""
+
+    def _open(self, page: Page, live_server_url: str, items: list[dict[str, Any]], raw: str) -> None:
+        page.route(
+            "**/api/v1/batches/parse",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result(items),
+            ),
+        )
+        _goto_batch(page, live_server_url)
+        page.fill("#batch-raw-input", raw)
+        page.click("#batch-parse-submit")
+        expect(page.locator(".batch-draft-card")).to_have_count(len(items))
+
+    @staticmethod
+    def _check(page: Page, item_id: str) -> None:
+        page.locator(f'.batch-draft-card[data-item-id="{item_id}"] .batch-card-checkbox-row').check()
+
+    def test_partial_success_keeps_persistent_result_and_excludes_success(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        calls: list[dict[str, Any]] = []
+
+        def _accept(route: Any, request: Any) -> None:
+            calls.append(json.loads(request.post_data or "{}"))
+            _accept_route_handler({"item-a"})(route, request)
+
+        page.route("**/api/v1/batches/batch-spa/save-confirm*", _accept)
+        items = [
+            _batch_item("item-a", "甲S1", status="DRAFT", canonical_title="甲 第一季", preview_request=_preview_request("甲", "req-a")),
+            _batch_item("item-b", "乙S1", status="DRAFT", canonical_title="乙 第一季", preview_request=_preview_request("乙", "req-b")),
+            _batch_item("item-c", "丙S1", status="DRAFT", canonical_title="丙 第一季", preview_request=_preview_request("丙", "req-c")),
+        ]
+        self._open(page, live_server_url, items, "甲S1\n乙S1\n丙S1")
+        self._check(page, "item-a")
+        self._check(page, "item-b")
+        page.click("#batch-accept-submit")
+        page.locator(".confirm-dialog .primary-button").click()
+        expect(page.locator(".global-notification")).to_contain_text("批量保存确认完成")
+
+        expect(page.locator("#batch-save-summary")).to_contain_text("本次结果：已确认 1 项；失败 1 项；完整批次剩余 2 项。")
+        expect(page.locator('.batch-draft-card[data-item-id="item-a"] .batch-card-status')).to_contain_text("已确认待提交")
+        expect(page.locator('.batch-draft-card[data-item-id="item-a"] .batch-card-checkbox-row')).to_be_disabled()
+        expect(page.locator("#batch-accept-all")).to_contain_text("2 部")
+        assert len(calls) == 1
+
+    def test_unknown_response_retries_the_exact_frozen_operation(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        held: list[Any] = []
+        calls: list[dict[str, Any]] = []
+        item = _batch_item("item-a", "甲S1", status="DRAFT", canonical_title="甲 第一季", preview_request=_preview_request("甲", "req-a"))
+
+        def _accept(route: Any, request: Any) -> None:
+            payload = json.loads(request.post_data or "{}")
+            calls.append(payload)
+            if len(calls) == 1:
+                held.append(route)
+                return
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_accept_result(
+                    [{"item_id": "item-a", "outcome": "CONFIRMED", "request_id": "req-a", "status": "CONFIRMED", "tracking_id": "tracking-a", "tracking_ready": True}],
+                    [],
+                ),
+            )
+
+        page.route("**/api/v1/batches/batch-spa/save-confirm*", _accept)
+        self._open(page, live_server_url, [item], "甲S1")
+        self._check(page, "item-a")
+        page.click("#batch-accept-submit")
+        page.locator(".confirm-dialog .primary-button").click()
+        expect(page.locator("#batch-accept-all-reason")).to_contain_text("正在保存确认")
+        assert held
+        frozen = json.loads(json.dumps(calls[0]))
+        held[0].fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"ok": True, "result": {"batch_id": "batch-spa", "results": [], "summary": {}}}),
+        )
+        expect(page.locator(".batch-card-status")).to_contain_text("结果待核验")
+        page.click("#batch-retry-frozen-operation")
+        expect(page.locator(".global-notification")).to_contain_text("批量保存确认完成")
+        assert len(calls) == 2
+        assert calls[1] == frozen
+
+    def test_no_new_failure_stays_and_locates_first_remaining_item(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        def _accept(route: Any, request: Any) -> None:
+            _accept_route_handler({"item-a"})(route, request)
+
+        page.route("**/api/v1/batches/batch-spa/save-confirm*", _accept)
+        items = [
+            _batch_item("item-a", "甲S1", status="DRAFT", canonical_title="甲 第一季", preview_request=_preview_request("甲", "req-a")),
+            _batch_item("item-b", "乙S1", status="DRAFT", canonical_title="乙 第一季", preview_request=_preview_request("乙", "req-b")),
+        ]
+        self._open(page, live_server_url, items, "甲S1\n乙S1")
+        self._check(page, "item-a")
+        page.click("#batch-accept-submit")
+        page.locator(".confirm-dialog .primary-button").click()
+        expect(page.locator("#batch-save-summary")).to_contain_text("完整批次剩余 1 项")
+        expect(page.locator(".batch-review-navigation")).to_contain_text("首个未处理条目")
+        expect(page.locator('.batch-draft-card[data-item-id="item-b"]')).to_have_class(re.compile(r"\bis-current\b"))
+        assert "/app/add" in page.url
+
+    def test_all_success_enters_tracking_with_public_identifier(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        page.route(
+            "**/api/v1/batches/batch-spa/save-confirm*",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_accept_result(
+                    [{"item_id": "item-a", "outcome": "CONFIRMED", "request_id": "req-a", "status": "CONFIRMED", "tracking_id": "tracking-public-a", "tracking_ready": True}],
+                    [],
+                ),
+            ),
+        )
+        item = _batch_item("item-a", "甲S1", status="DRAFT", canonical_title="甲 第一季", preview_request=_preview_request("甲", "req-a"))
+        self._open(page, live_server_url, [item], "甲S1")
+        self._check(page, "item-a")
+        page.click("#batch-accept-all")
+        page.locator(".confirm-dialog .primary-button").click()
+        page.wait_for_url(re.compile(r"/app/tracking\?tracking_id=tracking-public-a$"), timeout=5000)
+        assert "tracking-public-a" in page.url

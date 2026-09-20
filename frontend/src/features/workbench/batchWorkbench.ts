@@ -567,6 +567,76 @@ export function batchSaveConfirmSucceeded(item: BatchSaveConfirmItem): boolean {
     (!item.tracking_id || isPublicRouteIdentifier(item.tracking_id))
 }
 
+export interface BatchSaveConfirmOutcomeSummary {
+  requested: number
+  confirmed: number
+  failed: number
+  /** Items in the complete batch that still need work after this response. */
+  remaining: number
+  total: number
+}
+
+export function batchSaveConfirmOutcomeSummaryText(summary: BatchSaveConfirmOutcomeSummary): string {
+  return `本次结果：已确认 ${summary.confirmed} 项；失败 ${summary.failed} 项；完整批次剩余 ${summary.remaining} 项。`
+}
+
+/**
+ * US-357: derive the persistent batch summary from the server's result rows.
+ * The response summary is useful as transport metadata, but it is not the
+ * authority for item state and must not be used to infer partial success.
+ */
+export function batchSaveConfirmOutcomeSummary(
+  results: readonly BatchSaveConfirmItem[],
+  items: readonly BatchItem[],
+): BatchSaveConfirmOutcomeSummary {
+  const confirmedIds = new Set(
+    items.filter((item) => String(item.status ?? '') === 'CONFIRMED').map((item) => item.item_id ?? ''),
+  )
+  let confirmed = 0
+  for (const result of results) {
+    if (!batchSaveConfirmSucceeded(result)) continue
+    confirmed += 1
+    if (result.item_id) confirmedIds.add(result.item_id)
+  }
+  return {
+    requested: results.length,
+    confirmed,
+    failed: Math.max(0, results.length - confirmed),
+    remaining: Math.max(0, items.length - confirmedIds.size),
+    total: items.length,
+  }
+}
+
+export type BatchSaveConfirmNextFocus = { kind: 'failed' | 'remaining'; itemId: string } | null
+
+/** Choose the first recoverable target without ever inventing a hidden node. */
+export function batchSaveConfirmNextFocus(
+  results: readonly BatchSaveConfirmItem[],
+  items: readonly BatchItem[],
+): BatchSaveConfirmNextFocus {
+  const resultById = new Map(results.map((result) => [result.item_id, result]))
+  for (const item of items) {
+    const result = resultById.get(item.item_id ?? '')
+    if (result && !batchSaveConfirmSucceeded(result) && item.item_id) {
+      return { kind: 'failed', itemId: item.item_id }
+    }
+  }
+  const confirmedIds = new Set(
+    items.filter((item) => String(item.status ?? '') === 'CONFIRMED').map((item) => item.item_id ?? ''),
+  )
+  for (const result of results) {
+    if (batchSaveConfirmSucceeded(result) && result.item_id) confirmedIds.add(result.item_id)
+  }
+  const remaining = items.find((item) => item.item_id && !confirmedIds.has(item.item_id))
+  return remaining?.item_id ? { kind: 'remaining', itemId: remaining.item_id } : null
+}
+
+/** Return a real public tracking id for D-04 completion navigation only. */
+export function batchSaveConfirmTrackingId(results: readonly BatchSaveConfirmItem[]): string | null {
+  const result = results.find((candidate) => batchSaveConfirmSucceeded(candidate) && isPublicRouteIdentifier(candidate.tracking_id))
+  return result?.tracking_id ?? null
+}
+
 export function batchSaveConfirmErrorLabel(item: BatchSaveConfirmItem): string {
   const labels: Record<string, string> = {
     draft_expired: '订阅草案已失效，请重新生成。',
