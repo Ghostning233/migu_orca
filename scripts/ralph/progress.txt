@@ -59,9 +59,11 @@ Agent 完成开发与定向验证；US-356/US-357 尚未开始，必须等本包
 - `npm run typecheck` → 通过；`npm run lint` → 通过（`eslint . --max-warnings 0`）。
 - `npm run build` → 通过（Vite 生产构建，供浏览器套件使用）。
 - `npm run api:check` → 通过，`docs/api/openapi.json` → `src/api/generated/api.ts` 无漂移。
-- `uv run pytest tests/api_contract/test_dto_contracts.py test_save_confirm_service.py
-  test_openapi_generation.py test_openapi_runtime_consistency.py test_draft_store.py -q`
-  → 98 通过。
+- `uv run pytest tests/api_contract/test_dto_contracts.py tests/api_contract/test_save_confirm_service.py
+  tests/api_contract/test_openapi_generation.py tests/api_contract/test_openapi_runtime_consistency.py
+  tests/api_contract/test_draft_store.py -q` → 98 通过。
+  注：本条命令的逐文件路径由独立审核实际复跑纠正（`98 passed in 6.41s`）。此前记录把后四个
+  文件写成根目录相对路径，无法按记录复现；现已按真实执行的命令更正，结果一致。
 - `uv run pytest tests/browser/ -q` → 255 通过（真实 Chromium；含 `test_app_batch_workbench.py`
   新增 `TestAppBatchCompactList` 15 个用例：默认层/辅助层、1/12/36 连续列表无分页、
   1440×900 三张完整卡、200% 缩放、长标题与长错误自然增高不裁切、键盘不被内部表单截获、
