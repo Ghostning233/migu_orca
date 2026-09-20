@@ -1,0 +1,25 @@
+{
+  "project": "MiGuOrca",
+  "branchName": "ralph/stage44-shared-draft-review",
+  "description": "Stage 44：共享草案审核；基线 Stage43 merge 36ba540。D-03已于2026-09-19确认默认最多3条安全标题、完整按需展开、单番/批量同口径；不改D-02/D-04、API、CAS、safe-info或外部写，不使用ralph.sh。执行PRD docs/MiGuOrca_stage44_shared_draft_review_PRD.md。",
+  "userStories": [
+    {
+      "id": "US-353",
+      "title": "合集身份、资源与筛选审核层级",
+      "description": "作为审核草案的用户，我希望先看到已选真实合集及公开证据，再理解字幕、筛选和资源结果。",
+      "acceptanceCriteria": ["D-03已确认：默认最多3条安全标题、完整按需展开、单番/批量同口径；批量只传实际选中公开候选摘要", "不从别名、解析、Request或其他候选推断季度、封面或总集数", "资源计数同源、敏感白名单/Canary、状态恢复与真实Chromium/契约回归通过"],
+      "priority": 1,
+      "passes": true,
+      "notes": "US-353 完成：共享资源摘要默认最多3条安全标题并按需展开；批量仅将用户点击的公开候选摘要以内存投影传入 AnimeDraftEditor；直连草案无候选投影时合集身份固定未提供；poster 仅保留同源 opaque 白名单并以已提供/未提供状态展示；批量重搜/删除清理旧投影。定向 Vitest、typecheck、lint、build、api:check 与单番/批量 Chromium 通过。"
+    },
+    {
+      "id": "US-354",
+      "title": "修改状态与单番本地确认层级",
+      "description": "作为审核草案的用户，我希望区分保存修改与本地保存确认。",
+      "acceptanceCriteria": ["保存修改次操作与pending/失败/恢复语义不变；单番说明本地/外部两次边界", "批量详情不新增最终保存按钮；unknown/saved pending/部分成功仍用既有恢复", "已保存模式与真实Chromium、Vitest、契约回归通过"],
+      "priority": 2,
+      "passes": true,
+      "notes": "US-354 完成：单番最终确认移至完整 AnimeDraftEditor 审核内容之后，邻近同源资格阻断原因，并明确“仅保存本地方案、追番管理再次确认外部提交”；保存修改说明明确仅更新当前服务端草案且继续由 scheduler 负责防抖/flush/CAS。批量详情未增加最终保存按钮；AnimeDraftEditor saved 模式调用者与人工 apply 回归保持不变。定向 Vitest 142 passed、typecheck、lint、api:check、build 与单番/批量 Chromium 74 passed。"
+    }
+  ]
+}

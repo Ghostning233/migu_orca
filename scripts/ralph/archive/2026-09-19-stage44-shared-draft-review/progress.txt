@@ -1,0 +1,49 @@
+# Ralph 当前状态
+
+Stage 44（共享草案审核）已完成开发准备、尚未启动开发。准备分支：`ralph/stage44-shared-draft-review`；实际基线：
+`origin/main` 的 Stage 43 合并 `36ba5400dddc981a6dcd72fb69f1fc9ace30de73`。
+
+执行 PRD：`docs/MiGuOrca_stage44_shared_draft_review_PRD.md`。
+
+## 决策门与范围
+
+- D-03 已于2026-09-19确认：默认最多3条安全标题，完整列表按需展开，单番/批量同口径；US-353 可在获得开发授权后启动。
+- D-02（隐藏手工勾选参与 N）与 D-04（全部完成导航）留 Stage 45，不顺带实现。
+- 保留服务端草案 authority、CAS、scheduler、防抖、flush、save-confirm、unknown 恢复、safe-info边界与两次确认；本阶段不新增 API、持久化或外部写。
+
+## 2026-09-19 - Stage 44 文档与分支准备
+
+- Stage 43 经 PR #72 合并，merge `36ba540`；最终门禁为后端1528、前端620、Chromium239通过。旧 Stage 43 分支保留，未删除。
+- 新执行 PRD分为 US-353（合集身份、资源与筛选审核层级）与 US-354（修改状态与单番本地确认层级），初始均 passes=false/notes空。
+- 已从实际 `origin/main` 建立准备分支并取消其发布 upstream；本轮仅文档/JSON/分支整理，未运行功能测试、未开始开发、未 push/PR/merge。
+
+## 2026-09-19 - US-353 合集身份、资源与筛选审核层级
+
+- 修改 `ResourceSummary.vue`：有效资源默认只展示前三条安全标题，更多资源保留在嵌套按需展开层；完整资源继续按字幕组一级、标题二级分组，计数沿用现有来源，不做相减推算。
+- 修改 `BatchWorkbenchView.vue`：仅在用户点击候选并成功生成草案后，以内存中的公开候选摘要传给共享 `AnimeDraftEditor`；不从 Request、解析/别名或其他候选补值，缺失季度/总集数继续显示未知。
+- 补充 `ResourceSummary.test.ts`、`BatchWorkbenchView.test.ts`，并将 `US-353` 标记为 `passes=true`。
+- 实际验证：`npm run test:unit -- --run src/features/workbench/ResourceSummary.test.ts src/features/workbench/AnimeDraftEditor.test.ts src/features/workbench/BatchWorkbenchView.test.ts`（69 passed）；`npm run typecheck`、`npm run lint`、`npm run api:check`、`npm run build` 均通过；`uv run pytest tests/browser/test_app_workbench.py tests/browser/test_app_batch_workbench.py -q`（73 passed in 44.91s）。
+- 遗留风险：未新增浏览器测试用例，现有单番/批量套件覆盖已通过；Stage 44 另一故事 US-354 未启动。
+
+## 2026-09-19 - US-354 修改状态与单番本地确认层级
+
+- 修改 `SingleAnimeReviewPanel.vue`：将单番最终确认块移到完整 `AnimeDraftEditor` 审核内容之后，紧邻资格阻断原因；增加“仅保存本地方案、追番管理再次确认外部提交”边界说明。
+- 更新单番审核说明：明确“保存修改”仅更新当前服务端草案；未改 scheduler、1.5 秒防抖、flush、CAS、unknown/saved pending/定位恢复或批量固定工具栏。
+- 增加 `WorkbenchView.test.ts` 层级与文案回归；`AnimeDraftEditor` saved 模式调用者与人工保存行为保持原状。
+- 审核后补充 `WorkbenchView.test.ts` 单番操作层级回归：断言 `#preview-apply-button` 为 secondary、`#single-review-save-button` 为 primary；该回归在当前 HEAD 直接通过（并非红测），因更早提交已具备 `apply-variant="secondary"`。
+- 实际验证：`npm run test:unit -- --run src/features/workbench/WorkbenchView.test.ts src/features/workbench/AnimeDraftEditor.test.ts`（54 passed）；`npm run test:unit -- --run src/features/workbench/BatchWorkbenchView.test.ts src/features/requests/RequestDetailPanel.test.ts`（88 passed）；`npm run typecheck`、`npm run lint`、`npm run api:check`、`npm run build` 均通过；`uv run pytest tests/browser/test_app_workbench.py tests/browser/test_app_batch_workbench.py -q`（74 passed in 44.50s）。
+- 遗留风险：未运行 Stage 44 完整后端/前端/Chromium 门禁（按普通 story 范围）；未新增独立浏览器用例，既有单番/批量真实 Chromium 套件覆盖通过。
+
+## 2026-09-19 - Stage 44 Chromium 时序修复（PR #73 冻结 HEAD 复核）
+
+- CI `35427861964` 的完整 Chromium 门禁仅失败 `test_profile_change_while_app_is_mounted_invalidates_held_old_list[chromium]`：首次 profile-a `reload()` 后 5 秒内未出现数量 2 的 `.pending-badge`；失败发生在测试前置条件，非 profile-b 切换或 held 旧响应断言。
+- 原因：测试仅等待 DOM 徽标，未明确同步首次 profile-a tracking 请求及真实 envelope 响应；页面壳已渲染不代表列表响应已完成，导致 reload 时序在 CI 中暴露。
+- 修复：测试按 profile-a 查询 URL 使用 `expect_response`，核对 `ok=true` 与两条真实响应 items 后再断言徽标；进入 tracking 前使用精确 `expect_request` 确认 held 的 profile-a 请求已建立，并保留其真实 envelope 延迟返回与 profile-b 刷新后旧响应不得覆盖新值的断言。未修改生产代码/API/业务语义，未改任何 passes 字段。
+- 验证：该测试连续 5 次通过（每次 1 passed）；`uv run pytest tests/browser/test_stage39_global_status.py -q`（15 passed）。
+
+## 2026-09-19 - US-353 集中修复与复审
+
+- 修复 `AnimeDraftEditor`：草案默认层仅从用户实际选择的内存候选摘要展示合集身份；直连/缺失摘要固定显示“未提供”，保存模式保留既有公开标题回退。
+- 扩展 `SelectedCollectionSummary` 的 poster 白名单投影，仅接受同源 `/api/v1/mikan/posters/...` opaque 路径；默认层只显示封面状态，不把路径或外链写入 DOM；批量重搜和删除条目清理旧投影。
+- 新增直连真实 Chromium 缺省身份断言，并调整已有浏览器断言按季度/总集数字段核对，避免与独立封面缺省文案冲突。
+- 验证：`npm run test:unit -- --run src/features/workbench/AnimeDraftEditor.test.ts src/features/workbench/candidateSearch.test.ts src/features/workbench/BatchWorkbenchView.test.ts src/features/workbench/WorkbenchView.test.ts`（127 passed）；`npm run typecheck`、`npm run lint`、`npm run api:check`、`npm run build` 通过；`uv run pytest tests/browser/test_app_workbench.py tests/browser/test_app_batch_workbench.py -q`（74 passed）。

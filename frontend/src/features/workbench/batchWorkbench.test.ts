@@ -5,17 +5,25 @@ import {
   batchAcceptAllConfirmCopy,
   batchAcceptAllScopeText,
   batchCandidateSelectionIsBlocked,
+  batchCardAuxiliaryFacts,
   batchCardNeedsReview,
+  batchCardNextStep,
   batchCardPreferenceSummary,
   batchCardSeedSummary,
   batchCardTitle,
+  batchConfirmDisabledReason,
   batchItemCount,
   batchItemIsException,
   batchItemMatchesReviewFilters,
+  batchSelectedConfirmCopy,
+  batchSelectedScopeText,
   batchStatusLabel,
   batchSaveConfirmErrorLabel,
   batchSaveConfirmRecoveryAllowed,
   batchSaveConfirmSucceeded,
+  batchSaveConfirmOutcomeSummary,
+  batchSaveConfirmNextFocus,
+  batchSaveConfirmTrackingId,
   buildBatchSaveConfirmPayload,
   buildBatchCandidateCreatePayload,
   buildBatchParsePayload,
@@ -24,6 +32,8 @@ import {
   canExpandBatchCard,
   orderBatchItemsForReview,
   validateBatchRawInput,
+  type BatchCardGuidance,
+  type BatchConfirmScopeCounts,
   type BatchItem,
 } from '@/features/workbench/batchWorkbench'
 
@@ -47,6 +57,48 @@ describe('batch save-confirm contract (US-290)', () => {
     expect(batchSaveConfirmRecoveryAllowed({ outcome: 'failed', error_type: 'save_confirm_failed', request_id: 'req-saved' } as never)).toBe(true)
     expect(batchSaveConfirmRecoveryAllowed({ outcome: 'SAVED_CONFIRM_FAILED', error_type: 'save_confirm_failed', request_id: 'req-saved' } as never)).toBe(false)
     expect(batchSaveConfirmRecoveryAllowed({ outcome: 'failed', error_type: 'save_confirm_failed', request_id: 'https://private.invalid' } as never)).toBe(false)
+  })
+})
+
+describe('batch save-confirm outcome recovery (US-357)', () => {
+  it('summarizes the server results together with remaining complete-batch work', () => {
+    const results = [
+      { item_id: 'item-a', outcome: 'CONFIRMED', request_id: 'req-a', tracking_id: 'tracking-a' },
+      { item_id: 'item-b', outcome: 'FAILED', error_type: 'draft_expired' },
+    ] as never
+    const items = [
+      batchItem({ item_id: 'item-a', status: 'DRAFT' }),
+      batchItem({ item_id: 'item-b', status: 'DRAFT' }),
+      batchItem({ item_id: 'item-c', status: 'DRAFT' }),
+    ]
+    expect(batchSaveConfirmOutcomeSummary(results, items)).toEqual({
+      requested: 2,
+      confirmed: 1,
+      failed: 1,
+      remaining: 2,
+      total: 3,
+    })
+  })
+
+  it('prioritizes a failed result, then the first remaining item, without choosing a hidden node', () => {
+    const items = [batchItem({ item_id: 'item-a', status: 'DRAFT' }), batchItem({ item_id: 'item-b', status: 'DRAFT' })]
+    expect(batchSaveConfirmNextFocus([
+      { item_id: 'item-a', outcome: 'CONFIRMED', request_id: 'req-a' },
+      { item_id: 'item-b', outcome: 'FAILED', error_type: 'draft_expired' },
+    ] as never, items)).toEqual({ kind: 'failed', itemId: 'item-b' })
+    expect(batchSaveConfirmNextFocus([
+      { item_id: 'item-a', outcome: 'CONFIRMED', request_id: 'req-a' },
+    ] as never, items)).toEqual({ kind: 'remaining', itemId: 'item-b' })
+  })
+
+  it('returns only a public tracking identifier for completion navigation', () => {
+    expect(batchSaveConfirmTrackingId([
+      { item_id: 'item-a', outcome: 'CONFIRMED', request_id: 'req-a', tracking_id: 'https://private.invalid' },
+      { item_id: 'item-b', outcome: 'CONFIRMED', request_id: 'req-b', tracking_id: 'tracking-b' },
+    ] as never)).toBe('tracking-b')
+    expect(batchSaveConfirmTrackingId([
+      { item_id: 'item-a', outcome: 'CONFIRMED', request_id: 'req-a', tracking_id: null },
+    ] as never)).toBeNull()
   })
 })
 
@@ -295,5 +347,140 @@ describe('batch confirm-all confirm copy (US-348)', () => {
     expect(copy.title).toBe('保存并确认全部 2 部')
     expect(copy.message).toContain('其中 2 部被筛选隐藏')
     expect(copy.message).not.toContain('已排除')
+  })
+})
+
+describe('batch card default layer (US-355)', () => {
+  function guidance(overrides: Partial<BatchCardGuidance> = {}): BatchCardGuidance {
+    return {
+      status: 'DRAFT',
+      hasCandidates: false,
+      hasDraft: true,
+      blocker: null,
+      resultUnknown: false,
+      savedPendingConfirm: false,
+      trackingLocated: false,
+      generating: false,
+      ...overrides,
+    }
+  }
+
+  it('lists only on-demand auxiliary facts and never repeats the card title', () => {
+    const facts = batchCardAuxiliaryFacts(
+      batchItem({
+        canonical_title_candidates: ['关于我转生变成史莱姆这档事 第四季', '转生史莱姆 第四季'],
+        search_queries: ['转生史莱姆 第四季'],
+        season_hint: 'S4',
+        candidates: [{ bangumi_id: '42' }],
+        status: 'DRAFT',
+        preview_request: previewRequest(),
+      }),
+    )
+    const byLabel = Object.fromEntries(facts.map((fact) => [fact.label, fact.value]))
+    expect(byLabel['别名']).toBe('转生史莱姆 第四季')
+    expect(byLabel['别名']).not.toContain('关于我转生变成史莱姆这档事 第四季')
+    expect(byLabel['检索关键词']).toBe('转生史莱姆 第四季')
+    expect(byLabel['季数提示']).toBe('S4')
+    expect(byLabel['候选合集']).toBe('1 个')
+    expect(byLabel['偏好']).toBe('未配置偏好，使用默认流程')
+    expect(byLabel['总集数']).toBe('未知')
+    expect(batchCardAuxiliaryFacts(batchItem())).toEqual([
+      { label: '检索关键词', value: '转生史莱姆 第四季' },
+      { label: '季数提示', value: 'S4' },
+      { label: '偏好', value: '未配置偏好，使用默认流程' },
+      { label: '总集数', value: '未知' },
+    ])
+  })
+
+  it('names exactly one next step for every actionable card state', () => {
+    expect(batchCardNextStep(guidance({ generating: true }))).toContain('等待当前候选')
+    expect(batchCardNextStep(guidance({ resultUnknown: true }))).toContain('使用相同操作重试')
+    expect(batchCardNextStep(guidance({ status: 'RESPONSE_UNKNOWN', hasDraft: false }))).toContain('重试定位')
+    expect(batchCardNextStep(guidance({ savedPendingConfirm: true }))).toContain('重试确认')
+    expect(batchCardNextStep(guidance({ status: 'SAVED_PENDING_CONFIRM' }))).toContain('不会重复保存')
+    expect(batchCardNextStep(guidance({ status: 'CONFIRMED', trackingLocated: true, hasDraft: false }))).toContain('追番管理')
+    expect(batchCardNextStep(guidance({ status: 'CONFIRMED', hasDraft: false }))).toContain('重试定位')
+    expect(batchCardNextStep(guidance({ status: 'FAILED', blocker: '需先生成可审核草案', hasDraft: false }))).toContain('删除该条目')
+    expect(batchCardNextStep(guidance({ status: 'EMPTY', blocker: '需先生成可审核草案', hasDraft: false }))).toContain('更完整的名称')
+    expect(batchCardNextStep(guidance({ hasCandidates: true, hasDraft: false, blocker: '需先生成可审核草案' })))
+      .toBe('在右栏选择真实 MiKan 合集生成草案。')
+    expect(batchCardNextStep(guidance({ blocker: '有尚未应用的编辑' }))).toBe('先解决：有尚未应用的编辑。')
+    expect(batchCardNextStep(guidance())).toContain('保存并确认全部')
+    expect(batchCardNextStep(guidance({ hasDraft: false }))).toContain('重新获取批量草案')
+  })
+})
+
+// Stage 45 / WP-45-B / US-356: N 部（手工勾选且有资格）与确认全部的两种范围必须由
+// 同一份计数派生；两入口的可见禁用原因常驻，不依赖 title。
+describe('batch N-part selection scope (US-356)', () => {
+  const scope = (overrides: Partial<BatchConfirmScopeCounts> = {}): BatchConfirmScopeCounts => ({
+    total: 3,
+    visible: 2,
+    selected: 2,
+    selectedHidden: 1,
+    selectedExcluded: 0,
+    confirmable: 3,
+    hidden: 1,
+    needsProcessing: 0,
+    ...overrides,
+  })
+
+  it('states the checked-and-eligible complete-batch range with hidden participants', () => {
+    expect(batchSelectedScopeText(scope())).toBe(
+      '保存并确认 2 部来自完整批次 3 部中已勾选且当前可确认的条目，其中 1 部当前被筛选隐藏、仍会一并保存；筛选与可见全选不改变本集合。',
+    )
+    expect(batchSelectedScopeText(scope({ selectedHidden: 0, hidden: 0 }))).toBe(
+      '保存并确认 2 部来自完整批次 3 部中已勾选且当前可确认的条目；筛选与可见全选不改变本集合。',
+    )
+  })
+
+  it('states a visible reason when nothing checked can be confirmed', () => {
+    expect(batchSelectedScopeText(scope({ selected: 0, selectedHidden: 0 }))).toContain('请先在卡片上勾选')
+    expect(batchSelectedScopeText(scope({ selected: 0, selectedHidden: 0, selectedExcluded: 2 }))).toContain(
+      '已勾选但当前不可确认的 2 部被排除',
+    )
+    expect(batchSelectedScopeText(scope({ total: 0, visible: 0, selected: 0, confirmable: 0, selectedHidden: 0 }))).toBe('')
+  })
+
+  it('never reports counts outside the batch bounds', () => {
+    const clamped = batchSelectedScopeText(scope({ total: 2, selected: 9, selectedHidden: 9, selectedExcluded: 9 }))
+    expect(clamped).toContain('保存并确认 2 部')
+    expect(clamped).toContain('其中 2 部当前被筛选隐藏')
+    expect(clamped).not.toContain('9')
+  })
+
+  it('names the frozen N count in the title, the safety list and the confirm button', () => {
+    const copy = batchSelectedConfirmCopy(scope(), ['甲 第一季', '乙 第一季'])
+    expect(copy.title).toBe('保存并确认 2 部')
+    expect(copy.confirmLabel).toBe('保存并确认 2 部')
+    expect(copy.items).toEqual(['甲 第一季', '乙 第一季'])
+    expect(copy.itemsLabel).toBe('本次将保存并确认的 2 部')
+    expect(copy.message).toContain('完整批次 3 部中已勾选且当前可确认的 2 部')
+    expect(copy.message).toContain('其中 1 部被筛选隐藏，仍会一并保存并确认')
+    expect(copy.message).toContain('仅保存本地订阅方案，不会提交到 Auto Bangumi')
+    expect(copy.message).toContain('外部提交需在追番管理再次确认')
+    expect(copy.message).not.toContain('draft')
+  })
+
+  it('states the exclusions of the N scope without naming capabilities', () => {
+    const copy = batchSelectedConfirmCopy(scope({ selectedExcluded: 1, selected: 1, selectedHidden: 0 }), ['甲 第一季'])
+    expect(copy.title).toBe('保存并确认 1 部')
+    expect(copy.message).toContain('已勾选但当前不可确认的 1 部被排除')
+    expect(copy.items).toEqual(['甲 第一季'])
+  })
+
+  it('lists the same frozen set as the confirm-all safety list', () => {
+    const copy = batchAcceptAllConfirmCopy({ total: 3, confirmable: 2, hidden: 1 }, ['甲 第一季', '乙 第一季'])
+    expect(copy.items).toEqual(['甲 第一季', '乙 第一季'])
+    expect(copy.itemsLabel).toBe('本次将保存并确认的 2 部')
+  })
+})
+
+describe('batch confirm disabled reasons (US-356)', () => {
+  it('always explains a disabled entry with persistent copy instead of a title', () => {
+    expect(batchConfirmDisabledReason({ saving: false, pendingVerification: false })).toBe('')
+    expect(batchConfirmDisabledReason({ saving: true, pendingVerification: false })).toContain('正在保存确认')
+    expect(batchConfirmDisabledReason({ saving: false, pendingVerification: true })).toContain('待核验')
+    expect(batchConfirmDisabledReason({ saving: true, pendingVerification: true })).toContain('待核验')
   })
 })

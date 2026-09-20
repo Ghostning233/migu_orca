@@ -1,49 +1,266 @@
 # Ralph 当前状态
 
-Stage 44（共享草案审核）已完成开发准备、尚未启动开发。准备分支：`ralph/stage44-shared-draft-review`；实际基线：
-`origin/main` 的 Stage 43 合并 `36ba5400dddc981a6dcd72fb69f1fc9ace30de73`。
+Stage 45（批量确认范围、结果恢复与完成导航）：US-355～US-357 已完成开发、独立审核，
+US-357 审核问题已按红测集中修复并复审；完整后端、前端与真实 Chromium 收尾门禁通过，
+当前待用户明确发布授权。
+准备分支：`ralph/stage45-batch-confirmation`；实际基线：Stage 44 PR #73 merge
+`9073fed30d3edd481ad5f4339c4b44b04d235a5e`（以实时 git 为准）。
 
-执行 PRD：`docs/MiGuOrca_stage44_shared_draft_review_PRD.md`。
+执行 PRD：`docs/MiGuOrca_stage45_batch_confirmation_PRD.md`。
+总体 PRD：`docs/MiGuOrca_stage43_45_add_anime_visual_PRD.md`。
+决策台账：`docs/development/add-anime-visual-prd-handoff-2026-09-18.md`。
 
-## 决策门与范围
+## 已确认决定与范围
 
-- D-03 已于2026-09-19确认：默认最多3条安全标题，完整列表按需展开，单番/批量同口径；US-353 可在获得开发授权后启动。
-- D-02（隐藏手工勾选参与 N）与 D-04（全部完成导航）留 Stage 45，不顺带实现。
-- 保留服务端草案 authority、CAS、scheduler、防抖、flush、save-confirm、unknown 恢复、safe-info边界与两次确认；本阶段不新增 API、持久化或外部写。
+- D-02 于 2026-09-19 确认采用既有建议：筛选隐藏的手工勾选且仍有资格项参与 N 部确认；可见项全选只作用可见项。N 的计数、弹窗、描述符和 `item_ids` 必须同源，筛选不清除手工意图。
+- D-04 于 2026-09-19 确认采用既有建议：全部成功且无剩余工作自动进入追番管理；有失败或未处理项留页，按失败优先、未处理次之可见化并聚焦。
+- 三个原子包依次为 US-355（紧凑列表与查看、勾选分离）、US-356（固定操作栏与两种确认范围）、US-357（部分成功、unknown 与完成导航）。前包完成开发、独立审核、最小红测、同一修复 Agent 集中修复与复审闭环前，不进入后包。
+- 保留服务端草案 authority、`draft_id + revision`、CAS、scheduler/1.5 秒防抖、flush、save-confirm、unknown 冻结恢复、safe-info和两次确认；不新增 API/OpenAPI/generated、后端、持久化、外部写、未保存 safe-info、单项重搜或实时进度；不运行 `ralph.sh`。
 
-## 2026-09-19 - Stage 44 文档与分支准备
+## 2026-09-19 - Stage 45 执行材料准备（非功能验证）
 
-- Stage 43 经 PR #72 合并，merge `36ba540`；最终门禁为后端1528、前端620、Chromium239通过。旧 Stage 43 分支保留，未删除。
-- 新执行 PRD分为 US-353（合集身份、资源与筛选审核层级）与 US-354（修改状态与单番本地确认层级），初始均 passes=false/notes空。
-- 已从实际 `origin/main` 建立准备分支并取消其发布 upstream；本轮仅文档/JSON/分支整理，未运行功能测试、未开始开发、未 push/PR/merge。
+- 已先逐字归档活动 Stage 44 `prd.json` 与 `progress.txt` 至 `scripts/ralph/archive/2026-09-19-stage44-shared-draft-review/`，保留原 Stage 44 执行证据；随后才切换活动 Ralph 状态。
+- 已依据 Stage 44 实际合并 `9073fed`、总体 PRD §6 和用户确认的 D-02/D-04，创建独立执行 PRD、三条初始 `passes=false`/空 notes 的故事、索引和决策台账同步。尚无代码、测试、审核、修复、提交、push、PR 或合并。
+- 本轮只应做文档/JSON一致性核验；不得将该准备记录视为 Vitest、typecheck、lint、build、后端或 Chromium 验证通过。
 
-## 2026-09-19 - US-353 合集身份、资源与筛选审核层级
+## 2026-09-19 - US-355 紧凑列表与查看、勾选分离（WP-45-A）
 
-- 修改 `ResourceSummary.vue`：有效资源默认只展示前三条安全标题，更多资源保留在嵌套按需展开层；完整资源继续按字幕组一级、标题二级分组，计数沿用现有来源，不做相减推算。
-- 修改 `BatchWorkbenchView.vue`：仅在用户点击候选并成功生成草案后，以内存中的公开候选摘要传给共享 `AnimeDraftEditor`；不从 Request、解析/别名或其他候选补值，缺失季度/总集数继续显示未知。
-- 补充 `ResourceSummary.test.ts`、`BatchWorkbenchView.test.ts`，并将 `US-353` 标记为 `passes=true`。
-- 实际验证：`npm run test:unit -- --run src/features/workbench/ResourceSummary.test.ts src/features/workbench/AnimeDraftEditor.test.ts src/features/workbench/BatchWorkbenchView.test.ts`（69 passed）；`npm run typecheck`、`npm run lint`、`npm run api:check`、`npm run build` 均通过；`uv run pytest tests/browser/test_app_workbench.py tests/browser/test_app_batch_workbench.py -q`（73 passed in 44.91s）。
-- 遗留风险：未新增浏览器测试用例，现有单番/批量套件覆盖已通过；Stage 44 另一故事 US-354 未启动。
+协作模式：用户指定 Claude Fable（实际模型 `claude-fable-5[1M]`）作为唯一写入开发 Agent，
+无子 Agent、无团队调度；单 Agent 内完成红测 → 实现 → 定向验证。
 
-## 2026-09-19 - US-354 修改状态与单番本地确认层级
+实现范围（只改既有批量前端与其测试，未动 API/OpenAPI/generated/后端/持久化/外部写）：
 
-- 修改 `SingleAnimeReviewPanel.vue`：将单番最终确认块移到完整 `AnimeDraftEditor` 审核内容之后，紧邻资格阻断原因；增加“仅保存本地方案、追番管理再次确认外部提交”边界说明。
-- 更新单番审核说明：明确“保存修改”仅更新当前服务端草案；未改 scheduler、1.5 秒防抖、flush、CAS、unknown/saved pending/定位恢复或批量固定工具栏。
-- 增加 `WorkbenchView.test.ts` 层级与文案回归；`AnimeDraftEditor` saved 模式调用者与人工保存行为保持原状。
-- 审核后补充 `WorkbenchView.test.ts` 单番操作层级回归：断言 `#preview-apply-button` 为 secondary、`#single-review-save-button` 为 primary；该回归在当前 HEAD 直接通过（并非红测），因更早提交已具备 `apply-variant="secondary"`。
-- 实际验证：`npm run test:unit -- --run src/features/workbench/WorkbenchView.test.ts src/features/workbench/AnimeDraftEditor.test.ts`（54 passed）；`npm run test:unit -- --run src/features/workbench/BatchWorkbenchView.test.ts src/features/requests/RequestDetailPanel.test.ts`（88 passed）；`npm run typecheck`、`npm run lint`、`npm run api:check`、`npm run build` 均通过；`uv run pytest tests/browser/test_app_workbench.py tests/browser/test_app_batch_workbench.py -q`（74 passed in 44.50s）。
-- 遗留风险：未运行 Stage 44 完整后端/前端/Chromium 门禁（按普通 story 范围）；未新增独立浏览器用例，既有单番/批量真实 Chromium 套件覆盖通过。
+- 默认左卡重排为紧凑层：标题（加粗）+ 中文状态 + 需人工核对 + 输入行 + 有效种子数 +
+  阻断/错误（EMPTY/FAILED 反馈、草案修改失败、保存确认失败、结果恢复反馈、复核提示）+
+  「下一步：…」+ 快捷字幕组编辑 + 动作行；别名、检索关键词、季数提示、候选数、偏好、
+  总集数移入 `<details class="batch-card-more">` 的「辅助信息」。失败、未生效编辑、
+  unknown（`RESPONSE_UNKNOWN`）与全部恢复动作都留在折叠之外。
+- 新增纯 helper：`batchCardAuxiliaryFacts()`（辅助事实，排除已作为标题的首个别名）与
+  `batchCardNextStep()`（默认层唯一「下一步」，恢复/终态优先于通用分支）。
+- 卡片快捷键只处理落在卡片自身的事件（`event.target !== event.currentTarget` 直接返回），
+  复选框、快捷字幕组 select、动作按钮不再被 Arrow/Enter 截获。
+- 「已勾选但当前不可确认」的条目保留勾选与手工意图，通过 `.batch-card-intent-note` 就地
+  说明首个阻断原因并说明解决后仍参与保存确认；计数仍按「可确认」口径排除它。
+- 删除临时卡先记录删除位置，再按「下一项 → 上一项 → 列表标题（批量工作台面板标题）」
+  恢复焦点；列表为空时焦点不回落到 body。
+- 筛选无匹配新增 `#batch-review-no-match` 常驻提示（说明本批次仍有 N 部、数据/勾选/右栏
+  未变），不复用空批次 EmptyState；筛选控件与计数移出滚动区，清除筛选入口始终可达。
+- 滚动区只包含卡片列表并留出焦点环空间（wrapper 6px padding + 卡片 scroll-margin 8px），
+  卡片 `:focus-visible` 用 3px/offset 2px 令牌描边；卡片网格与列表容器都可作为焦点落点。
+- 紧凑尺寸：卡片 padding 6/8px、行距 3px、海报占位 48×44、桌面尺寸复选框；重排后
+  1440×900 的 12 项短标题夹具在列表可视区内可完整显示 3 张卡片。
+- 卡片 `aria-label` 为「查看条目：<标题>（<中文状态>）」，复选框可访问名称仍为
+  「选择 <输入标题>」（视觉隐藏标签、保留原生 input），查看与勾选对读屏可区分。
 
-## 2026-09-19 - Stage 44 Chromium 时序修复（PR #73 冻结 HEAD 复核）
+实际验证命令与结果（全部在本机真实运行）：
 
-- CI `35427861964` 的完整 Chromium 门禁仅失败 `test_profile_change_while_app_is_mounted_invalidates_held_old_list[chromium]`：首次 profile-a `reload()` 后 5 秒内未出现数量 2 的 `.pending-badge`；失败发生在测试前置条件，非 profile-b 切换或 held 旧响应断言。
-- 原因：测试仅等待 DOM 徽标，未明确同步首次 profile-a tracking 请求及真实 envelope 响应；页面壳已渲染不代表列表响应已完成，导致 reload 时序在 CI 中暴露。
-- 修复：测试按 profile-a 查询 URL 使用 `expect_response`，核对 `ok=true` 与两条真实响应 items 后再断言徽标；进入 tracking 前使用精确 `expect_request` 确认 held 的 profile-a 请求已建立，并保留其真实 envelope 延迟返回与 profile-b 刷新后旧响应不得覆盖新值的断言。未修改生产代码/API/业务语义，未改任何 passes 字段。
-- 验证：该测试连续 5 次通过（每次 1 passed）；`uv run pytest tests/browser/test_stage39_global_status.py -q`（15 passed）。
+- `cd frontend && npx vitest run` → 49 文件 / 635 用例通过（含新增 7 个 US-355 视图用例、
+  2 个 helper 用例；新增用例先按红测写就并在实现前实际失败）。
+- `npm run typecheck` → 通过；`npm run lint` → 通过（`eslint . --max-warnings 0`）。
+- `npm run build` → 通过（Vite 生产构建，供浏览器套件使用）。
+- `npm run api:check` → 通过，`docs/api/openapi.json` → `src/api/generated/api.ts` 无漂移。
+- `uv run pytest tests/api_contract/test_dto_contracts.py tests/api_contract/test_save_confirm_service.py
+  tests/api_contract/test_openapi_generation.py tests/api_contract/test_openapi_runtime_consistency.py
+  tests/api_contract/test_draft_store.py -q` → 98 通过。
+  注：本条命令的逐文件路径由独立审核实际复跑纠正（`98 passed in 6.41s`）。此前记录把后四个
+  文件写成根目录相对路径，无法按记录复现；现已按真实执行的命令更正，结果一致。
+- `uv run pytest tests/browser/ -q` → 255 通过（真实 Chromium；含 `test_app_batch_workbench.py`
+  新增 `TestAppBatchCompactList` 15 个用例：默认层/辅助层、1/12/36 连续列表无分页、
+  1440×900 三张完整卡、200% 缩放、长标题与长错误自然增高不裁切、键盘不被内部表单截获、
+  焦点环不被滚动容器裁切、删除后焦点落点、下一个异常先可见化再聚焦、筛选无匹配、
+  只在显式排序时重排、reduced-motion、敏感 canary 扩展覆盖辅助信息层）。
+- 浏览器验证全部使用 route mock / 临时 storage；未访问真实 MiKan、Auto Bangumi 或 qBittorrent；
+  未新增敏感截图/trace 入库（临时截图写在 /tmp 并已删除临时用例文件）。
 
-## 2026-09-19 - US-353 集中修复与复审
+保留的既有行为（未改动）：服务端草案 authority、`draft_id + base_revision`、CAS、
+1.5 秒防抖 scheduler 与 flush、save-confirm、unknown 冻结恢复（原 body/key/revision/集合）、
+safe-info 边界、本地保存与外部提交两次确认、`AnimeDraftEditor` saved 模式与人工保存调用者。
 
-- 修复 `AnimeDraftEditor`：草案默认层仅从用户实际选择的内存候选摘要展示合集身份；直连/缺失摘要固定显示“未提供”，保存模式保留既有公开标题回退。
-- 扩展 `SelectedCollectionSummary` 的 poster 白名单投影，仅接受同源 `/api/v1/mikan/posters/...` opaque 路径；默认层只显示封面状态，不把路径或外链写入 DOM；批量重搜和删除条目清理旧投影。
-- 新增直连真实 Chromium 缺省身份断言，并调整已有浏览器断言按季度/总集数字段核对，避免与独立封面缺省文案冲突。
-- 验证：`npm run test:unit -- --run src/features/workbench/AnimeDraftEditor.test.ts src/features/workbench/candidateSearch.test.ts src/features/workbench/BatchWorkbenchView.test.ts src/features/workbench/WorkbenchView.test.ts`（127 passed）；`npm run typecheck`、`npm run lint`、`npm run api:check`、`npm run build` 通过；`uv run pytest tests/browser/test_app_workbench.py tests/browser/test_app_batch_workbench.py -q`（74 passed）。
+遗留风险与交接：
+
+- 列表底部的固定操作栏仍以 sticky 形式覆盖滚动区下缘（截图可复现）。这是 US-356 的
+  验收项（「固定栏按实际多行高度预留滚动空间，最后卡片不被遮挡」），本包未越界处理；
+  US-355 的「同屏三张完整卡」按列表可视区（滚动容器 640px）判定，未被容器裁切。
+- 1440×900 下 12 行批量输入会把整页推高，列表本身通常位于首屏之下；这是既有批量输入
+  区域高度，属 US-351 范围，本包未改。
+- 交互式复算（切换字幕组 / 未应用筛选）后重新计数的路径仍由既有 scheduler 驱动，
+  本包只增加「保留意图 + 排除资格 + 就地说明」，未改 CAS 语义。
+
+可复用结论：
+
+- `CheckboxRow` 在 `inheritAttrs: false` 下把 `class` 通过 `v-bind="attrs"` 落到原生
+  `input`，因此卡片布局必须给复选框加一层 cell 容器；直接给 CheckboxRow 加布局类不会
+  作用到包装元素。
+- 列表滚动区与筛选控件分离后，`#batch-review-clear` 常驻可达，且卡片焦点环不再与容器
+  overflow 或 sticky 控件冲突；这是同时满足「清除筛选可达」和「焦点环不裁切」的最省改动。
+
+提交：`feat: [US-355] - 紧凑列表与查看、勾选分离`（只暂存本 story 的 5 个文件 + prd.json
++ progress.txt）。未 push、未建 PR、未合并、未强推、未删分支、未运行 `ralph.sh`、未 `git add .`。
+
+## 2026-09-20 - US-356 固定操作栏与两种确认范围（WP-45-B）
+
+协作模式：用户指定 Claude Fable（实际模型 `claude-fable-5[1M]`）作为唯一写入开发 Agent，
+无子 Agent、无团队调度；单 Agent 内完成最小红测 → 实现 → 定向验证。
+
+实现范围（既有批量前端 + 共享 `ConfirmDialog` 的可选安全清单；未动 API/OpenAPI/generated、
+后端、持久化、外部写、保存协调器、`AnimeDraftEditor` saved 模式或人工保存调用者）：
+
+- D-02：`#batch-accept-submit`（N 部）的资格集合改为「完整批次中手工勾选且当前可确认」的条目
+  （`selectedEligibleItems`）；筛选隐藏的勾选仍参与，被阻断的勾选保留意图但退出请求并计入「已排除」。
+  「全选当前可见可确认项」仍只改可见项（`selectable` 口径未变），all 仍用完整批次的 `batchConfirmable`。
+- 一份计数派生两条范围：新增 `batchConfirmScope`（total/visible/selected/selectedHidden/
+  selectedExcluded/confirmable/hidden/needsProcessing），N 与 all 的按钮数量、范围文案、弹窗数量、
+  安全标题清单、描述符与 `item_ids` 全部由它派生。工具栏计数改为分组呈现（完整批次/当前可见/已勾选/
+  重算中/上次保存，各带 `data-scope`），不再是一行难以分辨的连续数字。
+- 两个入口都冻结内存 intent 并在确认前复核：新增 `BatchSelectedIntent`（participants + itemIds +
+  counts + titles），与既有 `BatchAcceptAllIntent` 同构。弹窗打开后批次绑定、资格、`draft_id` 或
+  revision 变化一律零请求：关闭弹窗、在固定栏留下常驻说明 `#batch-accept-selected-recheck`
+  （all 仍为 `#batch-accept-all-recheck`）并聚焦，需用户再次明确确认；仅筛选变化不改写已冻结集合。
+- 弹窗文案：N 与 all 都声明完整批次来源、被筛选隐藏仍参与的数量、被排除的数量，以及
+  「仅保存本地订阅方案，不会提交到 Auto Bangumi；外部提交需在追番管理再次确认」。
+  `ConfirmDialog` 新增可选 `items/itemsLabel`，用真实 `<ul>` 渲染安全标题清单，`aria-describedby`
+  同时指向正文与清单；清单与描述符、`item_ids` 同源同序，只含公开标题（经 `displayValue` 脱敏），
+  草案能力仍只留在内存 intent 中。
+- 常驻禁用原因：新增 `batchConfirmDisabledReason`（保存中 / 结果待核验），两个入口共用；
+  `canConfirmSelected`/`canConfirmAll` 都定义为「集合非空 && 无操作阻断」，因此「按钮禁用」与
+  「存在可见原因」结构同源，不依赖 `title`。空集合与全批无资格的原因由各自的 scope 文案给出；
+  右栏「加入批量确认」也补上常驻可见的阻断原因。
+- 固定栏预留空间：`ResizeObserver` 把 `#batch-accept-toolbar` 的真实多行高度发布为
+  `--batch-accept-toolbar-height`（组件卸载时断开），`.batch-review-layout` 用它做 `padding-bottom`
+  预留底部滚动空间，卡片 `scroll-margin-bottom`（8px 焦点环余量 + 栏高）让聚焦与 `scrollIntoView`
+  把固定栏让出来。
+- 保留未改动：服务端草案 authority、`draft_id + base_revision`、CAS、scheduler/1.5 秒防抖与 flush、
+  save-confirm、unknown 冻结恢复（原 body/key/revision/集合，`#batch-retry-frozen-operation` 不新起
+  intent）、safe-info 与本地/外部两次确认。
+
+最小红测（先写、先失败）：新增 15 个用例后运行
+`cd frontend && npx vitest run src/features/workbench/BatchWorkbenchView.test.ts
+src/features/workbench/batchWorkbench.test.ts` → 14 failed / 89 passed，失败点正是 D-02 隐藏勾选范围、
+N 的弹窗同源清单、N 的版本变化零请求、以及「无勾选/待核验」常驻禁用原因缺失；实现后同命令全绿。
+
+实际验证命令与结果（全部在本机真实运行）：
+
+- `cd frontend && npx vitest run` → 49 文件 / 653 用例通过（新增 10 个 US-356 视图用例、
+  6 个 scope/禁用原因 helper 用例、2 个 ConfirmDialog 清单用例）。
+- `npm run typecheck` → 通过；`npm run lint` → 通过（`eslint . --max-warnings 0`）。
+- `npm run build` → 通过；`npm run api:check` → 通过，`docs/api/openapi.json` →
+  `src/api/generated/api.ts` 无漂移。
+- `uv run pytest tests/api_contract/test_dto_contracts.py tests/api_contract/test_save_confirm_service.py
+  tests/api_contract/test_openapi_generation.py tests/api_contract/test_openapi_runtime_consistency.py
+  tests/api_contract/test_draft_store.py -q` → 98 通过。
+- `uv run pytest tests/browser/ -q` → 267 通过（真实 Chromium；`test_app_batch_workbench.py`
+  新增 `TestAppBatchConfirmScope` 12 个用例：筛选隐藏勾选参与 N 且请求/清单/描述符/item_ids 同源、
+  可见全选只改可见项、held route 下的版本变化零请求与再次确认、保存中与待核验的常驻禁用原因、
+  固定栏按实测多行高度预留空间且末卡与右栏末字段不被遮挡、三档视口与 200% 缩放下范围文案与清单可达、
+  ConfirmDialog trap/Escape/焦点恢复与背景 inert、敏感 canary）。
+- 浏览器验证全部使用 route mock / held route / 临时 storage；未访问真实 MiKan、Auto Bangumi 或
+  qBittorrent；未新增敏感截图/trace 入库（临时探针用例与 /tmp 截图已删除）。
+- 运行数据隔离核对：`.migu_orca/` 下今日无被修改文件，浏览器套件使用每用例 tmp storage root。
+
+遗留风险与交接：
+
+- 固定栏在多行文案下高度约 226px（1440×900、12 项）；它仍是 sticky 浮层，中途滚动时内容会从其
+  后面经过，但预留空间与卡片 `scroll-margin-bottom` 保证末卡、右栏末字段与错误都能被滚到栏上方
+  （浏览器用例按实测几何断言）。若后续继续增大栏内文案，建议同步检查该用例。
+- 两个入口现在都可能因「待核验」禁用；`#batch-retry-frozen-operation` 是唯一的恢复入口，属既有
+  设计，本包未改其语义。
+- 原生 `<select>`（状态筛选、卡片快捷字幕组）使用浏览器原生弹层，不参与 z-index 竞争；模态与
+  Toast 仍共用 `--z-overlay`，靠 Teleport 顺序保证弹窗在上（浏览器用例已断言背景 inert 与层级）。
+
+可复用结论：
+
+- 需要「按钮禁用 ⟺ 存在可见原因」这种结构保证时，把禁用条件定义成「原因字符串非空」比在两个
+  地方分别维护 `:disabled` 与说明文案更省事，也不会出现只有 `title` 的禁用态。
+- `ResizeObserver` 发布实测高度 + `scroll-margin-bottom` 是让 sticky 底栏不遮挡可聚焦内容的
+  最小改动组合：前者预留滚动空间，后者让 `scrollIntoView`/聚焦主动避让。
+- jsdom 没有 `ResizeObserver`；组件内必须 `typeof ResizeObserver !== 'undefined'` 兜底，
+  否则 Vitest 挂载即失败。
+
+提交：`feat: [US-356] - 固定操作栏与两种确认范围`（只暂存本 story 的 7 个代码/测试文件 +
+prd.json + progress.txt）。未 push、未建 PR、未合并、未强推、未删分支、未运行 `ralph.sh`、
+未 `git add .`；US-357 未开始。
+
+## 2026-09-20 - US-355 / US-356 独立审核闭环
+
+协作模式：主 Agent 独立审核；两个只读辅助审核 Agent 使用 `gpt-5.6-luna`，分别核对
+US-355 与 US-356。辅助审核未写文件，其结论不替代主 Agent 对代码、测试与 AC 的逐项判断。
+
+审核结论：
+
+- US-355 未发现业务语义、安全、焦点/键盘、筛选/勾选分离或测试真实性的阻断问题。
+  目标提交中 N 部仍按可见集合计算属于后续 US-356 的明确范围，当前 HEAD 已由 US-356
+  收敛为完整批次的手工勾选资格集合，不记作 US-355 缺陷。
+- US-356 未发现 D-02、N/all 同源、冻结 intent、版本变化零请求、unknown 原 body/key/revision/
+  集合、固定栏、ConfirmDialog 或安全清单的阻断问题。
+- 无审核代码问题需要新增红测或修复；因此本轮以“无问题独立审核 + 定向复跑”完成复审闭环，
+  不制造无对应缺陷的测试或代码改动。
+
+主 Agent 实际验证：
+
+- `cd frontend && npx vitest run src/features/workbench/BatchWorkbenchView.test.ts
+  src/features/workbench/batchWorkbench.test.ts src/components/feedback/ConfirmDialog.test.ts`
+  → 3 文件 / 116 用例通过。
+- `uv run pytest tests/browser/test_app_batch_workbench.py::TestAppBatchCompactList
+  tests/browser/test_app_batch_workbench.py::TestAppBatchConfirmScope -q`
+  → 27 用例通过（真实 Chromium，route mock / held route / 每用例临时 storage）。
+- 浏览器前核对 `.migu_orca/`：仅有既存历史数据与海报缓存，定向套件不读取该目录；未移动、
+  删除或改写用户数据。
+- Vitest 生成的仓库根未跟踪缓存 `node_modules/.vite/vitest/.../results.json` 已精确删除，
+  空目录一并移除；工作区恢复干净。
+
+Stage 收尾待办：执行材料 PRD/文档索引仍保留“等待开发”旧状态；`git diff --check
+origin/main...HEAD` 报告该 PRD 第 3～5 行 Markdown 行尾空格。二者不影响前两包实现，统一在
+US-357 审核闭环后的 Stage 收尾修正并纳入最终门禁。
+
+## 2026-09-20 - US-357 / WP-45-C 实现与定向验证
+
+协作模式：唯一写入 Agent，实际模型 `gpt-5.6-luna`；无 Claude Fable 可用。未访问真实 MiKan、Auto Bangumi 或 qBittorrent，浏览器均使用 route mock、held route 与每用例临时 storage。
+
+实现范围：`batchWorkbench.ts` 新增基于服务端 `results[]` 的安全 outcome summary、失败/未处理聚焦目标和公开 tracking_id 选择；`BatchWorkbenchView.vue` 持久展示本次结果与完整批次剩余，成功项退出确认资格，失败优先/无失败有剩余先可见化再聚焦，全部成功且无剩余在保存状态清理后进入追番管理，未伪造 tracking query；保留现有失效、saved pending、unknown、畸形 200 与冻结重试语义。结果摘要仅由单次全局 Toast 播报，常驻汇总为可见非 live 文本，避免重复播报。新增 Vitest 和 Chromium 定向用例覆盖部分成功、held unknown 原 body 重试、无失败有剩余、公开 tracking 完成导航。
+
+先行红测：`cd frontend && npx vitest run src/features/workbench/batchWorkbench.test.ts` 初次 3 failed（新增 helper 尚不存在），实现后同组测试全绿。
+
+实际验证命令与结果：
+
+- `cd frontend && npx vitest run src/features/workbench/BatchWorkbenchView.test.ts src/features/workbench/batchWorkbench.test.ts` → 2 文件 / 110 用例通过。
+- `cd frontend && npm run typecheck`、`npm run lint`、`npm run build`、`npm run api:check` → 全部通过。
+- `uv run pytest tests/api_contract/test_dto_contracts.py tests/api_contract/test_save_confirm_service.py tests/api_contract/test_openapi_generation.py tests/api_contract/test_openapi_runtime_consistency.py tests/api_contract/test_draft_store.py -q` → 98 passed。
+- `uv run pytest tests/browser/test_app_batch_workbench.py::TestAppBatchOutcomeRecovery -q` → 4 passed；`TestAppBatchAccept` → 14 passed；`TestAppBatchConfirmScope` + `TestAppBatchCompactList` → 合计 41 passed；`TestAppBatchParse` → 6 passed。真实 Chromium，覆盖 route mock/held route、三档视口、200%、长标题、键盘/焦点、reduced-motion 与敏感 canary 的既有定向矩阵。
+- `git diff --check` → 通过；`.migu_orca` 今日无新增/修改文件。
+
+
+
+## 2026-09-20 - US-357 审核修复：清理待核验旧结果汇总
+
+固定问题：已有一次成功/部分成功后再次发起批量保存，malformed 200 或网络/非 JSON/5xx unknown 时旧 `#batch-save-summary` 仍显示为“本次结果”。
+
+修复：`BatchWorkbenchView.vue` 在新 save-confirm 操作进入 in-flight 前清空旧 outcome summary，并在结果结构校验失败、网络/非 JSON/5xx 等 response-unknown 分支再次清空；原 frozen body、幂等 key、revision、参与集合、`#batch-retry-frozen-operation` 与“结果待核验”固定栏语义未改变。测试 Agent 红测保留并将首轮失败夹具改为既有安全 `batch_error`，使 item-2 仍参与第二次 unknown，避免误测既有 draft_expired → EMPTY 恢复。
+
+实际验证：
+
+- 红测：`cd frontend && npx vitest run src/features/workbench/BatchWorkbenchView.test.ts -t 'does not present a previous save summary'` → 先 1 failed（旧汇总残留），修复后 1 passed。
+- `cd frontend && npx vitest run src/features/workbench/BatchWorkbenchView.test.ts src/features/workbench/batchWorkbench.test.ts` → 2 文件 / 111 用例通过。
+- `cd frontend && npm run build`（含 typecheck）→ 通过。
+- `uv run pytest tests/browser/test_app_batch_workbench.py::TestAppBatchOutcomeRecovery -q` → 4 passed，真实 Chromium、route mock/held route。
+- `git diff --check` → 通过；`.migu_orca` 无新增/修改文件。
+
+协作模式：唯一写入 Agent，实际模型 `gpt-5.6-luna`；无 Claude Fable 可用。未运行 `ralph.sh`，未 push/PR/merge/删分支。
+
+## 2026-09-20 - Stage 45 收尾门禁
+
+主 Agent 复审 US-357 审核修复后确认：新 save-confirm 和所有 response-unknown 分支均清空旧
+outcome summary；不改变 frozen body、幂等 key、revision、参与集合或 `#batch-retry-frozen-operation`。
+US-355～US-357 的 PRD AC 均已有代码、定向验证和独立审核证据。
+
+完整门禁实际结果：
+
+- `uv run python -m compileall -q src tests`、`uv run ruff check src tests`、
+  `uv run pytest -q -m "not browser"`、`uv run migu-orca-openapi --check`
+  → 全部通过；pytest 为 1528 passed / 271 deselected。
+- `cd frontend && npm run api:check && npm run typecheck && npm run lint &&
+  npm run test:unit -- --run && npm run build` → 全部通过；Vitest 为 49 文件 / 660 用例通过。
+- `uv run pytest tests/browser/ -q` → 271 passed（真实 Chromium，route mock / 临时 storage）。
+- `git diff --check origin/main...HEAD` → 通过；收尾前后核对 `.migu_orca/` 无当日新增/修改数据。
+
+文档同步：Stage PRD 与 docs 索引更新为“本地开发与收尾门禁完成，待发布授权”。未 push、未建
+PR、未合并、未强推、未删分支；Stage 46 仅有交接占位，尚无获批范围。

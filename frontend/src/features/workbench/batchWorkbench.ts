@@ -195,6 +195,85 @@ export function batchItemIsException(item: BatchItem): boolean {
   return String(item.status ?? '') === 'FAILED' || String(item.status ?? '') === 'EMPTY' || batchCardNeedsReview(item)
 }
 
+/** One label/value pair of the card's on-demand auxiliary layer. */
+export interface BatchCardFact {
+  label: string
+  value: string
+}
+
+/**
+ * US-355: the auxiliary card facts (aliases, queries, season hint, preference
+ * resolution, candidate count and episode placeholder).
+ *
+ * These are the facts a reviewer only needs while investigating a card, so the
+ * default layer stays compact. Everything that decides whether an item is
+ * blocked — status, blockers, failures, unknown results and recovery actions —
+ * is rendered outside this list and is therefore never hidden by it.
+ */
+export function batchCardAuxiliaryFacts(item: BatchItem): BatchCardFact[] {
+  const facts: BatchCardFact[] = []
+  const title = batchCardTitle(item)
+  const aliases = (item.canonical_title_candidates ?? [])
+    .filter((alias): alias is string => typeof alias === 'string' && Boolean(alias.trim()) && alias !== title)
+  if (aliases.length) facts.push({ label: '别名', value: aliases.join('、') })
+  const queries = (item.search_queries ?? []).filter((query): query is string => typeof query === 'string' && Boolean(query.trim()))
+  if (queries.length) facts.push({ label: '检索关键词', value: queries.join('、') })
+  if (item.season_hint) facts.push({ label: '季数提示', value: String(item.season_hint) })
+  const candidates = item.candidates?.length ?? 0
+  if (candidates) facts.push({ label: '候选合集', value: `${candidates} 个` })
+  facts.push({ label: '偏好', value: batchCardPreferenceSummary(item) })
+  facts.push({ label: '总集数', value: batchEpisodeProgressText(undefined).replace('总集数：', '') })
+  return facts
+}
+
+/** Public, decision-relevant inputs of one card's single next step. */
+export interface BatchCardGuidance {
+  status: string | null | undefined
+  /** The card is still at the real-collection step and has choices to show. */
+  hasCandidates: boolean
+  /** The card owns a server-authoritative draft that can still be confirmed. */
+  hasDraft: boolean
+  /** First blocker of the shared confirmability gate, when the card is blocked. */
+  blocker: string | null
+  /** The last save result still has to be verified against the frozen request. */
+  resultUnknown: boolean
+  /** The plan is saved locally and its confirmation is still open. */
+  savedPendingConfirm: boolean
+  /** The confirmed plan is already bound to a real tracking record. */
+  trackingLocated: boolean
+  /** A draft generation for this card is in flight. */
+  generating: boolean
+}
+
+/**
+ * US-355: the one action the reviewer should take for this card.
+ *
+ * Pure copy over public state only: recovery and terminal states win over the
+ * generic branches so the card never suggests regenerating a draft that is
+ * actually waiting for a retry of an already-frozen request.
+ */
+export function batchCardNextStep(guidance: BatchCardGuidance): string {
+  const status = String(guidance.status ?? '')
+  if (guidance.generating) return '等待当前候选的订阅草案生成完成。'
+  if (guidance.resultUnknown || status === 'RESPONSE_UNKNOWN') {
+    return '用「使用相同操作重试」或「重试定位」核验本条结果。'
+  }
+  if (guidance.savedPendingConfirm || status === 'SAVED_PENDING_CONFIRM') {
+    return '点「重试确认」完成确认；不会重复保存。'
+  }
+  if (status === 'CONFIRMED') {
+    return guidance.trackingLocated
+      ? '在追番管理中再次确认后提交外部订阅。'
+      : '点「重试定位」找回追番记录后继续。'
+  }
+  if (status === 'FAILED') return '删除该条目，或调整名称后重新获取批量草案。'
+  if (status === 'EMPTY') return '删除该条目，或改用更完整的名称后重新获取。'
+  if (guidance.hasCandidates) return '在右栏选择真实 MiKan 合集生成草案。'
+  if (guidance.blocker) return `先解决：${guidance.blocker}。`
+  if (guidance.hasDraft) return '勾选加入待确认，或用「保存并确认全部」。'
+  return '重新获取批量草案以生成可审核条目。'
+}
+
 /** Find the next exception after the current item, wrapping at the end. */
 export function nextBatchException(items: BatchItem[], currentItemId: string | null): BatchItem | null {
   const exceptions = items.filter(batchItemIsException)
@@ -286,6 +365,28 @@ export interface BatchAcceptAllCounts {
   hidden: number
 }
 
+/**
+ * US-356: the one count model both save entries are described by.
+ *
+ * `confirmable`/`hidden` describe the complete batch's 保存并确认全部 scope;
+ * `selected`/`selectedHidden`/`selectedExcluded` describe the D-02 scope of
+ * 保存并确认 N 部 (manually checked *and* currently eligible items of the
+ * complete batch — a review filter never removes a manual intent, and a checked
+ * item that is not currently eligible never enters the request).
+ */
+export interface BatchConfirmScopeCounts extends BatchAcceptAllCounts {
+  /** Items the active review filter currently shows. */
+  visible: number
+  /** Complete-batch items that are checked and currently eligible (N). */
+  selected: number
+  /** Of `selected`, those the active review filter hides but that still travel. */
+  selectedHidden: number
+  /** Checked items that are currently not eligible, so excluded from N. */
+  selectedExcluded: number
+  /** Complete-batch items that still need processing before they can confirm. */
+  needsProcessing: number
+}
+
 /** Clamp the confirm-all counts to the batch they describe. */
 function normalizeAcceptAllCounts(counts: BatchAcceptAllCounts): {
   total: number
@@ -297,6 +398,91 @@ function normalizeAcceptAllCounts(counts: BatchAcceptAllCounts): {
   const confirmable = Math.max(0, Math.min(Math.trunc(counts.confirmable), total))
   const hidden = Math.max(0, Math.min(Math.trunc(counts.hidden), confirmable))
   return { total, confirmable, hidden, excluded: total - confirmable }
+}
+
+/** Clamp every scope count to the set it is derived from. */
+function normalizeConfirmScopeCounts(counts: BatchConfirmScopeCounts): {
+  total: number
+  visible: number
+  selected: number
+  selectedHidden: number
+  selectedExcluded: number
+  confirmable: number
+  hidden: number
+  excluded: number
+  needsProcessing: number
+} {
+  const base = normalizeAcceptAllCounts(counts)
+  const visible = Math.max(0, Math.min(Math.trunc(counts.visible), base.total))
+  const selected = Math.max(0, Math.min(Math.trunc(counts.selected), base.total))
+  const selectedExcluded = Math.max(0, Math.min(Math.trunc(counts.selectedExcluded), base.total - selected))
+  const selectedHidden = Math.max(0, Math.min(Math.trunc(counts.selectedHidden), selected))
+  return { ...base, visible, selected, selectedHidden, selectedExcluded, needsProcessing: base.excluded }
+}
+
+/**
+ * US-356: visible scope line for the 保存并确认 N 部 entry.
+ *
+ * N is the complete batch's manually checked *and* currently eligible set
+ * (D-02): a review filter only changes what the user browses, so it never drops
+ * a manual intent, and a checked item that is currently blocked keeps its check
+ * but is excluded from the request. The copy states the batch total, that same
+ * N, how many of the N items the filter hides, and how many checked items are
+ * excluded, so the entry is described by visible copy and not only by a title.
+ */
+export function batchSelectedScopeText(counts: BatchConfirmScopeCounts): string {
+  const { total, selected, selectedHidden, selectedExcluded } = normalizeConfirmScopeCounts(counts)
+  if (total === 0) return ''
+  if (selected === 0) {
+    const excluded = selectedExcluded
+      ? `已勾选但当前不可确认的 ${selectedExcluded} 部被排除：请先解决各自的阻断原因。`
+      : ''
+    return `完整批次 ${total} 部中没有已勾选且可确认的条目：请先在卡片上勾选当前可确认的条目。${excluded}`
+  }
+  const details = [`保存并确认 ${selected} 部来自完整批次 ${total} 部中已勾选且当前可确认的条目`]
+  if (selectedHidden) details.push(`其中 ${selectedHidden} 部当前被筛选隐藏、仍会一并保存`)
+  if (selectedExcluded) details.push(`已勾选但当前不可确认的 ${selectedExcluded} 部被排除`)
+  return `${details.join('，')}；筛选与可见全选不改变本集合。`
+}
+
+export interface BatchConfirmDialogCopy {
+  title: string
+  message: string
+  confirmLabel: string
+  /** Heading for the safety title list; empty when there is no list. */
+  itemsLabel: string
+  /** The frozen, display-safe titles of exactly the items that will be sent. */
+  items: string[]
+}
+
+export type BatchAcceptAllConfirmCopy = BatchConfirmDialogCopy
+
+/**
+ * US-356: dialog copy for one frozen N-part intent.
+ *
+ * The title and the confirm button both state N so the number the user saw on
+ * the entry is the number the button promises; the body states that the set
+ * comes from the complete batch, the hidden participants that still travel with
+ * the request, the checked items that were excluded, and that this only saves a
+ * local plan — the external Auto Bangumi submit is a separate, later
+ * confirmation. The title list is exactly the frozen participant set.
+ */
+export function batchSelectedConfirmCopy(
+  counts: BatchConfirmScopeCounts,
+  titles: readonly string[] = [],
+): BatchConfirmDialogCopy {
+  const { total, selected, selectedHidden, selectedExcluded } = normalizeConfirmScopeCounts(counts)
+  const clauses = [`本次保存并确认完整批次 ${total} 部中已勾选且当前可确认的 ${selected} 部`]
+  if (selectedHidden) clauses.push(`其中 ${selectedHidden} 部被筛选隐藏，仍会一并保存并确认`)
+  const exclusion = selectedExcluded ? `已勾选但当前不可确认的 ${selectedExcluded} 部被排除。` : ''
+  const label = `保存并确认 ${selected} 部`
+  return {
+    title: label,
+    confirmLabel: label,
+    itemsLabel: titles.length ? `本次将保存并确认的 ${titles.length} 部` : '',
+    items: [...titles],
+    message: `${clauses.join('，')}。${exclusion}仅保存本地订阅方案，不会提交到 Auto Bangumi；外部提交需在追番管理再次确认。`,
+  }
 }
 
 /**
@@ -320,14 +506,8 @@ export function batchAcceptAllScopeText(counts: BatchAcceptAllCounts): string {
   return `${details.join('，')}；不受筛选或勾选影响。`
 }
 
-export interface BatchAcceptAllConfirmCopy {
-  title: string
-  message: string
-  confirmLabel: string
-}
-
 /**
- * US-348: dialog copy for one frozen confirm-all intent.
+ * US-348 / US-356: dialog copy for one frozen confirm-all intent.
  *
  * The title and the confirm button both state M so the number the user saw is
  * the number the button promises; the body states the complete batch, the
@@ -335,7 +515,10 @@ export interface BatchAcceptAllConfirmCopy {
  * and that this only saves a local plan — the external Auto Bangumi submit is
  * a separate, later confirmation.
  */
-export function batchAcceptAllConfirmCopy(counts: BatchAcceptAllCounts): BatchAcceptAllConfirmCopy {
+export function batchAcceptAllConfirmCopy(
+  counts: BatchAcceptAllCounts,
+  titles: readonly string[] = [],
+): BatchConfirmDialogCopy {
   const { total, confirmable, hidden, excluded } = normalizeAcceptAllCounts(counts)
   const clauses = [`完整批次 ${total} 部中当前可确认 ${confirmable} 部`]
   if (hidden) clauses.push(`其中 ${hidden} 部被筛选隐藏，仍会一并保存并确认`)
@@ -343,9 +526,27 @@ export function batchAcceptAllConfirmCopy(counts: BatchAcceptAllCounts): BatchAc
   const label = `保存并确认全部 ${confirmable} 部`
   return {
     title: label,
-    message: `${clauses.join('，')}。${exclusion}仅保存本地订阅方案，不会提交到 Auto Bangumi；外部提交需在追番管理再次确认。`,
     confirmLabel: label,
+    itemsLabel: titles.length ? `本次将保存并确认的 ${titles.length} 部` : '',
+    items: [...titles],
+    message: `${clauses.join('，')}。${exclusion}仅保存本地订阅方案，不会提交到 Auto Bangumi；外部提交需在追番管理再次确认。`,
   }
+}
+
+/**
+ * US-356: the persistent, visible reason both save entries are disabled by.
+ *
+ * A disabled entry must always carry this copy in the business area; the
+ * `title` attribute is never the only explanation. It returns an empty string
+ * exactly when no transport-level block applies — an empty scope is explained
+ * by that entry's own scope line instead.
+ */
+export function batchConfirmDisabledReason(state: { saving: boolean; pendingVerification: boolean }): string {
+  if (state.pendingVerification) {
+    return '上一次批量保存结果待核验：请先用「使用相同操作重试」核验后再发起新的确认，不会重复保存。'
+  }
+  if (state.saving) return '正在保存确认：请等待本次请求完成后再次提交。'
+  return ''
 }
 
 /** Build the generated save-confirm body; capabilities never leave this payload. */
@@ -364,6 +565,76 @@ export function buildBatchSaveConfirmPayload(
 export function batchSaveConfirmSucceeded(item: BatchSaveConfirmItem): boolean {
   return String(item.outcome ?? '').toUpperCase() === 'CONFIRMED' && isPublicRouteIdentifier(item.request_id) &&
     (!item.tracking_id || isPublicRouteIdentifier(item.tracking_id))
+}
+
+export interface BatchSaveConfirmOutcomeSummary {
+  requested: number
+  confirmed: number
+  failed: number
+  /** Items in the complete batch that still need work after this response. */
+  remaining: number
+  total: number
+}
+
+export function batchSaveConfirmOutcomeSummaryText(summary: BatchSaveConfirmOutcomeSummary): string {
+  return `本次结果：已确认 ${summary.confirmed} 项；失败 ${summary.failed} 项；完整批次剩余 ${summary.remaining} 项。`
+}
+
+/**
+ * US-357: derive the persistent batch summary from the server's result rows.
+ * The response summary is useful as transport metadata, but it is not the
+ * authority for item state and must not be used to infer partial success.
+ */
+export function batchSaveConfirmOutcomeSummary(
+  results: readonly BatchSaveConfirmItem[],
+  items: readonly BatchItem[],
+): BatchSaveConfirmOutcomeSummary {
+  const confirmedIds = new Set(
+    items.filter((item) => String(item.status ?? '') === 'CONFIRMED').map((item) => item.item_id ?? ''),
+  )
+  let confirmed = 0
+  for (const result of results) {
+    if (!batchSaveConfirmSucceeded(result)) continue
+    confirmed += 1
+    if (result.item_id) confirmedIds.add(result.item_id)
+  }
+  return {
+    requested: results.length,
+    confirmed,
+    failed: Math.max(0, results.length - confirmed),
+    remaining: Math.max(0, items.length - confirmedIds.size),
+    total: items.length,
+  }
+}
+
+export type BatchSaveConfirmNextFocus = { kind: 'failed' | 'remaining'; itemId: string } | null
+
+/** Choose the first recoverable target without ever inventing a hidden node. */
+export function batchSaveConfirmNextFocus(
+  results: readonly BatchSaveConfirmItem[],
+  items: readonly BatchItem[],
+): BatchSaveConfirmNextFocus {
+  const resultById = new Map(results.map((result) => [result.item_id, result]))
+  for (const item of items) {
+    const result = resultById.get(item.item_id ?? '')
+    if (result && !batchSaveConfirmSucceeded(result) && item.item_id) {
+      return { kind: 'failed', itemId: item.item_id }
+    }
+  }
+  const confirmedIds = new Set(
+    items.filter((item) => String(item.status ?? '') === 'CONFIRMED').map((item) => item.item_id ?? ''),
+  )
+  for (const result of results) {
+    if (batchSaveConfirmSucceeded(result) && result.item_id) confirmedIds.add(result.item_id)
+  }
+  const remaining = items.find((item) => item.item_id && !confirmedIds.has(item.item_id))
+  return remaining?.item_id ? { kind: 'remaining', itemId: remaining.item_id } : null
+}
+
+/** Return a real public tracking id for D-04 completion navigation only. */
+export function batchSaveConfirmTrackingId(results: readonly BatchSaveConfirmItem[]): string | null {
+  const result = results.find((candidate) => batchSaveConfirmSucceeded(candidate) && isPublicRouteIdentifier(candidate.tracking_id))
+  return result?.tracking_id ?? null
 }
 
 export function batchSaveConfirmErrorLabel(item: BatchSaveConfirmItem): string {

@@ -91,6 +91,42 @@ describe('ConfirmDialog (US-200)', () => {
     await expect(promise).resolves.toBe(true)
   })
 
+  it('renders an optional safety list as part of the accessible description', async () => {
+    wrapper = mountDialog()
+    const promise = wrapper.vm.confirm({
+      title: '保存并确认 2 部',
+      message: '本次保存并确认完整批次 3 部中已勾选且当前可确认的 2 部。',
+      itemsLabel: '本次将保存并确认的 2 部',
+      items: ['甲 第一季', '乙 第一季'],
+    })
+    await new Promise((r) => requestAnimationFrame(r))
+
+    expect(wrapper.find('.confirm-dialog-items-label').text()).toBe('本次将保存并确认的 2 部')
+    expect(wrapper.findAll('.confirm-dialog-items li').map((entry) => entry.text())).toEqual([
+      '甲 第一季',
+      '乙 第一季',
+    ])
+    const describedBy = wrapper.find('.confirm-dialog').attributes('aria-describedby') ?? ''
+    const itemsId = wrapper.find('.confirm-dialog-items').attributes('id')
+    expect(itemsId).toBeTruthy()
+    expect(describedBy.split(' ')).toContain(itemsId)
+
+    wrapper.find('.primary-button').trigger('click')
+    await expect(promise).resolves.toBe(true)
+  })
+
+  it('renders no list when the caller passes none', async () => {
+    wrapper = mountDialog()
+    const promise = wrapper.vm.confirm({ title: '确认操作', message: '正文' })
+    await new Promise((r) => requestAnimationFrame(r))
+
+    expect(wrapper.find('.confirm-dialog-items').exists()).toBe(false)
+    expect(wrapper.find('.confirm-dialog-items-label').exists()).toBe(false)
+
+    wrapper.find('.secondary-button').trigger('click')
+    await expect(promise).resolves.toBe(false)
+  })
+
   it('closes on Escape and resolves false', async () => {
     wrapper = mountDialog()
     const promise = wrapper.vm.confirm({
