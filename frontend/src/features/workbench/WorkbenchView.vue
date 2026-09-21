@@ -168,7 +168,7 @@ const showSingleHome = computed(
   () => mode.value === 'single' && !hasResults.value && !draftRequest.value,
 )
 const showLegacyWorkbench = computed(
-  () => mode.value === 'batch' || Boolean(draftRequest.value),
+  () => mode.value === 'batch',
 )
 // US-343: which candidate owns the in-flight generation, and the sanitized
 // failure that stays beside a candidate after its generation failed.
@@ -517,9 +517,8 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 
   <h1 v-else-if="mode === 'batch'" id="workbench-heading" class="workbench-title">添加番剧</h1>
 
-  <!-- 非英雄区状态（批量 / 已有候选 / 草案）沿用既有面板结构；
-       空结果或搜索中仍显示英雄区，因此这里用 !showSingleHome 而不是 v-else，
-       以便下面的「搜索结果」面板能与英雄区共存。 -->
+  <!-- 批量工作台沿用既有面板结构；单番审核态独占图 03 的审核画布，
+       不再把搜索壳层留在身份区之前，避免审核页发生垂直偏移。 -->
   <PanelSection v-if="showLegacyWorkbench" title="搜索候选合集" class="workbench-panel">
     <ol class="journey-steps" aria-label="添加番剧步骤">
       <li class="is-current">输入名称</li>
@@ -554,6 +553,12 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
       class="search-results-panel"
       aria-labelledby="candidate-search-heading"
     >
+      <AnimeModeSwitch
+        class="search-results-mode-switch"
+        :model-value="mode"
+        :disabled="singleBusy"
+        @update:model-value="changeMode"
+      />
       <div class="candidate-search-summary-row">
         <h2 id="candidate-search-heading">搜索结果</h2>
         <p v-if="searchResult && hasResults" class="candidate-search-summary" role="status" aria-live="polite">
@@ -668,6 +673,7 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
       :selected-collection="selectedCollection"
       @changed="onDraftChanged"
       @discard="discardDraft"
+      @change-mode="changeMode"
     />
   <LoadingState
     v-if="mode === 'single' && draftLoading && !draftRequest && generatingCandidateId === null"
@@ -845,8 +851,19 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 }
 
 .search-results-panel {
+  position: relative;
   width: 100%;
   margin-bottom: var(--space-5);
+}
+
+/* 结果态仍允许切换到批量现场；绝对定位不改变图 02 的摘要行和卡片网格锚点。 */
+.search-results-mode-switch {
+  position: absolute;
+  top: 0;
+  right: 192px;
+  z-index: 1;
+  transform: scale(0.72);
+  transform-origin: top right;
 }
 
 .candidate-search-summary-row {

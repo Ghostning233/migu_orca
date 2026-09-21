@@ -274,42 +274,44 @@ defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
 </script>
 
 <template>
-  <PanelSection :title="panelHeading" class="anime-draft-editor" :data-mode="editorMode">
+  <PanelSection :title="panelHeading" class="anime-draft-editor" :class="{ 'draft-review-editor': editorMode === 'draft' }" :data-mode="editorMode">
     <div :id="props.containerId ?? 'anime-draft-editor'" class="request-detail" aria-live="polite" aria-relevant="additions text">
-      <!-- F4: 标题同样取自公开合集投影，默认层不回显原始输入标题；技术上
-           的「原始标题」留在下方折叠的技术层里。 -->
-      <h3 class="request-detail-title">{{ displayValue(selectedCollectionTitle) }}</h3>
+      <section class="draft-identity" aria-label="合集身份">
+        <!-- F4: 标题同样取自公开合集投影，默认层不回显原始输入标题；技术上
+             的「原始标题」留在下方折叠的技术层里。 -->
+        <h3 class="request-detail-title">{{ displayValue(selectedCollectionTitle) }}</h3>
 
-      <!-- F4 审核默认层：回答「已选哪部/哪一季、筛后有什么」。合集与季度来自
-           宿主内存中的公开候选投影（未保存草案快照不含这些字段）；不适用时
-           显示「未提供」而不是伪造取值。 -->
-      <section class="draft-review-summary" aria-label="已选合集与筛选摘要">
-        <dl class="detail-grid">
-          <div class="detail-row"><dt>已选合集</dt><dd>{{ displayValue(selectedCollectionTitle) }}</dd></div>
-          <div class="detail-row">
-            <dt>季度</dt>
-            <dd>{{ candidateSummary?.season ? `第 ${candidateSummary.season} 季` : '未提供' }}</dd>
-          </div>
-          <div class="detail-row">
-            <dt>总集数</dt>
-            <dd>{{ candidateSummary?.totalEpisodes ? `${candidateSummary.totalEpisodes} 集` : '未知' }}</dd>
-          </div>
-          <div class="detail-row">
-            <dt>封面</dt>
-            <dd>{{ candidateSummary?.posterUrl ? '已提供' : '未提供' }}</dd>
-          </div>
-          <div class="detail-row">
-            <dt>字幕组</dt>
-            <dd>{{ displayValue(request.confirmable_config?.selected_subtitle_group) }}</dd>
-          </div>
-          <div class="detail-row">
-            <dt>筛选规则</dt>
-            <dd>{{ filterSummaryText }}</dd>
-          </div>
-        </dl>
+        <!-- F4 审核默认层：回答「已选哪部/哪一季、筛后有什么」。合集与季度来自
+             宿主内存中的公开候选投影（未保存草案快照不含这些字段）；不适用时
+             显示「未提供」而不是伪造取值。 -->
+        <section class="draft-review-summary" aria-label="已选合集与筛选摘要">
+          <dl class="detail-grid">
+            <div class="detail-row"><dt>已选合集</dt><dd>{{ displayValue(selectedCollectionTitle) }}</dd></div>
+            <div class="detail-row">
+              <dt>季度</dt>
+              <dd>{{ candidateSummary?.season ? `第 ${candidateSummary.season} 季` : '未提供' }}</dd>
+            </div>
+            <div class="detail-row">
+              <dt>总集数</dt>
+              <dd>{{ candidateSummary?.totalEpisodes ? `${candidateSummary.totalEpisodes} 集` : '未知' }}</dd>
+            </div>
+            <div class="detail-row">
+              <dt>封面</dt>
+              <dd>{{ candidateSummary?.posterUrl ? '已提供' : '未提供' }}</dd>
+            </div>
+            <div class="detail-row">
+              <dt>字幕组</dt>
+              <dd>{{ displayValue(request.confirmable_config?.selected_subtitle_group) }}</dd>
+            </div>
+            <div class="detail-row">
+              <dt>筛选规则</dt>
+              <dd>{{ filterSummaryText }}</dd>
+            </div>
+          </dl>
+        </section>
       </section>
 
-      <form :id="props.formId" class="detail-inline-form" @submit.prevent="apply">
+      <form :id="props.formId" class="detail-inline-form draft-filter-column" @submit.prevent="apply">
         <h4 class="detail-form-heading">{{ formHeading }}</h4>
         <FormField :label="'字幕组'" :inputId="`${idPrefix}-subtitle-group`">
           <SubtitleGroupSelect
@@ -346,7 +348,10 @@ defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
           <BaseButton :id="`${idPrefix}-reset-button`" type="button" variant="secondary" :disabled="applying" @click="$emit('reset')">恢复上次结果</BaseButton>
         </div>
         <div class="detail-form-actions">
-          <BaseButton :id="`${idPrefix}-apply-button`" type="submit" :variant="props.applyVariant ?? 'primary'" :loading="applying" :disabled="disabled || !dirty">{{ applyLabel }}</BaseButton>
+          <div v-if="editorMode === 'draft'" id="detail-save-modify" class="detail-save-modify-control">
+            <BaseButton :id="`${idPrefix}-apply-button`" type="submit" :variant="props.applyVariant ?? 'primary'" :loading="applying" :disabled="disabled || !dirty">{{ applyLabel }}</BaseButton>
+          </div>
+          <BaseButton v-else :id="`${idPrefix}-apply-button`" type="submit" :variant="props.applyVariant ?? 'primary'" :loading="applying" :disabled="disabled || !dirty">{{ applyLabel }}</BaseButton>
         </div>
       </form>
       <slot name="review-note" />
@@ -388,7 +393,7 @@ defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
         </dl>
       </section>
 
-      <section class="detail-section seeds-section" aria-label="资源摘要">
+      <section class="detail-section seeds-section resource-summary-column" aria-label="资源摘要">
         <h4 class="detail-section-heading">资源摘要</h4>
         <ResourceSummary :effective-seeds="effective" :complete-groups="completeGroups" :excluded-seeds="excluded" :selected-group-name="selectedGroupName" />
       </section>
@@ -401,11 +406,16 @@ defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
 .request-detail-title { margin: 0; font-size: 1.15rem; }
 .draft-review-summary { display: grid; gap: 0.5rem; border: 1px solid var(--color-border); border-radius: 6px; padding: 0.75rem; background: var(--color-bg-muted); }
 .draft-review-summary dd { color: var(--color-text); }
+.draft-identity { display: grid; gap: var(--space-3); border: var(--border-default); border-radius: var(--radius-lg); padding: var(--space-4); background: var(--color-bg); }
+.draft-identity .request-detail-title { font-size: var(--type-section-title); line-height: 1.4; }
+.draft-identity .draft-review-summary { border: 0; padding: 0; background: transparent; }
 .advanced-detail { display: grid; gap: 0.75rem; border: 1px solid var(--color-border); border-radius: 6px; padding: 0.75rem; }
 .advanced-detail summary { cursor: pointer; font-weight: 600; }
 .detail-inline-form { display: grid; gap: 0.75rem; border: 1px solid var(--color-border); border-radius: 6px; padding: 1rem; }
 .detail-form-heading, .detail-section-heading { margin: 0; font-size: 1rem; }
 .detail-form-actions, .filter-options { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; }
+.detail-save-modify-control { width: 176px; }
+.detail-save-modify-control .base-button { width: 100%; }
 .advanced-settings { display: grid; gap: 0.75rem; border-top: 1px solid var(--color-border); padding-top: 0.75rem; }
 .advanced-settings summary { cursor: pointer; font-weight: 600; }
 .detail-section { display: grid; gap: 0.5rem; }
@@ -414,5 +424,41 @@ defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
 .detail-row { display: contents; }
 .detail-row dt { font-weight: 600; color: var(--color-text-muted); }
 .detail-row dd { margin: 0; overflow-wrap: anywhere; }
+
+/* Stage 47 图 03：审核页的左侧编辑/规则与右侧资源摘要保持稳定双栏。
+ * 只挂在 draft-review-editor 上，批量工作台和已保存方案继续使用共享旧布局。 */
+.draft-review-editor {
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+.draft-review-editor :deep(.panel-heading) { display: none; }
+
+@media (min-width: 960px) {
+  .draft-review-editor .request-detail {
+    grid-template-columns: minmax(0, 480px) minmax(0, 1fr);
+    column-gap: var(--space-6);
+    align-items: start;
+  }
+  .draft-review-editor .draft-identity,
+  .draft-review-editor > .request-detail > .review-note {
+    grid-column: 1 / -1;
+  }
+  .draft-review-editor .detail-inline-form,
+  .draft-review-editor .advanced-detail,
+  .draft-review-editor .filter-section {
+    grid-column: 1;
+  }
+  .draft-review-editor .seeds-section {
+    grid-column: 2;
+    grid-row: 2 / span 3;
+    min-width: 0;
+  }
+  .draft-review-editor .detail-grid { grid-template-columns: max-content minmax(0, 1fr); }
+  .draft-review-editor .draft-identity .detail-grid {
+    grid-template-columns: max-content minmax(0, 1fr) max-content minmax(0, 1fr) max-content minmax(0, 1fr);
+  }
+  .draft-review-editor .advanced-detail { margin-top: 0; }
+}
 @media (max-width: 720px) { .detail-grid { grid-template-columns: 1fr; gap: 0.2rem; } }
 </style>

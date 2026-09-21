@@ -21,6 +21,7 @@ import ConfirmDialog from '@/components/feedback/ConfirmDialog.vue'
 import BaseButton from '@/components/forms/BaseButton.vue'
 import LoadingState from '@/components/feedback/LoadingState.vue'
 import AnimeDraftEditor from '@/features/workbench/AnimeDraftEditor.vue'
+import AnimeModeSwitch, { type AnimeMode } from '@/features/workbench/AnimeModeSwitch.vue'
 import { useDraftEditScheduler } from '@/features/workbench/draftEditScheduler'
 import type { PreviewEditState, SelectedCollectionSummary } from '@/features/workbench/candidateSearch'
 import { effectiveSeeds, type RequestSnapshot } from '@/features/requests/requestDetail'
@@ -44,6 +45,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: 'changed', state: { request: RequestSnapshot; draftId: string; draftRevision: number }): void
   (event: 'discard', destination: 'candidates' | 'input'): void
+  (event: 'change-mode', mode: AnimeMode): void
 }>()
 
 const notification = useNotificationStore()
@@ -362,29 +364,7 @@ defineExpose({ session, editor, leaveGuard })
 
 <template>
   <section id="single-anime-review-step" aria-labelledby="single-anime-review-heading">
-    <div class="review-step-header">
-      <div>
-        <p class="step-label">步骤 3</p>
-        <h2 id="single-anime-review-heading">审核订阅方案</h2>
-        <p class="field-help">已选择 MiKan 合集，请核对字幕组、筛选规则和有效资源后再继续。</p>
-      </div>
-      <div class="review-navigation" aria-label="审核步骤导航">
-        <BaseButton
-          v-if="reuseSuggestion && journey.state.phase === 'review'"
-          id="single-review-apply-reuse-suggestion"
-          variant="secondary"
-          :disabled="navigationLoading || session.applying.value"
-          @click="applyReuseSuggestion"
-        >
-          {{ reuseSuggestionApplied ? '已载入复制方案建议' : '应用复制方案建议' }}
-        </BaseButton>
-        <BaseButton id="single-review-back-candidates" variant="secondary" :disabled="navigationLoading || session.applying.value" @click="leave('candidates')">重新选择合集</BaseButton>
-        <BaseButton id="single-review-edit-search" variant="secondary" :disabled="navigationLoading || session.applying.value" @click="leave('input')">修改搜索</BaseButton>
-      </div>
-    </div>
-
     <div id="request-detail-container">
-      <p v-if="journey.state.phase === 'review'" class="review-summary preview-mode-note" role="status">订阅草案（未保存）：当前修改只保留在本次页面操作中。</p>
       <AnimeDraftEditor
         ref="editor"
         :request="draftSnapshot"
@@ -409,11 +389,29 @@ defineExpose({ session, editor, leaveGuard })
         </template>
       </AnimeDraftEditor>
 
+      <p v-if="journey.state.phase === 'review'" class="review-summary preview-mode-note" role="status">订阅草案（未保存）：当前修改只保留在本次页面操作中。</p>
+
       <!-- 最终确认必须在完整审核内容之后；这是保存本地方案的入口，
            追番管理仍会再次要求用户确认外部提交。 -->
-      <div class="review-confirmation-block" aria-live="polite">
+      <div class="review-action-row" aria-label="审核操作">
+        <AnimeModeSwitch :model-value="'single'" :disabled="navigationLoading || session.applying.value || confirmLoading" @update:model-value="emit('change-mode', $event)" />
+        <div class="review-navigation" aria-label="审核步骤导航">
+          <BaseButton
+            v-if="reuseSuggestion && journey.state.phase === 'review'"
+            id="single-review-apply-reuse-suggestion"
+            variant="secondary"
+            :disabled="navigationLoading || session.applying.value"
+            @click="applyReuseSuggestion"
+          >
+            {{ reuseSuggestionApplied ? '已载入复制方案建议' : '应用复制方案建议' }}
+          </BaseButton>
+          <BaseButton id="single-review-back-candidates" variant="secondary" :disabled="navigationLoading || session.applying.value" @click="leave('candidates')">重新选择合集</BaseButton>
+          <BaseButton id="single-review-edit-search" variant="secondary" :disabled="navigationLoading || session.applying.value" @click="leave('input')">修改搜索</BaseButton>
+        </div>
         <p class="review-confirmation-boundary">仅保存本地方案、追番管理再次确认外部提交。</p>
-        <BaseButton v-if="journey.state.phase === 'review'" id="single-review-save-button" variant="primary" :loading="confirmLoading" :disabled="saveButtonDisabled" aria-describedby="single-review-save-blockers" @click="saveAndConfirm">保存并确认</BaseButton>
+        <div v-if="journey.state.phase === 'review'" id="detail-save-confirm" class="detail-save-confirm-control">
+          <BaseButton id="single-review-save-button" variant="primary" size="lg" :loading="confirmLoading" :disabled="saveButtonDisabled" aria-describedby="single-review-save-blockers" @click="saveAndConfirm">保存并确认</BaseButton>
+        </div>
         <BaseButton v-else-if="journey.state.phase === 'saved_pending_confirm'" id="single-review-retry-accept" variant="primary" :loading="confirmLoading" :disabled="confirmLoading" @click="retrySavedConfirmation">重试确认</BaseButton>
         <BaseButton v-if="journey.state.phase === 'verification_pending' || journey.state.phase === 'confirmed_pending_tracking'" id="single-review-retry-locate" variant="secondary" :loading="confirmLoading" :disabled="confirmLoading" @click="retryTrackingLocation">重试定位</BaseButton>
         <BaseButton v-if="journey.state.phase === 'confirmed_pending_tracking'" id="single-review-open-unlocated" variant="secondary" :disabled="confirmLoading" @click="openUnlocatedTracking">打开无定位追番管理</BaseButton>
@@ -431,13 +429,21 @@ defineExpose({ session, editor, leaveGuard })
 </template>
 
 <style scoped>
-#single-anime-review-step { display: grid; gap: 1rem; }
+#single-anime-review-step { display: grid; gap: var(--space-6); }
 .review-step-header { display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start; }
-.review-step-header h2 { margin: 0; font-size: 1.2rem; }
+.review-step-header h2 { margin: 0; font-size: var(--type-section-title); line-height: 1.4; }
 .step-label { margin: 0 0 0.25rem; color: var(--color-text-muted); font-size: 0.85rem; }
-.review-navigation, .review-confirmation-block { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.review-navigation, .review-action-row { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; }
 .review-summary, .review-note { margin: 0; color: var(--color-text-muted); }
-.review-confirmation-block { border: 1px solid var(--color-border); border-radius: 6px; padding: 0.75rem; }
-.review-confirmation-block .field-help { margin: 0; }
+.review-action-row { min-height: var(--control-height-lg); border-top: var(--border-default); padding-top: var(--space-6); }
+.review-confirmation-boundary { flex: 1 1 100%; margin: 0; color: var(--color-text-muted); font-size: var(--type-caption); }
+.detail-save-confirm-control { flex: 0 0 220px; margin-left: auto; }
+.detail-save-confirm-control .base-button { width: 100%; }
+.review-action-row .field-help, .review-action-row .field-error { flex: 1 1 100%; margin: 0; }
+
+@media (min-width: 960px) {
+  .review-action-row .review-confirmation-boundary { order: -1; }
+  .review-action-row .review-confirmation-boundary + .detail-save-confirm-control { order: 1; }
+}
 @media (max-width: 720px) { .review-step-header { flex-direction: column; } }
 </style>
