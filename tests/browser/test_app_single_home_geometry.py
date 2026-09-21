@@ -44,12 +44,8 @@ TRACKING_BODY = json.dumps({"ok": True, "result": {"items": []}}, ensure_ascii=F
 PAGE_TOLERANCE = 2.0
 
 
-def _open_single_home(page: Page, live_server_url: str) -> list[str]:
-    """打开单番首页并记录所有非本地 API 之外的请求，返回 request URL 列表。"""
-    require_dist()
-    prepare_canvas(page)
-    requested: list[str] = []
-    page.on("request", lambda request: requested.append(request.url))
+def _install_shell_routes(page: Page) -> None:
+    """固定连接状态与待处理数量，避免外部依赖影响几何门禁。"""
     page.route(
         "**/api/v1/settings/autobangumi",
         lambda route: route.fulfill(status=200, content_type="application/json", body=CONNECTION_SUMMARY_BODY),
@@ -58,6 +54,15 @@ def _open_single_home(page: Page, live_server_url: str) -> list[str]:
         "**/api/v1/tracking/items**",
         lambda route: route.fulfill(status=200, content_type="application/json", body=TRACKING_BODY),
     )
+
+
+def _open_single_home(page: Page, live_server_url: str) -> list[str]:
+    """打开单番首页并记录所有非本地 API 之外的请求，返回 request URL 列表。"""
+    require_dist()
+    prepare_canvas(page)
+    requested: list[str] = []
+    page.on("request", lambda request: requested.append(request.url))
+    _install_shell_routes(page)
     page.goto(f"{live_server_url}/app/add")
     page.wait_for_selector(".single-home-hero", timeout=10_000)
     return requested
@@ -235,14 +240,7 @@ class TestSingleHomeGeometry:
     ) -> None:
         require_dist()
         page.set_viewport_size({"width": width, "height": height})
-        page.route(
-            "**/api/v1/settings/autobangumi",
-            lambda route: route.fulfill(status=200, content_type="application/json", body=CONNECTION_SUMMARY_BODY),
-        )
-        page.route(
-            "**/api/v1/tracking/items**",
-            lambda route: route.fulfill(status=200, content_type="application/json", body=TRACKING_BODY),
-        )
+        _install_shell_routes(page)
         page.goto(f"{live_server_url}/app/add")
         page.wait_for_selector(".single-home-hero", timeout=10_000)
         metrics = page.evaluate(
@@ -267,14 +265,7 @@ class TestSingleHomeGeometry:
     ) -> None:
         require_dist()
         page.set_viewport_size({"width": 720, "height": 450})
-        page.route(
-            "**/api/v1/settings/autobangumi",
-            lambda route: route.fulfill(status=200, content_type="application/json", body=CONNECTION_SUMMARY_BODY),
-        )
-        page.route(
-            "**/api/v1/tracking/items**",
-            lambda route: route.fulfill(status=200, content_type="application/json", body=TRACKING_BODY),
-        )
+        _install_shell_routes(page)
         page.goto(f"{live_server_url}/app/add")
         page.wait_for_selector(".single-home-hero", timeout=10_000)
         metrics = page.evaluate(
@@ -296,14 +287,7 @@ class TestSingleHomeGeometry:
         require_dist()
         prepare_canvas(page)
         page.emulate_media(reduced_motion="reduce")
-        page.route(
-            "**/api/v1/settings/autobangumi",
-            lambda route: route.fulfill(status=200, content_type="application/json", body=CONNECTION_SUMMARY_BODY),
-        )
-        page.route(
-            "**/api/v1/tracking/items**",
-            lambda route: route.fulfill(status=200, content_type="application/json", body=TRACKING_BODY),
-        )
+        _install_shell_routes(page)
         page.goto(f"{live_server_url}/app/add")
         page.wait_for_selector(".single-home-hero", timeout=10_000)
         page.fill("#mikan-candidate-query", "葬送的芙莉莲")
