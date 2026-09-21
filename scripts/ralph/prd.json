@@ -19,7 +19,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "开发自测完成（passes=false，等待独立审核）。按获批几何基线（形态 B）实现单番搜索首页：英雄区 720px 居中、内容在内容区垂直居中；标题 --type-display 40/1.2；模式切换 238×62（52px 选项 + 轨道）；输入 532×52 与主按钮 176×52（--control-height-lg）；三步预告三等分 232px；`.app-main` 页内边距改为 Token 档位32px 水平 / --space-6 垂直。`showSingleHome` 用 !hasResults 保证点击搜索后英雄区留在原位（仅取消垂直居中），避免输入与主按钮几何跳变；结果区/救援/候选/资源数/草案区在初始态均不渲染。证据：新增 tests/browser/stage47_single_home_baseline.py 与 test_app_single_home_geometry.py（11 个用例，含容器盒/宽高/间距/水平与垂直居中 <=2px、computed style 冻结 Token、初始态零候选请求与零外部请求、loading 期间控件几何不变、1280/1440/1920、200% 缩放、reduced-motion 键盘切换不清输入）；Vitest 667 passed；真实 Chromium 全套 327 passed。实现校正（搜索表单项 81px、轨道 238×62、帮助 22.4px）已记入基线文档第 11b 节与 progress。未改后端/API/草案状态机/外部写。"
+      "notes": "开发自测完成（passes=false，等待复审）。按获批几何基线（形态 B：锚点 + computed style + 几何，不启用像素层）实现单番搜索首页：720px 居中英雄区、内容垂直居中；标题 --type-display 40/1.2 固定 48px、副标题固定 24px 并单行截断（超长不推挤后续控件）；模式切换 238×62；搜索表单抽取为 SingleAnimeSearchForm.vue（输入 532×52 + 主按钮 176×52）由英雄区与草案态共用；三步预告三等分 232px；`.app-main` 页内边距改 Token 档位 32px 水平 / --space-6 垂直。`showSingleHome` 用 !hasResults 保证点击搜索后英雄区留在原位；`searchResult/searchError/selectedCandidate` 改为按模式存储的 modeSession，切换模式不再清除任一模式的输入、结果或已选候选（US-363 AC3）。证据：tests/browser/stage47_single_home_baseline.py + test_app_single_home_geometry.py 13 个用例（容器盒/宽高/间距/水平与垂直居中 <=2px、冻结 Token computed style、初始态零候选请求与零外部请求、loading 期几何不变、模式切换现场保留、超长标题固定高度、1280/1440/1920、200% 缩放、reduced-motion）；held route 用 expect_request + aria-busy 等待，无 sleep/轮询；Vitest 667 passed；真实 Chromium 329 passed。PRD 已正式修订门禁口径（G-47-01 记为已满足，形态 B），基线文档第 11b/11c 节记录实现校正与审核修复。未改后端/API/草案状态机/外部写。"
     },
     {
       "id": "US-364",

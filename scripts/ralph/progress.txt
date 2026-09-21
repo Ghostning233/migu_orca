@@ -99,3 +99,24 @@ Stage 46 分支与更早分支均保留，未删除、未重写。
 
 - US-363 的 `passes` 需主 Agent 独立审核后置位；WP-47-B（US-364）在 A 闭环前不得开始。
 - 设计 PNG 像素层按批准结论不启用（形态 B）；若后续提供与 Token 一致的参考图，可为图 01 追加像素门禁。
+
+## 2026-09-21 - US-363 独立审核（不通过）与集中修复
+
+审核结论：不通过（P0 1 项、P1 3 项、P2 2 项）。本轮为同一开发 Agent 的集中修复。
+
+- **P0（Spec）G-47-01 口径未落入 PRD**：正式修订 `docs/MiGuOrca_stage47_single_anime_pixel_PRD.md` ——
+  状态行改为「视觉基线已获批（形态 B，2026-09-21）；WP-47-A / US-363 开发中」；G-47-01 记为**已满足**，
+  并写明本阶段门禁为「锚点 + computed style + 几何」、**不启用 `<=0.5%` 像素层**（依据 Stage 46 裁决 3C 与
+  形态 A 资产未提供）；第 4 节验证规则、US-363/364/365 验收条件与第 7 节交接同步更新；原始阻断描述保留为历史。
+- **P1（Standards）held route 轮询**：`test_app_single_home_geometry.py` 删除 `wait_for_timeout(50)` 轮询，
+  改为 `expect_request`（请求发出）+ `aria-busy` 可观察状态等待，handler 内不 sleep。
+- **P1（Spec）模式切换清除现场**：`searchResult` / `searchError` / `selectedCandidate` 改为按模式存储的
+  `modeSession`（computed 读写）；`changeMode` 只切换视图，不再清空任何模式的输入、结果或已选候选。
+- **P2（Standards）搜索表单重复**：抽取 `SingleAnimeSearchForm.vue`（字段布局 + 176px 主按钮 + 焦点/选区透传），
+  英雄区与单番草案态共用一份实现；WorkbenchView 删除重复模板与重复样式。
+- **P2（Spec）标题/副标题截断**：固定单行高度（`h1` 48px、副标题 24px）+ `-webkit-line-clamp: 1` +
+  `overflow: hidden`，超长文案不再推挤后续控件；基线文档第 87 行同步改为「固定单行高度」口径。
+
+验证：`npm run typecheck` / `lint` / `build` 通过；`npx vitest --run` 667 passed；
+`uv run pytest tests/browser/ -q` **329 passed**（新增 2 项：模式切换现场保留、超长标题固定高度）；
+`uv run ruff check tests/` 通过。`passes` 仍为 `false`，等待复审。

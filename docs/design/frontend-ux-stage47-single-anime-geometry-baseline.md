@@ -84,8 +84,8 @@
 元素间距（垂直）：`h1`→副标题 `--space-2`(8)、副标题→模式切换 `--space-6`(24)、
 模式切换→搜索行 `--space-8`(32)、搜索行→帮助 `--space-4`(16)、帮助→三步预告 `--space-10`(40)。
 
-换行/截断：`h1` 与副标题单行居中，容器宽 720；超过 1 行时按 `-webkit-line-clamp: 2` 截断，
-容器高度不变（换行不推挤后续元素）。输入框内单行 `text-overflow: ellipsis`。
+换行/截断：`h1` 与副标题单行居中、容器宽 720，并**固定单行高度**（`h1` 48px、副标题 24px）；
+超长时按 `-webkit-line-clamp: 1` 截断并 `overflow: hidden`，容器高度不变，绝不推挤后续控件。输入框内单行 `text-overflow: ellipsis`。
 按钮标签 `white-space: nowrap`。
 
 **搜索前不得渲染**：结果区、救援面板（直连合集）、候选卡、草案审核区、有效/排除资源数、旧工作台空态。
@@ -344,6 +344,16 @@ US-363 实现时发现三处提案数值与冻结 Token 的既有实现不完全
 
 同时把「点击搜索后英雄区必须留在原位」写入实现：`showSingleHome` 用 `!hasResults`（而不是 `!searchStarted`），
 英雄区在搜索中仅取消垂直居中（`.is-searching`），保证输入与主按钮不因状态切换而改变几何。
+
+## 11c. 独立审核修复（2026-09-21，US-363 第二轮）
+
+| 审核项 | 修复 |
+| --- | --- |
+| P0：G-47-01 口径未落入 PRD | 正式修订 `docs/MiGuOrca_stage47_single_anime_pixel_PRD.md`：状态行改为「视觉基线已获批（形态 B）」、G-47-01 记为已满足并写明「锚点 + computed style + 几何，不启用 `<=0.5%` 像素层」、第 4 节与 US-363/364/365 AC 及第 7 节交接同步更新，并保留原始阻断描述为历史 |
+| P1：模式切换清除搜索现场 | `searchResult` / `searchError` / `selectedCandidate` 改为按模式存储的 `modeSession`（computed 读写），切换模式只切视图，不再清除任一模式的输入、结果或已选候选 |
+| P1：held route 轮询 | `test_app_single_home_geometry.py` 去掉 `wait_for_timeout` 轮询，改用 `expect_request` + 可观察的 `aria-busy` 状态 |
+| P2：搜索表单重复 | 抽取 `SingleAnimeSearchForm.vue`（含 176px 主按钮与字段布局），英雄区与草案态共用一份实现 |
+| P2：标题/副标题截断缺失 | 固定单行高度（48 / 24px）+ `-webkit-line-clamp: 1` + `overflow: hidden`，超长不推挤后续控件，并有专门用例 |
 
 ## 12. 待产品方审批与确认项
 
