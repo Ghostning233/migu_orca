@@ -695,11 +695,14 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 /* US-363: 单番搜索首页英雄区（Stage 47 几何基线）。
  * 容器 720px 居中；内容在内容区内垂直居中；间距/字号/控件高全部取冻结 Token。 */
 .single-home-hero {
+  /* Stage 47 获批页面专属几何：英雄区宽度（基线文档第 11 节 8 项清单之一）。
+   * 其余几何全部取自语义 Token。 */
+  --single-home-hero-width: 720px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: min(100%, 720px);
+  width: min(100%, var(--single-home-hero-width));
   min-height: calc(100vh - var(--size-shell-header) - var(--space-6) * 2);
   margin-inline: auto;
 }
@@ -721,18 +724,20 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 
 .single-home-hero .workbench-title {
   display: -webkit-box;
-  height: 48px;
+  /* 固定单行高度 = display 字号 × display 行高 Token（40 × 1.2 = 48px）。 */
+  height: calc(var(--type-display) * var(--type-display-line-height));
   overflow: hidden;
   font-size: var(--type-display);
-  font-weight: 700;
-  line-height: 1.2;
+  font-weight: var(--font-weight-bold);
+  line-height: var(--type-display-line-height);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 1;
 }
 
 .single-home-subtitle {
   display: -webkit-box;
-  height: 24px;
+  /* 固定单行高度 = 正文字号 × 正文行高 Token（15 × 1.6 = 24px）。 */
+  height: calc(var(--type-body) * var(--line-height-body));
   margin: 0;
   overflow: hidden;
   color: var(--color-text-muted);
@@ -768,7 +773,7 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-3);
   width: 100%;
-  min-height: 64px;
+  min-height: var(--space-16);
   margin: var(--space-10) 0 0;
   text-align: center;
   list-style-position: inside;

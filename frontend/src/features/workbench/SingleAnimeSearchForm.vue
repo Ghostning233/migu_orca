@@ -63,6 +63,8 @@ defineExpose({
 
 <style scoped>
 .workbench-search-form {
+  /* Stage 47 获批页面专属值（基线文档第 11 节）：主搜索按钮宽度。 */
+  --single-search-submit-width: 176px;
   display: grid;
   gap: var(--space-3);
 }
@@ -89,7 +91,7 @@ defineExpose({
  * 输入框占满剩余宽度（1440 英雄区下为 532px）。 */
 #mikan-candidate-search-submit {
   flex: 0 0 auto;
-  width: 176px;
+  width: var(--single-search-submit-width);
 }
 
 @media (max-width: 720px) {
