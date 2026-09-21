@@ -38,6 +38,7 @@ import PanelSection from '@/components/layout/PanelSection.vue'
 
 import CandidateCollectionList from '@/features/workbench/CandidateCollectionList.vue'
 import SingleAnimeReviewPanel from '@/features/workbench/SingleAnimeReviewPanel.vue'
+import SingleAnimeSearchForm from '@/features/workbench/SingleAnimeSearchForm.vue'
 import BatchWorkbenchView from '@/features/workbench/BatchWorkbenchView.vue'
 import AnimeModeSwitch, { type AnimeMode } from '@/features/workbench/AnimeModeSwitch.vue'
 import AnimeTitleInput from '@/features/workbench/AnimeTitleInput.vue'
@@ -74,7 +75,7 @@ const notification = useNotificationStore()
 const query = ref('')
 const batchQuery = ref('')
 const mode = ref<AnimeMode>('single')
-const singleInput = ref<InstanceType<typeof AnimeTitleInput> | null>(null)
+const singleSearchForm = ref<InstanceType<typeof SingleAnimeSearchForm> | null>(null)
 const batchInput = ref<InstanceType<typeof AnimeTitleInput> | null>(null)
 const batchWorkbench = ref<InstanceType<typeof BatchWorkbenchView> | null>(null)
 const batchSearchSubmitting = ref(false)
@@ -83,8 +84,27 @@ const selections = ref<Record<AnimeMode, { start: number; end: number }>>({
   batch: { start: 0, end: 0 },
 })
 const searchLoading = ref(false)
-const searchError = ref('')
-const searchResult = ref<CandidateSearchResult | null>(null)
+// US-363: 每个模式各自持有搜索现场。结果、错误与已选候选按模式存储，
+// 切换模式只切换视图，绝不清除任一模式的输入、结果或未保存现场。
+const modeSession = ref<
+  Record<AnimeMode, { result: CandidateSearchResult | null; error: string; candidate: MikanCandidate | null }>
+>({
+  single: { result: null, error: '', candidate: null },
+  batch: { result: null, error: '', candidate: null },
+})
+
+const searchError = computed({
+  get: () => modeSession.value[mode.value].error,
+  set: (value: string) => {
+    modeSession.value[mode.value].error = value
+  },
+})
+const searchResult = computed({
+  get: () => modeSession.value[mode.value].result,
+  set: (value: CandidateSearchResult | null) => {
+    modeSession.value[mode.value].result = value
+  },
+})
 const lastSearchQuery = ref('')
 
 /**
@@ -148,7 +168,12 @@ const seasonConfirmations = ref<Record<string, number | null>>({})
 // review step can answer「已选哪部/哪一季」without a second backend read
 // (F4; the unsaved draft snapshot has no season/total-episode fields and
 // D40-01 forbids safe-info for an unsaved draft).
-const selectedCandidate = ref<MikanCandidate | null>(null)
+const selectedCandidate = computed({
+  get: () => modeSession.value[mode.value].candidate,
+  set: (value: MikanCandidate | null) => {
+    modeSession.value[mode.value].candidate = value
+  },
+})
 
 /** Display-only projection of the selected collection for the review header. */
 const selectedCollection = computed(() =>
@@ -171,7 +196,7 @@ function editSearch(): void {
   searchError.value = ''
   selectedCandidate.value = null
   resetCandidateGenerationState()
-  void nextTick(() => singleInput.value?.focus())
+  void nextTick(() => singleSearchForm.value?.focusInput())
 }
 
 watch(query, (value) => {
@@ -189,16 +214,13 @@ watch(query, (value) => {
 
 async function changeMode(nextMode: AnimeMode): Promise<void> {
   if (nextMode === mode.value || singleBusy.value) return
-  const currentInput = mode.value === 'single' ? singleInput.value : batchInput.value
+  const currentInput = mode.value === 'single' ? singleSearchForm.value : batchInput.value
   if (currentInput) selections.value[mode.value] = currentInput.selection()
+  // 结果/错误/已选候选按模式存储（modeSession），这里只切换视图：
+  // 既不会把单番结果显示成批量结果，也不会清除任一模式的输入或未保存现场。
   mode.value = nextMode
-  // A result belongs to the mode that produced it; never present it as the
-  // result of the newly selected mode.
-  searchResult.value = null
-  searchError.value = ''
-  selectedCandidate.value = null
   await nextTick()
-  const nextInput = nextMode === 'single' ? singleInput.value : batchInput.value
+  const nextInput = nextMode === 'single' ? singleSearchForm.value : batchInput.value
   nextInput?.focus()
   const selection = selections.value[nextMode]
   nextInput?.restoreSelection(selection.start, selection.end)
@@ -423,7 +445,7 @@ function discardDraft(destination: 'candidates' | 'input'): void {
     lastSearchQuery.value = ''
     searchError.value = ''
   }
-  void nextTick(() => singleInput.value?.focus())
+  void nextTick(() => singleSearchForm.value?.focusInput())
 }
 
 onMounted(() => {
@@ -437,7 +459,7 @@ onMounted(() => {
   // Settings localStorage (relative only). Nothing to preload here.
   // The real application shell enters this view at /app/add; focus the first
   // actionable single-anime control after the shell has rendered it.
-  void nextTick(() => singleInput.value?.focus())
+  void nextTick(() => singleSearchForm.value?.focusInput())
 })
 
 defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
@@ -454,23 +476,13 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 
     <AnimeModeSwitch :model-value="mode" :disabled="singleBusy" @update:model-value="changeMode" />
 
-    <form id="mikan-candidate-search-form" class="workbench-search-form" @submit.prevent="searchCandidates">
-      <div class="search-control-row">
-        <div class="search-field">
-          <label for="mikan-candidate-query">番剧标题</label>
-          <AnimeTitleInput
-            ref="singleInput"
-            id="mikan-candidate-query"
-            v-model="query"
-            mode="single"
-            :disabled="singleBusy"
-          />
-        </div>
-        <BaseButton id="mikan-candidate-search-submit" type="submit" variant="primary" size="lg" :loading="searchLoading" :disabled="singleBusy || !query.trim()">
-          搜索候选合集
-        </BaseButton>
-      </div>
-    </form>
+    <SingleAnimeSearchForm
+      ref="singleSearchForm"
+      v-model:query="query"
+      :loading="searchLoading"
+      :disabled="singleBusy"
+      @submit="searchCandidates"
+    />
 
     <p class="field-help single-home-help" id="mikan-candidate-help">
       输入番剧标题，从真实 MiKan 搜索候选合集。候选不会自动选择，需手动点击「选择此合集」生成订阅草案。
@@ -503,22 +515,14 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
     <!-- ── single search ──────────────────────────────────────────── -->
     <AnimeModeSwitch :model-value="mode" :disabled="singleBusy" @update:model-value="changeMode" />
 
-    <form v-if="mode === 'single' && !hasResults" id="mikan-candidate-search-form" class="workbench-search-form" @submit.prevent="searchCandidates">
-      <div class="search-control-row">
-        <div class="search-field">
-          <label for="mikan-candidate-query">番剧标题</label>
-          <AnimeTitleInput
-            ref="singleInput"
-            id="mikan-candidate-query"
-            v-model="query"
-            mode="single"
-            :disabled="singleBusy"
-          />
-        </div>
-        <BaseButton id="mikan-candidate-search-submit" type="submit" variant="primary" size="lg" :loading="searchLoading" :disabled="singleBusy || !query.trim()">
-          搜索候选合集
-        </BaseButton>
-      </div>
+      <SingleAnimeSearchForm
+        v-if="mode === 'single' && !hasResults"
+        ref="singleSearchForm"
+        v-model:query="query"
+        :loading="searchLoading"
+        :disabled="singleBusy"
+        @submit="searchCandidates"
+      />
       <p class="field-help" id="mikan-candidate-help">
         输入番剧标题，从真实 MiKan 搜索候选合集。候选不会自动选择，需手动点击「选择此合集」生成订阅草案。
       </p>
@@ -528,7 +532,6 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
       <p v-if="searchError" id="mikan-candidate-search-error" class="field-error" role="alert">
         {{ searchError }}
       </p>
-    </form>
   </PanelSection>
 
     <!-- ── search results: created by a search, never before one ──────── -->
@@ -717,16 +720,26 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 }
 
 .single-home-hero .workbench-title {
+  display: -webkit-box;
+  height: 48px;
+  overflow: hidden;
   font-size: var(--type-display);
   font-weight: 700;
   line-height: 1.2;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
 }
 
 .single-home-subtitle {
+  display: -webkit-box;
+  height: 24px;
   margin: 0;
+  overflow: hidden;
   color: var(--color-text-muted);
   font-size: var(--font-size-md);
   line-height: var(--line-height-body);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
 }
 
 .single-home-hero > .anime-mode-switch {
@@ -736,15 +749,6 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 .single-home-hero > .workbench-search-form {
   width: 100%;
   margin-top: var(--space-8);
-}
-
-.single-home-hero .search-control-row {
-  align-items: end;
-}
-
-.single-home-hero #mikan-candidate-search-submit {
-  flex: 0 0 auto;
-  width: 176px;
 }
 
 .single-home-help {
@@ -769,14 +773,12 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
   text-align: center;
   list-style-position: inside;
 }
-.workbench-search-form,
 .batch-parse-form,
 .candidate-fallback-form {
   display: grid;
   gap: 0.75rem;
 }
 
-.workbench-search-form label,
 .batch-parse-form label,
 .candidate-fallback-form label {
   font-weight: 500;
@@ -791,23 +793,6 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 
 .workbench-title {
   margin: 0;
-}
-
-.search-control-row {
-  display: flex;
-  align-items: end;
-  gap: var(--space-3);
-}
-
-.search-field {
-  display: grid;
-  flex: 1 1 24rem;
-  gap: var(--space-2);
-  min-width: 0;
-}
-
-.search-control-row > button {
-  flex: 0 0 auto;
 }
 
 .journey-steps {
@@ -921,15 +906,6 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 }
 
 @media (max-width: 720px) {
-  .search-control-row {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .search-control-row > button {
-    width: 100%;
-  }
-
   .detail-grid {
     grid-template-columns: 1fr;
     gap: 0.2rem;
