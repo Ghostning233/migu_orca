@@ -75,47 +75,40 @@ body {
 .app-header {
   position: relative;
   z-index: var(--z-sticky);
-  border-bottom: 1px solid var(--color-border-subtle);
   background-color: var(--color-surface-raised);
   box-shadow: var(--shadow-shell);
 }
 
+/* Stage 46 (US-361): the shell keeps the frozen Token V1 geometry
+ * (--size-shell-header / --size-content-max / --space-* padding). The measured
+ * mockup numbers are recorded as diagnostics in tests/browser/visual_manifest.py
+ * but do not override the tokens (overall PRD 2.1). */
 .app-header-inner {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3) var(--space-6);
-  min-height: var(--size-shell-header);
   width: min(100%, var(--size-content-max));
+  /* Exact frozen shell height: the row is a fixed 72px band and its content is
+     vertically centred, so the header never grows with font metrics. */
+  height: var(--size-shell-header);
   margin-inline: auto;
-  padding: var(--space-4) var(--space-5);
+  padding-block: 0;
+  padding-inline: var(--space-5);
 }
 
 .brand-block {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-2);
+  color: var(--color-text);
+  text-decoration: none;
 }
 
-.brand-mark {
-  display: grid;
-  width: var(--size-control-min);
-  height: var(--size-control-min);
-  place-items: center;
-  flex: none;
-  border-radius: var(--radius-lg);
-  background: var(--color-surface-inverse);
-  color: var(--color-text-inverse);
-  font-weight: var(--font-weight-semibold);
-}
-
-.brand-eyebrow {
-  margin: 0 0 var(--space-1);
-  color: var(--color-accent-emphasis);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-semibold);
-  letter-spacing: 0.08em;
+.brand-block:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .app-title {
@@ -141,53 +134,59 @@ body {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
   min-height: var(--control-height-md);
+  min-width: var(--control-target-min);
   padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
-  color: var(--color-text);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  color: var(--color-text-secondary);
   text-decoration: none;
+  font-size: var(--font-size-md);
   font-weight: var(--font-weight-medium);
   transition:
     background-color var(--motion-duration-fast) var(--motion-easing-standard),
-    color var(--motion-duration-fast) var(--motion-easing-standard),
-    transform var(--motion-duration-fast) var(--motion-easing-standard);
+    color var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 .nav-link:hover {
   background-color: var(--color-surface-subtle);
-  transform: translateY(calc(var(--motion-distance) * -1));
+  color: var(--color-text);
 }
 
 .nav-link.router-link-active {
-  background-color: var(--color-action-primary);
-  color: var(--color-text-inverse);
+  color: var(--color-accent-emphasis);
 }
 
+/* The design shows the current item as coral text plus an underline; the
+ * underline uses the shared radius/space tokens instead of a bespoke height. */
 .nav-link.router-link-active::after {
   position: absolute;
   right: var(--space-3);
-  bottom: calc(var(--space-1) * -1);
+  bottom: 0;
   left: var(--space-3);
   height: var(--space-1);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-pill) var(--radius-pill) 0 0;
   background: var(--color-accent-emphasis);
   content: '';
-}
-
-.nav-current-marker {
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-semibold);
 }
 
 .workspace-status {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  margin: 0;
-  color: var(--color-text-muted);
-  font-size: var(--font-size-xs);
+  min-height: var(--control-height-sm);
+  padding-inline: var(--space-3);
+  border: var(--border-default);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-surface-subtle);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
   white-space: nowrap;
+  text-decoration: none;
+}
+
+.workspace-status:hover {
+  border-color: var(--color-border-strong);
+  color: var(--color-text);
 }
 
 .workspace-status-dot {
@@ -195,6 +194,20 @@ body {
   height: var(--space-2);
   border-radius: 50%;
   background: var(--color-accent-emphasis);
+}
+
+.pending-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--space-5);
+  padding-inline: var(--space-1);
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-emphasis);
+  color: var(--color-text-inverse);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  font-variant-numeric: tabular-nums;
 }
 
 .app-main {
@@ -332,6 +345,8 @@ textarea:focus-visible {
   .app-header-inner {
     flex-direction: column;
     align-items: flex-start;
+    height: auto;
+    padding-block: var(--space-3);
   }
 
   .top-nav,

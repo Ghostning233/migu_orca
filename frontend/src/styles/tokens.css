@@ -12,6 +12,11 @@
   --color-text-disabled: #8793a6;
   --color-border: #d9e0e8;
   --color-border-strong: #aab6c5;
+  /* Stage 46 (US-362) accessibility correction: Token V1 §2.3 requires a >= 3:1
+   * boundary for non-text controls. #aab6c5 only reaches ~2.0:1 against the white
+   * control surface, so form controls use this darker boundary (>= 3.6:1). The
+   * decorative `--color-border-strong` stays as the document baseline. */
+  --color-border-control: #7c8794;
   --color-primary: #0b2a55;
   --color-primary-hover: #123b73;
   --color-primary-active: #082143;
@@ -89,6 +94,9 @@
   --shadow-card: 0 2px 8px rgb(16 35 63 / 5%);
   --shadow-shell: var(--shadow-card);
   --shadow-dialog: var(--shadow-raised);
+  /* Token V1 frozen values. Stage 46 keeps these authoritative: the normalised
+   * design mockups are measured (tests/visual/measure.py) but their layout
+   * numbers lose to the explicit Token V1 values (overall PRD 2.1). */
   --top-nav-height: 72px;
   --content-max: 1512px;
   --size-shell-header: var(--top-nav-height);

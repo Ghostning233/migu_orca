@@ -8,7 +8,7 @@
 import ErrorBoundary from '@/components/feedback/ErrorBoundary.vue'
 import GlobalLoadingBar from '@/components/feedback/GlobalLoadingBar.vue'
 import GlobalNotification from '@/components/feedback/GlobalNotification.vue'
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { routeLocation, type AppRouteKey } from '@/app/router/catalog'
@@ -33,6 +33,16 @@ const navigation = [
 function isCurrent(routeKey: AppRouteKey): boolean {
   return route.name === routeKey
 }
+
+// Stage 46 (US-361): the visible pill is compact, matching the design's short
+// status chip ("未配置"). The full Chinese connection summary stays in the
+// accessible name, and internal codes / endpoints / credentials never render.
+const statusLabel = computed(() =>
+  connectionState.value.key === 'UNCONFIGURED' ? '未配置' : connectionState.value.label,
+)
+const statusAriaLabel = computed(
+  () => `Auto Bangumi 连接状态：${connectionState.value.label}，进入设置`,
+)
 
 onMounted(() => {
   observedProfile = currentStorageDir()
@@ -77,25 +87,19 @@ function requestBrandReturn(event: MouseEvent): void {
     <header class="app-header">
       <div class="app-header-inner">
         <RouterLink :to="routeLocation('add')" class="brand-block" aria-label="返回添加番剧" @click="requestBrandReturn">
-          <span class="brand-mark" aria-hidden="true">M</span>
-          <div class="header-copy">
-            <p class="brand-eyebrow">桌面番剧工作台</p>
-            <h1 class="app-title">MiGuOrca</h1>
-          </div>
+          <h1 class="app-title">MiGuOrca</h1>
         </RouterLink>
 
         <nav class="top-nav" aria-label="主导航">
           <ul class="top-nav-list">
-            <li v-for="item in navigation" :key="item.route">
+            <li v-for="(item, index) in navigation" :key="item.route">
               <RouterLink
+                :id="`shell-nav-${index + 1}`"
                 :to="routeLocation(item.route)"
                 class="nav-link"
                 :aria-current="isCurrent(item.route) ? 'page' : undefined"
               >
                 <span>{{ item.label }}</span>
-                <span v-if="isCurrent(item.route)" class="nav-current-marker" aria-hidden="true">
-                  当前
-                </span>
               </RouterLink>
             </li>
           </ul>
@@ -105,10 +109,10 @@ function requestBrandReturn(event: MouseEvent): void {
           :to="routeLocation('settings')"
           class="workspace-status"
           role="status"
-          aria-label="Auto Bangumi 连接状态，进入设置"
+          :aria-label="statusAriaLabel"
         >
           <span class="workspace-status-dot" aria-hidden="true"></span>
-          <span>Auto Bangumi：{{ connectionState.label }}（本地桌面工作区）</span>
+          <span class="workspace-status-label">{{ statusLabel }}</span>
           <span v-if="pendingCount" class="pending-badge" aria-label="待处理追番数量">
             {{ pendingCount }}
           </span>

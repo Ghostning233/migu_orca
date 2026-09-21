@@ -64,9 +64,13 @@ def test_app_shell_loads_and_mounts_spa(page: Page, live_server_url: str) -> Non
     assert nav.nth(2).locator("span").first.inner_text().strip() == "追番管理"
     assert nav.nth(3).locator("span").first.inner_text().strip() == "设置"
     assert nav.nth(0).get_attribute("aria-current") == "page"
-    assert nav.nth(0).locator(".nav-current-marker").inner_text().strip() == "当前"
+    # Stage 46 (US-361): the design's current item is text + coral underline
+    # only, so the redundant "当前" marker is gone; aria-current carries the
+    # state for assistive technology.
+    assert nav.nth(0).locator(".nav-current-marker").count() == 0
     assert page.locator("#workbench-heading").count() >= 1
-    assert "Auto Bangumi：" in page.locator(".workspace-status").inner_text()
+    status_text = page.locator(".workspace-status-label").inner_text().strip()
+    assert status_text in {"未配置", "连接可用", "已配置", "需检查"}
     page.locator(".workspace-status").click()
     page.wait_for_url("**/app/settings", timeout=5000)
     assert page.locator("#settings-heading").count() == 1
