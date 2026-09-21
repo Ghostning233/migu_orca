@@ -62,3 +62,40 @@ Stage 46 分支与更早分支均保留，未删除、未重写。
 - 本轮范围：`/app/add` 单番初始态的英雄区布局（任务标题/说明、模式切换、搜索组合、三步预告）、
   `.app-main` 页内边距改为 Token 档位、首页几何/锚点门禁与既有测试同步。
 - 不进入 WP-47-B/C；不改后端、API、草案状态机、外部写或批量页面。
+
+## 2026-09-21 - WP-47-A / US-363 实现完成（自测通过，等待独立审核）
+
+范围：`/app/add` 单番初始态（图 01）按获批几何基线（形态 B）复刻；不改 US-364/365、批量页面、
+后端、API、草案状态机或外部写。`passes` 保持 `false`，本条仅为开发自测证据。
+
+### 实际改动
+
+- `WorkbenchView.vue`：新增 `.single-home-hero` 英雄区（标题/说明、模式切换、搜索组合、帮助、三步预告），
+  初始态不再渲染结果区/救援面板/候选卡/资源数/草案区；`showSingleHome` 用 `!hasResults && !draftRequest`
+  以保证点击搜索后英雄区留在原位（`.is-searching` 仅取消垂直居中），避免控件几何跳变；
+  `#workbench-heading`、`.journey-steps`、`.workbench-search-form`、`#mikan-candidate-query`、
+  `#mikan-candidate-search-submit` 等既有语义 id/class 全部保留。
+- `styles/main.css`：`.app-main` 页内边距改为 Token 档位（1440 → 32px 水平）与 `--space-6` 24px 垂直（共享壳层改动）。
+- `AnimeModeSwitch.vue`：选项 `min-width` 由 `--control-target-min` 改为 112px（基线：轨道总宽 238px）。
+- 新增 `tests/browser/stage47_single_home_baseline.py`（获批几何基线）与
+  `tests/browser/test_app_single_home_geometry.py`（11 个门禁用例）。
+- `BatchWorkbenchView.test.ts`：消除既有防抖竞态（真实 1500ms 防抖与慢环境），改为同一 tick 内改规则并提交。
+
+### 实现校正（已写入基线文档第 11b 节）
+
+- 搜索表单项实际高 **81px**（label 21 + `--space-2` 8 + 输入 52），提案记作 52px（只计控件盒）；
+- 模式切换轨道实际 **238×62**（含 1px 边框），提案记作 236×60；
+- 帮助文字实际 **22.4px**（14/1.6，沿用共享 `.field-help`），提案记作 18px；
+- 因此英雄区内容块高 421.4px、垂直居中后内容顶 275.3px，门禁断言改为「容器盒 + 宽高 + 间距 + 居中」。
+
+### 验证结果
+
+- `npm run typecheck` / `npm run lint` / `npm run build` → 通过。
+- `npx vitest --run` → **667 passed**（含 `BatchWorkbenchView.test.ts` 连续 6 次单文件全绿）。
+- `uv run pytest tests/browser/ -q` → **327 passed**（真实 Chromium；其中新增几何门禁 11 项）。
+- `uv run ruff check tests/` → 通过。
+
+### 遗留
+
+- US-363 的 `passes` 需主 Agent 独立审核后置位；WP-47-B（US-364）在 A 闭环前不得开始。
+- 设计 PNG 像素层按批准结论不启用（形态 B）；若后续提供与 Token 一致的参考图，可为图 01 追加像素门禁。

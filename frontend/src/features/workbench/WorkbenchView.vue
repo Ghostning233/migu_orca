@@ -129,6 +129,13 @@ const draftLoading = ref(false)
 // candidate draft generation.  The individual flags remain for accurate UI
 // labels, while this lock prevents two long MiKan plans from racing.
 const singleBusy = ref(false)
+
+// US-363 (Stage 47 几何基线): 单番英雄区承载「尚未产出候选、也没有草案」的首页状态。
+// 用 !hasResults 而不是 !searchStarted：点击搜索后英雄区必须留在原位（仅取消垂直居中），
+// 否则搜索一开始容器就被卸载，输入与主按钮会发生布局跳变与宽度变化。
+const showSingleHome = computed(
+  () => mode.value === 'single' && !hasResults.value && !draftRequest.value,
+)
 // US-343: which candidate owns the in-flight generation, and the sanitized
 // failure that stays beside a candidate after its generation failed.
 const generatingCandidateId = ref<string | null>(null)
@@ -437,9 +444,57 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 </script>
 
 <template>
-  <h1 id="workbench-heading" class="workbench-title">添加番剧</h1>
+  <!-- US-363 (Stage 47 几何基线): 单番初始态是只组织一次搜索任务的居中英雄区。
+       搜索开始前不得渲染结果区、救援面板、候选卡、草案审核区或有效资源数。 -->
+  <div v-if="showSingleHome" class="single-home-hero" :class="{ 'is-searching': searchStarted }">
+    <div class="single-home-intro">
+      <h1 id="workbench-heading" class="workbench-title">添加番剧</h1>
+      <p class="single-home-subtitle">输入番剧名称 → 人工选择真实 MiKan 合集 → 审核并保存确认。</p>
+    </div>
 
-  <PanelSection title="搜索候选合集" class="workbench-panel">
+    <AnimeModeSwitch :model-value="mode" :disabled="singleBusy" @update:model-value="changeMode" />
+
+    <form id="mikan-candidate-search-form" class="workbench-search-form" @submit.prevent="searchCandidates">
+      <div class="search-control-row">
+        <div class="search-field">
+          <label for="mikan-candidate-query">番剧标题</label>
+          <AnimeTitleInput
+            ref="singleInput"
+            id="mikan-candidate-query"
+            v-model="query"
+            mode="single"
+            :disabled="singleBusy"
+          />
+        </div>
+        <BaseButton id="mikan-candidate-search-submit" type="submit" variant="primary" size="lg" :loading="searchLoading" :disabled="singleBusy || !query.trim()">
+          搜索候选合集
+        </BaseButton>
+      </div>
+    </form>
+
+    <p class="field-help single-home-help" id="mikan-candidate-help">
+      输入番剧标题，从真实 MiKan 搜索候选合集。候选不会自动选择，需手动点击「选择此合集」生成订阅草案。
+    </p>
+    <p v-if="reuseSource" id="reuse-handoff-summary" class="field-help" role="status">
+      已载入复制方案起点：{{ reuseSource.title }}（公开合集编号 {{ reuseSource.mikanBangumiId }}）。请重新搜索并选择真实合集。
+    </p>
+    <p v-if="searchError" id="mikan-candidate-search-error" class="field-error" role="alert">
+      {{ searchError }}
+    </p>
+
+    <ol class="journey-steps single-home-steps" aria-label="添加番剧步骤">
+      <li class="is-current">输入名称</li>
+      <li>选择真实合集</li>
+      <li>审核并保存确认</li>
+    </ol>
+  </div>
+
+  <h1 v-else id="workbench-heading" class="workbench-title">添加番剧</h1>
+
+  <!-- 非英雄区状态（批量 / 已有候选 / 草案）沿用既有面板结构；
+       空结果或搜索中仍显示英雄区，因此这里用 !showSingleHome 而不是 v-else，
+       以便下面的「搜索结果」面板能与英雄区共存。 -->
+  <PanelSection v-if="!showSingleHome" title="搜索候选合集" class="workbench-panel">
     <ol class="journey-steps" aria-label="添加番剧步骤">
       <li class="is-current">输入名称</li>
       <li>选择真实合集</li>
@@ -634,6 +689,86 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 </template>
 
 <style scoped>
+/* US-363: 单番搜索首页英雄区（Stage 47 几何基线）。
+ * 容器 720px 居中；内容在内容区内垂直居中；间距/字号/控件高全部取冻结 Token。 */
+.single-home-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: min(100%, 720px);
+  min-height: calc(100vh - var(--size-shell-header) - var(--space-6) * 2);
+  margin-inline: auto;
+}
+
+/* 搜索一旦开始（loading 或空结果）英雄区回到文档流顶部，与结果区顺序排布，
+ * 避免从「垂直居中」跳到「结果面板」造成的布局跳变。 */
+.single-home-hero.is-searching {
+  justify-content: flex-start;
+  min-height: auto;
+  padding-top: var(--space-2);
+}
+
+.single-home-intro {
+  display: grid;
+  gap: var(--space-2);
+  width: 100%;
+  text-align: center;
+}
+
+.single-home-hero .workbench-title {
+  font-size: var(--type-display);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.single-home-subtitle {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-body);
+}
+
+.single-home-hero > .anime-mode-switch {
+  margin-top: var(--space-6);
+}
+
+.single-home-hero > .workbench-search-form {
+  width: 100%;
+  margin-top: var(--space-8);
+}
+
+.single-home-hero .search-control-row {
+  align-items: end;
+}
+
+.single-home-hero #mikan-candidate-search-submit {
+  flex: 0 0 auto;
+  width: 176px;
+}
+
+.single-home-help {
+  width: 100%;
+  margin: var(--space-4) 0 0;
+  text-align: center;
+}
+
+.single-home-hero > #reuse-handoff-summary,
+.single-home-hero > #mikan-candidate-search-error {
+  width: 100%;
+  margin: var(--space-4) 0 0;
+}
+
+.single-home-hero .journey-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 64px;
+  margin: var(--space-10) 0 0;
+  text-align: center;
+  list-style-position: inside;
+}
 .workbench-search-form,
 .batch-parse-form,
 .candidate-fallback-form {

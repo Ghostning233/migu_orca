@@ -68,7 +68,8 @@ function onKeydown(event: KeyboardEvent, mode: AnimeMode): void {
  * second general-purpose primary button. */
 .anime-mode-option {
   min-height: var(--control-height-lg);
-  min-width: var(--control-target-min);
+  /* Stage 47 几何基线：两个选项各 112px，轨道总宽 236px。 */
+  min-width: 112px;
   padding-inline: var(--space-6);
   border: 0;
   border-radius: var(--radius-pill);
