@@ -120,3 +120,24 @@ Stage 46 分支与更早分支均保留，未删除、未重写。
 验证：`npm run typecheck` / `lint` / `build` 通过；`npx vitest --run` 667 passed；
 `uv run pytest tests/browser/ -q` **329 passed**（新增 2 项：模式切换现场保留、超长标题固定高度）；
 `uv run ruff check tests/` 通过。`passes` 仍为 `false`，等待复审。
+
+## 2026-09-21 - US-363 复审（仍不通过）与第二轮集中修复
+
+复审确认上轮 P1 全部闭环（模式现场保留、held route 无轮询、表单抽取、长标题截断）。本轮修复剩余 4 项：
+
+- **P0（Spec）Ralph 验收口径未同步**：`scripts/ralph/prd.json` 中 US-363/364/365 的验收条件仍写
+  「像素、锚点、computed-style 三层门禁」，与已修订为形态 B 的执行 PRD 冲突。
+  已把三条 AC 同步为「锚点 + computed style + 几何，本阶段不启用像素层」，G-47-01 口径至此真正收口。
+- **P2（Standards）页面样式硬编码视觉常量**：`WorkbenchView.vue` 的 48px / 1.2 / 24px / 64px 改为
+  Token 表达——新增 `--type-display-line-height: 1.2` 与 `--font-weight-bold: 700`；
+  标题固定高 = `calc(var(--type-display) * var(--type-display-line-height))`；
+  副标题固定高 = `calc(var(--type-body) * var(--line-height-body))`；三步预告 = `var(--space-16)`；
+  页面专属值（英雄区 720、主按钮 176、模式选项 112）改为组件级 CSS 变量集中声明。
+- **P2（Standards）测试重复 mock**：`test_app_single_home_geometry.py` 中重复三次的
+  settings/tracking route 注册抽为 `_install_shell_routes(page)`，`_open_single_home` 亦复用。
+- **P2（Spec）文档状态自相矛盾**：基线文档第 12 节由「待产品方审批与确认项」改为
+  「批准记录（2026-09-21 已确认）」，与顶部「已获批」一致。
+
+验证：`npm run typecheck` / `lint` / `build` 通过；`npx vitest --run` 667 passed；
+`uv run pytest tests/browser/ -q` 329 passed；`uv run ruff check tests/` 通过。
+`passes` 仍为 `false`，等待复审。

@@ -12,7 +12,7 @@
         "首页只组织任务标题/说明、模式切换、搜索组合和三步预告；不将批量结构、候选卡或草案审核区提前渲染",
         "单番/批量切换支持鼠标、方向键、Enter/空格，且不清除任一输入或未保存现场；搜索保持既有防重、禁用理由与中文反馈",
         "初始 fixture 不发候选/外部请求，连接状态保持安全公开摘要；稳定截图、Token 锚点和浏览器安全边界通过",
-        "获批稳定区域通过像素、锚点、computed-style 三层门禁；G-47-01 未满足时本故事不得开始",
+        "按 G-47-01 批准结论（形态 B）通过锚点（<=2 CSS px）、computed style（冻结 Token）与几何门禁，本阶段不启用像素层；初始态不得渲染结果区、救援面板、候选卡或有效资源数",
         "Verify in browser using dev-browser skill",
         "Tests pass",
         "Typecheck passes"
@@ -30,7 +30,7 @@
         "点击首候选后用 held route 停在草案生成中：仅该项显示 loading，其余候选防重复但不被误标为 loading；候选阶段不展示有效/排除资源数",
         "PROVEN、NEEDS_CONFIRMATION、CONFLICT 与空/失败状态继续使用既有人工核对规则；不得把布局重构变成自动选择或放宽季数证据",
         "释放真实草案 envelope 后正确进入审核态；候选态不调用 saved Request safe-info，不访问真实外部系统",
-        "三次截图、目标锚点、文本容器和获批像素区域稳定；canary 不泄漏；长标题、1280×720、200% 缩放和 reduced-motion 可用",
+        "三次截图、目标锚点与文本容器稳定；canary 不泄漏；长标题、1280×720、200% 缩放和 reduced-motion 可用（按形态 B 不启用像素层）",
         "Verify in browser using dev-browser skill",
         "Tests pass",
         "Typecheck passes"
@@ -48,7 +48,7 @@
         "审核区按获批基线组织合集身份、筛选和资源摘要；完整种子/高级信息保持按需展开，文本容器和焦点顺序可测，不通过隐藏恢复信息换取视觉一致",
         "「保存修改」为次操作，仅在存在待提交修改时可用；「保存并确认」为唯一强主操作，仍走既有 save-confirm；外部 Auto Bangumi 提交不得出现在此页面",
         "保留筛选重算、冲突、零资源、保存失败、已保存待确认、定位失败和 unknown 恢复的真实可达性；不使用重挂载或前端副本覆盖服务端 revision",
-        "未保存草案不调用 saved safe-info；保存与确认、外部写、追番定位的边界不变；三次稳定、canary、安全、键盘、200% 缩放、reduced-motion 与获批视觉三层门禁通过",
+        "未保存草案不调用 saved safe-info；保存与确认、外部写、追番定位的边界不变；三次稳定、canary、安全、键盘、200% 缩放、reduced-motion 与 G-47-01 批准的锚点/几何/computed style 门禁通过（不启用像素层）",
         "Verify in browser using dev-browser skill",
         "Tests pass",
         "Typecheck passes"
