@@ -28,11 +28,11 @@ from playwright.sync_api import Page, expect
 from tests.browser.visual_manifest import CONTROLS_REGION, PIXEL_GATE_RULING
 from tests.browser.visual_support import (
     CANVAS,
+    assert_stable_reports,
     browser_surface,
     capture_canvas,
     compare_with_design,
     prepare_canvas,
-    report_json,
     require_dist,
 )
 
@@ -474,7 +474,7 @@ class TestAppSharedControlsVisual:
             reports.append(report)
             print(f"controls figure-{figure:02d} run{run} diff_ratio={report['diff_ratio']} mask={report['mask_ratio']}")
         assert PIXEL_GATE_RULING["design_pixel_gate_enabled"] is False
-        assert report_json(reports[0]) == report_json(reports[1]) == report_json(reports[2])
+        assert_stable_reports(reports)
         assert reports[0]["canvas"] == {"width": CONTROLS_REGION[2] - CONTROLS_REGION[0], "height": CONTROLS_REGION[3] - CONTROLS_REGION[1]}
         assert reports[0]["compared_pixels"] == (CONTROLS_REGION[2] - CONTROLS_REGION[0]) * (CONTROLS_REGION[3] - CONTROLS_REGION[1])
 

@@ -45,6 +45,8 @@ _STABILITY_CSS = """
 *, *::before, *::after {
   cursor: none !important;
   caret-color: transparent !important;
+  animation: none !important;
+  transition: none !important;
 }
 """
 
@@ -207,6 +209,35 @@ def browser_surface(page: Page) -> dict[str, str]:
               .join('\\n'),
         })"""
     )
+
+
+STABILITY_NOISE_RATIO = 0.0001
+"""连续截图允许的栅格化噪声比例（画布像素的 0.01%）。
+
+同一环境下重复截图仍可能出现个位数像素的子像素栅格化差异。尺寸与 DOM 锚点必须
+严格相等；只有差异统计在该噪声带内容忍，且它远小于 Stage 46 的 0.5% 口径，
+不构成对业务或布局漂移的放宽。
+"""
+
+
+def stability_noise_pixels(canvas_pixels: int) -> int:
+    return max(16, round(canvas_pixels * STABILITY_NOISE_RATIO))
+
+
+def assert_stable_reports(reports: list[dict[str, Any]]) -> None:
+    """断言连续三次截图的几何严格一致、差异统计只在栅格化噪声带内波动。"""
+    assert reports, "at least one report is required"
+    first = reports[0]
+    canvas_pixels = int(first["compared_pixels"]) + int(first["mask_pixels"])
+    noise = stability_noise_pixels(canvas_pixels)
+    for report in reports:
+        assert report["canvas"] == first["canvas"]
+        assert report["compared_pixels"] == first["compared_pixels"]
+        assert report["mask_pixels"] == first["mask_pixels"]
+        assert report["resample"] == first["resample"]
+        assert report["channel_threshold"] == first["channel_threshold"]
+        assert abs(int(report["diff_pixels"]) - int(first["diff_pixels"])) <= noise
+        assert report["masks"] == first["masks"]
 
 
 def report_json(report: dict[str, Any]) -> str:

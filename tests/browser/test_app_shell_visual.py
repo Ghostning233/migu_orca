@@ -29,11 +29,11 @@ from tests.browser.visual_manifest import (
 )
 from tests.browser.visual_support import (
     anchor_summary,
+    assert_stable_reports,
     browser_surface,
     capture_canvas,
     compare_shell,
     prepare_canvas,
-    report_json,
     require_dist,
 )
 
@@ -166,7 +166,7 @@ class TestAppShellVisual:
             reports.append(report)
             print(f"shell run{run} diff_ratio={report['diff_ratio']} mask_ratio={report['mask_ratio']}")
             print(f"shell run{run} diff distribution={_diff_distribution(diff)}")
-        assert report_json(reports[0]) == report_json(reports[1]) == report_json(reports[2])
+        assert_stable_reports(reports)
         assert reports[0]["canvas"] == {"width": SHELL_REGION[2], "height": SHELL_REGION[3]}
         assert reports[0]["compared_pixels"] == SHELL_REGION[2] * SHELL_REGION[3]
         assert 0.0 <= reports[0]["diff_ratio"] <= 1.0

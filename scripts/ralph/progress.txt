@@ -194,3 +194,25 @@ US-361 共享壳层 → US-362 共享控件。**未修改任何 `passes` 字段*
   loading 宽度红测与四页 44px 回归通过、Stage 47/48 恢复设计图像素硬门禁需先审批新基线。
 - 提交按 story 主题分组精确暂存，不使用 `git add .`；未 push/建 PR/合并前的状态以实时 git 为准。
 - 未访问真实 MiKan / Auto Bangumi / qBittorrent；未修改六张设计源 PNG。
+
+## 2026-09-21 - PR #75 CI 失败修复（不重跑、不绕过）
+
+首次 CI 结果：Static checks & non-browser tests 通过；Frontend 与 Real Chromium 两个 job 失败。
+
+1. `Frontend (typecheck, lint, unit, build)` 失败于
+   `BatchWorkbenchView.test.ts > refuses to send N when the batch was re-parsed while the dialog was open`：
+   `Cannot call text on an empty DOMWrapper`（`#batch-accept-selected-recheck` 未渲染）。
+   本地单独 3 次、全量 8 次均 667 passed，无法复现，判定为 CI 慢环境下的时序竞争：
+   测试在 `#batch-parse-submit` 触发后只 `flushPromises()` 一次就打开确认弹窗。
+   修复：在该测试与同模式的 `refuses to send all ...`（另有一处）中，于 `confirmDialog()` 之前补
+   `await nextTick()` 并断言重新解析已落地（卡片数变为 1）。未删除或放宽任何业务断言。
+2. `Real Chromium browser suite` 失败于 `test_three_consecutive_captures_are_stable`：
+   三次截图的差异统计出现 6 像素漂移（`diff_pixels` 214632 vs 214638，ratio 0.165611 vs 0.165616），
+   即同环境重复截图存在子像素栅格化噪声。
+   修复：`visual_support.install_stability_styles` 额外冻结 `animation/transition`；
+   新增 `assert_stable_reports` —— 画布尺寸、参与像素、掩码面积、锚点、比较参数仍**严格相等**，
+   仅 `diff_pixels`/`mask_pixels` 允许 ≤ 画布 0.01% 的噪声带（单图 130 px），
+   该噪声带远小于 Stage 46 的 0.5% 口径，不构成对业务或布局漂移的放宽。
+   四个视觉用例文件（单番/批量/壳层/控件）统一改用该断言。
+
+本地复验：`BatchWorkbenchView.test.ts` 77 passed；四个视觉文件 45 passed；Ruff 通过。
