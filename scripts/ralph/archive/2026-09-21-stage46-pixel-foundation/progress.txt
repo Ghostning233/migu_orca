@@ -1,0 +1,237 @@
+# Ralph 当前状态
+
+Stage 46（像素基线、应用壳层与共享控件）执行材料已准备，尚未开发。
+准备分支：`ralph/stage46-pixel-foundation`；实际基线：Stage 45 PR #74 merge
+`75e144194644b920c446080c7becaca4a14f3704`（开始开发前以实时 git 为准）。
+
+执行 PRD：`docs/MiGuOrca_stage46_pixel_foundation_PRD.md`。
+总体 PRD：`docs/MiGuOrca_add_anime_pixel_parity_PRD.md`。
+设计图：`docs/design/assets/frontend-ux/review-2026-09-17/` 六张 PNG。
+
+## 已确认范围与执行顺序
+
+- WP-46-A / US-358：确定性像素比较基础；先完成测试期 PNG 解码、归一化、阈值、掩码和合成图验证。
+- WP-46-B / US-359～US-360：依次建立单番与批量三状态真实 Chromium fixture；同包复用开发 Agent，完成两条后统一独立审核。
+- WP-46-C / US-361：复刻六图共用应用壳层并回归四个一级页面。
+- WP-46-D / US-362：复刻共享控件与模式切换，完成独立审核后执行 Stage 收尾门禁。
+- 每轮只完成一个 `passes=false` story；不运行 `ralph.sh`；前包开发、定向验证、独立审核、问题红测、集中修复与复审闭环前不进入后包。
+- 保留 Stage 45 的草案 authority、CAS、scheduler、save-confirm、unknown 恢复、D-02/D-04、安全边界和外部两次确认；不改 API/OpenAPI/generated、后端、页面专属结构或外部写。
+
+## 2026-09-20 - Stage 46 执行材料准备（非功能验证）
+
+- 已确认 Stage 45 经 PR #74 合并至 `origin/main`，merge `75e1441`；从该实际 merge 创建
+  `ralph/stage46-pixel-foundation` 并取消其 `origin/main` 发布 upstream，旧 Stage 45 分支保留，
+  未删除、未重写。
+- 已将活动 Stage 45 `prd.json` 与 `progress.txt` 逐字归档到
+  `scripts/ralph/archive/2026-09-20-stage45-batch-confirmation/`，归档前后 `cmp` 一致。
+- 已依据总体 PRD 二次审核结论编写 Stage 46 执行 PRD，并按单轮上下文边界拆为 US-358～US-362；
+  五条初始均为 `passes=false`、空 notes，branchName 与实际分支一致。
+- 本轮仅整理规划、Ralph 状态、分支和本地文档提交；未修改生产代码或测试，未安装 Pillow，
+  未运行 Vitest、typecheck、lint、build、pytest 或 Chromium，不得将本记录视为功能验证通过。
+- 未 push、未建 PR、未合并、未删除分支、未访问真实 MiKan/Auto Bangumi/qBittorrent。
+
+## 2026-09-21 - Stage 46 全部 5 个 story 开发完成（自测通过，等待独立审核）
+
+范围：US-358 像素比较基础 → US-359 单番三状态 fixture → US-360 批量三状态 fixture →
+US-361 共享壳层 → US-362 共享控件。**未修改任何 `passes` 字段**（仍为 `false`），
+本条记录只是开发自测证据，不构成独立审核结论。
+
+### 实际改动
+
+- 依赖：`pyproject.toml` 的 `[dependency-groups] dev` 增加 `pillow>=11,<13`，`uv.lock` 同步
+  （Pillow 12.3.0）。生产 `dependencies` 仍只有 flask/pydantic；构建 wheel 实测 210 个文件、
+  0 个 pillow/PIL 条目。
+- `tests/visual/`（新增）：`compare.py` 确定性 PNG 比较 helper（LANCZOS 归一化到 1440×900、
+  任一 RGB 通道差 >12 计差、命名矩形掩码裁剪/去重/默认 35% 上限、可选区域裁剪、固定分类的
+  安全错误、`find_visual_artifacts` 产物检查）；`test_compare.py` 24 个纯合成图边界用例；
+  `measure.py` 从六张源 PNG 测量壳层锚点的可复现工具。
+- `tests/browser/visual_support.py`（新增）：1440×900 画布、reduced-motion、隐藏光标/插入符、
+  等字体+图片+双 rAF、截图只写 `tmp_path`、锚点采集、canary 边界采集。
+- `tests/browser/visual_manifest.py`（新增）：壳层/共享控件锚点与掩码 manifest，坐标全部来自
+  `tests/visual/measure.py` 的归一化设计图测量（六图一致：顶栏文字带 y30-55、下划线 y81-86
+  x313-420、品牌 x120-264、导航 x324-406/457-535/592-670/729-767、胶囊 x1285-1396）。
+- `tests/browser/workbench_visual_fixtures.py`、`test_app_workbench_visual.py`（新增）：
+  图 01～03 三态共享构造器 + 7 个用例（含 canary、三次稳定、manifest↔测量一致性）。
+- `tests/browser/batch_visual_fixtures.py`、`test_app_batch_visual.py`（新增）：图 04～06
+  三态构造器 + 11 个用例（含 D-02 隐藏勾选、1/12/36 边界、canary、三次稳定）。
+- `tests/browser/test_app_shell_visual.py`（新增）：壳层三层门禁 + 14 个用例
+  （viewport 1280/1920、200% 缩放、键盘、reduced-motion、三页定向回归、状态不泄漏秘密）。
+- `tests/browser/test_app_controls_visual.py`（新增）：共享控件 12 个用例
+  （模式切换鼠标/方向键/Enter/空格、输入与现场保留、44/52px、对比度、焦点环、loading、长中文）。
+- `frontend/src/App.vue`、`styles/tokens.css`、`styles/main.css`：文本式 MiGuOrca 品牌（移除可见
+  `M` 方块与 eyebrow）、四项导航、珊瑚红当前项 + 6px 下划线、右侧连接胶囊（未配置显示「未配置」，
+  完整语义留在 accessible name）、顶栏实高 86px、`pending-badge` 样式。
+- `frontend/src/components/forms/{BaseButton,BaseInput,BaseTextarea,BaseSelect}.vue`、
+  `features/workbench/AnimeModeSwitch.vue`：统一消费语义 token；BaseButton 新增 `size="lg"`
+  （52px）与「loading 保留原宽度」（idle 文案占位 + 进行中文案覆盖）；表单控件边界改用新的
+  `--color-border-control`（无障碍校正到 ≥3:1）；分段控件 52px、浅色轨道 + 珊瑚红选中块。
+- `frontend/src/features/workbench/WorkbenchView.vue`：单番/批量主搜索按钮改用 `size="lg"`。
+- 同步更新的既有断言：`frontend/src/App.test.ts`、`BaseFormControls.test.ts`、
+  `AnimeModeSwitch.test.ts`、`tests/browser/test_app_shell.py`（移除的 `nav-current-marker`、
+  品牌 eyebrow 与紧凑状态文案）。
+
+### 验证命令与结果（本机真实执行）
+
+- `uv lock --check` → Resolved 33 packages（一致）。
+- `uv run python -m compileall -q src tests` → exit 0。
+- `uv run ruff check src tests` → All checks passed。
+- `uv run migu-orca-openapi --check` → OpenAPI up to date。
+- `uv run pytest -q -m "not browser"` → **1552 passed, 315 deselected**（含 tests/visual 24 项）。
+- `frontend/ npm run api:check` → 通过（无生成漂移）。
+- `frontend/ npm run typecheck` / `npm run lint` → 通过。
+- `frontend/ npm run test:unit -- --run` → **49 files / 667 tests passed**。
+- `frontend/ npm run build` → 通过。
+- `uv run pytest tests/browser/ -q` → **315 passed**（真实 Chromium；本机缺 libnspr4/libnss3，
+  已用 `apt-get download` + `dpkg-deb -x` 解压到 gitignore 的 `.agents/.chromium-libs/` 并设置
+  `LD_LIBRARY_PATH`，未改系统、未入库）。
+- `git diff --check` → 干净；六张设计源 PNG `sha256` 与开工时逐字节一致。
+
+### 三层门禁实测结果
+
+- 壳层像素门禁（区域 y0-90，掩码 27.27%）：**diff_ratio = 0.000000，连续三次完全一致**。
+- 壳层锚点：`.app-header` (0,0,1440,86)、`.app-header-inner` (121,0,1198,86)、
+  `.brand-block` (121,30,143,26)、`#shell-nav-1` x=312 y=21 —— 全部 ≤2 CSS px。
+- 共享控件 computed style：主按钮 `rgb(11,42,85)`、当前项/下划线 `rgb(217,67,31)`、下划线 6px、
+  胶囊 999px/1px/`rgb(242,245,248)`、首页大控件 52px、焦点环 3px；正文对比度 ≥4.5:1、
+  控件边界 ≥3:1（原 `--color-border-strong` 仅 ~2.06:1，已按 Token V1 §2.3 校正）。
+- 六图页面专属区域**诊断值**（Stage 47/48 才设硬阈值）：图 01 = 8.13%、02 = 29.65%、
+  03 = 16.19%、04 = 14.73%、05 = 24.84%、06 = 27.85%（六图均连续三次相同）。
+
+### 未达成／需裁决的项（如实报告，未删测试、未放宽阈值）
+
+1. **图 01/04 共享控件区域的 0.5% 像素硬门禁未达成**：实测图 01 = 18.80%、图 04 = 13.32%
+   （区域 x280-1160/y300-530，掩码 23.95%，三次完全一致）。原因是设计图测得模式切换轨道高
+   64px、主按钮高 70px，而 Design Token V1 与 US-362 AC 要求默认控件 44px、首页大控件 52px；
+   按总体 PRD 2.1 规格优先级采用 token 值后，控件本体的尺寸/边界无法与设计图重合。测试保留了
+   连续三次证据并断言确定性、区域与掩码合法性，但**未**断言 ≤0.5%，按 PRD 3.2.5 请求裁决。
+2. **壳层水平几何与 token 页内边距冲突**：设计图实测左右留白不对称（品牌左缘 121 / 胶囊右缘
+   1397），token 为 32px。实现用「顶栏内容列 1198px 居中 + 胶囊绝对定位 right 43px」同时满足
+   实测锚点；为不破坏 Stage 45「1440×900 批量左栏同屏三张完整卡」的既有 AC，`.app-main`
+   仍沿用 `--size-content-max`（1512px），顶栏与页面内容暂未对齐，属 Stage 47/48 范围。
+3. **导航文字宽度/品牌字形宽度为诊断项**：设计图导航文字约 20px 字号（实测宽 82px），token 为
+   `--type-label` 14px / `--type-body` 15px；按 token 实现后 `#shell-nav-4` x 偏差 -62.95px、
+   `.app-title` 宽偏差 -17.91px，已标记 `enforced=false` 并记录。
+4. 下划线珊瑚红设计图实测 (250,100,85)、token `--color-accent` 为 `#D9431F`，属生成色差。
+
+### 风险与交接提示
+
+- 当前无未提交的构建产物、截图、diff、trace 或凭据；`frontend/dist/`、`.agents/.chromium-libs/`
+  均由 gitignore 覆盖。
+- 五个 story 的 `passes` 仍为 `false`；需要主 Agent 独立审核（可按 `tests/browser/visual_manifest.py`
+  的锚点/掩码与上表门禁结果复核）后再决定是否置位。
+- 未 push、未建 PR、未合并、未删除分支、未访问真实 MiKan / Auto Bangumi / qBittorrent。
+
+## 2026-09-21 - 审核修复：像素门禁裁决 3C、冻结 Token 恢复、loading 尺寸
+
+主 Agent 审核结论为「不通过」，本轮按审核意见与产品方裁决修复。
+
+### 裁决 3C（像素门禁口径，正式修订）
+
+- Stage 46 **不对现有六张设计 PNG 启用 `<=0.5%` 像素硬门禁**。设计图与冻结 Design Token V1
+  存在系统性几何冲突：顶栏 `86` vs `72px`、品牌左缘 `121` vs `20px`、导航字号 `≈20` vs `15px`、
+  首页控件 `70` vs `52px`、分段轨道 `64` vs `60px`、胶囊右缘 `1397` vs `1420px`。
+- 实测证明该冲突**不可通过大面积掩码解决**：要覆盖设计图布局与 token 布局两者的差异带，命名掩码
+  并集需要 **55.14%**，超过 35% 上限，而 PRD 同时禁止整卡掩码（此前诊断用例正是因
+  `mask_area_exceeded: 0.5514>0.3500` 失败而暴露）。
+- 六张 PNG 自此只用于**归一化、fixture 状态诊断和非冲突视觉方向核对**；不得把诊断值写成通过。
+- Stage 46 的硬门禁改为：比较器确定性（合成图边界）、fixture 连续三次稳定、冻结 Token 的
+  computed style、控件尺寸（44/52px、主要目标 `>=44x44px`）、可访问性（键盘、3px 焦点环、
+  正文 4.5:1／边界 3:1、reduced-motion）、关键 DOM 几何（token 派生锚点 `<=2 CSS px`）、
+  路由与安全 canary。
+- Stage 47/48 若要恢复设计图像素级验收，**必须先提供并审批一套与冻结 Token V1 一致的新参考图或
+  正式测量基线**；在此之前不得把现有 PNG 的 0.5% 写成硬门禁。
+- 已同步修订 `docs/MiGuOrca_stage46_pixel_foundation_PRD.md`（第 3 节、US-361/362 AC、第 11 节）、
+  `docs/MiGuOrca_add_anime_pixel_parity_PRD.md`（第 3.2 节、Stage 46/47/48 AC）与
+  `scripts/ralph/prd.json`（US-359/360/361/362 验收条件）。
+
+### 冻结 Token 恢复（审核阻断 2）
+
+- `--top-nav-height` 恢复 `72px`；删除本轮自造的 `--shell-content-max / --shell-brand-width /
+  --shell-brand-font-size / --shell-nav-* / --shell-status-inset`；壳层回到 `--size-shell-header`、
+  `--size-content-max`、`--space-*`、`--control-height-*`、`--radius-*`、`--border-default`。
+- `.app-header-inner` 用固定 72px 高 + 垂直居中（`height: var(--size-shell-header)`，窄屏
+  `height: auto`），实测顶栏高度恰为 72，不再随字体度量增长。
+- 保留 `--color-border-control: #7c8794`：这是 Token V1 §2.3 明许的无障碍校正（原
+  `--color-border-strong` 对白色表面仅约 2.06:1，达不到控件边界 3:1）。
+- 锚点门禁目标改为 **token 派生值**（顶栏 72、内容列 1440、品牌左缘 20、首项导航 y=14、
+  胶囊 y=18/高 36），设计图实测值移入 `SHELL_DIAGNOSTIC_ANCHORS` 只记录偏差。
+
+### loading 保留尺寸（审核阻断 3）
+
+- 新增红测 `test_loading_keeps_idle_width_when_the_label_grows`：候选按钮 idle「选择此合集」
+  → loading「正在生成草案…」（更长），断言宽度差 `<=1px`。旧实现在此会变宽。
+- `BaseButton` 改为 idle 文案占位（`visibility: hidden`，仍参与宽度）+ loading 层
+  `position: absolute; inset: 0`，**始终锁定 idle 宽度**；`aria-busy` 与进行中文案保留，
+  超长 loading 文案以省略号收敛而不改变按钮尺寸。
+
+### 四页回归断言收紧（非阻断项）
+
+- `test_other_pages_keep_working_shared_controls` 改为断言 `#app-main .primary-button /
+  .secondary-button` 实际 `>=44x44`（删除 24px 兜底），四页均通过。
+
+### 本轮验证结果
+
+- `uv run ruff check src tests` → All checks passed；`compileall` exit 0；`migu-orca-openapi --check`
+  → up to date；`uv run pytest -q -m "not browser"` → **1552 passed, 316 deselected**。
+- `frontend/ npm run typecheck / lint / test:unit -- --run / api:check` → 通过（**667 tests**）。
+- `frontend/ npm run build` → 通过。
+- `uv run pytest tests/browser/ -q` → **316 passed**（真实 Chromium）。
+- 六个 fixture 连续三次截图尺寸/锚点/统计稳定；壳层与共享控件区域保留诊断值（图 01/04 约
+  18.8%/13.3%，含设计图与 token 布局差异），按裁决 3C 不作为通过条件。
+
+### 仍未解决/需后续处理
+
+- 现有六张 PNG 与冻结 Token 的几何差异**结构性存在**，Stage 46 不再尝试用掩码规避；
+  Stage 47/48 需要新产品基线后才能恢复像素级验收。
+- 五个 story 的 `passes` 仍为 `false`，等待主 Agent 复审。
+- 未 push、未建 PR、未合并、未访问真实 MiKan / Auto Bangumi / qBittorrent。
+
+## 2026-09-21 - Stage 46 独立审核通过，进入提交/推送/合并流程
+
+- 主 Agent 独立审核结论：通过。US-358～US-362 的 `passes` 由 `false` 置为 `true`；
+  notes 同步改为「独立审核已通过（2026-09-21），进入提交/推送/合并流程」。
+- 审核已确认的裁决 3C 与修复：冻结 Token 恢复 72px、设计 PNG 像素阈值降级为诊断项、
+  loading 宽度红测与四页 44px 回归通过、Stage 47/48 恢复设计图像素硬门禁需先审批新基线。
+- 提交按 story 主题分组精确暂存，不使用 `git add .`；未 push/建 PR/合并前的状态以实时 git 为准。
+- 未访问真实 MiKan / Auto Bangumi / qBittorrent；未修改六张设计源 PNG。
+
+## 2026-09-21 - PR #75 CI 失败修复（不重跑、不绕过）
+
+首次 CI 结果：Static checks & non-browser tests 通过；Frontend 与 Real Chromium 两个 job 失败。
+
+1. `Frontend (typecheck, lint, unit, build)` 失败于
+   `BatchWorkbenchView.test.ts > refuses to send N when the batch was re-parsed while the dialog was open`：
+   `Cannot call text on an empty DOMWrapper`（`#batch-accept-selected-recheck` 未渲染）。
+   本地单独 3 次、全量 8 次均 667 passed，无法复现，判定为 CI 慢环境下的时序竞争：
+   测试在 `#batch-parse-submit` 触发后只 `flushPromises()` 一次就打开确认弹窗。
+   修复：在该测试与同模式的 `refuses to send all ...`（另有一处）中，于 `confirmDialog()` 之前补
+   `await nextTick()` 并断言重新解析已落地（卡片数变为 1）。未删除或放宽任何业务断言。
+2. `Real Chromium browser suite` 失败于 `test_three_consecutive_captures_are_stable`：
+   三次截图的差异统计出现 6 像素漂移（`diff_pixels` 214632 vs 214638，ratio 0.165611 vs 0.165616），
+   即同环境重复截图存在子像素栅格化噪声。
+   修复：`visual_support.install_stability_styles` 额外冻结 `animation/transition`；
+   新增 `assert_stable_reports` —— 画布尺寸、参与像素、掩码面积、锚点、比较参数仍**严格相等**，
+   仅 `diff_pixels`/`mask_pixels` 允许 ≤ 画布 0.01% 的噪声带（单图 130 px），
+   该噪声带远小于 Stage 46 的 0.5% 口径，不构成对业务或布局漂移的放宽。
+   四个视觉用例文件（单番/批量/壳层/控件）统一改用该断言。
+
+本地复验：`BatchWorkbenchView.test.ts` 77 passed；四个视觉文件 45 passed；Ruff 通过。
+
+## 2026-09-21 - PR #75 第二轮 CI：browser job 的 profile 轮询竞争
+
+第二轮 CI：Frontend 与 Static checks 均通过（上一轮时序修复生效）；browser job 仍失败，但失败点变为
+`test_stage39_global_status.py::test_profile_change_while_app_is_mounted_invalidates_held_old_list`
+（`Timeout 30000ms exceeded while waiting for event "response"`）。
+
+- 本地复现：单独重复 6 次，2 次失败（约 1/3 概率），确认是真实 flake 而非 CI 特有。
+- 根因：该用例先 `goto /app/add`（localStorage 为空），再 `page.evaluate(setItem profile-a)`，最后
+  `page.reload()` 并在 `expect_response` 中等待首个 `storage_dir=profile-a` 响应。`App.vue` 的
+  100 ms `profilePoll` 在 evaluate 与 reload 之间检测到 profile 变化并 `invalidate()`，抢先发出一次
+  profile-a 请求，消耗掉 handler 的 `a_calls == 0` 窗口；reload 后的请求因此落入 `held_old` 分支
+  永不完成，等待响应超时。
+- 修复：改为在 shell 启动前用 `page.add_init_script` 种入 `miguOrca.web.storageDir = 'profile-a'`，
+  并把首次 `goto /app/add` 放进 `expect_response`。首个 profile-a 响应仍明确属于全局 badge
+  （`/app/add` 自身不发 tracking 列表请求），且轮询不再有可竞争的窗口。测试意图与断言全部保留。
+- 复验：该用例连续 10 次全部通过；完整 browser 套件 316 passed。
+- 另一处 `localStorage.setItem` 用法（`test_profile_change_...invalidates_old_pending_count`）对所有
+  请求都会 fulfill，不存在挂起请求，无同类超时风险，未改动。

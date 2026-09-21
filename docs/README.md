@@ -16,7 +16,8 @@
 - 添加番剧单番与批量旅程已确认的六张效果图：[新版设计方向](design/frontend-ux-review-mockups-2026-09-17.md)
 - 已完成的 Stage 43～45 总体规划：[添加番剧视觉与信息层级收口](MiGuOrca_stage43_45_add_anime_visual_PRD.md)
 - 后续 Stage 46～48 总体规划：[添加番剧页面像素级复刻总体 PRD](MiGuOrca_add_anime_pixel_parity_PRD.md)
-- 当前执行材料：[Stage 46 像素基线、应用壳层与共享控件](MiGuOrca_stage46_pixel_foundation_PRD.md)；Ralph [JSON](../scripts/ralph/prd.json) / [progress](../scripts/ralph/progress.txt) 已准备，尚未开发
+- Stage 46 像素基线、应用壳层与共享控件已由 PR #75 合并；其 3C 像素门禁裁决与执行记录见 [Stage 46 PRD](MiGuOrca_stage46_pixel_foundation_PRD.md) 及 Ralph [JSON](../scripts/ralph/prd.json) / [progress](../scripts/ralph/progress.txt)
+- 下一阶段执行材料：[Stage 47 单番三状态页面复刻](MiGuOrca_stage47_single_anime_pixel_PRD.md)；须先获批与 Token V1 一致的新视觉基线，尚未授权开发
 - Stage 43～45 的历史决策与编写交接：[决策/规划交接](development/add-anime-visual-prd-handoff-2026-09-18.md)；不作为 Stage 46 现行指令
 - Stage 40～42 的历史规划来源：[2026-09-17 前端审核后续交接](development/frontend-ux-followup-handoff-2026-09-17.md)，不作为当前未完成清单
 - 当前截图与六图对比后的外部规划输入（非执行 PRD）：[添加番剧视觉与信息层级收口分析](design/frontend-ux-external-analysis-2026-09-18.md)
@@ -36,7 +37,7 @@
   已完成 F-F（US-303～US-317）并归档；F-G 已由 Stage 39 完成并归档（US-318～US-340）。
   前端体验重构的用户审核已形成问题清单；Stage 40（FE-01）与 Stage 41（D0、F2～F4）
   与 F5/WP-42-A 均已完成并合并。Stage 43（US-347～US-352）与 Stage 44（US-353～US-354）均已完成并合并；
-  Stage 45（US-355～US-357）已经 PR #74 合并；Stage 46 像素基线、应用壳层与共享控件的执行材料已准备，尚未开发；Stage 47～48 仍为总体规划。执行材料不等于开发或发布授权。
+  Stage 45（US-355～US-357）已经 PR #74 合并；Stage 46 像素基线、应用壳层与共享控件已经 PR #75 合并；Stage 47 单番三状态页面复刻 PRD 已编写，等待 Token V1 一致的新视觉基线决策；Stage 48 仍为总体规划。执行材料不等于开发或发布授权。
   工作目标、候选 Stage、设计决策门和 Agent 协作顺序见
   [前端体验重构：工作目标与协作流程](frontend-ux-refactor-work-goals.md)。
 - 页面体验设计与视觉评审已经作为独立工作完成。后续必须先完成后端支撑和前端分片 PRD、
@@ -93,8 +94,9 @@ Stage 42 已完成 WP-42-A / US-346，并经 PR #70 合并至 `main`（merge `cb
 - Stage 43：[搜索入口与候选选择视觉收口](MiGuOrca_stage43_add_anime_entry_visual_PRD.md)（US-347～US-352 已完成并经 PR #72 合并）
 - Stage 44：[共享草案审核执行 PRD](MiGuOrca_stage44_shared_draft_review_PRD.md)（US-353～US-354 已完成并经 PR #73 合并）
 - Stage 45：[批量确认范围、结果恢复与完成导航执行 PRD](MiGuOrca_stage45_batch_confirmation_PRD.md)（US-355～US-357 已完成并经 PR #74 合并；D-02/D-04 已确认）；总体边界见[总体 PRD](MiGuOrca_stage43_45_add_anime_visual_PRD.md)
-- Stage 46：[像素基线、应用壳层与共享控件执行 PRD](MiGuOrca_stage46_pixel_foundation_PRD.md)（US-358～US-362，执行材料已准备，尚未开发）
-- Stage 47～48：[添加番剧页面像素级复刻总体 PRD](MiGuOrca_add_anime_pixel_parity_PRD.md)（US-363～US-368，执行 PRD 待前一阶段闭环后分别编写；固定 `1440×900` Linux Chromium 基准下采用图像差异、关键锚点和 computed style 三层验收）
+- Stage 46：[像素基线、应用壳层与共享控件执行 PRD](MiGuOrca_stage46_pixel_foundation_PRD.md)（US-358～US-362，已由 PR #75 合并；保留裁决 3C 与执行证据）
+- Stage 47：[单番三状态页面复刻执行 PRD](MiGuOrca_stage47_single_anime_pixel_PRD.md)（US-363～US-365，等待与 Token V1 一致的新视觉基线获批）
+- Stage 48：[添加番剧页面像素级复刻总体 PRD](MiGuOrca_add_anime_pixel_parity_PRD.md)（US-366～US-368，待 Stage 47 闭环并另行编写执行 PRD；设计图像素硬门禁同样须先有获批新基线）
 
 Stage PRD 记录单一阶段的范围、非目标、决策和验收结果。已完成阶段的 Ralph 执行快照位于 `../scripts/ralph/archive/`。
 
