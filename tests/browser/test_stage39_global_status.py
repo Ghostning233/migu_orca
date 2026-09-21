@@ -187,11 +187,14 @@ def test_profile_change_while_app_is_mounted_invalidates_held_old_list(page: Pag
     page.route("**/api/v1/settings/autobangumi", handle)
     page.route("**/api/v1/tracking/items**", handle)
     page.route("**/api/v1/preferences", handle)
-    # Load the shell on a route without its own tracking-list request first.
-    # This makes the first profile-a response unambiguously belong to the
-    # global badge; the tracking route then supplies the held old request.
-    page.goto(f"{live_server_url}/app/add")
-    page.evaluate("localStorage.setItem('miguOrca.web.storageDir', 'profile-a')")
+    # Seed the profile *before* the shell boots: the /app/add route issues no
+    # tracking-list request of its own, so the first profile-a response
+    # unambiguously belongs to the global badge, and the 100 ms profile poll in
+    # the shell cannot race a reload by firing an extra profile-a request first
+    # (which used to consume the first-response window and hang the held request).
+    page.add_init_script(
+        "window.localStorage.setItem('miguOrca.web.storageDir', 'profile-a')"
+    )
     with page.expect_response(
         lambda response: (
             response.request.method == "GET"
@@ -200,7 +203,7 @@ def test_profile_change_while_app_is_mounted_invalidates_held_old_list(page: Pag
             and response.ok
         )
     ) as profile_a_response:
-        page.reload()
+        page.goto(f"{live_server_url}/app/add")
     payload = profile_a_response.value.json()
     assert payload["ok"] is True
     assert len(payload["result"]["items"]) == 2
