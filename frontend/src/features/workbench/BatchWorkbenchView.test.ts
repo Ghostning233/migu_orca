@@ -1384,7 +1384,9 @@ describe('BatchWorkbenchView confirm-all dialog intent (US-348)', () => {
 
     // 先发出修改并保持响应在途；真实 ConfirmDialog 打开后背景表单会 inert，
     // 因此不能在弹窗打开后再从背景触发表单提交。
-    await wrapperUnderTest.find('#batch-preview-must-contain').setValue('新筛选')
+    // 同一 tick 内改规则并提交：不让 1.5s 防抖窗口在慢环境下先行触发，
+    // 否则会多出一次 preview-modify，把「恰好一次」的防重断言变成计时器竞态。
+    wrapperUnderTest.find('#batch-preview-must-contain').setValue('新筛选')
     await wrapperUnderTest.find('#detail-preview-edit-form').trigger('submit')
     await nextTick()
     expect(apiPost.mock.calls.filter(([path]) => path === '/api/v1/requests/preview-modify')).toHaveLength(1)
@@ -2078,7 +2080,9 @@ describe('BatchWorkbenchView selection scope (US-356)', () => {
     await nextTick()
 
     // 先发出修改并保持响应在途：甲被阻断，N 此刻只剩乙。
-    await wrapperUnderTest.find('#batch-preview-must-contain').setValue('新筛选')
+    // 同一 tick 内改规则并提交：不让 1.5s 防抖窗口在慢环境下先行触发，
+    // 否则会多出一次 preview-modify，把「恰好一次」的防重断言变成计时器竞态。
+    wrapperUnderTest.find('#batch-preview-must-contain').setValue('新筛选')
     await wrapperUnderTest.find('#detail-preview-edit-form').trigger('submit')
     await nextTick()
     expect(apiPost.mock.calls.filter(([path]) => path === '/api/v1/requests/preview-modify')).toHaveLength(1)

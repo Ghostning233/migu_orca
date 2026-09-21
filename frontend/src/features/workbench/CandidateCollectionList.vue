@@ -46,12 +46,13 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <ul class="candidate-list" :class="{ 'is-compact': compact }" aria-label="MiKan 候选合集">
+  <ul class="candidate-list candidate-collection-list" :class="{ 'is-compact': compact }" aria-label="MiKan 候选合集">
     <CandidateCard
       v-for="candidate in candidates"
       :key="candidate.bangumi_id"
       :candidate="candidate"
       :query="query"
+      :compact="compact"
       :disabled="disabled || candidateIsSuspended(candidate.bangumi_id)"
       :loading="candidateIsLoading(candidate.bangumi_id)"
       :error="candidateErrors[candidate.bangumi_id] ?? ''"
@@ -65,8 +66,8 @@ const emit = defineEmits<{
 <style scoped>
 .candidate-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
-  gap: 0.75rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
   list-style: none;
   margin: 0;
   padding: 0;
@@ -74,6 +75,30 @@ const emit = defineEmits<{
 
 .candidate-list.is-compact {
   grid-template-columns: 1fr;
-  gap: 0.5rem;
+  gap: var(--space-2);
+}
+
+@media (max-width: 1359px) {
+  .candidate-list:not(.is-compact) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .candidate-list:not(.is-compact) {
+    grid-template-columns: 1fr;
+  }
+}
+
+@container (min-width: 721px) and (max-width: 1359px) {
+  .candidate-list:not(.is-compact) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container (max-width: 720px) {
+  .candidate-list:not(.is-compact) {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

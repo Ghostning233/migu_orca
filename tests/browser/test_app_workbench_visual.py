@@ -91,6 +91,33 @@ class TestAppWorkbenchVisualFixtures:
         expect(page.locator(".candidate-card")).to_have_count(0)
         assert scenario.safe_info_calls == [], "未保存草案不得调用已保存 Request 的 safe-info"
 
+    def test_figure_03_review_uses_approved_identity_columns_and_actions(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        """图 03：身份、双栏审核和操作层必须落在稳定的结构锚点上。"""
+        scenario = self._scenario(page, live_server_url, storage_dir)
+        scenario.enter_figure_03()
+
+        def box(selector: str) -> dict[str, float]:
+            return page.locator(selector).bounding_box() or {}
+
+        identity = box(".draft-identity")
+        left = box(".draft-filter-column")
+        right = box(".resource-summary-column")
+        action = box(".review-action-row")
+        save = box("#detail-save-confirm")
+        assert identity and left and right and action and save
+        assert abs(identity["x"] - 32) <= 2
+        assert abs(identity["y"] - 96) <= 2
+        assert abs(identity["width"] - 1376) <= 2
+        assert abs(left["x"] - 32) <= 2
+        assert abs(left["width"] - 480) <= 2
+        assert abs(right["x"] - 536) <= 2
+        assert abs(right["width"] - 872) <= 2
+        assert abs(action["x"] - 32) <= 2
+        assert abs(action["width"] - 1376) <= 2
+        assert abs(save["width"] - 220) <= 2
+
     def test_canary_never_reaches_browser_surfaces_or_screenshot_artifacts(
         self, page: Page, live_server_url: str, storage_dir: Path, tmp_path: Path
     ) -> None:
