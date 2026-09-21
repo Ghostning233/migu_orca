@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
+import BaseButton from '@/components/forms/BaseButton.vue'
 import BaseInput from '@/components/forms/BaseInput.vue'
 import BaseTextarea from '@/components/forms/BaseTextarea.vue'
 
@@ -59,5 +60,33 @@ describe('BaseTextarea (US-200)', () => {
     })
     await wrapper.find('textarea').setValue('Loli')
     expect(wrapper.emitted('update:modelValue')).toEqual([['Loli']])
+  })
+})
+
+describe('BaseButton (US-362)', () => {
+  it('defaults to the 44px medium control and offers the 52px home-page size', () => {
+    const medium = mount(BaseButton, { slots: { default: '搜索' } })
+    expect(medium.classes()).toContain('base-button-md')
+    expect(medium.attributes('aria-busy')).toBeUndefined()
+
+    const large = mount(BaseButton, { props: { size: 'lg' }, slots: { default: '搜索候选合集' } })
+    expect(large.classes()).toContain('base-button-lg')
+  })
+
+  it('keeps the loading label and busy state instead of collapsing to a spinner', () => {
+    const wrapper = mount(BaseButton, { props: { loading: true }, slots: { default: '搜索' } })
+    expect(wrapper.attributes('aria-busy')).toBe('true')
+    expect(wrapper.attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.base-button-spinner').exists()).toBe(true)
+    expect(wrapper.find('.base-button-loading-label').text()).toBe('处理中…')
+  })
+
+  it('accepts a custom loading label and keeps the button geometry variant', () => {
+    const wrapper = mount(BaseButton, {
+      props: { loading: true, size: 'lg', loadingLabel: '正在搜索' },
+      slots: { default: '搜索' },
+    })
+    expect(wrapper.classes()).toContain('base-button-lg')
+    expect(wrapper.find('.base-button-loading-label').text()).toBe('正在搜索')
   })
 })

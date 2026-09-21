@@ -1489,6 +1489,9 @@ describe('BatchWorkbenchView confirm-all dialog intent (US-348)', () => {
     await wrapperUnderTest.find('#batch-raw-input').setValue('新甲')
     await wrapperUnderTest.find('#batch-parse-submit').trigger('click')
     await flushPromises()
+    await nextTick()
+    // 重新解析必须先真正落地，否则「弹窗打开期间批次变化」的判定会在慢环境里竞争。
+    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(1)
 
     await confirmDialog()
 
@@ -2117,6 +2120,9 @@ describe('BatchWorkbenchView selection scope (US-356)', () => {
     await wrapperUnderTest.find('#batch-raw-input').setValue('新甲')
     await wrapperUnderTest.find('#batch-parse-submit').trigger('click')
     await flushPromises()
+    await nextTick()
+    // 重新解析必须先真正落地，否则「弹窗打开期间批次变化」的判定会在慢环境里竞争。
+    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(1)
 
     await confirmDialog()
 

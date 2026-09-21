@@ -59,8 +59,14 @@ describe('App shell (US-260)', () => {
 
     expect(wrapper.find('.app-shell').exists()).toBe(true)
     expect(wrapper.find('.app-title').text()).toBe('MiGuOrca')
-    expect(wrapper.find('.brand-eyebrow').text()).toBe('桌面番剧工作台')
-    expect(wrapper.find('.workspace-status').text()).toContain('Auto Bangumi：需检查')
+    // Stage 46 (US-361): the generated design has no visible brand mark or
+    // eyebrow; the brand is text-only with an accessible return name.
+    expect(wrapper.find('.brand-mark').exists()).toBe(false)
+    expect(wrapper.find('.brand-eyebrow').exists()).toBe(false)
+    expect(wrapper.find('.brand-block').attributes('aria-label')).toBe('返回添加番剧')
+    // No connection summary is loaded in this unit mount, so the compact pill
+    // shows the honest "needs checking" label rather than an empty chip.
+    expect(wrapper.find('.workspace-status').text()).toContain('需检查')
 
     const navLinks = wrapper.findAll('.top-nav .nav-link')
     expect(navLinks).toHaveLength(4)
@@ -68,8 +74,10 @@ describe('App shell (US-260)', () => {
     expect(navLinks[1]?.text()).toContain('追番方案')
     expect(navLinks[2]?.text()).toContain('追番管理')
     expect(navLinks[3]?.text()).toContain('设置')
+    expect(navLinks[0]?.attributes('id')).toBe('shell-nav-1')
+    expect(navLinks[3]?.attributes('id')).toBe('shell-nav-4')
     expect(navLinks[0]?.attributes('aria-current')).toBe('page')
-    expect(navLinks[0]?.find('.nav-current-marker').text()).toBe('当前')
+    expect(navLinks[0]?.find('.nav-current-marker').exists()).toBe(false)
     expect(navLinks.slice(1).every((link) => link.attributes('aria-current') === undefined)).toBe(true)
 
     const main = wrapper.find('.app-main')

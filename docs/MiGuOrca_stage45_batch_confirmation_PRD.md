@@ -1,9 +1,10 @@
 # Stage 45：批量确认范围、结果恢复与完成导航
 
-状态：本地开发与收尾门禁完成，待发布授权。
+状态：已完成并经 PR #74 合并到 `main`，merge `75e144194644b920c446080c7becaca4a14f3704`。
 基线：Stage 44 已经 PR #73 合并到 `origin/main`，merge `9073fed30d3edd481ad5f4339c4b44b04d235a5e`。
 准备分支：`ralph/stage45-batch-confirmation`。
-执行状态：[Ralph prd.json](../scripts/ralph/prd.json) 与 [progress](../scripts/ralph/progress.txt)。
+执行快照：[Ralph prd.json](../scripts/ralph/archive/2026-09-20-stage45-batch-confirmation/prd.json) 与
+[progress](../scripts/ralph/archive/2026-09-20-stage45-batch-confirmation/progress.txt)。
 
 ## 1. 目标与范围
 
