@@ -34,12 +34,14 @@ import {
 const props = withDefaults(defineProps<{
   candidate: MikanCandidate
   query: string
+  compact?: boolean
   disabled?: boolean
   confirmedSeason: number | null
   loading?: boolean
   error?: string
 }>(), {
   disabled: false,
+  compact: false,
   loading: false,
   error: '',
 })
@@ -79,90 +81,130 @@ function onPosterError(): void {
 </script>
 
 <template>
-  <li class="candidate-card" :class="{ 'is-generating': loading }">
-    <strong class="candidate-title">{{ candidateTitle }}</strong>
+  <li class="candidate-card" :class="{ 'is-generating': loading, 'is-compact': compact }">
+    <div class="candidate-card-poster">
+      <img
+        v-if="showPoster"
+        class="candidate-poster"
+        :src="posterSrc ?? undefined"
+        alt=""
+        loading="lazy"
+        decoding="async"
+        @error="onPosterError"
+      >
+      <div v-else class="candidate-poster candidate-poster-placeholder">暂无封面</div>
+    </div>
 
-    <span v-if="candidate.recommendation" class="candidate-recommendation">
-      {{ candidate.recommendation }}
-    </span>
+    <div class="candidate-card-content">
+      <strong class="candidate-title" :title="candidateTitle">{{ candidateTitle }}</strong>
 
-    <div class="candidate-progress">{{ episodeProgressText(candidate.total_episodes) }}</div>
+      <span v-if="candidate.recommendation" class="candidate-recommendation">
+        {{ candidate.recommendation }}
+      </span>
 
-    <img
-      v-if="showPoster"
-      class="candidate-poster"
-      :src="posterSrc ?? undefined"
-      alt=""
-      loading="lazy"
-      decoding="async"
-      @error="onPosterError"
-    >
-    <div v-else class="candidate-poster candidate-poster-placeholder">暂无封面</div>
+      <div class="candidate-progress">{{ episodeProgressText(candidate.total_episodes) }}</div>
 
-    <template v-if="needsConfirmation && seasonNumber !== null">
-      <label class="candidate-season-confirmation">
-        <input
-          type="checkbox"
-          class="base-checkbox"
-          :checked="confirmedSeason === seasonNumber"
-          :aria-describedby="`candidate-season-confirmation-help-${candidate.bangumi_id}`"
-          @change="onSeasonChange"
-        >
-        <span :id="`candidate-season-confirmation-help-${candidate.bangumi_id}`">
-          我确认此合集为第{{ seasonNumber }}季（候选标题未提供季数证据）
-        </span>
-      </label>
-    </template>
-    <p v-else-if="candidate.season_evidence?.status === 'CONFLICT'" class="candidate-season-conflict">
-      候选合集季数与搜索识别结果冲突，请先人工核对。
-    </p>
-    <p v-else class="candidate-season-evidence">{{ seasonEvidenceText(candidate) }}</p>
+      <template v-if="needsConfirmation && seasonNumber !== null">
+        <label class="candidate-season-confirmation">
+          <input
+            type="checkbox"
+            class="base-checkbox"
+            :checked="confirmedSeason === seasonNumber"
+            :aria-describedby="`candidate-season-confirmation-help-${candidate.bangumi_id}`"
+            @change="onSeasonChange"
+          >
+          <span :id="`candidate-season-confirmation-help-${candidate.bangumi_id}`">
+            我确认此合集为第{{ seasonNumber }}季（候选标题未提供季数证据）
+          </span>
+        </label>
+      </template>
+      <p v-else-if="candidate.season_evidence?.status === 'CONFLICT'" class="candidate-season-conflict">
+        候选合集季数与搜索识别结果冲突，请先人工核对。
+      </p>
+      <p v-else class="candidate-season-evidence">{{ seasonEvidenceText(candidate) }}</p>
 
-    <BaseButton
-      class="candidate-select"
-      variant="primary"
-      :disabled="disabled || blocked"
-      :loading="loading"
-      loading-label="正在生成草案…"
-      :aria-disabled="String(disabled || blocked || loading)"
-      :aria-label="`${error ? '重试生成草案' : '选择此合集'}：${candidateTitle}`"
-      :aria-describedby="error ? errorId : undefined"
-      @click="emit('select')"
-    >
-      {{ error ? '重试生成草案' : '选择此合集' }}
-    </BaseButton>
+      <BaseButton
+        class="candidate-select"
+        variant="primary"
+        :disabled="disabled || blocked"
+        :loading="loading"
+        loading-label="正在生成草案…"
+        :aria-disabled="String(disabled || blocked || loading)"
+        :aria-label="`${error ? '重试生成草案' : '选择此合集'}：${candidateTitle}`"
+        :aria-describedby="error ? errorId : undefined"
+        @click="emit('select')"
+      >
+        {{ error ? '重试生成草案' : '选择此合集' }}
+      </BaseButton>
 
-    <p v-if="loading" class="candidate-generating-status" role="status">
-      正在生成订阅草案…
-    </p>
-    <p v-else-if="error" :id="errorId" class="candidate-generate-error" role="alert">
-      {{ error }}
-    </p>
+      <p v-if="loading" class="candidate-generating-status" role="status">
+        正在生成订阅草案…
+      </p>
+      <p v-else-if="error" :id="errorId" class="candidate-generate-error" role="alert">
+        {{ error }}
+      </p>
 
-    <!-- F4: 公开封面对应的技术编号与解析搜索词属于诊断信息，默认层不显示；
-         需要核对时按需展开。 -->
-    <details class="candidate-advanced">
-      <summary>高级信息</summary>
-      <dl class="candidate-advanced-grid">
-        <div class="candidate-advanced-row"><dt>合集编号</dt><dd>{{ candidate.bangumi_id }}</dd></div>
-        <div class="candidate-advanced-row"><dt>匹配搜索词</dt><dd>{{ candidate.source_query || query }}</dd></div>
-      </dl>
-    </details>
+      <!-- F4: 公开封面对应的技术编号与解析搜索词属于诊断信息，默认层不显示；
+           需要核对时按需展开。 -->
+      <details class="candidate-advanced">
+        <summary>高级信息</summary>
+        <dl class="candidate-advanced-grid">
+          <div class="candidate-advanced-row"><dt>合集编号</dt><dd>{{ candidate.bangumi_id }}</dd></div>
+          <div class="candidate-advanced-row"><dt>匹配搜索词</dt><dd>{{ candidate.source_query || query }}</dd></div>
+        </dl>
+      </details>
+    </div>
   </li>
 </template>
 
 <style scoped>
 .candidate-card {
+  --candidate-poster-size: 120px;
+  --candidate-card-gap: var(--space-4);
+  position: relative;
   display: grid;
-  gap: 0.35rem;
+  grid-template-columns: minmax(0, var(--candidate-poster-size)) minmax(0, 1fr);
+  column-gap: var(--candidate-card-gap);
+  align-items: start;
+  min-height: 196px;
+  height: 196px;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
-  padding: 0.75rem;
+  border-radius: var(--radius-md);
+  /* The 1px border is included in the 16px baseline inset. */
+  padding: calc(var(--space-4) - var(--control-border-width));
+  padding-bottom: 0;
   background: var(--color-bg);
 }
 
+.candidate-card-poster,
+.candidate-poster {
+  width: var(--candidate-poster-size);
+  height: 160px;
+}
+
+.candidate-poster {
+  display: block;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+}
+
+.candidate-card-content {
+  min-width: 0;
+  height: 180px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-1);
+}
+
 .candidate-title {
-  font-weight: 600;
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: var(--type-card-title);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow-wrap: anywhere;
 }
 
@@ -176,10 +218,16 @@ function onPosterError(): void {
   color: var(--color-text-muted);
 }
 
-.candidate-progress,
 .candidate-season-evidence {
-  font-size: 0.875rem;
+  font-size: var(--type-label);
   color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.candidate-progress {
+  color: var(--color-text-muted);
+  font-size: var(--type-caption);
+  line-height: 1.5;
   overflow-wrap: anywhere;
 }
 
@@ -216,18 +264,13 @@ function onPosterError(): void {
 }
 
 .candidate-poster {
-  width: min(8rem, 100%);
-  max-width: 8rem;
-  height: 8rem;
-  object-fit: cover;
-  border-radius: 4px;
+  flex: 0 0 auto;
 }
 
 .candidate-poster-placeholder {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 6rem;
   border: 1px dashed var(--color-border);
   color: var(--color-text-muted);
   font-size: 0.8125rem;
@@ -247,8 +290,102 @@ function onPosterError(): void {
 }
 
 .candidate-select {
-  justify-self: start;
+  width: 100%;
   max-width: 100%;
+  margin-top: auto;
+}
+
+.candidate-card:not(.is-compact) .candidate-advanced {
+  position: absolute;
+  top: calc(var(--space-4) + 160px);
+  left: var(--space-4);
+  z-index: 1;
+  width: var(--candidate-poster-size);
+  background: var(--color-bg);
+}
+
+.candidate-card:not(.is-compact):has(.candidate-advanced[open]) {
+  height: auto;
+  padding-bottom: calc(var(--space-4) - var(--control-border-width));
+}
+
+.candidate-card:not(.is-compact):has(.candidate-advanced[open]) .candidate-card-content {
+  height: auto;
+}
+
+.candidate-card:not(.is-compact):has(.candidate-advanced[open]) .candidate-advanced {
+  position: static;
+  width: auto;
+}
+
+.candidate-card.is-compact {
+  --candidate-poster-size: 8rem;
+  display: grid;
+  grid-template-columns: 1fr;
+  height: auto;
+  min-height: 0;
+  gap: 0.35rem;
+  padding: 0.75rem;
+  border-radius: 6px;
+}
+
+.candidate-card.is-compact .candidate-card-content {
+  display: contents;
+  height: auto;
+}
+
+.candidate-card.is-compact .candidate-card-poster {
+  order: 5;
+  width: auto;
+  height: auto;
+}
+
+.candidate-card.is-compact .candidate-poster {
+  width: min(8rem, 100%);
+  max-width: 8rem;
+  height: 8rem;
+  border-radius: 4px;
+}
+
+.candidate-card.is-compact .candidate-title {
+  order: 1;
+  display: block;
+  font-size: inherit;
+  font-weight: 600;
+  line-height: inherit;
+  -webkit-line-clamp: unset;
+}
+
+.candidate-card.is-compact .candidate-recommendation {
+  order: 2;
+}
+
+.candidate-card.is-compact .candidate-progress {
+  order: 3;
+}
+
+.candidate-card.is-compact .candidate-season-confirmation,
+.candidate-card.is-compact .candidate-season-conflict,
+.candidate-card.is-compact .candidate-season-evidence {
+  order: 4;
+}
+
+.candidate-card.is-compact .candidate-select {
+  order: 6;
+  width: auto;
+  margin-top: 0;
+}
+
+.candidate-card.is-compact .candidate-generating-status,
+.candidate-card.is-compact .candidate-generate-error {
+  order: 7;
+}
+
+.candidate-card.is-compact .candidate-advanced {
+  order: 8;
+  position: static;
+  width: auto;
+  background: transparent;
 }
 
 .candidate-generating-status,

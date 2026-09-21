@@ -167,6 +167,9 @@ watch(
 const showSingleHome = computed(
   () => mode.value === 'single' && !hasResults.value && !draftRequest.value,
 )
+const showLegacyWorkbench = computed(
+  () => mode.value === 'batch' || Boolean(draftRequest.value),
+)
 // US-343: which candidate owns the in-flight generation, and the sanitized
 // failure that stays beside a candidate after its generation failed.
 const generatingCandidateId = ref<string | null>(null)
@@ -512,12 +515,12 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
     </ol>
   </div>
 
-  <h1 v-else id="workbench-heading" class="workbench-title">添加番剧</h1>
+  <h1 v-else-if="mode === 'batch'" id="workbench-heading" class="workbench-title">添加番剧</h1>
 
   <!-- 非英雄区状态（批量 / 已有候选 / 草案）沿用既有面板结构；
        空结果或搜索中仍显示英雄区，因此这里用 !showSingleHome 而不是 v-else，
        以便下面的「搜索结果」面板能与英雄区共存。 -->
-  <PanelSection v-if="!showSingleHome" title="搜索候选合集" class="workbench-panel">
+  <PanelSection v-if="showLegacyWorkbench" title="搜索候选合集" class="workbench-panel">
     <ol class="journey-steps" aria-label="添加番剧步骤">
       <li class="is-current">输入名称</li>
       <li>选择真实合集</li>
@@ -546,11 +549,21 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
   </PanelSection>
 
     <!-- ── search results: created by a search, never before one ──────── -->
-    <PanelSection
+    <section
       v-if="mode === 'single' && !draftRequest && searchStarted"
-      title="搜索结果"
       class="search-results-panel"
+      aria-labelledby="candidate-search-heading"
     >
+      <div class="candidate-search-summary-row">
+        <h2 id="candidate-search-heading">搜索结果</h2>
+        <p v-if="searchResult && hasResults" class="candidate-search-summary" role="status" aria-live="polite">
+          已搜索「{{ searchResult.query }}」，请选择要审核的真实 MiKan 合集。
+        </p>
+        <div v-if="searchResult && hasResults" class="search-summary-actions">
+          <span class="search-summary-label">搜索摘要</span>
+          <BaseButton id="mikan-edit-search" variant="secondary" @click="editSearch">修改搜索</BaseButton>
+        </div>
+      </div>
       <div
         id="mikan-candidate-search-result"
         class="candidate-list-wrapper"
@@ -605,14 +618,16 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
           </form>
         </section>
         <template v-if="searchResult && hasResults">
-          <p class="step-label">步骤 2 · 选择合集</p>
-          <p class="candidate-search-summary" role="status" aria-live="polite">
-            已搜索「{{ searchResult.query }}」，请选择要审核的真实 MiKan 合集。
-          </p>
-          <div class="search-summary-actions">
-            <span class="search-summary-label">搜索摘要</span>
-            <BaseButton id="mikan-edit-search" variant="secondary" @click="editSearch">修改搜索</BaseButton>
-          </div>
+          <CandidateCollectionList
+            :candidates="searchResult.candidates"
+            :query="searchResult.query"
+            :disabled="searchLoading || (draftLoading && generatingCandidateId === null)"
+            :loading-candidate-id="generatingCandidateId"
+            :candidate-errors="candidateErrors"
+            :confirmed-seasons="seasonConfirmations"
+            @select="generateFromCandidate"
+            @update:confirmed-season="(bangumiId: string, season: number | null) => (seasonConfirmations = { ...seasonConfirmations, [bangumiId]: season })"
+          />
           <details class="title-parse-summary">
             <summary>标题解析摘要（诊断信息）</summary>
             <dl class="detail-grid">
@@ -635,22 +650,12 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
               </ul>
             </template>
           </details>
-          <CandidateCollectionList
-            :candidates="searchResult.candidates"
-            :query="searchResult.query"
-            :disabled="searchLoading || (draftLoading && generatingCandidateId === null)"
-            :loading-candidate-id="generatingCandidateId"
-            :candidate-errors="candidateErrors"
-            :confirmed-seasons="seasonConfirmations"
-            @select="generateFromCandidate"
-            @update:confirmed-season="(bangumiId: string, season: number | null) => (seasonConfirmations = { ...seasonConfirmations, [bangumiId]: season })"
-          />
         </template>
       </div>
       <p v-if="parseNeedsReview && hasResults" class="field-help" id="candidate-parse-review-note">
         标题解析结果需人工核对；展开「标题解析摘要」查看识别标题、季度与解析来源。
       </p>
-    </PanelSection>
+    </section>
 
     <!-- ── draft preview ───────────────────────────────────────────── -->
     <SingleAnimeReviewPanel
@@ -839,6 +844,41 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
   gap: var(--space-3);
 }
 
+.search-results-panel {
+  width: 100%;
+  margin-bottom: var(--space-5);
+}
+
+.candidate-search-summary-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: 44px;
+  margin-bottom: var(--space-5);
+}
+
+.candidate-search-summary-row h2 {
+  margin: 0;
+  font-size: var(--type-section-title);
+  line-height: 1.4;
+}
+
+.candidate-search-summary-row #mikan-edit-search {
+  width: 176px;
+}
+
+.candidate-search-summary {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: var(--type-label);
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .search-summary-label {
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
@@ -846,8 +886,8 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 }
 
 .candidate-list-wrapper {
-  display: grid;
-  gap: 0.75rem;
+  display: block;
+  container-type: inline-size;
 }
 
 .title-parse-summary {
@@ -907,14 +947,6 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
   padding-left: 1.25rem;
   display: grid;
   gap: 0.25rem;
-}
-
-.candidate-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 0.75rem;
 }
 
 .batch-workbench-section {
