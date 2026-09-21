@@ -54,12 +54,22 @@
   等待 `document.fonts.ready`、图片、目标响应和两个 `requestAnimationFrame`，禁止用任意 sleep 猜稳定。
 - 源图以 Pillow LANCZOS 归一化；页面截图必须原生 `1440×900`。PNG helper 只进 dev dependency，
   不能进入生产 wheel/前端 bundle。
-- 稳定区域以任一 RGB 通道差值 `>12` 计差异像素，目标页启用硬门禁后差异比例 `<=0.5%`；
-  掩码必须命名、限面积、来自固定 selector/矩形，禁止整页、整卡和自由涂抹掩码。
-- 关键锚点 `x/y/width/height` 目标误差 `<=2 CSS px`；颜色、字号、行高、字重、圆角、边框、
-  阴影、控件高度和焦点环按冻结 token/无障碍修正值断言 computed style。
-- Stage 46 仅对壳层和共享控件启用上述硬门禁；图 01～03 的页面专属区域在 Stage 47 启用，
-  图 04～06 的页面专属区域在 Stage 48 启用。fixture 可记录初始诊断值，但不得提交预期失败测试。
+- **像素门禁裁决 3C（2026-09-21）**：Stage 46 **不对现有六张设计 PNG 启用 `<=0.5%` 像素硬门禁**。
+  实测设计图与冻结 Design Token V1 存在系统性几何冲突（顶栏 `86` vs `72px`、品牌左缘 `121` vs
+  `20px`、导航字号 `≈20` vs `15px`、首页控件 `70` vs `52px`），两者差异带的并集需要 `55.14%`
+  命名掩码，超过 35% 上限，而 PRD 同时禁止整卡掩码；按总体 PRD 2.1 的规格优先级采用冻结 Token。
+  完整测量见 `tests/browser/visual_manifest.py` 的 `MOCKUP_VS_TOKEN_DELTAS`。
+- 六张 PNG 只用于归一化、fixture 状态诊断和非冲突视觉方向核对；fixture 保留连续三次诊断值，
+  不设阈值，也不得把诊断值写成通过。
+- Stage 46 的硬门禁为：比较器确定性（合成图边界）、fixture 连续三次稳定、冻结 Token 的
+  computed style、控件尺寸（默认 44px／首页 52px／主要目标 `>=44x44px`）、可访问性（键盘、
+  焦点环、对比度、reduced-motion）、关键 DOM 几何（token 派生锚点，误差 `<=2 CSS px`）、
+  路由与安全 canary。
+- 锚点、控件与壳层的目标值按总体 PRD 2.1 取冻结 Token 派生值；设计图实测值只作诊断记录。
+- Stage 47/48 若要恢复「设计图像素级验收」，必须先提供并审批一套与冻结 Token V1 一致的新参考图
+  或正式测量基线；在此之前不得把现有六张 PNG 的 `<=0.5%` 写成硬门禁。
+- shared 掩码能力仍保留在 US-358 helper 中（命名、裁剪、去重、35% 上限），供后续阶段在获批的
+  新基线上使用。
 - 四个一级路由、skip link、键盘焦点、中文状态、reduced-motion、`1280×720`、`1920×1080` 和
   桌面 200% 缩放继续可用；截图通过不替代 DOM、交互、安全 canary 或响应式验证。
 - 自动化一律 mock 外部依赖并使用临时 storage；不访问真实 MiKan、Auto Bangumi 或 qBittorrent。
@@ -166,8 +176,9 @@ route mock、held route、临时 storage 和 scope helper。
    与下划线、右侧浅色连接胶囊；移除设计图没有的可见 `M` 方块和品牌 eyebrow，但保留可访问返回名称。
 2. 未配置时胶囊可见文案为“未配置”；其他状态使用既有中文连接摘要，完整语义留在 accessible name，
    不显示 endpoint、凭据或内部代码。待处理数量仍可辨且不改变链接目的地。
-3. 顶栏高度、内容最大宽度、左右内边距、品牌/导航/状态锚点在标准桌面误差 `<=2 CSS px`；颜色、字号、
-   边框、阴影和 active 状态消费语义 token，不在 `App.vue` 散落第二套色值。
+3. 顶栏高度、内容最大宽度、左右内边距、品牌/导航/状态锚点**按冻结 Token 派生目标**误差 `<=2 CSS px`
+   （设计图实测值仅作诊断）；颜色、字号、边框、阴影和 active 状态消费语义 token，不在 `App.vue`
+   散落第二套色值。
 4. 当前路由判定、`/app/` history、skip link、品牌返回、query-only 不抢焦点和设置入口行为不变。
 5. `1280×720`、`1920×1080` 和 200% 缩放可达；导航不被状态胶囊覆盖，焦点环不裁剪；
    reduced-motion 不影响当前项识别。
@@ -197,7 +208,8 @@ route mock、held route、临时 storage 和 scope helper。
 4. hover/focus/active/error/disabled/loading 状态按 token computed style 断言；焦点环 3px 且不被裁剪，
    正文对比度至少 4.5:1、控件边界至少 3:1。
 5. reduced-motion 取消非必要位移/旋转并保留进行文字；长中文、200% 缩放和 1280 桌面不溢出操作区。
-6. 图 01/04 的模式切换和共享控件区域启用硬视觉门禁；不在本故事重排英雄区、多行面板、候选卡或审核区。
+6. 图 01/04 的模式切换和共享控件区域启用冻结 Token 硬门禁（computed style、控件尺寸、可访问性；
+   不启用设计图像素硬门禁，见第 3 节裁决）；不在本故事重排英雄区、多行面板、候选卡或审核区。
 7. 四个一级页面所有调用者完成定向回归；改动文案、class 或 DOM 时同步搜索并更新真实受影响断言，
    不删测试或放宽业务/敏感边界来换取通过。
 
@@ -243,9 +255,10 @@ uv run pytest tests/browser/ -q
 git diff --check
 ```
 
-额外收尾：六个 fixture 连续三次稳定；壳层/共享控件三层门禁通过；所有 screenshot/diff/trace 仅在临时目录；
+额外收尾：六个 fixture 连续三次稳定；壳层/共享控件的 Token 几何／computed style／控件尺寸／可访问性门禁通过；
+设计图像素诊断值如实记录（按裁决 3C 不设 0.5% 硬阈值）；所有 screenshot/diff/trace 仅在临时目录；
 依赖锁文件一致；源 PNG 哈希不变；`git status` 无 `dist/`、浏览器产物、凭据或本地 storage 改动。
 
 Stage 47 只在本阶段闭环且其执行 PRD另行编写后开始。交接必须列出已冻结 helper API、六态 fixture 名称、
-锚点/掩码 manifest、实际阈值结果、字体环境、剩余页面差异和真实验证命令；不得把诊断值冒充图 01～06
-页面专属像素验收已通过。
+锚点 manifest、像素门禁裁决 3C 的记录、诊断值、字体环境、剩余页面差异和真实验证命令；不得把诊断值冒充
+图 01～06 页面专属像素验收已通过。

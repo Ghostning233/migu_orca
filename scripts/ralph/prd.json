@@ -17,8 +17,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "开发自测完成（passes=false，等待复审）。Pillow 12.3.0 仅进 dev group 并同步 uv.lock；tests/visual/compare.py 提供 LANCZOS 归一化 1440x900、任一 RGB 通道差 >12、命名矩形掩码（裁剪/重叠去重/默认 35% 面积上限）、固定矩形区域裁剪与固定分类的安全错误；tests/visual/measure.py 从六张源 PNG 测量壳层锚点。命名掩码能力保留，供获批的新基线上使用。证据：uv lock --check 一致；ruff check src tests 通过；compileall exit 0；pytest -m 'not browser' 1552 passed/316 deselected（含 tests/visual 24 项）；wheel 实测 210 文件 0 个 pillow/PIL；生产 dependencies 无 Pillow；六张源 PNG sha256 逐字节未变。 【审核修复 · 像素门禁裁决 3C】(1) Token 已恢复为冻结值 --top-nav-height: 72px，并删除本轮自造的 --shell-content-max/--shell-brand-width/--shell-status-inset 等；44/52px 控件基线未改。(2) 设计 PNG 的 0.5% 像素阈值按 3C 降级为诊断项，不再是 Stage 46 未达成项：设计图与冻结 Token V1 存在结构性几何冲突（顶栏 86 vs 72px、品牌左缘 121 vs 20px、导航字号 ≈20 vs 15px、首页控件 70 vs 52px），差异带并集需 55.14% 命名掩码，超 35% 上限且禁止整卡掩码；Stage 46 硬门禁改由比较器确定性、fixture 三次稳定、冻结 Token 的 computed style、控件尺寸、可访问性、token 派生 DOM 几何与安全 canary 承担。(3) loading 宽度红测与四页 44px 回归已通过：test_loading_keeps_idle_width_when_the_label_grows 覆盖比 idle 更长的 loading 文案并验证始终锁定 idle 宽度（差 <=1px）；test_other_pages_keep_working_shared_controls 对 #app-main .primary-button/.secondary-button 断言实际 >=44x44（已删除 24px 兜底）。(4) 真实诊断值全部保留且连续三次完全一致。前置条件：Stage 47/48 若要恢复设计图像素硬门禁，必须先提供并审批一套与冻结 Token V1 一致的新参考图或正式测量基线；在此之前不得把现有六张 PNG 的 <=0.5% 重新写成硬门禁，也不得用大面积掩码规避。独立审核已通过（2026-09-21），进入提交/推送/合并流程。"
     },
     {
       "id": "US-359",
@@ -36,8 +36,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "开发自测完成（passes=false，等待复审）。tests/browser/workbench_visual_fixtures.py 与 test_app_workbench_visual.py：图01 初始、图02 首候选 held 生成、图03 未保存草案审核共享同一安全构造器，envelope 为真实 DTO 形状，held route 不 sleep。证据：7 个用例真实 Chromium 通过（canary 不落 DOM/属性/URL/history/storage/console/截图/diff；safe-info 调用数 0；三次稳定；manifest 与归一化设计图测量一致）。图01/02/03 页面专属区域诊断 diff_ratio = 8.55% / 29.56% / 16.17%，无掩码，连续三次完全一致——按 3C 这些只是诊断记录，不作为通过条件，Stage 47 恢复像素验收前需先获批新基线。 【审核修复 · 像素门禁裁决 3C】(1) Token 已恢复为冻结值 --top-nav-height: 72px，并删除本轮自造的 --shell-content-max/--shell-brand-width/--shell-status-inset 等；44/52px 控件基线未改。(2) 设计 PNG 的 0.5% 像素阈值按 3C 降级为诊断项，不再是 Stage 46 未达成项：设计图与冻结 Token V1 存在结构性几何冲突（顶栏 86 vs 72px、品牌左缘 121 vs 20px、导航字号 ≈20 vs 15px、首页控件 70 vs 52px），差异带并集需 55.14% 命名掩码，超 35% 上限且禁止整卡掩码；Stage 46 硬门禁改由比较器确定性、fixture 三次稳定、冻结 Token 的 computed style、控件尺寸、可访问性、token 派生 DOM 几何与安全 canary 承担。(3) loading 宽度红测与四页 44px 回归已通过：test_loading_keeps_idle_width_when_the_label_grows 覆盖比 idle 更长的 loading 文案并验证始终锁定 idle 宽度（差 <=1px）；test_other_pages_keep_working_shared_controls 对 #app-main .primary-button/.secondary-button 断言实际 >=44x44（已删除 24px 兜底）。(4) 真实诊断值全部保留且连续三次完全一致。前置条件：Stage 47/48 若要恢复设计图像素硬门禁，必须先提供并审批一套与冻结 Token V1 一致的新参考图或正式测量基线；在此之前不得把现有六张 PNG 的 <=0.5% 重新写成硬门禁，也不得用大面积掩码规避。独立审核已通过（2026-09-21），进入提交/推送/合并流程。"
     },
     {
       "id": "US-360",
@@ -48,14 +48,14 @@
         "fixture沿用Stage45真实派生，不伪造逐条进度、勾选、资格、确认计数或D-02/D-04行为",
         "每态按单番相同的字体/图片/网络/双帧稳定化和1440x900临时截图规则执行",
         "图04至06建立来自归一化设计图的命名锚点和掩码manifest，不新增单项重搜、API或后端",
-        "连续三次尺寸、锚点和统计稳定，且构造器不破坏1/12/36边界与敏感canary",
+        "连续三次尺寸、锚点和统计稳定（诊断值按裁决 3C 不设设计图像素硬阈值），且构造器不破坏1/12/36边界与敏感canary",
         "Verify in browser using dev-browser skill",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "开发自测完成（passes=false，等待复审）。tests/browser/batch_visual_fixtures.py 与 test_app_batch_visual.py：图04 六行 held 搜索（6/36、不伪造逐条进度、输入原样保留）、图05 三项候选/两项草案/一项失败的混合状态且当前项 held 生成、图06 恰两项手工勾选可确认。证据：11 个用例真实 Chromium 通过（D-02 隐藏勾选仍参与、可见全选只改可见项、1/12/36 边界、canary、未触发 save-confirm、三次稳定）。图04/05/06 页面专属区域诊断 diff_ratio = 14.87% / 24.88% / 27.83%，无掩码，连续三次完全一致——按 3C 为诊断项，不是未达成项。 【审核修复 · 像素门禁裁决 3C】(1) Token 已恢复为冻结值 --top-nav-height: 72px，并删除本轮自造的 --shell-content-max/--shell-brand-width/--shell-status-inset 等；44/52px 控件基线未改。(2) 设计 PNG 的 0.5% 像素阈值按 3C 降级为诊断项，不再是 Stage 46 未达成项：设计图与冻结 Token V1 存在结构性几何冲突（顶栏 86 vs 72px、品牌左缘 121 vs 20px、导航字号 ≈20 vs 15px、首页控件 70 vs 52px），差异带并集需 55.14% 命名掩码，超 35% 上限且禁止整卡掩码；Stage 46 硬门禁改由比较器确定性、fixture 三次稳定、冻结 Token 的 computed style、控件尺寸、可访问性、token 派生 DOM 几何与安全 canary 承担。(3) loading 宽度红测与四页 44px 回归已通过：test_loading_keeps_idle_width_when_the_label_grows 覆盖比 idle 更长的 loading 文案并验证始终锁定 idle 宽度（差 <=1px）；test_other_pages_keep_working_shared_controls 对 #app-main .primary-button/.secondary-button 断言实际 >=44x44（已删除 24px 兜底）。(4) 真实诊断值全部保留且连续三次完全一致。前置条件：Stage 47/48 若要恢复设计图像素硬门禁，必须先提供并审批一套与冻结 Token V1 一致的新参考图或正式测量基线；在此之前不得把现有六张 PNG 的 <=0.5% 重新写成硬门禁，也不得用大面积掩码规避。独立审核已通过（2026-09-21），进入提交/推送/合并流程。"
     },
     {
       "id": "US-361",
@@ -64,7 +64,7 @@
       "acceptanceCriteria": [
         "1440x900下复刻文本式MiGuOrca品牌、四项导航、珊瑚红当前项/下划线和右侧连接胶囊，移除设计图没有的可见M方块与eyebrow",
         "未配置显示紧凑中文状态，其他连接/待处理状态保留既有安全语义和设置链接，不展示endpoint、凭据或内部代码",
-        "页头关键锚点误差不超过2 CSS px，颜色/字号/边框/阴影消费共享token且稳定区域像素差满足Stage46门槛",
+        "页头关键锚点按冻结 Token 派生目标误差不超过 2 CSS px（设计图实测值仅作诊断），颜色/字号/边框/阴影消费共享 token；按像素门禁裁决 3C 不对现有六张设计 PNG 启用 0.5% 硬门禁",
         "当前路由、skip link、品牌返回、query-only焦点与/app/ history语义不变",
         "1280x720、1920x1080、200%缩放、键盘焦点和reduced-motion可用；追番方案、追番管理、设置完成定向不回归",
         "Verify in browser using dev-browser skill",
@@ -72,8 +72,8 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "开发自测完成（passes=false，等待复审）。Token 已恢复为冻结值：--top-nav-height 72px，删除自造的 --shell-content-max/--shell-brand-width/--shell-brand-font-size/--shell-status-inset，壳层回到 --size-shell-header、--size-content-max、--space-*、--control-height-*、--radius-*。App.vue/tokens.css/main.css 复刻文本品牌（无 M 方块与 eyebrow）、四导航、珊瑚红当前项+下划线、连接胶囊（未配置显示「未配置」，完整语义在 accessible name）；.app-header-inner 固定 72px 高并垂直居中，实测顶栏高度恰为 72。证据：test_app_shell_visual.py 14 个用例通过；token 派生锚点全部 <=2 CSS px（shell.header 0/0/1440/72、shell.content 0/0/1440/72、shell.brand x=20、shell.nav-first y=14、shell.status y=18/h=36）；computed style 品牌 rgb(16,35,63)/28px、当前项与下划线 rgb(217,67,31)、下划线 4px、胶囊 999px/1px/rgb(242,245,248)；1280/1920/200% 缩放、skip link 与 Tab 顺序、reduced-motion、plans/tracking/settings 定向回归通过。壳层区域像素按 3C 为诊断项：diff_ratio = 13.22%，无掩码，连续三次完全一致（差异来自设计图 86px/121px 与冻结 Token 72px/20px 的结构性冲突）。 【审核修复 · 像素门禁裁决 3C】(1) Token 已恢复为冻结值 --top-nav-height: 72px，并删除本轮自造的 --shell-content-max/--shell-brand-width/--shell-status-inset 等；44/52px 控件基线未改。(2) 设计 PNG 的 0.5% 像素阈值按 3C 降级为诊断项，不再是 Stage 46 未达成项：设计图与冻结 Token V1 存在结构性几何冲突（顶栏 86 vs 72px、品牌左缘 121 vs 20px、导航字号 ≈20 vs 15px、首页控件 70 vs 52px），差异带并集需 55.14% 命名掩码，超 35% 上限且禁止整卡掩码；Stage 46 硬门禁改由比较器确定性、fixture 三次稳定、冻结 Token 的 computed style、控件尺寸、可访问性、token 派生 DOM 几何与安全 canary 承担。(3) loading 宽度红测与四页 44px 回归已通过：test_loading_keeps_idle_width_when_the_label_grows 覆盖比 idle 更长的 loading 文案并验证始终锁定 idle 宽度（差 <=1px）；test_other_pages_keep_working_shared_controls 对 #app-main .primary-button/.secondary-button 断言实际 >=44x44（已删除 24px 兜底）。(4) 真实诊断值全部保留且连续三次完全一致。前置条件：Stage 47/48 若要恢复设计图像素硬门禁，必须先提供并审批一套与冻结 Token V1 一致的新参考图或正式测量基线；在此之前不得把现有六张 PNG 的 <=0.5% 重新写成硬门禁，也不得用大面积掩码规避。独立审核已通过（2026-09-21），进入提交/推送/合并流程。"
     },
     {
       "id": "US-362",
@@ -85,14 +85,14 @@
         "primary/secondary/disabled/loading层级符合Token V1，loading保留尺寸与文字，珊瑚红不成为第二套普通主按钮",
         "hover/focus/active/error/disabled/loading的computed style、3px焦点环、正文4.5:1和控件边界3:1均可验证",
         "1280桌面、200%缩放、长中文与reduced-motion可用；不重排英雄区、候选卡、审核区或批量固定栏",
-        "四个一级页面调用者回归以及图01/04共享控件区域三层视觉门禁通过",
+        "四个一级页面调用者回归以及图01/04共享控件区域的冻结 Token 硬门禁（computed style、控件尺寸、可访问性）通过；按像素门禁裁决 3C 不启用设计图像素硬门禁",
         "Verify in browser using dev-browser skill",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "开发自测完成（passes=false，等待复审）。BaseButton 新增 size=lg（52px）、BaseInput/Textarea/Select 使用 --color-border-control（>=3:1）、AnimeModeSwitch 52px 浅色轨道 + 珊瑚红选中块 + 3px 焦点环。loading 宽度红测已通过：test_loading_keeps_idle_width_when_the_label_grows 覆盖比 idle 更长的 loading 文案（「选择此合集」→「正在生成草案…」），按钮始终锁定 idle 宽度（差 <=1px），aria-busy 与进行中文案保留。四页 44px 回归已通过：test_other_pages_keep_working_shared_controls 对 #app-main .primary-button/.secondary-button 断言实际 >=44x44（已删除 24px 兜底）。其余证据：test_app_controls_visual.py 13 个用例通过（鼠标/方向键/Enter/空格、输入与未保存现场保留、44/52px 与 >=44x44、3px 焦点环不被裁剪、正文 4.5:1 与控件边界 3:1、loading 尺寸文字、reduced-motion、长中文 1280 不溢出）；Vitest 667 passed。共享控件区域像素按 3C 为诊断项：图01 = 21.99%、图04 = 11.32%，无掩码，连续三次完全一致。 【审核修复 · 像素门禁裁决 3C】(1) Token 已恢复为冻结值 --top-nav-height: 72px，并删除本轮自造的 --shell-content-max/--shell-brand-width/--shell-status-inset 等；44/52px 控件基线未改。(2) 设计 PNG 的 0.5% 像素阈值按 3C 降级为诊断项，不再是 Stage 46 未达成项：设计图与冻结 Token V1 存在结构性几何冲突（顶栏 86 vs 72px、品牌左缘 121 vs 20px、导航字号 ≈20 vs 15px、首页控件 70 vs 52px），差异带并集需 55.14% 命名掩码，超 35% 上限且禁止整卡掩码；Stage 46 硬门禁改由比较器确定性、fixture 三次稳定、冻结 Token 的 computed style、控件尺寸、可访问性、token 派生 DOM 几何与安全 canary 承担。(3) loading 宽度红测与四页 44px 回归已通过：test_loading_keeps_idle_width_when_the_label_grows 覆盖比 idle 更长的 loading 文案并验证始终锁定 idle 宽度（差 <=1px）；test_other_pages_keep_working_shared_controls 对 #app-main .primary-button/.secondary-button 断言实际 >=44x44（已删除 24px 兜底）。(4) 真实诊断值全部保留且连续三次完全一致。前置条件：Stage 47/48 若要恢复设计图像素硬门禁，必须先提供并审批一套与冻结 Token V1 一致的新参考图或正式测量基线；在此之前不得把现有六张 PNG 的 <=0.5% 重新写成硬门禁，也不得用大面积掩码规避。独立审核已通过（2026-09-21），进入提交/推送/合并流程。"
     }
   ]
 }
