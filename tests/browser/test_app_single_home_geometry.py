@@ -182,8 +182,6 @@ class TestSingleHomeGeometry:
 
     def test_search_keeps_the_hero_in_place_while_loading(self, page: Page, live_server_url: str) -> None:
         """点击搜索后英雄区与两个控件保持在原位，不因状态切换而卸载。"""
-        import time
-
         _open_single_home(page, live_server_url)
         held: list[Any] = []
         page.route(
@@ -195,10 +193,13 @@ class TestSingleHomeGeometry:
             "submit": page.locator("#mikan-candidate-search-submit").bounding_box(),
         }
         page.fill("#mikan-candidate-query", "葬送的芙莉莲")
-        page.click("#mikan-candidate-search-submit")
-        deadline = time.monotonic() + 10
-        while not held and time.monotonic() < deadline:
-            page.wait_for_timeout(50)
+        # held route 语义：请求被保存后由测试显式 fulfill，handler 内不 sleep；
+        # 测试侧用 expect_request + 可观察的 loading 状态等待，不做轮询或固定延时。
+        with page.expect_request(
+            lambda request: request.method == "POST" and "/api/v1/mikan/candidates" in request.url
+        ):
+            page.click("#mikan-candidate-search-submit")
+        expect(page.locator("#mikan-candidate-search-submit")).to_have_attribute("aria-busy", "true")
         assert held, "candidate search was not held"
         after = {
             "query": page.locator("#mikan-candidate-query").bounding_box(),
@@ -321,3 +322,82 @@ class TestSingleHomeGeometry:
         for name, selector in HOME_SELECTORS.items():
             assert page.locator(selector).count() == 1, name
         assert (page.viewport_size["width"], page.viewport_size["height"]) == VIEWPORT
+
+    def test_mode_switch_preserves_each_mode_scene(self, page: Page, live_server_url: str) -> None:
+        """AC3：切换模式不得清除任一模式的输入、结果或未保存现场。"""
+        _open_single_home(page, live_server_url)
+        page.route(
+            "**/api/v1/mikan/candidates",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "ok": True,
+                        "result": {
+                            "query": "葬送的芙莉莲",
+                            "status": "FOUND",
+                            "parse_result": None,
+                            "attempted_queries": [],
+                            "error": None,
+                            "candidates": [
+                                {
+                                    "bangumi_id": "2353",
+                                    "title": "葬送的芙莉莲",
+                                    "mikan_url": "https://mikan.example/Home/Bangumi/2353",
+                                    "poster_url": None,
+                                    "source_query": "葬送的芙莉莲",
+                                    "aliases": [],
+                                    "season_evidence": {"status": "PROVEN", "season": 1, "requires_review": False},
+                                    "total_episodes": 28,
+                                }
+                            ],
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+            ),
+        )
+        page.fill("#mikan-candidate-query", "葬送的芙莉莲")
+        page.click("#mikan-candidate-search-submit")
+        expect(page.locator(".candidate-card")).to_have_count(1)
+
+        page.click("#anime-mode-batch")
+        page.fill("#batch-raw-input", "萌王S4")
+        expect(page.locator(".candidate-card")).to_have_count(0)
+        page.click("#anime-mode-single")
+        # 单番的搜索结果在切回后仍然保留（未被切换清除）。
+        expect(page.locator(".candidate-card")).to_have_count(1)
+        # 回到输入态后，单番输入也没有被清除。
+        page.click("#mikan-edit-search")
+        expect(page.locator("#mikan-candidate-query")).to_have_value("葬送的芙莉莲")
+        # 批量输入同样保留。
+        page.click("#anime-mode-batch")
+        assert page.input_value("#batch-raw-input") == "萌王S4"
+
+    def test_hero_title_and_subtitle_keep_fixed_height(self, page: Page, live_server_url: str) -> None:
+        """超长文案在固定高度的单行容器内截断，不推挤后续控件。"""
+        _open_single_home(page, live_server_url)
+        page.evaluate(
+            """() => {
+                document.querySelector('#workbench-heading').textContent = '超长标题'.repeat(80)
+                document.querySelector('.single-home-subtitle').textContent = '超长说明文字'.repeat(120)
+            }"""
+        )
+        boxes = page.evaluate(
+            """() => {
+                const read = (selector) => {
+                    const rect = document.querySelector(selector).getBoundingClientRect()
+                    return { y: rect.y, height: rect.height }
+                }
+                return {
+                    title: read('#workbench-heading'),
+                    subtitle: read('.single-home-subtitle'),
+                    mode: read('#anime-mode-switch'),
+                }
+            }"""
+        )
+        assert abs(boxes["title"]["height"] - 48.0) <= TOLERANCE
+        assert abs(boxes["subtitle"]["height"] - 24.0) <= TOLERANCE
+        gap = boxes["mode"]["y"] - (boxes["subtitle"]["y"] + boxes["subtitle"]["height"])
+        assert abs(gap - 24.0) <= TOLERANCE, gap
