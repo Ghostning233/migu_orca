@@ -460,7 +460,7 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
             :disabled="singleBusy"
           />
         </div>
-        <BaseButton id="mikan-candidate-search-submit" type="submit" variant="primary" :loading="searchLoading" :disabled="singleBusy || !query.trim()">
+        <BaseButton id="mikan-candidate-search-submit" type="submit" variant="primary" size="lg" :loading="searchLoading" :disabled="singleBusy || !query.trim()">
           搜索候选合集
         </BaseButton>
       </div>
@@ -618,7 +618,7 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
       </p>
       <p v-if="batchValidationError" id="batch-input-validation" class="field-error" role="alert">{{ batchValidationError }}</p>
       <div class="notification-actions">
-        <BaseButton id="batch-parse-submit" type="submit" variant="primary" :loading="batchSearchSubmitting" :disabled="batchSearchDisabled">
+        <BaseButton id="batch-parse-submit" type="submit" variant="primary" size="lg" :loading="batchSearchSubmitting" :disabled="batchSearchDisabled">
           搜索候选合集
         </BaseButton>
       </div>

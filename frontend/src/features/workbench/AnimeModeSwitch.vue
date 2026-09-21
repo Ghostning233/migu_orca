@@ -54,22 +54,29 @@ function onKeydown(event: KeyboardEvent, mode: AnimeMode): void {
 <style scoped>
 .anime-mode-switch {
   display: inline-flex;
-  gap: 0.2rem;
-  padding: 0.2rem;
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border: var(--border-default);
+  border-radius: var(--radius-pill);
   background: var(--color-surface-subtle);
 }
 
+/* Stage 46 (US-362): the segmented control is a light track with one clearly
+ * selected block, sized with the shared "home page large control" token. Every
+ * value comes from the semantic tokens; the selected block uses the coral
+ * accent because the design reserves it for the current choice, which is not a
+ * second general-purpose primary button. */
 .anime-mode-option {
-  min-height: var(--control-height);
-  padding: 0.35rem 0.9rem;
+  min-height: var(--control-height-lg);
+  min-width: var(--control-target-min);
+  padding-inline: var(--space-6);
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: transparent;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   font: inherit;
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
   cursor: pointer;
 }
 
@@ -79,6 +86,11 @@ function onKeydown(event: KeyboardEvent, mode: AnimeMode): void {
   font-weight: var(--font-weight-semibold);
 }
 
+.anime-mode-option:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
 .anime-mode-option:disabled {
   cursor: not-allowed;
   opacity: 0.6;
@@ -86,7 +98,9 @@ function onKeydown(event: KeyboardEvent, mode: AnimeMode): void {
 
 @media (prefers-reduced-motion: no-preference) {
   .anime-mode-option {
-    transition: background-color var(--motion-duration-fast) var(--motion-easing-standard), color var(--motion-duration-fast) var(--motion-easing-standard);
+    transition:
+      background-color var(--motion-duration-fast) var(--motion-easing-standard),
+      color var(--motion-duration-fast) var(--motion-easing-standard);
   }
 }
 </style>

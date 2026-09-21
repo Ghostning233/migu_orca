@@ -43,7 +43,7 @@ function onInput(event: Event): void {
   width: 100%;
   min-height: var(--control-height);
   padding: var(--control-padding-block) var(--control-padding-inline);
-  border: var(--control-border-width) solid var(--color-border-strong);
+  border: var(--control-border-width) solid var(--color-border-control);
   border-radius: var(--radius-md);
   background: var(--color-control-surface);
   color: var(--color-text);

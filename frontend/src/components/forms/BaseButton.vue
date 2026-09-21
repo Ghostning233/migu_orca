@@ -16,6 +16,8 @@ withDefaults(
     disabled?: boolean
     loading?: boolean
     loadingLabel?: string
+    /** `md` is the default 44px control; `lg` is the 52px home-page control. */
+    size?: 'md' | 'lg'
   }>(),
   {
     variant: 'secondary',
@@ -23,24 +25,63 @@ withDefaults(
     disabled: false,
     loading: false,
     loadingLabel: '处理中…',
+    size: 'md',
   },
 )
 </script>
 
 <template>
   <button
-    :class="`base-button ${variant}-button`"
+    :class="`base-button ${variant}-button base-button-${size}`"
     :type="type"
     :disabled="disabled || loading"
     :aria-busy="loading || undefined"
   >
-    <span v-if="loading" aria-hidden="true" class="base-button-spinner" />
-    <span v-if="loading" class="base-button-loading-label">{{ loadingLabel }}</span>
-    <slot v-else />
+    <span class="base-button-stack">
+      <span class="base-button-slot" :class="{ 'is-loading': loading }"><slot /></span>
+      <span v-if="loading" class="base-button-loading">
+        <span aria-hidden="true" class="base-button-spinner" />
+        <span class="base-button-loading-label">{{ loadingLabel }}</span>
+      </span>
+    </span>
   </button>
 </template>
 
 <style scoped>
+/* US-362: the idle label stays in the layout while loading (invisible but still
+ * sizing the button) and the in-progress layer is absolutely positioned inside
+ * it. The button therefore keeps its exact idle width even when the loading
+ * label is longer than the idle label, and the in-progress text is never
+ * replaced by a bare spinner. */
+.base-button-stack {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+}
+
+.base-button-slot.is-loading {
+  visibility: hidden;
+}
+
+.base-button-loading {
+  position: absolute;
+  inset: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.base-button-loading-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .base-button {
   display: inline-flex;
   align-items: center;
@@ -65,6 +106,14 @@ withDefaults(
 
 .base-button:hover:not(:disabled) {
   transform: translateY(calc(var(--motion-distance) * -1));
+}
+
+/* Home-page large control: 52px tall, body-size label. Loading keeps this
+   geometry so the button never shrinks or collapses to a bare spinner. */
+.base-button-lg {
+  min-height: var(--control-height-lg);
+  padding-inline: var(--space-5);
+  font-size: var(--font-size-md);
 }
 
 .base-button:focus-visible {
