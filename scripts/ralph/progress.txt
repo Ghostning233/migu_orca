@@ -141,3 +141,22 @@ Stage 46 分支与更早分支均保留，未删除、未重写。
 验证：`npm run typecheck` / `lint` / `build` 通过；`npx vitest --run` 667 passed；
 `uv run pytest tests/browser/ -q` 329 passed；`uv run ruff check tests/` 通过。
 `passes` 仍为 `false`，等待复审。
+
+## 2026-09-21 - US-363 第三轮复审（仍不通过）与集中修复
+
+- **P1（Spec）AC3 未保存现场丢失**：批量工作台此前由 `v-if="mode === 'batch'"` 渲染，
+  切回单番会卸载 `BatchWorkbenchView`，其内部候选、草案、筛选与当前查看现场全部丢失。
+  已改为「首次进入批量后保持挂载 + `v-show` 切换可见性」（`batchMounted` + watch）：初始态仍不渲染
+  （`#batch-parse-form` 不存在），进入过批量后往返切换不再卸载。新增浏览器回归：
+  parse 两项 → 筛选剩一项 → 展开当前查看 → 切单番再切回，卡片数、筛选值与详情面板全部保留。
+- **P2（Standards）mock 逐步漂移**：把 settings/tracking 的固定 mock 统一到
+  `tests/browser/visual_support.install_shell_status_routes`（含 `UNCONFIGURED_CONNECTION_BODY` /
+  `EMPTY_TRACKING_ITEMS_BODY`），单番几何门禁文件改为复用它。
+- **P2（Standards）基线常量未被消费**：删除 `CONTENT_RECT`、`HERO_CONTAINER_RECT`、
+  `HERO_CONTENT_HEIGHT`、`HERO_CONTENT_TOP`、`HOME_ANCHOR_SELECTORS`（说明保留在基线文档）。
+- **P2（Spec）文档标题不一致**：基线文档标题改为「Stage 47 单番三图 Token V1 几何基线（已获批）」。
+- **P2（Spec）键盘覆盖不足**：新增 Enter 与空格的端到端断言（除既有方向键断言外）。
+
+验证：`npm run typecheck` / `lint` / `build` 通过；`npx vitest --run` 667 passed；
+`uv run pytest tests/browser/ -q` **331 passed**（新增 2 项）；`uv run ruff check tests/` 通过。
+`passes` 仍为 `false`，等待复审。
