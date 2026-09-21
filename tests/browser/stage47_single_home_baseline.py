@@ -14,18 +14,6 @@ from __future__ import annotations
 
 VIEWPORT = (1440, 900)
 
-CONTENT_RECT = (32, 96, 1376, 780)
-"""Token 档位页内边距（1440 -> 32px 水平）+ `--space-6` 24px 垂直内边距下的内容区。"""
-
-HERO_CONTAINER_RECT = (360, 96, 720, 780)
-"""英雄区容器盒：720px 居中，占满内容区高度。"""
-
-HERO_CONTENT_HEIGHT = 421.4
-"""英雄区内容块高度：48+8+24+24+62+32+81+16+22.4+40+64（轨道含边框、帮助文字 14/1.6）。"""
-
-HERO_CONTENT_TOP = 275.3
-"""内容块顶：96 + (780 − 421.4) / 2；实际由浏览器取整，门禁用 TOLERANCE。"""
-
 CENTER_X = 720.0
 """1440 视口的内容水平中心。"""
 
@@ -58,8 +46,6 @@ HOME_SPACING: tuple[tuple[str, str, float], ...] = (
 
 HOME_SELECTORS: dict[str, str] = {name: selector for name, (selector, _, _) in HOME_BOXES.items()}
 """所有基线选择器，供实现与门禁共用。"""
-
-HOME_ANCHOR_SELECTORS: dict[str, str] = {**HOME_SELECTORS, "content": ".app-main"}
 
 FORBIDDEN_INITIAL_SELECTORS: tuple[str, ...] = (
     ".search-results-panel",

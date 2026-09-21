@@ -153,6 +153,17 @@ const singleBusy = ref(false)
 // US-363 (Stage 47 几何基线): 单番英雄区承载「尚未产出候选、也没有草案」的首页状态。
 // 用 !hasResults 而不是 !searchStarted：点击搜索后英雄区必须留在原位（仅取消垂直居中），
 // 否则搜索一开始容器就被卸载，输入与主按钮会发生布局跳变与宽度变化。
+// US-363 AC3: 批量工作台一旦进入过就保持挂载，只用 v-show 切换可见性。
+// 否则切回单番会卸载 BatchWorkbenchView，其内部的候选、草案、筛选与勾选现场会被丢弃。
+const batchMounted = ref(false)
+watch(
+  mode,
+  (value) => {
+    if (value === 'batch') batchMounted.value = true
+  },
+  { immediate: true },
+)
+
 const showSingleHome = computed(
   () => mode.value === 'single' && !hasResults.value && !draftRequest.value,
 )
@@ -659,8 +670,13 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
   />
 
   <!-- ── batch workbench (US-205) ────────────────────────────────── -->
-  <template v-if="mode === 'batch'">
-    <form id="batch-parse-form" class="batch-parse-form" @submit.prevent="submitBatchSearch">
+  <template v-if="batchMounted">
+    <form
+      v-show="mode === 'batch'"
+      id="batch-parse-form"
+      class="batch-parse-form"
+      @submit.prevent="submitBatchSearch"
+    >
       <label for="batch-raw-input">批量番剧名称</label>
       <AnimeTitleInput
         ref="batchInput"
@@ -682,6 +698,7 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
       </div>
     </form>
     <BatchWorkbenchView
+      v-show="mode === 'batch'"
       ref="batchWorkbench"
       class="batch-workbench-section"
       v-model:raw-input="batchQuery"

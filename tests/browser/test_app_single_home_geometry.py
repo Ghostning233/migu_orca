@@ -23,37 +23,16 @@ from tests.browser.stage47_single_home_baseline import (
     TOLERANCE,
     VIEWPORT,
 )
-from tests.browser.visual_support import prepare_canvas, require_dist
+from tests.browser.visual_support import (
+    install_shell_status_routes,
+    prepare_canvas,
+    require_dist,
+)
 
 pytestmark = pytest.mark.browser
 
-CONNECTION_SUMMARY_BODY = json.dumps(
-    {
-        "ok": True,
-        "result": {
-            "configured": False,
-            "credential_present": False,
-            "connection_status": "UNCONFIGURED",
-            "capabilities": None,
-        },
-    },
-    ensure_ascii=False,
-)
-TRACKING_BODY = json.dumps({"ok": True, "result": {"items": []}}, ensure_ascii=False)
 
 PAGE_TOLERANCE = 2.0
-
-
-def _install_shell_routes(page: Page) -> None:
-    """固定连接状态与待处理数量，避免外部依赖影响几何门禁。"""
-    page.route(
-        "**/api/v1/settings/autobangumi",
-        lambda route: route.fulfill(status=200, content_type="application/json", body=CONNECTION_SUMMARY_BODY),
-    )
-    page.route(
-        "**/api/v1/tracking/items**",
-        lambda route: route.fulfill(status=200, content_type="application/json", body=TRACKING_BODY),
-    )
 
 
 def _open_single_home(page: Page, live_server_url: str) -> list[str]:
@@ -62,7 +41,7 @@ def _open_single_home(page: Page, live_server_url: str) -> list[str]:
     prepare_canvas(page)
     requested: list[str] = []
     page.on("request", lambda request: requested.append(request.url))
-    _install_shell_routes(page)
+    install_shell_status_routes(page)
     page.goto(f"{live_server_url}/app/add")
     page.wait_for_selector(".single-home-hero", timeout=10_000)
     return requested
@@ -240,7 +219,7 @@ class TestSingleHomeGeometry:
     ) -> None:
         require_dist()
         page.set_viewport_size({"width": width, "height": height})
-        _install_shell_routes(page)
+        install_shell_status_routes(page)
         page.goto(f"{live_server_url}/app/add")
         page.wait_for_selector(".single-home-hero", timeout=10_000)
         metrics = page.evaluate(
@@ -265,7 +244,7 @@ class TestSingleHomeGeometry:
     ) -> None:
         require_dist()
         page.set_viewport_size({"width": 720, "height": 450})
-        _install_shell_routes(page)
+        install_shell_status_routes(page)
         page.goto(f"{live_server_url}/app/add")
         page.wait_for_selector(".single-home-hero", timeout=10_000)
         metrics = page.evaluate(
@@ -287,7 +266,7 @@ class TestSingleHomeGeometry:
         require_dist()
         prepare_canvas(page)
         page.emulate_media(reduced_motion="reduce")
-        _install_shell_routes(page)
+        install_shell_status_routes(page)
         page.goto(f"{live_server_url}/app/add")
         page.wait_for_selector(".single-home-hero", timeout=10_000)
         page.fill("#mikan-candidate-query", "葬送的芙莉莲")
@@ -385,3 +364,80 @@ class TestSingleHomeGeometry:
         assert abs(boxes["subtitle"]["height"] - 24.0) <= TOLERANCE
         gap = boxes["mode"]["y"] - (boxes["subtitle"]["y"] + boxes["subtitle"]["height"])
         assert abs(gap - 24.0) <= TOLERANCE, gap
+
+
+    def test_mode_switch_enter_and_space_work_end_to_end(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """AC3：除方向键外，Enter 与空格也必须能在真实页面切换模式。"""
+        _open_single_home(page, live_server_url)
+
+        page.locator("#anime-mode-batch").focus()
+        page.keyboard.press("Enter")
+        expect(page.locator("#anime-mode-batch")).to_have_attribute("aria-selected", "true")
+        expect(page.locator("#batch-parse-form")).to_be_visible()
+
+        page.locator("#anime-mode-single").focus()
+        page.keyboard.press(" ")
+        expect(page.locator("#anime-mode-single")).to_have_attribute("aria-selected", "true")
+        expect(page.locator(".single-home-hero")).to_be_visible()
+
+    def test_batch_workbench_keeps_its_scene_across_mode_switch(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """AC3：切回单番不得丢弃批量工作台的候选 / 筛选 / 勾选等未保存现场。"""
+        from tests.browser.batch_visual_fixtures import (
+            batch_candidate,
+            batch_item,
+            batch_parse_envelope,
+        )
+
+        _open_single_home(page, live_server_url)
+        items = [
+            batch_item(
+                f"item-{index:02d}",
+                title,
+                status="FOUND",
+                canonical_title=f"{title} 第一季",
+                candidates=[
+                    batch_candidate(
+                        bangumi_id=f"9{index:03d}",
+                        title=f"{title} 第一季",
+                        season=1,
+                        total_episodes=12,
+                        source_query=title,
+                    )
+                ],
+            )
+            for index, title in enumerate(("甲", "乙"), start=1)
+        ]
+        page.route(
+            "**/api/v1/batches/parse",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=batch_parse_envelope(items),
+            ),
+        )
+
+        page.click("#anime-mode-batch")
+        page.fill("#batch-raw-input", "甲\n乙")
+        page.click("#batch-parse-submit")
+        expect(page.locator(".batch-draft-card")).to_have_count(2)
+
+        # 在批量工作台内部制造现场：筛选只留一项、展开当前查看项。
+        page.fill("#batch-review-search", "甲")
+        expect(page.locator(".batch-draft-card")).to_have_count(1)
+        page.locator('.batch-draft-card[data-item-id="item-01"] .batch-card-expand').click()
+        expect(page.locator("#batch-detail-pane")).to_be_visible()
+
+        # 切回单番：批量区隐藏但不卸载。
+        page.click("#anime-mode-single")
+        expect(page.locator("#batch-parse-form")).not_to_be_visible()
+        expect(page.locator(".single-home-hero")).to_be_visible()
+
+        # 再切回批量：候选现场、筛选值与当前查看项都还在。
+        page.click("#anime-mode-batch")
+        expect(page.locator(".batch-draft-card")).to_have_count(1)
+        assert page.input_value("#batch-review-search") == "甲"
+        expect(page.locator("#batch-detail-pane")).to_be_visible()

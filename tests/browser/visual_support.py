@@ -69,6 +69,43 @@ async () => {
 """
 
 
+UNCONFIGURED_CONNECTION_BODY = json.dumps(
+    {
+        "ok": True,
+        "result": {
+            "configured": False,
+            "credential_present": False,
+            "connection_status": "UNCONFIGURED",
+            "capabilities": None,
+        },
+    },
+    ensure_ascii=False,
+)
+"""固定的「未配置」连接摘要：视觉/几何门禁不依赖部署端连接状态。"""
+
+EMPTY_TRACKING_ITEMS_BODY = json.dumps({"ok": True, "result": {"items": []}}, ensure_ascii=False)
+"""固定的空追番列表：待处理数量恒为 0，避免跨用例漂移。"""
+
+
+def install_shell_status_routes(
+    page: Page,
+    *,
+    connection_body: str | None = None,
+    tracking_body: str | None = None,
+) -> None:
+    """统一注册 settings/tracking mock，避免各用例各写一份而逐步漂移。"""
+    connection = connection_body if connection_body is not None else UNCONFIGURED_CONNECTION_BODY
+    tracking = tracking_body if tracking_body is not None else EMPTY_TRACKING_ITEMS_BODY
+    page.route(
+        "**/api/v1/settings/autobangumi",
+        lambda route: route.fulfill(status=200, content_type="application/json", body=connection),
+    )
+    page.route(
+        "**/api/v1/tracking/items**",
+        lambda route: route.fulfill(status=200, content_type="application/json", body=tracking),
+    )
+
+
 def require_dist() -> None:
     """SPA 生产构建是浏览器视觉用例的硬前置。"""
     if (REPO_ROOT / "frontend" / "dist" / "index.html").is_file():
