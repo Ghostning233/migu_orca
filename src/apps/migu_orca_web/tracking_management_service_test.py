@@ -7,9 +7,9 @@ import pytest
 
 import apps.migu_orca_web.tracking_management_service as management_service
 from ab_engine.models.management import AutoBangumiCapabilities, ExternalRss, ExternalSubscription
+from apps.migu_orca_web.save_confirm_service import compute_request_fingerprint
 from apps.migu_orca_web.tracking_management_service import recover_tracking_management, run_tracking_management
 from shared.errors import Stage1Error
-from apps.migu_orca_web.save_confirm_service import compute_request_fingerprint
 from storage_engine.controllers.operation_repository import load_tracking_operation
 from storage_engine.controllers.request_repository import (
     load_request_snapshot,
