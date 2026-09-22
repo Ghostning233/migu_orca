@@ -18,8 +18,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "开发自测完成（passes=false，等待复审）。按获批几何基线（形态 B：锚点 + computed style + 几何，不启用像素层）实现单番搜索首页：720px 居中英雄区、内容垂直居中；标题 --type-display 40/1.2 固定 48px、副标题固定 24px 并单行截断（超长不推挤后续控件）；模式切换 238×62；搜索表单抽取为 SingleAnimeSearchForm.vue（输入 532×52 + 主按钮 176×52）由英雄区与草案态共用；三步预告三等分 232px；`.app-main` 页内边距改 Token 档位 32px 水平 / --space-6 垂直。`showSingleHome` 用 !hasResults 保证点击搜索后英雄区留在原位；`searchResult/searchError/selectedCandidate` 改为按模式存储的 modeSession，切换模式不再清除任一模式的输入、结果或已选候选（US-363 AC3）。证据：tests/browser/stage47_single_home_baseline.py + test_app_single_home_geometry.py 13 个用例（容器盒/宽高/间距/水平与垂直居中 <=2px、冻结 Token computed style、初始态零候选请求与零外部请求、loading 期几何不变、模式切换现场保留、超长标题固定高度、1280/1440/1920、200% 缩放、reduced-motion）；held route 用 expect_request + aria-busy 等待，无 sleep/轮询；Vitest 667 passed；真实 Chromium 329 passed。PRD 已正式修订门禁口径（G-47-01 记为已满足，形态 B），基线文档第 11b/11c 节记录实现校正与审核修复。未改后端/API/草案状态机/外部写。 第三轮复审修复：批量工作台改为「首次进入后保持挂载 + v-show 切换可见性」，切回单番不再卸载 BatchWorkbenchView（其候选/筛选/当前查看现场保留），并新增浏览器回归（筛选与当前查看项在模式往返后仍存在）与 Enter/空格端到端键盘断言；壳层 settings/tracking mock 统一到 visual_support.install_shell_status_routes；删除未被门禁消费的基线常量；基线文档标题改为「已获批」。证据：几何门禁 15 用例通过；Vitest 667；真实 Chromium 331 passed。"
+      "passes": true,
+      "notes": "已验收并随 PR #79 合并；具体实现、审核和验证证据见 progress.txt 的 Stage 47 收尾记录。"
     },
     {
       "id": "US-364",
@@ -36,8 +36,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "已验收并随 PR #79 合并；实现提交 923f050。"
     },
     {
       "id": "US-365",
@@ -54,8 +54,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "已验收并随 PR #79 合并；实现提交 7f40806。"
     }
   ]
 }

@@ -4,16 +4,15 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 状态 | 已准备执行材料、尚未开发；D-01 已批准全局对齐及四页回归，按 A→B→C→D→E 执行 |
+| 状态 | 历史执行 PRD；US-347～US-352 已完成并由 PR #72 合并 |
 | 日期/基线 | 2026-09-18；`334c8e69dbcc7c27be8ab482f8ccb142081db0b7` |
 | 分支 | `ralph/stage43-add-anime-entry-visual`；开始前核对实时 HEAD/工作区，不从本文猜状态 |
 | 总体依据 | [Stage 43～45 总体 PRD](MiGuOrca_stage43_45_add_anime_visual_PRD.md) |
 | 决策唯一记录 | [D-01～04 与后续编写交接](development/add-anime-visual-prd-handoff-2026-09-18.md) |
-| Ralph | `scripts/ralph/prd.json`，US-347～US-352，priority 1～6；初始全为 false，notes 为空 |
-| 下一会话启动 | [团队主 Agent 提示词](development/stage43-team-main-agent-prompt.md) |
+| Ralph | 本阶段没有单独保留的 Ralph 快照；以 PR #72 与本 PRD 为历史证据，不作为现行入口 |
+| 团队提示词 | [历史主 Agent 提示词](development/stage43-team-main-agent-prompt.md)，仅供追溯 |
 
-本次授权仅文档落盘/状态准备/本地文档提交，不自动启动开发、团队或发布。
-后续用户发送启动提示词才按其明确授权执行。未运行本 Stage 功能测试。
+下文记录当时的范围和约束，仅供追溯；不得据此启动开发、团队或发布。
 
 ## 2. 范围与稳定边界
 

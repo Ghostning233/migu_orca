@@ -57,9 +57,25 @@ uv run migu-orca "咒术回战第三季"
 
 ## 开发与文档
 
-- Agent 开始开发：[AGENTS.md](AGENTS.md)。不必先读历史综合手册。
-- 验证、Ralph 和审核：[开发流程](docs/development/workflow.md)。
+- 开发规则与目录边界：[AGENTS.md](AGENTS.md)。不必先读历史综合手册。
+- 验证、审核与发布：[开发流程](docs/development/workflow.md)。
 - 产品、视觉、阶段和待办：[文档索引](docs/README.md)。
 - 技术分层：[架构](docs/design/architecture.md)；接口规范：[API 文档](docs/api/README.md)。
 - 旧 README 已保留为[历史综合开发手册](docs/history/README_legacy_2026-09-13.md)，
   仅供追溯，不代表当前页面、契约或开发权限。
+
+## 参与开发
+
+需求和进度统一记录在 GitHub Issues。开发从讨论开始，而不是从预设的 Stage 或脚本循环开始：
+
+| 阶段 | 使用的 skill | 为什么使用 |
+| --- | --- | --- |
+| 明确方向 | `grilling` | 逐轮澄清目标、边界和不可逆决定，避免在含糊需求上直接改代码。 |
+| 固化共同语言 | `domain-modeling`（需要时） | 将稳定术语和架构决定沉淀到领域文档或 ADR，避免不同任务各自解释同一个概念。 |
+| 查证或试验 | `research` / `prototype`（需要时） | 用一手资料回答外部事实；把必须运行才能回答的问题限制为可丢弃的小实验。 |
+| 规划与领取 | GitHub Issues | 一个 spec 或纵向 ticket 写清验收、依赖和范围外事项；可实施时标记 `ready-for-agent`。 |
+| 实现与验证 | `tdd`、`dev-browser`（按变更适用） | 先证明预期行为；Web UI 在真实 Chromium 中验证，而不只依赖 mock。 |
+| 审核与修复 | `code-review`、`diagnosing-bugs`（需要时） | 分开核对规范与需求；疑难失败先定位原因，再决定修复。 |
+
+完整操作细节、权限与验证矩阵在[开发流程](docs/development/workflow.md)。历史 Ralph 记录保留在
+`scripts/ralph/archive/`，仅用于追溯，后续开发不再使用 Ralph 状态文件或执行器。

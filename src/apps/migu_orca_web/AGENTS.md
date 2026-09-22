@@ -54,7 +54,7 @@
 
 - Python 用 uv；指定受影响 pytest 用例 + Ruff。契约变更执行
   `uv run migu-orca-openapi`、`uv run migu-orca-openapi --check`，在 frontend 生成/检查客户端。
-  完整门禁与发布权限按根规范和当前 PRD，不每次运行全量。
+  完整门禁与发布权限按根规范和当前 GitHub Issue，不每次运行全量。
 - monkeypatch 指向符号实际调用的模块，不是原定义处；明确测试是否真的进入目标边界。
   fixture 清理 DraftStore/context，用临时 Web root，不能创建/读取用户默认存储当测试数据。
 - API/浏览器测试默认 fake transport/route mock 外部系统，不隐式写真实 AB 或 qB。

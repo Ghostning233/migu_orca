@@ -2,8 +2,8 @@
 
 ## 1. 目的与不可变边界
 
-本文是根 `AGENTS.md` 的调用细节，适用于 Stage 40 起的工作包开发。Ralph 仍只保存 PRD、逐 story
-验收/提交和 progress；**不得使用 `ralph.sh` 启动开发循环**。一个工作包的真实闭环是：主 Agent
+本文是根 `AGENTS.md` 的调用细节，适用于 GitHub Issue 中定义的纵向 ticket。Ralph 已归档，仅作历史追溯。
+一个工作包的真实闭环是：主 Agent
 给开发 Agent 自包含任务 → 同一开发 Agent 连续完成该包 → 主 Agent 独立审核 → 有问题先固化最小红测
 再交修复 Agent 集中修复 → 主 Agent 复审。未闭环不得开始下一工作包。
 
@@ -16,9 +16,9 @@
 
 ```text
 仓库与分支：<绝对仓库路径；实际分支；基线 SHA>。
-工作包：<WP/US 列表>；只完成此包，不进入下一包。
+工作包：<Issue/ticket 列表>；只完成此包，不进入下一包。
 目标/非目标：<产品目标、不能改动的 API/模块/资产>。
-必读：<AGENTS、模块规范、执行 PRD、精确代码/测试文件>。
+必读：<AGENTS、模块规范、当前 GitHub Issue、关联规格、精确代码/测试文件>。
 实现与安全边界：<草案/revision/敏感值/外部写等适用规则>。
 最小验证：<精确命令；浏览器场景或明确禁止项>。
 停止条件：<缺口、失败、权限或范围变化时停止并报告>。
@@ -29,7 +29,7 @@
 
 ```text
 spawn_agent(
-  task_name="stage40_wp40a_development",
+  task_name="issue_123_development",
   model="gpt-5.6-luna",
   fork_turns="none",
   message="上述自包含提示词"
@@ -37,7 +37,7 @@ spawn_agent(
 ```
 
 开发 Agent 在一个工作包中保持存活；主 Agent 使用 follow-up 传递同一包的补充、测试问题或集中修复任务，
-不为每个 story 新建会话。主 Agent 审核发现问题后，先按根规范固定最小红测，再将完整清单交给一个修复
+不为同一 ticket 的修复新建会话。主 Agent 审核发现问题后，先按根规范固定最小红测，再将完整清单交给一个修复
 Agent；复审仍有问题时继续复用该修复 Agent。只有该工作包复审通过才关闭旧会话，并为下一包创建新会话。
 
 ## 3. Fable：Claude Code 子 Agent（仅用户指定且环境可用）
@@ -69,7 +69,7 @@ C 只处理主 Agent 已独立审核的 HEAD：中文提交/PR 文案、授权�
 获授权后的合并及 merge SHA/远端 main 核对。C 不开发功能、不改验收结果、不修 CI、不重跑失败 CI，也不
 在无用户明确发布授权时执行任何远端写。
 
-- 在同一 Codex 主会话中，保留一个命名稳定的 C Agent（例如 `release_c_cn`），跨 Stage 复用；每次发布前
+- 在同一 Codex 主会话中，保留一个命名稳定的 C Agent（例如 `release_c_cn`），跨工作包复用；每次发布前
   主 Agent 给它当前分支、已审核 HEAD、允许的文件、中文 PR 要点与精确发布授权。
 - 累计约 20 次 PR 提交（创建或更新 PR 的提交）后，记录轮换原因，结束旧 C Agent，并以
   `fork_turns="none"` 新建 C；新 C 只接收发布职责、当前仓库/分支、授权边界与简短已合并摘要。
