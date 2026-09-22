@@ -15,6 +15,7 @@ from flask import url_for
 
 from apps.migu_orca_web.autobangumi_probe_service import cached_capabilities
 from apps.migu_orca_web.contexts import candidate_selection_contexts
+from apps.migu_orca_web.poster_runtime import poster_service
 from batch_engine.controllers.candidate_search_orchestrator import (
     CandidateSearchOutcome,
 )
@@ -31,12 +32,9 @@ from mikan_engine.controllers.mikan_candidate_recommendation import (
     candidate_recommendation_label,
 )
 from mikan_engine.controllers.mikan_client import MikanCandidate
-from mikan_engine.controllers.mikan_poster_service import MikanPosterService
 from shared.errors import Stage1Error
 from shared.season_evidence import candidate_season_evidence
 from storage_engine.controllers.autobangumi_config_repository import AutoBangumiConfigRecord
-
-poster_service = MikanPosterService()
 
 
 def _serialize_batch_parse_result(

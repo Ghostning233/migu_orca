@@ -18,10 +18,17 @@ import pytest
 from flask.testing import FlaskClient
 
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
+from apps.migu_orca_web import tracking_poster
 from apps.migu_orca_web.api_contract import (
     TrackingDetailResultDTO,
     TrackingItemListResultDTO,
 )
+from apps.migu_orca_web.tracking_handoff import ensure_confirmed_request_tracking
+from mikan_engine.controllers.mikan_poster_cache import (
+    MikanPosterCacheConfig,
+    poster_cache_key,
+)
+from mikan_engine.controllers.mikan_poster_service import MikanPosterService
 from request_engine.controllers.request_controller import accept_request
 from shared.models import EntryRequest
 from storage_engine.controllers.operation_repository import bind_tracking_operation
@@ -553,3 +560,115 @@ def test_tracking_list_poisoned_plan_label_is_redacted(
     assert item["title"] == "[redacted]"
     body_text = response.get_data(as_text=True)
     assert "private.example" not in body_text
+
+
+# ---------------------------------------------------------------------------
+# Cover references (issue #84)
+# ---------------------------------------------------------------------------
+
+
+def _poster_service(tmp_path: Path) -> MikanPosterService:
+    return MikanPosterService(MikanPosterCacheConfig(cache_dir=tmp_path / "posters"))
+
+
+def _accepted_request_with_cover(
+    tmp_path: Path, request_id: str, poster_url: str | None
+) -> dict[str, Any]:
+    config = _config(tmp_path)
+    request = accept_request(
+        {
+            **generate_request(EntryRequest(raw_title="芙莉莲"))["request"],
+            "request_id": request_id,
+        }
+    )
+    request["source_info"]["matched_bangumi"]["poster_url"] = poster_url
+    save_request_snapshot(config, request)
+    return request
+
+
+def test_confirmed_plan_persists_a_same_origin_cover_across_restart(
+    tmp_path: Path,
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        tracking_poster, "poster_service", _poster_service(tmp_path)
+    )
+    config = _config(tmp_path)
+    upstream = "https://mikan.example/assets/cover.jpg?token=secret"
+    request = _accepted_request_with_cover(tmp_path, "request-cover", upstream)
+
+    handoff = ensure_confirmed_request_tracking(
+        config=config,
+        request=request,
+        origin=TRACKING_ORIGIN_SAVE_CONFIRM,
+    )
+    assert handoff.tracking_ready is True
+
+    # A restart re-reads only durable state; the same cover reference must come
+    # back from the tracking summary and never the upstream address.
+    response = client.get(
+        f"/api/v1/tracking/items/{handoff.tracking_id}",
+        query_string={"storage_dir": "storage"},
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["result"]["poster_path"] == (
+        f"/api/v1/mikan/posters/{poster_cache_key(upstream)}"
+    )
+    body_text = response.get_data(as_text=True)
+    assert "mikan.example" not in body_text
+    assert "token=secret" not in body_text
+
+
+def test_confirmed_plan_without_a_cover_still_lists(
+    tmp_path: Path,
+    client: FlaskClient,
+) -> None:
+    config = _config(tmp_path)
+    request = _accepted_request_with_cover(tmp_path, "request-no-cover", None)
+
+    handoff = ensure_confirmed_request_tracking(
+        config=config,
+        request=request,
+        origin=TRACKING_ORIGIN_SAVE_CONFIRM,
+    )
+
+    response = client.get("/api/v1/tracking/items", query_string={"storage_dir": "storage"})
+    payload = response.get_json()
+    assert response.status_code == 200
+    item = payload["result"]["items"][0]
+    assert item["tracking_id"] == handoff.tracking_id
+    assert item["poster_path"] is None
+
+
+@pytest.mark.parametrize(
+    ("unsafe", "request_id"),
+    [
+        ("https://mikan.example/assets/cover.jpg", "request-unsafe-url"),
+        ("/etc/passwd", "request-unsafe-path"),
+        ("/api/v1/mikan/posters/../escape", "request-unsafe-traversal"),
+    ],
+)
+def test_tracking_summary_drops_an_unsafe_cover_reference(
+    tmp_path: Path,
+    client: FlaskClient,
+    unsafe: str,
+    request_id: str,
+) -> None:
+    config = _config(tmp_path)
+    record = create_tracking_record(
+        request_id=request_id,
+        status=TRACKING_STATUS_PENDING_SUBMIT,
+        plan_summary={"title": "葬送的芙莉莲", "poster_path": unsafe},
+        origin=TRACKING_ORIGIN_SAVE_CONFIRM,
+        audit_action=TRACKING_AUDIT_TRACKING_CREATED,
+        audit_actor=TRACKING_AUDIT_ACTOR_USER,
+    )
+    ensure_tracking_record(config, record)
+
+    response = client.get("/api/v1/tracking/items", query_string={"storage_dir": "storage"})
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["result"]["items"][0]["poster_path"] is None
+    assert unsafe not in response.get_data(as_text=True)

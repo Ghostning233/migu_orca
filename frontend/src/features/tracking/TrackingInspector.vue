@@ -40,6 +40,7 @@ import {
 import TrackingExternalDelete from './TrackingExternalDelete.vue'
 import TrackingManagementActions from './TrackingManagementActions.vue'
 import TrackingModifyForm from './TrackingModifyForm.vue'
+import TrackingPoster from './TrackingPoster.vue'
 
 type TrackingDetail = NonNullable<
   operations['getTrackingItemDetail']['responses']['200']['content']['application/json']['result']
@@ -444,7 +445,10 @@ defineExpose({ reload: () => fetchDetail(true) })
     <div v-else-if="detail" class="tracking-inspector-detail">
       <section ref="inspectorHeading" tabindex="-1" class="tracking-inspector-summary" aria-labelledby="tracking-inspector-title">
         <p class="field-help">安全追番摘要</p>
-        <h3 id="tracking-inspector-title">{{ detail.title || '未命名番剧' }}</h3>
+        <div class="tracking-inspector-identity">
+          <TrackingPoster :poster-path="detail.poster_path" variant="detail" />
+          <h3 id="tracking-inspector-title">{{ detail.title || '未命名番剧' }}</h3>
+        </div>
         <dl>
           <div><dt>季度</dt><dd>{{ detail.season ?? '未设置' }}</dd></div>
           <div><dt>字幕组</dt><dd>{{ detail.subtitle_group || '未设置' }}</dd></div>
@@ -680,6 +684,8 @@ defineExpose({ reload: () => fetchDetail(true) })
 .tracking-inspector-detail, .tracking-inspector-summary, .tracking-inspector-section { display: grid; gap: .55rem; }
 .tracking-inspector-summary, .tracking-inspector-section { padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); }
 .tracking-inspector-summary:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.tracking-inspector-identity { display: flex; align-items: center; gap: var(--space-3); }
+.tracking-inspector-identity h3 { margin: 0; }
 .tracking-inspector-detail dl { display: grid; gap: .35rem; margin: 0; }
 .tracking-inspector-detail dl div { display: flex; justify-content: space-between; gap: 1rem; }
 .tracking-inspector-detail dt { color: var(--color-text-muted); }

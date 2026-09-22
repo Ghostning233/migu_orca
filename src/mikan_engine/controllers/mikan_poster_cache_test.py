@@ -65,6 +65,44 @@ def test_expired_cleanup_deletes_only_regular_cache_files(tmp_path: Path) -> Non
     assert symlink.is_symlink()
 
 
+def test_pinned_entry_survives_expiry_and_cleanup(tmp_path: Path) -> None:
+    clock = Clock()
+    cache = _repository(tmp_path, clock, ttl_seconds=10, cleanup_interval_seconds=0)
+    key = poster_cache_key("https://mikan.example/kept.jpg")
+    stored = cache.put(key, "image/jpeg", [b"kept"])
+    assert cache.pin_existing(key) is True
+    assert cache.is_pinned(key) is True
+    clock.value += timedelta(days=30)
+    assert cache.get(key) == stored
+    cache.cleanup_expired()
+    assert stored.exists()
+    assert (stored.parent / f"{key}.pin").exists()
+
+
+def test_pin_existing_requires_a_cached_image_and_valid_key(tmp_path: Path) -> None:
+    cache = _repository(tmp_path, Clock())
+    key = poster_cache_key("https://mikan.example/missing.jpg")
+    assert cache.pin_existing(key) is False
+    assert cache.is_pinned(key) is False
+    assert not (tmp_path / "posters" / f"{key}.pin").exists()
+    with pytest.raises(Stage1Error, match="标识"):
+        cache.pin_existing("../escape")
+
+
+def test_unpin_restores_expiry_cleanup(tmp_path: Path) -> None:
+    clock = Clock()
+    cache = _repository(tmp_path, clock, ttl_seconds=10, cleanup_interval_seconds=0)
+    key = poster_cache_key("https://mikan.example/released.jpg")
+    stored = cache.put(key, "image/jpeg", [b"released"])
+    assert cache.pin_existing(key) is True
+    assert cache.unpin(key) is True
+    assert cache.is_pinned(key) is False
+    clock.value += timedelta(seconds=11)
+    cache.cleanup_expired()
+    assert not stored.exists()
+    assert cache.unpin(key) is False
+
+
 @pytest.mark.parametrize("key", ["../escape", "a" * 63, "A" * 64])
 def test_cache_rejects_path_traversal_and_invalid_keys(tmp_path: Path, key: str) -> None:
     with pytest.raises(Stage1Error, match="标识"):

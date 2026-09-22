@@ -694,6 +694,22 @@ def tracking_from_storage_dict(data: Any) -> TrackingRecord:
 # -- nested cleaning ---------------------------------------------------------
 
 
+#: The only poster reference a tracking summary may carry: a same-origin opaque
+#: proxy route. Upstream image URLs, absolute paths and traversal shapes are
+#: never valid references, whatever the source snapshot held.
+TRACKING_POSTER_PATH_RE = re.compile(r"^/api/v1/mikan/posters/[A-Za-z0-9_.-]+$")
+
+
+def safe_poster_path(value: Any) -> str | None:
+    """Return a trimmed same-origin opaque poster route, otherwise ``None``."""
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip()
+    if not candidate or not TRACKING_POSTER_PATH_RE.fullmatch(candidate):
+        return None
+    return candidate
+
+
 def _clean_plan_summary(value: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("plan_summary must be an object")
@@ -1031,10 +1047,12 @@ __all__ = [
     "TRACKING_STATUS_SUBMITTING",
     "TRACKING_STATUS_UNKNOWN",
     "TRACKING_STATUS_VERIFYING_EXTERNAL",
+    "TRACKING_POSTER_PATH_RE",
     "TrackingRecord",
     "append_audit_event",
     "build_audit_event",
     "create_tracking_record",
+    "safe_poster_path",
     "tracking_from_storage_dict",
     "tracking_id_for_request",
     "tracking_status_group",

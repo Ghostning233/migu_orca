@@ -101,6 +101,28 @@ describe('TrackingInspector secure detail (US-306)', () => {
     expect(wrapper.text()).toContain('没有可返回的本地订阅方案')
   })
 
+  it('renders the persisted same-origin cover in the tracking detail', async () => {
+    const cover = `/api/v1/mikan/posters/${'c'.repeat(64)}`
+    apiGet.mockResolvedValue(detail({ poster_path: cover }) as never)
+
+    const wrapper = await mountInspector()
+
+    const poster = wrapper.find('.tracking-inspector-identity .tracking-poster')
+    expect(poster.attributes('data-poster-state')).toBe('ready')
+    expect(poster.find('img').attributes('src')).toBe(cover)
+    expect(wrapper.html()).not.toContain('mikan.example')
+  })
+
+  it('keeps a stable placeholder when the detail has no cover', async () => {
+    apiGet.mockResolvedValue(detail() as never)
+
+    const wrapper = await mountInspector()
+
+    const poster = wrapper.find('.tracking-inspector-identity .tracking-poster')
+    expect(poster.attributes('data-poster-state')).toBe('placeholder')
+    expect(poster.find('img').exists()).toBe(false)
+  })
+
   it('does not let an older detail response overwrite a newer selection', async () => {
     let resolveFirst: ((value: unknown) => void) | undefined
     const first = new Promise((resolve) => { resolveFirst = resolve })

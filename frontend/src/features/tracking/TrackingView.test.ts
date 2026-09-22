@@ -18,21 +18,21 @@ const caps = {
   rss_disable: 'SUPPORTED', rss_delete: 'SUPPORTED', rss_refresh: 'SUPPORTED', external_verify: 'SUPPORTED',
   checked_at: null, safe_message: null,
 }
-function row(actions: unknown[] = []) {
+function row(actions: unknown[] = [], posterPath: string | null = null) {
   return { tracking_id: 'tracking-1', request_id: 'request-1', title: '测试番', season: 1,
-    subtitle_group: '字幕组', poster_path: null, status: 'PENDING_SUBMIT', status_label: '待提交',
+    subtitle_group: '字幕组', poster_path: posterPath, status: 'PENDING_SUBMIT', status_label: '待提交',
     status_group: 'PENDING', available_actions: actions, valid_resource_count: 1, updated_episode: null,
     updated_episode_status: 'NOT_IMPLEMENTED', total_episodes: null, revision: 1,
     updated_at: '2026-09-14T00:00:00Z' }
 }
-async function mountSaved(actions: unknown[] = []) {
+async function mountSaved(actions: unknown[] = [], posterPath: string | null = null) {
   const router = createRouter({ history: createMemoryHistory('/app/'), routes: [
     { path: '/tracking', component: TrackingView },
   ] })
   await router.push('/tracking'); await router.isReady()
   apiGet.mockImplementation(async (path) => path === '/api/v1/settings/autobangumi'
     ? { configured: true, credential_present: true, connection_ref: '11111111-1111-4111-8111-111111111111', configuration_revision: 3, connection_status: 'CONFIGURED', capabilities: null }
-    : { items: [row(actions)], summary: {}, warnings: [] })
+    : { items: [row(actions, posterPath)], summary: {}, warnings: [] })
   const wrapper = mount(TrackingView, { attachTo: document.body, global: { plugins: [createPinia(), router], stubs: { Teleport: true } } })
   await flushPromises()
   return { wrapper, router }
@@ -71,5 +71,23 @@ describe('TrackingView saved connection flow', () => {
       : { items: [row()], summary: {}, warnings: [] })
     await wrapper.find('#tracking-refresh').trigger('click'); await flushPromises()
     expect(wrapper.find('#tracking-sync').exists()).toBe(false)
+  })
+
+  it('renders the persisted same-origin cover for a listed record', async () => {
+    const cover = `/api/v1/mikan/posters/${'a'.repeat(64)}`
+    const { wrapper } = await mountSaved([], cover)
+
+    const poster = wrapper.find('.tracking-list-item .tracking-poster')
+    expect(poster.attributes('data-poster-state')).toBe('ready')
+    expect(poster.find('img').attributes('src')).toBe(cover)
+    expect(wrapper.html()).not.toContain('mikan.example')
+  })
+
+  it('falls back to the placeholder when a listed record has no cover', async () => {
+    const { wrapper } = await mountSaved()
+
+    const poster = wrapper.find('.tracking-list-item .tracking-poster')
+    expect(poster.attributes('data-poster-state')).toBe('placeholder')
+    expect(poster.find('img').exists()).toBe(false)
   })
 })
