@@ -4785,6 +4785,7 @@ export interface operations {
                      *           "pending": 1,
                      *           "processing": 1,
                      *           "active": 1,
+                     *           "inactive": 1,
                      *           "needs_attention": 1,
                      *           "unreadable": 1
                      *         },
@@ -4892,6 +4893,9 @@ export interface operations {
                             /**
                              * TrackingItemListSummaryDTO
                              * @description Safe summary counts for the tracking list (§11.2).
+                             *
+                             *     ``inactive`` counts the DISABLED group; ``processing`` stays a transient
+                             *     per-row state that the page never renders as its own overview category.
                              */
                             summary: {
                                 /** Total */
@@ -4902,6 +4906,8 @@ export interface operations {
                                 processing: number;
                                 /** Active */
                                 active: number;
+                                /** Inactive */
+                                inactive: number;
                                 /** Needs Attention */
                                 needs_attention: number;
                                 /** Unreadable */

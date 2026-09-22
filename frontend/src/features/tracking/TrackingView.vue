@@ -28,6 +28,7 @@ import {
   createWriteConflictSession,
   createWriteSession,
   filterTrackingItems,
+  formatTrackingUpdatedAt,
   isDefiniteWriteRejection,
   isRecoveryActionCode,
   isTrackingManagementScope,
@@ -41,6 +42,7 @@ import {
   recoveryConfirmation,
   recoverySessionKeepsLock,
   sortTrackingItems,
+  TRACKING_OVERVIEW_GROUPS,
   TRACKING_RECOVER_ENDPOINT,
   TRACKING_STATUS_GROUPS,
   WRITE_ACTION_CONFIRMATIONS,
@@ -49,6 +51,7 @@ import {
   type TrackingAction,
   type TrackingActionIntent,
   type TrackingItem,
+  type TrackingListSummary,
   type TrackingManagementScope,
   type TrackingManagementSession,
   type TrackingRecoverResult,
@@ -188,10 +191,13 @@ async function probeSavedConnection(): Promise<void> {
 }
 
 const statusLabels: Record<TrackingStatusGroup, string> = {
-  PENDING: '待处理', PROCESSING: '处理中', ACTIVE: '追番中',
-  ATTENTION: '需处理', INACTIVE: '已停用/已删除',
+  PENDING: '待提交', PROCESSING: '处理中', ACTIVE: '追番中',
+  ATTENTION: '需处理', INACTIVE: '已停用',
 }
-const overview = computed(() => projectTrackingOverview(items.value))
+// Issue #85: the overview is the server's authoritative count projection, not a
+// recount of whichever rows this page happens to hold or filter.
+const listSummary = ref<TrackingListSummary | null>(null)
+const overview = computed(() => projectTrackingOverview(listSummary.value))
 const capabilitySummary = computed(() => (
   savedState.value ? projectCapabilitySummary(savedState.value.capabilities) : []
 ))
@@ -323,6 +329,7 @@ async function loadList(silent = false): Promise<void> {
     if (sequence !== listSequence || generation !== writeGeneration) return
     const previous = selectedTrackingId.value
     items.value = result?.items ?? []
+    listSummary.value = result?.summary ?? null
     syncSelection(true)
     if (selectedTrackingId.value && selectedTrackingId.value !== previous) await focusSelection()
   } catch (error) {
@@ -1011,19 +1018,19 @@ onBeforeUnmount(() => {
 
 <template>
   <section id="tracking-overview" class="tracking-overview" aria-labelledby="tracking-heading">
-    <PanelSection title="追番管理" class="tracking-header">
+    <PanelSection title="我的追番" class="tracking-header">
       <template #actions>
         <BaseButton id="tracking-probe-saved" variant="secondary" :disabled="!savedConnection?.connection_ref" @click="probeSavedConnection">测试已保存连接</BaseButton>
         <BaseButton v-if="savedState" id="tracking-sync" variant="secondary" :loading="syncLoading" :disabled="syncLoading || syncPending || savedState.capabilities.probe_status !== 'VERIFIED'" @click="syncTracking">同步 Auto Bangumi</BaseButton>
         <BaseButton id="tracking-refresh" variant="secondary" :loading="loading" @click="refreshTracking">刷新列表</BaseButton>
       </template>
-      <p id="tracking-heading" class="tracking-lede">查看本地追番状态。选择单条记录后，右侧将显示检查器入口。</p>
+      <p id="tracking-heading" class="tracking-lede">管理待提交任务和正在运行的追番。</p>
     </PanelSection>
 
     <section class="tracking-status-overview" aria-labelledby="tracking-status-heading">
       <h2 id="tracking-status-heading">状态总览</h2>
       <div class="tracking-status-cards">
-        <button v-for="group in TRACKING_STATUS_GROUPS" :key="group" type="button" class="tracking-status-card"
+        <button v-for="group in TRACKING_OVERVIEW_GROUPS" :key="group" type="button" class="tracking-status-card"
           :class="{ 'is-selected': statusFilter === group }" :aria-pressed="statusFilter === group"
           @click="statusFilter = statusFilter === group ? '' : group">
           <span>{{ statusLabels[group] }}</span><strong>{{ overview.byGroup[group] }}</strong>
@@ -1032,7 +1039,7 @@ onBeforeUnmount(() => {
       <p class="tracking-status-total" role="status">共 {{ overview.total }} 条追番记录</p>
     </section>
 
-    <section class="tracking-workspace" aria-label="追番记录与检查器">
+    <section class="tracking-workspace" aria-label="追番记录与追番详情">
       <PanelSection title="追番列表" class="tracking-list-panel">
         <template #actions><span class="tracking-count" aria-live="polite">显示 {{ filteredItems.length }} / {{ items.length }}</span></template>
         <div class="tracking-filters">
@@ -1053,8 +1060,14 @@ onBeforeUnmount(() => {
             :aria-current="selectedTrackingId === item.tracking_id ? 'true' : undefined" @click="selectItem(item.tracking_id)">
             <span class="tracking-list-indicator" aria-hidden="true" />
             <TrackingPoster :poster-path="item.poster_path" variant="list" />
-            <span class="tracking-list-copy"><strong>{{ item.title || '未命名番剧' }}</strong><span>{{ item.subtitle_group || '未设置字幕组' }}</span></span>
-            <span class="tracking-list-meta"><span>{{ item.status_label }}</span><small>{{ item.updated_episode_status === 'NOT_IMPLEMENTED' ? '更新集数待开发' : '更新信息不可用' }}</small></span>
+            <span class="tracking-list-copy">
+              <strong>{{ item.title || '未命名番剧' }}</strong>
+              <span>{{ item.season ? `第 ${item.season} 季` : '季度未设置' }}</span>
+            </span>
+            <span class="tracking-list-meta">
+              <span>{{ item.status_label }}</span>
+              <small>{{ formatTrackingUpdatedAt(item.updated_at) }}</small>
+            </span>
           </button>
         </div>
         <p v-if="selectedHidden" class="tracking-selection-note" role="status">当前选择被筛选条件隐藏，未自动切换记录。</p>
@@ -1116,7 +1129,7 @@ onBeforeUnmount(() => {
 .tracking-status-card strong { font-size: 1.35rem; }
 .tracking-status-total, .tracking-count { margin: 0; color: var(--color-text-muted); }
 .tracking-compat-notice { margin: var(--space-3) 0 0; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-subtle); color: var(--color-text-muted); }
-.tracking-workspace { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(17rem, 1fr); gap: var(--space-5); align-items: start; }
+.tracking-workspace { display: grid; grid-template-columns: minmax(0, 3fr) minmax(18rem, 2fr); gap: var(--space-5); align-items: start; }
 .tracking-list-panel { min-width: 0; }
 .tracking-filters { display: grid; grid-template-columns: auto minmax(10rem, 1fr) auto minmax(8rem, .7fr) auto; gap: .65rem; align-items: center; margin-bottom: var(--space-4); }
 .tracking-filters label { font-size: .85rem; font-weight: 600; }

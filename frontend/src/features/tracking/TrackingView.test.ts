@@ -25,14 +25,22 @@ function row(actions: unknown[] = [], posterPath: string | null = null) {
     updated_episode_status: 'NOT_IMPLEMENTED', total_episodes: null, revision: 1,
     updated_at: '2026-09-14T00:00:00Z' }
 }
-async function mountSaved(actions: unknown[] = [], posterPath: string | null = null) {
+const defaultSummary = {
+  total: 1, pending: 1, processing: 0, active: 0, inactive: 0,
+  needs_attention: 0, unreadable: 0,
+}
+async function mountSaved(
+  actions: unknown[] = [],
+  posterPath: string | null = null,
+  summary: Record<string, number> = defaultSummary,
+) {
   const router = createRouter({ history: createMemoryHistory('/app/'), routes: [
     { path: '/tracking', component: TrackingView },
   ] })
   await router.push('/tracking'); await router.isReady()
   apiGet.mockImplementation(async (path) => path === '/api/v1/settings/autobangumi'
     ? { configured: true, credential_present: true, connection_ref: '11111111-1111-4111-8111-111111111111', configuration_revision: 3, connection_status: 'CONFIGURED', capabilities: null }
-    : { items: [row(actions, posterPath)], summary: {}, warnings: [] })
+    : { items: [row(actions, posterPath)], summary, warnings: [] })
   const wrapper = mount(TrackingView, { attachTo: document.body, global: { plugins: [createPinia(), router], stubs: { Teleport: true } } })
   await flushPromises()
   return { wrapper, router }
@@ -89,5 +97,29 @@ describe('TrackingView saved connection flow', () => {
     const poster = wrapper.find('.tracking-list-item .tracking-poster')
     expect(poster.attributes('data-poster-state')).toBe('placeholder')
     expect(poster.find('img').exists()).toBe(false)
+  })
+
+  it('presents the unified workbench with server overview counts', async () => {
+    const { wrapper } = await mountSaved([], null, {
+      total: 9, pending: 4, processing: 2, active: 2, inactive: 1,
+      needs_attention: 1, unreadable: 1,
+    })
+
+    expect(wrapper.text()).toContain('我的追番')
+    expect(wrapper.text()).toContain('管理待提交任务和正在运行的追番')
+    const cards = wrapper.findAll('.tracking-status-card')
+    expect(cards.map((card) => card.text())).toEqual([
+      '待提交4', '追番中2', '已停用1', '需处理1',
+    ])
+    expect(wrapper.find('.tracking-status-total').text()).toBe('共 9 条追番记录')
+  })
+
+  it('shows season and last-updated columns from the server summary row', async () => {
+    const { wrapper } = await mountSaved()
+
+    const items = wrapper.findAll('.tracking-list-item')
+    expect(items[0]!.text()).toContain('第 1 季')
+    expect(items[0]!.text()).toContain('待提交')
+    expect(items[0]!.text()).toContain('2026')
   })
 })

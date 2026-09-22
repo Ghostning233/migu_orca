@@ -112,7 +112,7 @@ def _mock_tracking(page: Page, request_id: str) -> None:
                         "items": [item],
                         "summary": {
                             "total": 1, "pending": 0, "processing": 0,
-                            "active": 1, "needs_attention": 0, "unreadable": 0,
+                            "active": 1, "inactive": 0, "needs_attention": 0, "unreadable": 0,
                         },
                         "warnings": [],
                     },
@@ -146,4 +146,4 @@ def test_tracking_route_is_the_formal_tracking_screen_not_the_retired_queue(
                      "#batch-queue-ab-auth-mode", "#batch-queue-ab-endpoint"):
         assert page.locator(selector).count() == 0, selector
     assert page.get_by_role("link", name="追番管理", exact=True).get_attribute("aria-current") == "page"
-    expect(page.locator("#tracking-heading")).to_contain_text("查看本地追番状态")
+    expect(page.locator("#tracking-heading")).to_contain_text("管理待提交任务和正在运行的追番")

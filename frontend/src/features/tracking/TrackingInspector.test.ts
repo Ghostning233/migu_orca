@@ -123,6 +123,49 @@ describe('TrackingInspector secure detail (US-306)', () => {
     expect(poster.find('img').exists()).toBe(false)
   })
 
+  it('names the panel 追番详情 and folds activity/technical detail by default', async () => {
+    apiGet.mockResolvedValue(detail({
+      current_operation: { operation_id: 'op-1', state: 'UNKNOWN', operation: 'SUBMIT', attempt: 1 },
+      audit_events: [{ action: 'SUBMIT', safe_message: '已提交', created_at: '2026-09-13T00:00:00Z' }],
+      external_mapping: { match_reason: '标题', enabled: true, external_deleted: false },
+    }) as never)
+
+    const wrapper = await mountInspector()
+
+    expect(wrapper.find('#tracking-inspector-heading').text()).toBe('追番详情')
+    const activity = wrapper.find('#tracking-activity-log')
+    const diagnostics = wrapper.find('#tracking-tech-diagnostics')
+    expect(activity.exists()).toBe(true)
+    expect(diagnostics.exists()).toBe(true)
+    // Collapsed by default: the user must opt in to operational detail.
+    expect(activity.attributes('open')).toBeUndefined()
+    expect(diagnostics.attributes('open')).toBeUndefined()
+    expect(activity.find('summary').text()).toBe('操作记录')
+    expect(diagnostics.find('summary').text()).toBe('技术诊断')
+
+    // Everyday essentials stay directly visible.
+    const summary = wrapper.find('.tracking-inspector-summary')
+    expect(summary.text()).toContain('有效资源')
+    expect(summary.text()).toContain('字幕组')
+    expect(summary.text()).toContain('追番中')
+  })
+
+  it('keeps an unknown server status label without rebuilding the state machine', async () => {
+    apiGet.mockResolvedValue(detail({
+      status: 'UNTRUSTED' as never,
+      status_label: '未知状态',
+      status_group: 'UNTRUSTED' as never,
+    }) as never)
+
+    const wrapper = await mountInspector()
+
+    // The page renders the server projection verbatim; it neither guesses a
+    // familiar group nor offers actions for a state it does not understand.
+    expect(wrapper.find('.tracking-inspector-summary').text()).toContain('未知状态')
+    expect(wrapper.find('#tracking-submit').exists()).toBe(false)
+    expect(wrapper.find('#tracking-revalidate').exists()).toBe(false)
+  })
+
   it('does not let an older detail response overwrite a newer selection', async () => {
     let resolveFirst: ((value: unknown) => void) | undefined
     const first = new Promise((resolve) => { resolveFirst = resolve })

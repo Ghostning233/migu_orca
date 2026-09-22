@@ -48,6 +48,7 @@ from tracking_engine.models.tracking import (
     TRACKING_AUDIT_TRACKING_CREATED,
     TRACKING_ORIGIN_SAVE_CONFIRM,
     TRACKING_STATUS_ACTIVE,
+    TRACKING_STATUS_DISABLED,
     TRACKING_STATUS_PENDING_SUBMIT,
     TRACKING_STATUS_SUBMIT_FAILED,
     TrackingRecord,
@@ -167,6 +168,7 @@ def test_tracking_list_empty(tmp_path: Path, client: FlaskClient) -> None:
             "pending": 0,
             "processing": 0,
             "active": 0,
+            "inactive": 0,
             "needs_attention": 0,
             "unreadable": 0,
         },
@@ -207,6 +209,7 @@ def test_tracking_list_returns_safe_summaries_and_actions(
         "pending": 1,
         "processing": 0,
         "active": 1,
+        "inactive": 0,
         "needs_attention": 1,
         "unreadable": 0,
     }
@@ -245,6 +248,28 @@ def test_tracking_list_returns_safe_summaries_and_actions(
         "REVALIDATE",
         "RETRY",
     ]
+
+
+def test_tracking_summary_counts_the_disabled_group(
+    tmp_path: Path,
+    client: FlaskClient,
+) -> None:
+    """Issue #85: "已停用" is an overview category backed by server counts."""
+    _seed_record(
+        tmp_path,
+        "request-disabled",
+        status=TRACKING_STATUS_DISABLED,
+        title="已停用番剧",
+    )
+
+    response = client.get("/api/v1/tracking/items", query_string={"storage_dir": "storage"})
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    item = payload["result"]["items"][0]
+    assert item["status_label"] == "已停用"
+    assert item["status_group"] == "INACTIVE"
+    assert payload["result"]["summary"]["inactive"] == 1
 
 
 def test_tracking_list_q_and_status_group_and_sort(

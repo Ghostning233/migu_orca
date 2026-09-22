@@ -112,7 +112,7 @@ def _mock_tracking(page: Page, item: dict[str, Any], *, poster_status: int = 200
                             "pending": 0,
                             "processing": 0,
                             "active": 1,
-                            "needs_attention": 0,
+                            "inactive": 0, "needs_attention": 0,
                             "unreadable": 0,
                         },
                         "warnings": [],

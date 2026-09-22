@@ -439,7 +439,7 @@ defineExpose({ reload: () => fetchDetail(true) })
 
 <template>
   <section class="tracking-inspector-content" aria-labelledby="tracking-inspector-heading">
-    <h2 id="tracking-inspector-heading">检查器</h2>
+    <h2 id="tracking-inspector-heading">追番详情</h2>
     <div v-if="loading" class="tracking-inspector-loading"><LoadingState message="正在读取安全详情…" /></div>
     <ErrorState v-else-if="failed" title="追番详情读取失败" message="暂时无法读取该追番详情，请稍后重试。" retry-label="重试详情" @retry="loadDetail" />
     <div v-else-if="detail" class="tracking-inspector-detail">
@@ -452,10 +452,10 @@ defineExpose({ reload: () => fetchDetail(true) })
         <dl>
           <div><dt>季度</dt><dd>{{ detail.season ?? '未设置' }}</dd></div>
           <div><dt>字幕组</dt><dd>{{ detail.subtitle_group || '未设置' }}</dd></div>
+          <div><dt>本地状态</dt><dd>{{ detail.status_label }}</dd></div>
           <div><dt>有效资源</dt><dd>{{ detail.valid_resource_count }}</dd></div>
           <div><dt>总集数</dt><dd>{{ detail.total_episodes ?? '待获取' }}</dd></div>
           <div><dt>已更新集数</dt><dd>待开发</dd></div>
-          <div><dt>本地状态</dt><dd>{{ detail.status_label }}</dd></div>
         </dl>
       </section>
 
@@ -465,56 +465,6 @@ defineExpose({ reload: () => fetchDetail(true) })
         class="tracking-intent-notice"
         role="status"
       >{{ intentNotice }}</p>
-
-      <section v-if="detail.external_mapping" class="tracking-inspector-section" aria-labelledby="tracking-external-heading">
-        <h4 id="tracking-external-heading">外部安全摘要</h4>
-        <dl>
-          <div><dt>关联状态</dt><dd>{{ detail.external_mapping.match_reason || '未提供' }}</dd></div>
-          <div><dt>启用状态</dt><dd>{{ detail.external_mapping.enabled ? '已启用' : '未启用' }}</dd></div>
-          <div><dt>外部删除</dt><dd>{{ detail.external_mapping.external_deleted ? '是' : '否' }}</dd></div>
-        </dl>
-      </section>
-
-      <section v-if="detail.current_operation" class="tracking-inspector-section" aria-labelledby="tracking-operation-heading">
-        <h4 id="tracking-operation-heading">最近操作</h4>
-        <p>{{ detail.current_operation.operation }} · {{ detail.current_operation.state }} · 第 {{ detail.current_operation.attempt }} 次</p>
-      </section>
-
-      <section v-if="detail.revalidation_issues?.length" class="tracking-inspector-section" aria-labelledby="tracking-issues-heading">
-        <h4 id="tracking-issues-heading">复核问题</h4>
-        <ul><li v-for="issue in detail.revalidation_issues" :key="`${issue.code}-${issue.field ?? ''}`">{{ issue.message }}</li></ul>
-      </section>
-
-      <section v-if="detail.audit_events?.length" class="tracking-inspector-section" aria-labelledby="tracking-audit-heading">
-        <h4 id="tracking-audit-heading">安全审计</h4>
-        <ul><li v-for="event in detail.audit_events" :key="`${event.action}-${event.created_at}`">{{ event.safe_message || event.action }} · {{ event.created_at }}</li></ul>
-      </section>
-
-      <section class="tracking-inspector-section tracking-revalidate" aria-labelledby="tracking-revalidate-heading">
-        <h4 id="tracking-revalidate-heading">本地方案复核</h4>
-        <p class="field-help">复核只在本地读取订阅方案，不携带任何 Auto Bangumi 凭据，也不会创建外部订阅。</p>
-        <BaseButton
-          v-if="revalidateAction"
-          id="tracking-revalidate"
-          variant="secondary"
-          :loading="revalidateLoading"
-          :disabled="revalidateLoading || itemActionInFlight"
-          @click="revalidatePlan"
-        >{{ revalidateAction.label }}</BaseButton>
-        <p v-else class="field-help">当前状态不可发起本地复核。</p>
-        <div
-          v-if="revalidateState !== 'IDLE'"
-          id="tracking-revalidate-result"
-          class="tracking-revalidate-result"
-          :class="`is-${revalidateState.toLowerCase()}`"
-          role="status"
-        >
-          <p class="tracking-revalidate-verdict">{{ revalidateMessage }}</p>
-          <ul v-if="revalidateIssues.length" class="tracking-revalidate-issues" aria-label="复核问题">
-            <li v-for="issue in revalidateIssues" :key="issue.code">{{ issue.message }}</li>
-          </ul>
-        </div>
-      </section>
 
       <section class="tracking-inspector-section tracking-submit" aria-labelledby="tracking-submit-heading">
         <h4 id="tracking-submit-heading">提交到 Auto Bangumi</h4>
@@ -548,6 +498,47 @@ defineExpose({ reload: () => fetchDetail(true) })
           <ul v-if="thisWrite.issues.length" class="tracking-submit-issues" aria-label="提交问题">
             <li v-for="issue in thisWrite.issues" :key="issue.code">{{ issue.message }}</li>
           </ul>
+        </div>
+      </section>
+
+      <section
+        v-if="recoveryActions.length || verifyExternalOffered || thisRecovery"
+        class="tracking-inspector-section tracking-recovery"
+        aria-labelledby="tracking-recovery-heading"
+      >
+        <h4 id="tracking-recovery-heading">结果未知恢复</h4>
+        <p class="field-help">恢复只用本地证据或只读外部核验，不会重新提交，也不会创建、修改或删除 Auto Bangumi 订阅。</p>
+        <div class="tracking-recovery-actions">
+          <BaseButton
+            v-for="action in recoveryActions"
+            :key="action.code"
+            :id="RECOVERY_BUTTON_IDS[action.code]"
+            :variant="RECOVERY_VARIANTS[action.style]"
+            :disabled="actionBusy"
+            @click="requestRecovery(action.code)"
+          >{{ action.label }}</BaseButton>
+          <BaseButton
+            v-if="verifyExternalOffered"
+            id="tracking-recover-verify"
+            variant="secondary"
+            :disabled="actionBusy"
+            @click="requestRecovery('VERIFY_EXTERNAL')"
+          >只读核验外部状态</BaseButton>
+        </div>
+        <p v-if="!verifyExternalOffered && recoveryActions.length" class="field-help">
+          只读外部核验需要先在页面连接 Auto Bangumi，并确认外部核验能力可用。
+        </p>
+        <div
+          v-if="thisRecovery"
+          id="tracking-recovery-result"
+          class="tracking-recovery-result"
+          :class="`is-${thisRecovery.state.toLowerCase()}`"
+          role="status"
+        >
+          <p class="tracking-recovery-verdict">{{ thisRecovery.message }}</p>
+          <p v-if="thisRecovery.needsManual" id="tracking-recovery-manual-notice" class="tracking-recovery-manual">
+            {{ RECOVERY_NEEDS_MANUAL_NOTICE }}
+          </p>
         </div>
       </section>
 
@@ -602,6 +593,72 @@ defineExpose({ reload: () => fetchDetail(true) })
         />
       </section>
 
+      <details id="tracking-activity-log" class="tracking-inspector-disclosure">
+        <summary>操作记录</summary>
+        <div class="tracking-inspector-disclosure-body">
+          <section v-if="detail.current_operation" class="tracking-inspector-section" aria-labelledby="tracking-operation-heading">
+            <h4 id="tracking-operation-heading">最近操作</h4>
+            <p>{{ detail.current_operation.operation }} · {{ detail.current_operation.state }} · 第 {{ detail.current_operation.attempt }} 次</p>
+          </section>
+
+          <section v-if="detail.revalidation_issues?.length" class="tracking-inspector-section" aria-labelledby="tracking-issues-heading">
+            <h4 id="tracking-issues-heading">复核问题</h4>
+            <ul><li v-for="issue in detail.revalidation_issues" :key="`${issue.code}-${issue.field ?? ''}`">{{ issue.message }}</li></ul>
+          </section>
+
+          <section v-if="detail.audit_events?.length" class="tracking-inspector-section" aria-labelledby="tracking-audit-heading">
+            <h4 id="tracking-audit-heading">安全审计</h4>
+            <ul><li v-for="event in detail.audit_events" :key="`${event.action}-${event.created_at}`">{{ event.safe_message || event.action }} · {{ event.created_at }}</li></ul>
+          </section>
+
+          <p v-if="!detail.current_operation && !detail.revalidation_issues?.length && !detail.audit_events?.length" class="field-help">暂无操作记录。</p>
+        </div>
+      </details>
+
+      <details id="tracking-tech-diagnostics" class="tracking-inspector-disclosure">
+        <summary>技术诊断</summary>
+        <div class="tracking-inspector-disclosure-body">
+          <section v-if="detail.external_mapping" class="tracking-inspector-section" aria-labelledby="tracking-external-heading">
+            <h4 id="tracking-external-heading">外部安全摘要</h4>
+            <dl>
+              <div><dt>关联状态</dt><dd>{{ detail.external_mapping.match_reason || '未提供' }}</dd></div>
+              <div><dt>启用状态</dt><dd>{{ detail.external_mapping.enabled ? '已启用' : '未启用' }}</dd></div>
+              <div><dt>外部删除</dt><dd>{{ detail.external_mapping.external_deleted ? '是' : '否' }}</dd></div>
+            </dl>
+          </section>
+
+          <section class="tracking-inspector-section tracking-revalidate" aria-labelledby="tracking-revalidate-heading">
+            <h4 id="tracking-revalidate-heading">本地方案复核</h4>
+            <p class="field-help">复核只在本地读取订阅方案，不携带任何 Auto Bangumi 凭据，也不会创建外部订阅。</p>
+            <BaseButton
+              v-if="revalidateAction"
+              id="tracking-revalidate"
+              variant="secondary"
+              :loading="revalidateLoading"
+              :disabled="revalidateLoading || itemActionInFlight"
+              @click="revalidatePlan"
+            >{{ revalidateAction.label }}</BaseButton>
+            <p v-else class="field-help">当前状态不可发起本地复核。</p>
+            <div
+              v-if="revalidateState !== 'IDLE'"
+              id="tracking-revalidate-result"
+              class="tracking-revalidate-result"
+              :class="`is-${revalidateState.toLowerCase()}`"
+              role="status"
+            >
+              <p class="tracking-revalidate-verdict">{{ revalidateMessage }}</p>
+              <ul v-if="revalidateIssues.length" class="tracking-revalidate-issues" aria-label="复核问题">
+                <li v-for="issue in revalidateIssues" :key="issue.code">{{ issue.message }}</li>
+              </ul>
+            </div>
+          </section>
+
+          <ul v-if="detail.safe_info?.resources?.valid_file_names?.length" class="tracking-resource-names" aria-label="有效资源名称">
+            <li v-for="name in detail.safe_info.resources.valid_file_names" :key="name">{{ name }}</li>
+          </ul>
+        </div>
+      </details>
+
       <section
         class="tracking-inspector-section tracking-delete-external-section"
         aria-labelledby="tracking-delete-external-section-heading"
@@ -619,47 +676,6 @@ defineExpose({ reload: () => fetchDetail(true) })
         />
       </section>
 
-      <section
-        v-if="recoveryActions.length || verifyExternalOffered || thisRecovery"
-        class="tracking-inspector-section tracking-recovery"
-        aria-labelledby="tracking-recovery-heading"
-      >
-        <h4 id="tracking-recovery-heading">结果未知恢复</h4>
-        <p class="field-help">恢复只用本地证据或只读外部核验，不会重新提交，也不会创建、修改或删除 Auto Bangumi 订阅。</p>
-        <div class="tracking-recovery-actions">
-          <BaseButton
-            v-for="action in recoveryActions"
-            :key="action.code"
-            :id="RECOVERY_BUTTON_IDS[action.code]"
-            :variant="RECOVERY_VARIANTS[action.style]"
-            :disabled="actionBusy"
-            @click="requestRecovery(action.code)"
-          >{{ action.label }}</BaseButton>
-          <BaseButton
-            v-if="verifyExternalOffered"
-            id="tracking-recover-verify"
-            variant="secondary"
-            :disabled="actionBusy"
-            @click="requestRecovery('VERIFY_EXTERNAL')"
-          >只读核验外部状态</BaseButton>
-        </div>
-        <p v-if="!verifyExternalOffered && recoveryActions.length" class="field-help">
-          只读外部核验需要先在页面连接 Auto Bangumi，并确认外部核验能力可用。
-        </p>
-        <div
-          v-if="thisRecovery"
-          id="tracking-recovery-result"
-          class="tracking-recovery-result"
-          :class="`is-${thisRecovery.state.toLowerCase()}`"
-          role="status"
-        >
-          <p class="tracking-recovery-verdict">{{ thisRecovery.message }}</p>
-          <p v-if="thisRecovery.needsManual" id="tracking-recovery-manual-notice" class="tracking-recovery-manual">
-            {{ RECOVERY_NEEDS_MANUAL_NOTICE }}
-          </p>
-        </div>
-      </section>
-
       <p v-if="detail.status === 'EXTERNAL_ONLY'" class="field-help" role="status">
         该记录是外部孤立项，没有可返回的本地订阅方案。
       </p>
@@ -669,12 +685,9 @@ defineExpose({ reload: () => fetchDetail(true) })
       <RouterLink v-else class="tracking-plan-link" :to="routeLocation('plans', { request_id: detail.request_id })">
         返回修改方案
       </RouterLink>
-      <ul v-if="detail.safe_info?.resources?.valid_file_names?.length" class="tracking-resource-names" aria-label="有效资源名称">
-        <li v-for="name in detail.safe_info.resources.valid_file_names" :key="name">{{ name }}</li>
-      </ul>
       <p v-if="detail.warnings?.length" class="field-help" role="status">{{ detail.warnings[0] }}</p>
     </div>
-    <p v-else class="field-help">选择一条追番记录查看安全检查器。</p>
+    <p v-else class="field-help">选择一条追番记录查看追番详情。</p>
   </section>
 </template>
 
@@ -686,6 +699,10 @@ defineExpose({ reload: () => fetchDetail(true) })
 .tracking-inspector-summary:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .tracking-inspector-identity { display: flex; align-items: center; gap: var(--space-3); }
 .tracking-inspector-identity h3 { margin: 0; }
+.tracking-inspector-disclosure { padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); }
+.tracking-inspector-disclosure > summary { cursor: pointer; font-weight: 600; }
+.tracking-inspector-disclosure > summary:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.tracking-inspector-disclosure-body { display: grid; gap: var(--space-3); margin-top: var(--space-3); }
 .tracking-inspector-detail dl { display: grid; gap: .35rem; margin: 0; }
 .tracking-inspector-detail dl div { display: flex; justify-content: space-between; gap: 1rem; }
 .tracking-inspector-detail dt { color: var(--color-text-muted); }

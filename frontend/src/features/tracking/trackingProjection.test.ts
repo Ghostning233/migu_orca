@@ -27,6 +27,7 @@ import {
   projectRecoveryOutcome,
   projectRevalidateIssues,
   projectTrackingActionScopes,
+  formatTrackingUpdatedAt,
   projectTrackingOverview,
   projectWriteOutcome,
   RECOVERY_ACTION_BODIES,
@@ -87,15 +88,36 @@ function action(overrides: Partial<ItemAction> = {}): ItemAction {
 }
 
 describe('tracking projection (US-304)', () => {
-  it('counts known server status groups and isolates unknown values', () => {
-    const result = projectTrackingOverview([
-      item(), item({ tracking_id: 'tracking-2', status_group: 'PENDING' }),
-      item({ tracking_id: 'tracking-3', status_group: 'UNTRUSTED' as never }),
-    ])
-    expect(result.total).toBe(3)
-    expect(result.byGroup.ACTIVE).toBe(1)
-    expect(result.byGroup.PENDING).toBe(1)
+  it('projects the overview from the server summary, never from loaded rows', () => {
+    const result = projectTrackingOverview({
+      total: 7, pending: 2, processing: 1, active: 3, inactive: 1,
+      needs_attention: 0, unreadable: 1,
+    })
+    expect(result.total).toBe(7)
+    expect(result.byGroup).toEqual({ PENDING: 2, ACTIVE: 3, INACTIVE: 1, ATTENTION: 0 })
     expect(result.unreadable).toBe(1)
+  })
+
+  it('fails closed to zero for a missing or malformed summary', () => {
+    expect(projectTrackingOverview(null)).toEqual({
+      total: 0,
+      byGroup: { PENDING: 0, ACTIVE: 0, INACTIVE: 0, ATTENTION: 0 },
+      unreadable: 0,
+    })
+    const malformed = projectTrackingOverview({
+      total: -1, pending: 'x', active: Number.NaN, inactive: null, needs_attention: 2,
+      processing: 0, unreadable: undefined,
+    } as never)
+    expect(malformed.total).toBe(0)
+    expect(malformed.byGroup).toEqual({ PENDING: 0, ACTIVE: 0, INACTIVE: 0, ATTENTION: 2 })
+    expect(malformed.unreadable).toBe(0)
+  })
+
+  it('formats a usable updated-at label and fails closed on bad values', () => {
+    expect(formatTrackingUpdatedAt('2026-09-14T00:00:00Z')).toContain('2026')
+    expect(formatTrackingUpdatedAt(null)).toBe('更新时间不可用')
+    expect(formatTrackingUpdatedAt('')).toBe('更新时间不可用')
+    expect(formatTrackingUpdatedAt('not-a-date')).toBe('更新时间不可用')
   })
 
   it('searches only public title/subtitle and applies server group filter', () => {

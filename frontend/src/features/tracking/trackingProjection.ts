@@ -71,9 +71,31 @@ export const TRACKING_STATUS_GROUPS = [
 
 export type TrackingStatusGroup = (typeof TRACKING_STATUS_GROUPS)[number]
 
+/**
+ * Overview cards (issue #85). PROCESSING is a transient per-row state and
+ * deliberately has no category of its own — those rows stay visible in the list
+ * and inside the server total.
+ */
+export const TRACKING_OVERVIEW_GROUPS = [
+  'PENDING', 'ACTIVE', 'INACTIVE', 'ATTENTION',
+] as const satisfies readonly TrackingStatusGroup[]
+
+export type TrackingOverviewGroup = (typeof TRACKING_OVERVIEW_GROUPS)[number]
+
 export interface TrackingOverview {
   total: number
-  byGroup: Record<TrackingStatusGroup, number>
+  byGroup: Record<TrackingOverviewGroup, number>
+  unreadable: number
+}
+
+/** Server-authoritative list counts from ``GET /api/v1/tracking/items``. */
+export interface TrackingListSummary {
+  total: number
+  pending: number
+  processing: number
+  active: number
+  inactive: number
+  needs_attention: number
   unreadable: number
 }
 
@@ -160,18 +182,45 @@ function isKnownScope(value: unknown): value is TrackingScope {
   return typeof value === 'string' && KNOWN_SCOPES.has(value as TrackingScope)
 }
 
-/** Count only server-provided known status groups; unknown data is unreadable. */
-export function projectTrackingOverview(items: readonly TrackingItem[]): TrackingOverview {
-  const byGroup = Object.fromEntries(TRACKING_STATUS_GROUPS.map((group) => [group, 0])) as Record<TrackingStatusGroup, number>
-  let unreadable = 0
-  for (const item of items) {
-    if (!isKnownStatusGroup(item.status_group)) {
-      unreadable += 1
-      continue
-    }
-    byGroup[item.status_group] += 1
+/**
+ * Project the overview strictly from the server summary (issue #85).
+ *
+ * The page never rebuilds the server state machine: counts come from the
+ * authoritative projection, and any missing or malformed value renders 0
+ * instead of being guessed from whichever rows happen to be loaded/filtered.
+ */
+export function projectTrackingOverview(
+  summary: TrackingListSummary | null | undefined,
+): TrackingOverview {
+  return {
+    total: _safeCount(summary?.total),
+    byGroup: {
+      PENDING: _safeCount(summary?.pending),
+      ACTIVE: _safeCount(summary?.active),
+      INACTIVE: _safeCount(summary?.inactive),
+      ATTENTION: _safeCount(summary?.needs_attention),
+    },
+    unreadable: _safeCount(summary?.unreadable),
   }
-  return { total: items.length, byGroup, unreadable }
+}
+
+function _safeCount(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0
+}
+
+/** Format a server timestamp for the list's "最近更新时间" column (issue #85). */
+export function formatTrackingUpdatedAt(value: string | null | undefined): string {
+  if (typeof value !== 'string' || !value.trim()) return '更新时间不可用'
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return '更新时间不可用'
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(parsed)
 }
 
 /** Search only public title/subtitle fields and apply a server status group. */

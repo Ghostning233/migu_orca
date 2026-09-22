@@ -923,12 +923,17 @@ class TrackingItemDTO(_StrictBase):
 
 
 class TrackingItemListSummaryDTO(_StrictBase):
-    """Safe summary counts for the tracking list (§11.2)."""
+    """Safe summary counts for the tracking list (§11.2).
+
+    ``inactive`` counts the DISABLED group; ``processing`` stays a transient
+    per-row state that the page never renders as its own overview category.
+    """
 
     total: int
     pending: int
     processing: int
     active: int
+    inactive: int
     needs_attention: int
     unreadable: int
 

@@ -816,7 +816,7 @@ class TestAppWorkbenchCandidateSelectionAndDraft:
                                 "pending": 0,
                                 "processing": 0,
                                 "active": 0,
-                                "needs_attention": 0,
+                                "inactive": 0, "needs_attention": 0,
                                 "unreadable": 0,
                             },
                             "warnings": [],
@@ -1108,7 +1108,7 @@ class TestAppWorkbenchCandidateSelectionAndDraft:
                         }],
                         "summary": {
                             "total": 1, "pending": 1, "processing": 0,
-                            "active": 0, "needs_attention": 0, "unreadable": 0,
+                            "active": 0, "inactive": 0, "needs_attention": 0, "unreadable": 0,
                         },
                         "warnings": [],
                     },

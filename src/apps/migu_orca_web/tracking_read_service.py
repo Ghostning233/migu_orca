@@ -50,6 +50,7 @@ from storage_engine.controllers.tracking_repository import (
 from tracking_engine.models.tracking import (
     TRACKING_STATUS_GROUP_ACTIVE,
     TRACKING_STATUS_GROUP_ATTENTION,
+    TRACKING_STATUS_GROUP_INACTIVE,
     TRACKING_STATUS_GROUP_PENDING,
     TRACKING_STATUS_GROUP_PROCESSING,
     TrackingRecord,
@@ -204,6 +205,7 @@ def _summary_counts(records: list[TrackingRecord], unreadable: int) -> dict[str,
         "pending": 0,
         "processing": 0,
         "active": 0,
+        "inactive": 0,
         "needs_attention": 0,
         "unreadable": unreadable,
     }
@@ -215,9 +217,10 @@ def _summary_counts(records: list[TrackingRecord], unreadable: int) -> dict[str,
             counts["processing"] += 1
         elif group == TRACKING_STATUS_GROUP_ACTIVE:
             counts["active"] += 1
+        elif group == TRACKING_STATUS_GROUP_INACTIVE:
+            counts["inactive"] += 1
         elif group == TRACKING_STATUS_GROUP_ATTENTION:
             counts["needs_attention"] += 1
-        # TRACKING_STATUS_GROUP_INACTIVE (B-C reserved) is counted in total only.
     return counts
 
 

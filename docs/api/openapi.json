@@ -8389,7 +8389,7 @@
                         },
                         "summary": {
                           "additionalProperties": false,
-                          "description": "Safe summary counts for the tracking list (§11.2).",
+                          "description": "Safe summary counts for the tracking list (§11.2).\n\n``inactive`` counts the DISABLED group; ``processing`` stays a transient\nper-row state that the page never renders as its own overview category.",
                           "properties": {
                             "total": {
                               "title": "Total",
@@ -8407,6 +8407,10 @@
                               "title": "Active",
                               "type": "integer"
                             },
+                            "inactive": {
+                              "title": "Inactive",
+                              "type": "integer"
+                            },
                             "needs_attention": {
                               "title": "Needs Attention",
                               "type": "integer"
@@ -8421,6 +8425,7 @@
                             "pending",
                             "processing",
                             "active",
+                            "inactive",
                             "needs_attention",
                             "unreadable"
                           ],
@@ -8480,6 +8485,7 @@
                       "pending": 1,
                       "processing": 1,
                       "active": 1,
+                      "inactive": 1,
                       "needs_attention": 1,
                       "unreadable": 1
                     },

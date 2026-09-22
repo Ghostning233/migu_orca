@@ -188,7 +188,7 @@ def test_saved_management_actions_send_only_bound_connection_fields(page, live_s
                             "pending": 1,
                             "processing": 0,
                             "active": 0,
-                            "needs_attention": 0,
+                            "inactive": 0, "needs_attention": 0,
                             "unreadable": 0,
                         },
                         "warnings": [],
@@ -310,7 +310,7 @@ def test_saved_sync_requires_explicit_probe_and_sends_ref_revision(page, live_se
                             "pending": 1,
                             "processing": 0,
                             "active": 0,
-                            "needs_attention": 0,
+                            "inactive": 0, "needs_attention": 0,
                             "unreadable": 0,
                         },
                         "warnings": [],
@@ -440,7 +440,7 @@ def test_saved_verify_external_preserves_unknown_source_lock(page, live_server_u
                             "pending": 0,
                             "processing": 0,
                             "active": 0,
-                            "needs_attention": 1,
+                            "inactive": 0, "needs_attention": 1,
                             "unreadable": 0,
                         },
                         "warnings": [],
@@ -877,6 +877,9 @@ def test_local_recovery_needs_no_saved_probe_and_revalidate_is_local(page, live_
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
     page.wait_for_selector("#tracking-recover-auto")
+    # Issue #85: local revalidation now lives inside the collapsed 技术诊断
+    # disclosure; the user opens it explicitly before acting.
+    page.locator("#tracking-tech-diagnostics summary").click()
     page.locator("#tracking-revalidate").click()
     page.wait_for_timeout(100)
     assert any(kind == "revalidate" and payload == {"expected_revision": 4} for kind, payload in calls)
