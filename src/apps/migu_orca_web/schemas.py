@@ -893,6 +893,39 @@ class TrackingRefreshRssPayload(_TrackingManagementBasePayload):
         return value
 
 
+class SavedTrackingLocalPlan(BaseModel):
+    """Local plan values raised together with a confirmed external modify.
+
+    Identity fields (title/season/subtitle_group) are deliberately absent: they
+    come from the real MiKan collection and are never edited here. Only the
+    editable plan fields travel, and the server merges them into the stored
+    snapshot instead of replacing it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    filter_rule: TrackingFilterRulePatch | None = None
+    expected_folder_name: str | None = None
+
+    @model_validator(mode="after")
+    def _require_local_field(self) -> SavedTrackingLocalPlan:
+        if not self.model_fields_set:
+            raise ValueError("local_plan 不能为空")
+        return self
+
+    @field_validator("expected_folder_name")
+    @classmethod
+    def _clean_local_folder(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        folder = value.strip()
+        if not folder:
+            raise ValueError("expected_folder_name 不能为空字符串")
+        if len(folder) > 255 or any(char in folder for char in "/\\"):
+            raise ValueError("expected_folder_name 含不合法字符")
+        return folder
+
+
 class SavedTrackingManagementInput(BaseModel):
     """Strict handoff for management through one saved AB generation."""
     model_config = ConfigDict(extra="forbid")
@@ -906,6 +939,8 @@ class SavedTrackingManagementInput(BaseModel):
     configuration_revision: StrictInt = Field(ge=0)
     patch: dict[str, Any] | None = None
     enabled: StrictBool | None = None
+    #: Local plan values to raise once the external modify is confirmed.
+    local_plan: SavedTrackingLocalPlan | None = None
     storage_dir: str | None = None
 
     @field_validator("connection_ref", mode="before")

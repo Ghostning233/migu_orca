@@ -10432,6 +10432,16 @@ export interface operations {
                         offset?: number | null;
                         expected_folder_name: string | null;
                     });
+                    /** @description issue #91：外部修改确认成功后同时提升的本地方案字段（身份字段不可编辑）。与 patch 独立，缺省表示只改外部对象。 */
+                    local_plan?: {
+                        filter_rule?: {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | null;
+                        expected_folder_name?: string | null;
+                    } | null;
                 } | {
                     /** @constant */
                     target_scope: "ASSOCIATED_RSS";

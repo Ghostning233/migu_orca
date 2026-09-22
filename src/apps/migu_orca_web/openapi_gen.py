@@ -363,6 +363,21 @@ def _modify_request_body() -> dict[str, Any]:
             "offset": {"type": ["integer", "null"], "minimum": 0},
             "expected_folder_name": {"type": ["string", "null"]},
     }
+    local_plan = {
+        "type": ["object", "null"],
+        "additionalProperties": False,
+        "description": "issue #91：外部修改确认成功后同时提升的本地方案字段（身份字段不可编辑）。与 patch 独立，缺省表示只改外部对象。",
+        "properties": {
+            "filter_rule": {
+                "type": ["object", "null"],
+                "additionalProperties": False,
+                "properties": filter_properties,
+                "minProperties": 1,
+            },
+            "expected_folder_name": {"type": ["string", "null"], "maxLength": 255},
+        },
+        "minProperties": 1,
+    }
     subscription_patch = {
         "allOf": [
             {"type": "object", "additionalProperties": False, "properties": subscription_properties},
@@ -396,6 +411,8 @@ def _modify_request_body() -> dict[str, Any]:
                 **common,
                 "target_scope": {"const": scope},
                 "patch": patch,
+                # Only a subscription modify has a local plan to raise.
+                **({"local_plan": local_plan} if scope == "SUBSCRIPTION" else {}),
             },
         }
 
