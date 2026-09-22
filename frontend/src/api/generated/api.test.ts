@@ -162,6 +162,6 @@ describe('generated API client (US-198)', () => {
   })
 
   it('has a non-empty expected operation set (guards the fixture)', () => {
-    expect(EXPECTED_OPERATION_IDS).toHaveLength(33)
+    expect(EXPECTED_OPERATION_IDS).toHaveLength(34)
   })
 })
