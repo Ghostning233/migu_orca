@@ -3,6 +3,7 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api/client'
+import { clearReuseHandoff, consumeReuseHandoff } from '@/features/requests/reuseHandoff'
 import TrackingInspector from './TrackingInspector.vue'
 import { createManagementSession, RECOVERY_NEEDS_MANUAL_NOTICE } from './trackingProjection'
 import type { CapabilityResult, TrackingRecoverySession, TrackingWriteSession } from './trackingProjection'
@@ -813,4 +814,44 @@ describe('TrackingInspector unified plan delete (issue #92)', () => {
     const payload = wrapper.emitted('plan-delete-requested')?.at(-1)?.[0] as { deleteExternal: boolean }
     expect(payload.deleteExternal).toBe(false)
   })
+})
+
+describe('TrackingInspector plan reuse (issue #93)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset(); clearReuseHandoff() })
+
+  it('publishes only the safe suggestion and leaves navigation to the page', async () => {
+    const base = detail()
+    apiGet.mockResolvedValue({
+      ...base,
+      safe_info: {
+        ...base.safe_info,
+        mikan_collection: { bangumi_id: 'mikan-1234', title: '葬送的芙莉莲', season: 1 },
+      },
+    } as never)
+    const wrapper = await mountInspector()
+
+    const button = wrapper.find('#tracking-reuse-plan')
+    expect(button.exists()).toBe(true)
+    expect(button.text()).toBe('复制并重新添加')
+    expect(wrapper.find('.tracking-reuse-section').text()).toContain('需要重新选择真实 MiKan 合集')
+
+    await button.trigger('click')
+
+    // The handoff travels in memory and carries only public suggestion fields.
+    const handoff = consumeReuseHandoff()
+    expect(handoff).not.toBeNull()
+    expect(handoff?.title).toBe('葬送的芙莉莲')
+    expect(handoff?.suggestion.expectedFolderName).toBe('安全文件夹')
+    expect(JSON.stringify(handoff)).not.toContain('rss_url')
+    expect(JSON.stringify(handoff)).not.toContain('password')
+    // The page owns the navigation.
+    expect(wrapper.emitted('reuse-requested')).toHaveLength(1)
+  })
+
+  it('offers no reuse entry when the plan has no readable safe info',
+    async () => {
+      apiGet.mockResolvedValue(detail({ safe_info: null }) as never)
+      const wrapper = await mountInspector()
+      expect(wrapper.find('#tracking-reuse-plan').exists()).toBe(false)
+    })
 })

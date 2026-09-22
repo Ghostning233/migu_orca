@@ -594,3 +594,60 @@ class TestPlanDelete:
         # Back to the idle entry point, with the record still listed.
         expect(page.locator("#tracking-delete-plan")).to_be_visible()
         expect(page.locator(".tracking-list-item")).to_have_count(1)
+
+class TestPlanReuse:
+    """Issue #93: "复制并重新添加" lives in the tracking detail."""
+
+    def test_reuse_returns_to_the_add_journey_with_a_safe_suggestion(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        item = {**_item("tracking-a", "葬送的芙莉莲"), "request_id": "request-plan", "available_actions": []}
+        safe_info = {
+            "request_id": "request-plan", "status": "ACCEPTED", "raw_title": "安全标题",
+            "title": "葬送的芙莉莲", "aliases": [], "season": 1, "season_raw": None,
+            "season_evidence": None, "subtitle_groups": [], "selected_subtitle_group": "喵萌奶茶屋",
+            "mikan_collection": {"bangumi_id": "mikan-1234", "title": "葬送的芙莉莲", "season": 1},
+            "filter_rule": {"must_contain": "", "must_not_contain": "", "use_regex": False, "case_sensitive": False},
+            "resources": {"selected_subtitle_group": "喵萌奶茶屋", "valid_resource_count": 1,
+                          "invalid_resource_count": 0, "complete_resource_count": 1,
+                          "valid_file_names": ["第一集.mkv"], "excluded_file_names": []},
+            "folder_name": "安全文件夹", "storage_profile": "profile", "total_episodes": None,
+            "updated_episode": None, "updated_episode_status": "NOT_IMPLEMENTED",
+            "history_summary": [], "ab_status": None,
+        }
+
+        def handler(route: Any, request: Any) -> None:
+            path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+            if request.method == "GET" and path == "/settings/autobangumi":
+                route.fulfill(json={"ok": True, "result": {
+                    "configured": True, "credential_present": True,
+                    "connection_ref": "11111111-1111-4111-8111-111111111111",
+                    "configuration_revision": 1, "connection_status": "CONFIGURED",
+                }})
+                return
+            if request.method == "GET" and path == "/tracking/items":
+                route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1, pending=1), "warnings": []}})
+                return
+            if request.method == "GET" and path == "/tracking/items/tracking-a":
+                route.fulfill(json={"ok": True, "result": {
+                    **item, "origin": "single", "batch_id": None, "created_at": "2026-09-01T00:00:00Z",
+                    "last_synced_at": None, "current_operation": None, "revalidation_issues": [],
+                    "external_mapping": None, "audit_events": [], "warnings": [], "safe_info": safe_info,
+                }})
+                return
+            route.continue_()
+
+        page.route("**/api/v1/**", handler)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-reuse-plan")
+
+        expect(page.locator("#tracking-reuse-plan")).to_have_text("复制并重新添加")
+        page.locator("#tracking-reuse-plan").click()
+        page.wait_for_url("**/app/add**", timeout=10_000)
+
+        assert "/app/add" in page.url
+        # The suggestion is in memory only: the URL carries no plan data.
+        for forbidden in ("rss", "token", "password", "mikan-1234"):
+            assert forbidden not in page.url

@@ -38,6 +38,7 @@ import type { RequestDetailResult } from '@/features/requests/requestDetail'
 import type { PreviewPatch } from '@/features/workbench/candidateSearch'
 import type { TrackingPlanDeleteSession } from './trackingProjection'
 import CheckboxRow from '@/components/forms/CheckboxRow.vue'
+import { buildReuseHandoff, publishReuseHandoff } from '@/features/requests/reuseHandoff'
 import TrackingExternalDelete from './TrackingExternalDelete.vue'
 import TrackingManagementActions from './TrackingManagementActions.vue'
 import TrackingModifyForm from './TrackingModifyForm.vue'
@@ -84,6 +85,8 @@ const emit = defineEmits<{
   // its own form built; the page re-validates both before anything is sent.
   /** Issue #92: delete this plan, optionally with its controlled external object. */
   (e: 'plan-delete-requested', payload: { item: TrackingItem; deleteExternal: boolean }): void
+  /** Issue #93: reuse this plan's safe suggestion in the add journey. */
+  (e: 'reuse-requested'): void
   (e: 'management-requested', payload: {
     action: TrackingAction
     item: TrackingItem
@@ -412,6 +415,24 @@ function confirmDeletePlan(): void {
   })
 }
 
+// -- reuse this plan in the add journey (issue #93) --------------------------
+// "复制并重新添加" carries only the public, user-editable suggestion and never
+// the external mapping, history or any technical field. The add journey still
+// requires choosing a real MiKan collection again.
+const canReusePlan = computed(() => Boolean(
+  detail.value?.safe_info && buildReuseHandoff(detail.value.safe_info),
+))
+
+function reusePlan(): void {
+  const safeInfo = detail.value?.safe_info
+  if (!safeInfo) return
+  const handoff = buildReuseHandoff(safeInfo)
+  if (!handoff) return
+  // The handoff travels in memory only; the page owns the navigation.
+  publishReuseHandoff(handoff)
+  emit('reuse-requested')
+}
+
 function requestManagement(payload: {
   action: TrackingAction
   item: TrackingItem
@@ -551,6 +572,23 @@ defineExpose({ reload: () => fetchDetail(true) })
         <p v-if="thisManagementAction" id="tracking-apply-result" class="field-help" role="status">
           {{ thisManagementAction.message }}
         </p>
+      </section>
+
+      <section
+        v-if="canReusePlan"
+        class="tracking-inspector-section tracking-reuse-section"
+        aria-labelledby="tracking-reuse-heading"
+      >
+        <h4 id="tracking-reuse-heading">复制并重新添加</h4>
+        <p class="field-help">
+          只携带安全标题与编辑建议，回到添加番剧后需要重新选择真实 MiKan 合集；
+          不会复制外部映射、历史或状态。
+        </p>
+        <BaseButton
+          id="tracking-reuse-plan"
+          variant="secondary"
+          @click="reusePlan"
+        >复制并重新添加</BaseButton>
       </section>
 
       <section

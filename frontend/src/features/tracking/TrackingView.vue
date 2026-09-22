@@ -627,6 +627,12 @@ const TRACKING_BATCH_SUBMIT_ENDPOINT = '/api/v1/tracking/batch-submit'
 const planDeleteSession = ref<TrackingPlanDeleteSession | null>(null)
 let planDeleteSequence = 0
 
+async function openReuseJourney(): Promise<void> {
+  // The safe suggestion is already published in memory by the inspector; the
+  // add journey consumes it and still demands a real MiKan collection.
+  await router.push(routeLocation('add'))
+}
+
 async function runPlanDelete(payload: {
   item: TrackingItem
   deleteExternal: boolean
@@ -1354,6 +1360,7 @@ onBeforeUnmount(() => {
           :write-busy="inspectorIntentBusy"
           :intent-notice="selectedIntentNotice"
           :plan-delete-session="planDeleteSession"
+          @reuse-requested="openReuseJourney"
           @plan-delete-requested="runPlanDelete"
           @tracking-updated="applyReturnedTracking"
           @write-requested="runTrackingWrite"
