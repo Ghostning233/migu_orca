@@ -1042,6 +1042,18 @@ class TrackingSubmitResultDTO(_StrictBase):
     next_revision: int
     checked_at: str
     operation_id: str | None = None
+    #: Published, non-sensitive failure classification (issue #86). ``None`` on
+    #: success; every other code maps to fixed client copy and a fixed display
+    #: channel (blocking dialog vs. inline item message).
+    failure_category: Literal[
+        "CONNECTION",
+        "AUTHENTICATION",
+        "VERSION",
+        "DUPLICATE_SUBSCRIPTION",
+        "VALIDATION",
+        "REJECTED",
+        "OUTCOME_UNKNOWN",
+    ] | None = None
     issues: list[TrackingRevalidationIssueDTO] = Field(default_factory=list)
     tracking: TrackingItemDTO
 

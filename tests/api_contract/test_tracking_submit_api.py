@@ -156,6 +156,7 @@ def test_submit_success_persists_active_and_dto(
     result = response.get_json()["result"]
     assert result["outcome"] == TRACKING_STATUS_ACTIVE
     assert result["issues"] == []
+    assert result["failure_category"] is None
     assert result["operation_id"] is not None
     assert result["tracking"]["status"] == TRACKING_STATUS_ACTIVE
     TrackingSubmitResultDTO.model_validate(result)
@@ -261,6 +262,7 @@ def test_submit_definite_external_failure_returns_submit_failed(
     assert response.status_code == 200
     result = response.get_json()["result"]
     assert result["outcome"] == TRACKING_STATUS_SUBMIT_FAILED
+    assert result["failure_category"] == "AUTHENTICATION"
     assert fake.calls
     body_text = response.get_data(as_text=True)
     assert "secret-token" not in body_text
@@ -292,6 +294,50 @@ def test_submit_unknown_external_outcome_returns_verifying_external(
     assert response.status_code == 200
     result = response.get_json()["result"]
     assert result["outcome"] == TRACKING_STATUS_VERIFYING_EXTERNAL
+    assert result["failure_category"] == "OUTCOME_UNKNOWN"
+
+
+@pytest.mark.parametrize(
+    ("error_type", "expected_category"),
+    [
+        ("ab_connection_failed_pre_write", "CONNECTION"),
+        ("ab_timeout_pre_write", "CONNECTION"),
+        ("ab_connection_failed", "OUTCOME_UNKNOWN"),
+        ("ab_timeout", "OUTCOME_UNKNOWN"),
+        ("ab_auth_failed", "AUTHENTICATION"),
+        ("ab_unsupported_version", "VERSION"),
+        ("ab_duplicate_subscription", "DUPLICATE_SUBSCRIPTION"),
+        ("invalid_ab_payload", "VALIDATION"),
+        ("ab_submit_failed", "REJECTED"),
+    ],
+)
+def test_submit_publishes_a_stable_failure_category(
+    tmp_path: Path,
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+    error_type: str,
+    expected_category: str,
+) -> None:
+    """Issue #86: every external failure publishes one safe, actionable class."""
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    fake = FakeAutoBangumiClient(
+        error=Stage1Error(error_type, "Auto Bangumi 提交失败", "create_ab_subscription")
+    )
+    _patch_ab_factory(monkeypatch, fake)
+
+    response = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/submit",
+        json=_submit_body(record),
+    )
+
+    assert response.status_code == 200
+    result = response.get_json()["result"]
+    assert result["failure_category"] == expected_category
+    TrackingSubmitResultDTO.model_validate(result)
+    body_text = response.get_data(as_text=True)
+    for forbidden in ("secret-token", "auto-bangumi.local", str(tmp_path)):
+        assert forbidden not in body_text
 
 
 # ---------------------------------------------------------------------------

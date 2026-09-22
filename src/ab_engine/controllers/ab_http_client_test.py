@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
+
+import pytest
 
 from ab_engine.controllers.ab_config import AutoBangumiConfig
 from ab_engine.controllers.ab_http_client import (
@@ -94,7 +96,11 @@ def test_token_submit_fails_closed_without_a_write_request() -> None:
 
 
 def test_legacy_31_probe_and_submit_stay_cookie_isolated() -> None:
-    transport = _RecordingTransport([{"access_token": "secret-cookie"}, {"version": "3.1.18"}, {"access_token": "secret-cookie"}, {"status": True}])
+    transport = _RecordingTransport([
+        {"access_token": "secret-cookie"}, {"version": "3.1.18"},
+        {"access_token": "secret-cookie"}, {"version": "3.1.18"},
+        {"status": True},
+    ])
     client = create_legacy_3_1_auto_bangumi_client(_password_config(), transport=transport)
     assert client.probe()["submit_supported"] is True
     assert client.create_subscription(_legacy_payload()) == {"status": True}
@@ -105,6 +111,7 @@ def test_legacy_31_probe_and_submit_stay_cookie_isolated() -> None:
 def test_submit_client_factory_dispatches_password_mode_to_legacy_adapter() -> None:
     transport = _RecordingTransport([
         {"access_token": "secret-cookie"},
+        {"version": "3.1.18"},
         {"status": True},
     ])
 
@@ -115,6 +122,47 @@ def test_submit_client_factory_dispatches_password_mode_to_legacy_adapter() -> N
     assert response == {"status": True}
     assert [call["endpoint"] for call in transport.calls] == [
         "http://auto-bangumi.local/api/v1/auth/login",
+        "http://auto-bangumi.local/api/v1/status",
         "http://auto-bangumi.local/api/v1/rss/subscribe",
     ]
-    assert transport.calls[1]["headers"]["Cookie"] == "token=secret-cookie"
+    assert transport.calls[2]["headers"]["Cookie"] == "token=secret-cookie"
+
+
+def test_submit_checks_connection_credentials_and_version_before_writing() -> None:
+    """Issue #86: the pre-write check fails closed before any subscribe POST."""
+    unreachable = _RecordingTransport([URLError("connection refused")])
+    with pytest.raises(Stage1Error) as failure:
+        create_auto_bangumi_submit_client(
+            _password_config(), transport=unreachable
+        ).create_subscription(_legacy_payload())
+    assert failure.value.error_type == "ab_connection_failed_pre_write"
+    assert not any("rss/subscribe" in call["endpoint"] for call in unreachable.calls)
+
+    unsupported = _RecordingTransport([
+        {"access_token": "secret-cookie"}, {"version": "2.6.0"},
+    ])
+    with pytest.raises(Stage1Error) as unsupported_failure:
+        create_auto_bangumi_submit_client(
+            _password_config(), transport=unsupported
+        ).create_subscription(_legacy_payload())
+    assert unsupported_failure.value.error_type == "ab_unsupported_version"
+    assert not any("rss/subscribe" in call["endpoint"] for call in unsupported.calls)
+
+
+def test_submit_classifies_a_duplicate_subscription_without_echoing_upstream_text() -> None:
+    canary = "订阅《番剧》已经存在，请勿重复添加"
+    transport = _RecordingTransport([
+        {"access_token": "secret-cookie"},
+        {"version": "3.1.18"},
+        {"status": False, "msg": canary},
+    ])
+
+    with pytest.raises(Stage1Error) as failure:
+        create_auto_bangumi_submit_client(
+            _password_config(), transport=transport
+        ).create_subscription(_legacy_payload())
+
+    assert failure.value.error_type == "ab_duplicate_subscription"
+    assert canary not in failure.value.message
+    assert canary not in str(failure.value.details or {})
+    assert canary not in failure.value.failed_step

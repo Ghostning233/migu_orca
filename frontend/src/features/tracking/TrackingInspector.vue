@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
-import { api, toApiError } from '@/api/client'
+import { api } from '@/api/client'
 import type { operations } from '@/api/generated/api'
 import BaseButton from '@/components/forms/BaseButton.vue'
 import ErrorState from '@/components/feedback/ErrorState.vue'
@@ -10,25 +10,19 @@ import { routeLocation } from '@/app/router/catalog'
 import { storageQuery } from '@/features/requests/requestStorage'
 import {
   canVerifyExternally,
-  createTrackingActionIntent,
   executableTrackingActions,
   MANAGEMENT_NEEDS_MANUAL_NOTICE,
   MANAGEMENT_SCOPE_LABELS,
-  projectRevalidateIssues,
   projectTrackingActionScopes,
   RECOVERY_NEEDS_MANUAL_NOTICE,
   type CapabilityResult,
   type TrackingAction,
-  type TrackingActionIntent,
   type TrackingItem,
   type TrackingManagementActionCode,
   type TrackingManagementScope,
   type TrackingManagementSession,
   type TrackingRecoveryActionCode,
   type TrackingRecoverySession,
-  type TrackingRevalidateBody,
-  type TrackingRevalidateIssueView,
-  type TrackingRevalidateResult,
   type TrackingWriteSession,
 } from './trackingProjection'
 import {
@@ -46,14 +40,17 @@ type TrackingDetail = NonNullable<
   operations['getTrackingItemDetail']['responses']['200']['content']['application/json']['result']
 >
 
-type RevalidateState = 'IDLE' | 'READY' | 'BLOCKED' | 'CONFLICT' | 'FAILED'
 
 const props = defineProps<{
   trackingId: string
-  /** Non-null only while the page holds a credential session (US-307). */
+  /** Diagnostic-only capability summary; never an authorization gate (#86). */
   capabilities?: CapabilityResult | null
-  /** True only while the page credential session is live; the page owns it. */
-  credentialReady?: boolean
+  /**
+   * True while a usable Auto Bangumi connection is *saved*. Issue #86: this no
+   * longer requires a settings-page probe — every external write re-validates
+   * the connection, credentials, exact version and capability server-side.
+   */
+  connectionReady?: boolean
   /** Page-level external write state for one item; the page owns the request. */
   writeSession?: TrackingWriteSession | null
   /** Page-level unknown-result recovery state for one item (US-312). */
@@ -90,24 +87,6 @@ const inspectorHeading = ref<HTMLElement | null>(null)
 let requestSequence = 0
 let controller: AbortController | null = null
 
-// -- local revalidation (US-309) --------------------------------------------
-// Revalidation is a pure-local, revision-aware check: it never carries
-// credentials and never contacts Auto Bangumi.  Exactly one intent is held in
-// page memory (latest revision + opaque key); a transport retry reuses it and
-// a 409 clears it so the user must confirm again against fresh detail.
-const revalidateIntent = ref<TrackingActionIntent | null>(null)
-const revalidateLoading = ref(false)
-const revalidateState = ref<RevalidateState>('IDLE')
-const revalidateMessage = ref('')
-const revalidateIssues = ref<TrackingRevalidateIssueView[]>([])
-let revalidateSequence = 0
-let revalidateController: AbortController | null = null
-
-/** The server-computed REVALIDATE action, intersected with known values. */
-const revalidateAction = computed(() => (
-  detail.value ? executableTrackingActions(detail.value, null).find((action) => action.code === 'REVALIDATE') ?? null : null
-))
-
 // -- explicit external submission and retry (US-310, US-311) -----------------
 // The page owns the credential and the request; this component only offers the
 // server-computed write action when the page session proves the capability, and
@@ -120,20 +99,17 @@ const writeInFlight = computed(() => (
 const thisWrite = computed(() => (
   props.writeSession && props.writeSession.trackingId === props.trackingId ? props.writeSession : null
 ))
-/** The server-computed write actions, intersected with the proven capability. */
+/** The server-computed write actions, intersected only with known values. */
 const writeActions = computed(() => (
-  detail.value && props.credentialReady === true
-    ? executableTrackingActions(detail.value, props.capabilities)
-    : []
+  detail.value ? executableTrackingActions(detail.value, null) : []
 ))
 const submitAction = computed(() => writeActions.value.find((action) => action.code === 'SUBMIT') ?? null)
 const retryAction = computed(() => writeActions.value.find((action) => action.code === 'RETRY') ?? null)
 const writeHint = computed(() => {
-  if (props.credentialReady !== true) return '需要先在页面连接 Auto Bangumi，才能提交或重试外部订阅。'
   const offered = (detail.value?.available_actions ?? []).some(
     (action) => action.code === 'SUBMIT' || action.code === 'RETRY',
   )
-  return offered ? '当前连接未确认提交能力，已降级为只读。' : '当前状态不可提交或重试外部订阅。'
+  return offered ? '当前动作不在受支持的提交范围内，已降级为只读。' : '当前状态不可提交或重试外部订阅。'
 })
 
 function requestWrite(action: TrackingAction | null): void {
@@ -174,7 +150,7 @@ const recoveryActions = computed(() => (
  * the page session proves the capability; it never creates an external write.
  */
 const verifyExternalOffered = computed(() => (
-  recoveryActions.value.length > 0 && props.credentialReady === true && canVerifyExternally(props.capabilities)
+  recoveryActions.value.length > 0 && props.connectionReady === true && canVerifyExternally(props.capabilities)
 ))
 const recoveryInFlight = computed(() => (
   props.recoverySession?.trackingId === props.trackingId && props.recoverySession.state === 'IN_FLIGHT'
@@ -239,7 +215,7 @@ interface ManagementOfferView {
 }
 
 const managementOffers = computed<ManagementOfferView[]>(() => {
-  if (!detail.value || props.credentialReady !== true) return []
+  if (!detail.value || props.connectionReady !== true) return []
   const offers: ManagementOfferView[] = []
   for (const action of executableTrackingActions(detail.value, props.capabilities)) {
     if (!isSendableManagementActionCode(action.code)) continue
@@ -265,7 +241,7 @@ const modifyScopes = computed(() => modifyOffer.value?.scopes ?? [])
 
 /** Fixed read-only degradation copy when the live session cannot offer an action. */
 function managementHint(code: TrackingManagementActionCode, verb: string): string {
-  if (props.credentialReady !== true) return `需要先在页面连接 Auto Bangumi，才能${verb}。`
+  if (props.connectionReady !== true) return `需要先在页面连接 Auto Bangumi，才能${verb}。`
   const offered = (detail.value?.available_actions ?? []).some((action) => action.code === code)
   return offered ? '当前连接未确认该能力，已降级为只读。' : `当前状态不可${verb}。`
 }
@@ -295,88 +271,7 @@ function requestManagement(payload: {
   })
 }
 
-function resetRevalidate(): void {
-  revalidateSequence += 1
-  revalidateController?.abort()
-  revalidateController = null
-  revalidateIntent.value = null
-  revalidateLoading.value = false
-  revalidateState.value = 'IDLE'
-  revalidateMessage.value = ''
-  revalidateIssues.value = []
-}
 
-/** Converge the shared summary fields on the server-returned safe tracking. */
-function applyReturnedTracking(summary: TrackingItem): void {
-  if (!detail.value || summary.tracking_id !== props.trackingId) return
-  detail.value = { ...detail.value, ...summary }
-  emit('tracking-updated', summary)
-}
-
-async function revalidatePlan(): Promise<void> {
-  // Revalidation rewrites the local revision, so it is a conflicting action of
-  // this item while an external submit is in flight.
-  if (revalidateLoading.value || writeInFlight.value || !detail.value) return
-  const action = revalidateAction.value
-  if (!action) return
-  // One intent per user confirmation; a transport retry below reuses the same
-  // intent (same revision) instead of building a new one.
-  const intent = revalidateIntent.value ?? createTrackingActionIntent(detail.value, action, undefined, null)
-  if (!intent) return
-  revalidateIntent.value = intent
-  const trackingId = props.trackingId
-  const sequence = ++revalidateSequence
-  revalidateController?.abort()
-  const requestController = new AbortController()
-  revalidateController = requestController
-  revalidateLoading.value = true
-  revalidateState.value = 'IDLE'
-  revalidateMessage.value = ''
-  revalidateIssues.value = []
-  try {
-    const storageDir = storageQuery().storage_dir
-    const body: TrackingRevalidateBody = {
-      expected_revision: intent.expectedRevision,
-      ...(storageDir ? { storage_dir: storageDir } : {}),
-    }
-    const result = await api.post<TrackingRevalidateResult>(
-      '/api/v1/tracking/items/{tracking_id}/revalidate',
-      { path: { tracking_id: trackingId }, body, signal: requestController.signal },
-    )
-    if (sequence !== revalidateSequence || props.trackingId !== trackingId) return
-    // The round trip completed: this intent is spent, so the next user
-    // confirmation observes whatever revision the server just returned.
-    revalidateIntent.value = null
-    revalidateIssues.value = projectRevalidateIssues(result.issues)
-    revalidateState.value = result.ready ? 'READY' : 'BLOCKED'
-    revalidateMessage.value = result.ready
-      ? '复核通过：本地方案有效，尚未向 Auto Bangumi 创建订阅。'
-      : '提交前复核未通过，尚未向 Auto Bangumi 创建订阅。'
-    applyReturnedTracking(result.tracking)
-  } catch (error) {
-    if (sequence !== revalidateSequence || props.trackingId !== trackingId) return
-    const apiError = toApiError(error)
-    if (apiError.cancelled && !apiError.httpError) return
-    if (apiError.status === 409) {
-      // Revision/state conflict: drop the stale intent, re-read the detail and
-      // require an explicit new confirmation — never resend on the user's behalf.
-      revalidateIntent.value = null
-      revalidateIssues.value = []
-      revalidateState.value = 'CONFLICT'
-      revalidateMessage.value = '追番记录已变化，正在刷新最新详情；请重新确认后再发起复核。'
-      await loadDetail()
-      return
-    }
-    // Transport failures keep the intent so an explicit retry reuses it.
-    revalidateState.value = 'FAILED'
-    revalidateMessage.value = '复核请求失败，请稍后重试。'
-  } finally {
-    if (sequence === revalidateSequence) {
-      revalidateLoading.value = false
-      if (revalidateController === requestController) revalidateController = null
-    }
-  }
-}
 
 /**
  * ``preserve`` keeps the current detail visible while re-reading (US-310 write
@@ -417,22 +312,15 @@ function loadDetail(): Promise<void> {
   return fetchDetail(false)
 }
 
+// Selecting another record re-reads its detail; the immediate run loads the
+// detail the page selected on mount.
 watch(() => props.trackingId, () => {
-  resetRevalidate()
   void loadDetail()
 }, { immediate: true })
-// A write, recovery or management result supersedes a local revalidate verdict
-// for the same item (all of them change the revision it was made against).
-watch([() => props.writeSession, () => props.recoverySession, () => props.managementSession], ([write, recovery, management]) => {
-  const changed = write?.trackingId === props.trackingId
-    || recovery?.trackingId === props.trackingId
-    || management?.trackingId === props.trackingId
-  if (changed) resetRevalidate()
-})
+
 onBeforeUnmount(() => {
   controller?.abort()
   requestSequence += 1
-  resetRevalidate()
 })
 defineExpose({ reload: () => fetchDetail(true) })
 </script>
@@ -469,7 +357,7 @@ defineExpose({ reload: () => fetchDetail(true) })
       <section class="tracking-inspector-section tracking-submit" aria-labelledby="tracking-submit-heading">
         <h4 id="tracking-submit-heading">提交到 Auto Bangumi</h4>
         <template v-if="submitAction">
-          <p class="field-help">提交会使用本页面已探测的连接，在 Auto Bangumi 创建外部订阅并可能触发下载；每次提交都需要单独确认。</p>
+          <p class="field-help">提交会使用已保存的 Auto Bangumi 连接，在 Auto Bangumi 创建外部订阅并可能触发下载；服务端会在同一次请求中校验连接、认证、版本与写能力，每次提交都需要单独确认。</p>
           <BaseButton
             id="tracking-submit"
             :loading="writeInFlight"
@@ -478,7 +366,7 @@ defineExpose({ reload: () => fetchDetail(true) })
           >{{ submitAction.label }}</BaseButton>
         </template>
         <template v-else-if="retryAction">
-          <p class="field-help">该记录上次提交明确失败。重试会使用本页面已探测的连接，重新在 Auto Bangumi 创建外部订阅并可能触发下载；每次重试都需要单独确认。</p>
+          <p class="field-help">该记录上次提交明确失败。重试会使用已保存的 Auto Bangumi 连接，重新在 Auto Bangumi 创建外部订阅并可能触发下载；每次重试都需要单独确认。</p>
           <BaseButton
             id="tracking-retry"
             :loading="writeInFlight"
@@ -627,31 +515,6 @@ defineExpose({ reload: () => fetchDetail(true) })
             </dl>
           </section>
 
-          <section class="tracking-inspector-section tracking-revalidate" aria-labelledby="tracking-revalidate-heading">
-            <h4 id="tracking-revalidate-heading">本地方案复核</h4>
-            <p class="field-help">复核只在本地读取订阅方案，不携带任何 Auto Bangumi 凭据，也不会创建外部订阅。</p>
-            <BaseButton
-              v-if="revalidateAction"
-              id="tracking-revalidate"
-              variant="secondary"
-              :loading="revalidateLoading"
-              :disabled="revalidateLoading || itemActionInFlight"
-              @click="revalidatePlan"
-            >{{ revalidateAction.label }}</BaseButton>
-            <p v-else class="field-help">当前状态不可发起本地复核。</p>
-            <div
-              v-if="revalidateState !== 'IDLE'"
-              id="tracking-revalidate-result"
-              class="tracking-revalidate-result"
-              :class="`is-${revalidateState.toLowerCase()}`"
-              role="status"
-            >
-              <p class="tracking-revalidate-verdict">{{ revalidateMessage }}</p>
-              <ul v-if="revalidateIssues.length" class="tracking-revalidate-issues" aria-label="复核问题">
-                <li v-for="issue in revalidateIssues" :key="issue.code">{{ issue.message }}</li>
-              </ul>
-            </div>
-          </section>
 
           <ul v-if="detail.safe_info?.resources?.valid_file_names?.length" class="tracking-resource-names" aria-label="有效资源名称">
             <li v-for="name in detail.safe_info.resources.valid_file_names" :key="name">{{ name }}</li>
@@ -711,13 +574,6 @@ defineExpose({ reload: () => fetchDetail(true) })
 .tracking-plan-link { font-weight: 600; }
 .tracking-inspector-loading { min-height: 8rem; }
 .tracking-intent-notice { padding: var(--space-3); border: 1px solid var(--color-border-subtle); border-left: 0.3rem solid var(--color-accent-emphasis); border-radius: var(--radius-sm); background: var(--color-surface-raised); font-weight: 600; }
-.tracking-revalidate { gap: .65rem; }
-.tracking-revalidate-result { display: grid; gap: .4rem; padding: var(--space-3); border: 1px solid var(--color-border-subtle); border-left: 0.3rem solid var(--color-text-muted); border-radius: var(--radius-sm); background: var(--color-surface-raised); }
-.tracking-revalidate-result.is-ready { border-left-color: var(--color-feedback-success-border); }
-.tracking-revalidate-result.is-blocked, .tracking-revalidate-result.is-conflict { border-left-color: var(--color-accent-emphasis); }
-.tracking-revalidate-result.is-failed { border-left-color: var(--color-feedback-error-border); }
-.tracking-revalidate-verdict { font-weight: 600; }
-.tracking-revalidate-issues { padding-left: 1.2rem; }
 .tracking-submit { gap: .65rem; }
 .tracking-submit-result { display: grid; gap: .4rem; padding: var(--space-3); border: 1px solid var(--color-border-subtle); border-left: 0.3rem solid var(--color-text-muted); border-radius: var(--radius-sm); background: var(--color-surface-raised); }
 .tracking-submit-result.is-active { border-left-color: var(--color-feedback-success-border); }

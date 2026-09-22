@@ -293,7 +293,11 @@ export function executableTrackingActions(
       continue
     }
     if (action.code === 'SUBMIT' || action.code === 'RETRY') {
-      if (scopes.length > 0 || !supported(capabilities, 'subscription_submit')) continue
+      // Issue #86: submission is offered whenever the server projects the
+      // action. The server re-validates the saved connection, authentication,
+      // exact version and write capability inside the same request and fails
+      // closed, so a settings-page probe is diagnostic only — never a gate.
+      if (scopes.length > 0) continue
     } else if (scopes.length > 0) {
       continue
     }
@@ -499,12 +503,12 @@ export interface TrackingWriteConfirmation {
 export const WRITE_ACTION_CONFIRMATIONS: Record<TrackingWriteActionCode, TrackingWriteConfirmation> = {
   SUBMIT: {
     title: '提交 Auto Bangumi 订阅',
-    message: '将在 Auto Bangumi 创建该追番的外部订阅，并可能触发下载。提交只使用本页面已探测的连接，是否继续？',
+    message: '将在 Auto Bangumi 创建该追番的外部订阅，并可能触发下载。提交只使用已保存的 Auto Bangumi 连接，是否继续？',
     confirmLabel: '确认提交',
   },
   RETRY: {
     title: '重试 Auto Bangumi 提交',
-    message: '该追番上次提交明确失败。重试会使用本页面已探测的连接重新创建外部订阅，并可能触发下载，是否继续？',
+    message: '该追番上次提交明确失败。重试会使用已保存的 Auto Bangumi 连接重新创建外部订阅，并可能触发下载，是否继续？',
     confirmLabel: '确认重试',
   },
 }
@@ -538,12 +542,83 @@ export type TrackingSubmitOutcome = (typeof SUBMIT_OUTCOMES)[number]
  */
 export type TrackingWriteState = 'IN_FLIGHT' | TrackingSubmitOutcome | 'CONFLICT' | 'REJECTED' | 'UNKNOWN'
 
+/**
+ * Published, non-sensitive failure classification (issue #86). The server sends
+ * only this code; every user-facing sentence lives here so an upstream response
+ * can never reach the UI.
+ */
+export const WRITE_FAILURE_CATEGORIES = [
+  'CONNECTION', 'AUTHENTICATION', 'VERSION', 'DUPLICATE_SUBSCRIPTION',
+  'VALIDATION', 'REJECTED', 'OUTCOME_UNKNOWN',
+] as const
+
+export type WriteFailureCategory = (typeof WRITE_FAILURE_CATEGORIES)[number]
+
+export interface WriteFailurePresentation {
+  readonly title: string
+  readonly message: string
+  /**
+   * ``dialog``: a blocking connection/credential/version problem takes over the
+   * page and offers a settings deep link. ``item``: the rejection belongs to the
+   * record the user acted on. ``recovery``: the outcome is indeterminate and the
+   * existing recovery controls must be used.
+   */
+  readonly channel: 'dialog' | 'item' | 'recovery'
+}
+
+export const WRITE_FAILURE_PRESENTATIONS: Readonly<Record<WriteFailureCategory, WriteFailurePresentation>> = {
+  CONNECTION: {
+    title: '无法连接 Auto Bangumi',
+    message: '保存的 Auto Bangumi 配置当前无法连接。请前往设置检查地址与网络后重试；本次未创建外部订阅。',
+    channel: 'dialog',
+  },
+  AUTHENTICATION: {
+    title: 'Auto Bangumi 认证失败',
+    message: '保存的连接凭据被 Auto Bangumi 拒绝。请前往设置更新账号或密码后重试；本次未创建外部订阅。',
+    channel: 'dialog',
+  },
+  VERSION: {
+    title: 'Auto Bangumi 版本不受支持',
+    message: '当前 Auto Bangumi 版本不在已验证的 3.1.18 能力范围内。请前往设置确认版本后重试；本次未创建外部订阅。',
+    channel: 'dialog',
+  },
+  DUPLICATE_SUBSCRIPTION: {
+    title: '已存在相同订阅',
+    message: 'Auto Bangumi 中已存在相同订阅，本次未重复创建。请核对既有订阅后再决定是否继续。',
+    channel: 'item',
+  },
+  VALIDATION: {
+    title: '提交前检查未通过',
+    message: '本地方案未通过提交前检查，本次未创建外部订阅。请按提示修改追番方案后重新提交。',
+    channel: 'item',
+  },
+  REJECTED: {
+    title: 'Auto Bangumi 明确拒绝',
+    message: 'Auto Bangumi 明确拒绝了本次提交，尚未创建外部订阅。请检查方案内容后重新确认提交。',
+    channel: 'item',
+  },
+  OUTCOME_UNKNOWN: {
+    title: '提交结果未知',
+    message: '无法确认 Auto Bangumi 是否已创建订阅。请先使用恢复核验，未确认前不会再次提交。',
+    channel: 'recovery',
+  },
+}
+
+/** Parse the server's published category; anything unknown fails closed. */
+export function writeFailureCategory(value: unknown): WriteFailureCategory | null {
+  return typeof value === 'string' && (WRITE_FAILURE_CATEGORIES as readonly string[]).includes(value)
+    ? (value as WriteFailureCategory)
+    : null
+}
+
 export interface TrackingWriteSession {
   readonly trackingId: string
   readonly action: TrackingActionCode
   readonly state: TrackingWriteState
   readonly message: string
   readonly issues: TrackingRevalidateIssueView[]
+  /** Published failure class of a failed/indeterminate result, when provided. */
+  readonly failureCategory: WriteFailureCategory | null
 }
 
 /**
@@ -605,8 +680,14 @@ export function createWriteSession(
   action: TrackingActionCode,
   state: TrackingWriteState,
   issues: TrackingRevalidateIssueView[] = [],
+  failureCategory: WriteFailureCategory | null = null,
 ): TrackingWriteSession {
-  return { trackingId, action, state, message: WRITE_MESSAGES[state], issues }
+  // A published failure class owns the copy for its own channel; otherwise the
+  // fixed per-state sentence stays authoritative.
+  const message = failureCategory
+    ? WRITE_FAILURE_PRESENTATIONS[failureCategory].message
+    : WRITE_MESSAGES[state]
+  return { trackingId, action, state, message, issues, failureCategory }
 }
 
 /** Fixed next step for one documented conflict; unknown types fail closed. */
@@ -626,7 +707,10 @@ export function createWriteConflictSession(
   action: TrackingActionCode,
   errorType: unknown,
 ): TrackingWriteSession {
-  return { trackingId, action, state: 'CONFLICT', message: writeConflictMessage(errorType), issues: [] }
+  return {
+    trackingId, action, state: 'CONFLICT',
+    message: writeConflictMessage(errorType), issues: [], failureCategory: null,
+  }
 }
 
 /**
@@ -664,7 +748,13 @@ export function projectWriteOutcome(
   result: TrackingWriteResult,
 ): TrackingWriteSession {
   const outcome: TrackingWriteState = isSubmitOutcome(result.outcome) ? result.outcome : 'UNKNOWN'
-  return createWriteSession(trackingId, action, outcome, projectRevalidateIssues(result.issues))
+  return createWriteSession(
+    trackingId,
+    action,
+    outcome,
+    projectRevalidateIssues(result.issues),
+    writeFailureCategory(result.failure_category),
+  )
 }
 
 /**
@@ -742,7 +832,7 @@ export const RECOVERY_ACTION_CONFIRMATIONS = {
   },
   VERIFY_EXTERNAL: {
     title: '只读核验外部状态',
-    message: '将使用本页面已探测的连接，只读核对该追番在 Auto Bangumi 中的当前状态；不会创建、修改或删除任何外部订阅，是否继续？',
+    message: '将使用已保存的 Auto Bangumi 连接，只读核对该追番在 Auto Bangumi 中的当前状态；不会创建、修改或删除任何外部订阅，是否继续？',
     confirmLabel: '确认只读核验',
   },
 } as const satisfies Record<Exclude<TrackingRecoveryActionCode, 'RECOVER_AUTO'>, TrackingRecoveryConfirmation>

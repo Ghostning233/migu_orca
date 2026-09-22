@@ -299,7 +299,10 @@ class LegacyAutoBangumi31Client:
     def create_subscription(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Submit a prepared 3.1 ``{data: Bangumi, rss: RSSItem}`` body."""
         self._validate_legacy_subscription_payload(payload)
-        self._authenticate()
+        # Issue #86: everything that can fail *before* the write boundary is
+        # checked here, so a bad connection / credential / version is a definite,
+        # safely-retryable failure instead of an ambiguous external outcome.
+        self._pre_write_check()
         response = self._post_json(
             _api_endpoint(self._config.base_url, "/api/v1/rss/subscribe"),
             {
@@ -311,11 +314,45 @@ class LegacyAutoBangumi31Client:
         )
         if response.get("status") is True:
             return deepcopy(response)
+        if _looks_like_duplicate_subscription(response):
+            # A distinguishable business rejection: an equal subscription already
+            # exists upstream.  Only the category is derived here — the upstream
+            # text is never returned, logged or persisted.
+            raise Stage1Error(
+                "ab_duplicate_subscription",
+                "Auto Bangumi 中已存在相同订阅",
+                "create_ab_subscription",
+            )
         raise Stage1Error(
             "ab_submit_failed",
             "Auto Bangumi 提交失败",
             "create_ab_subscription",
         )
+
+    def _pre_write_check(self) -> None:
+        """Authenticate and verify the exact supported version before writing.
+
+        Raises a *pre-write* connection/version error, so the submit classifier
+        can report a definite, user-actionable category (fix the connection /
+        credentials / Auto Bangumi version) rather than an unknown outcome.
+        """
+        try:
+            self._authenticate()
+            status = self._request_json(
+                "GET",
+                _api_endpoint(self._config.base_url, "/api/v1/status"),
+                {"Accept": "application/json", "Cookie": self._session_cookie()},
+            )
+        except Stage1Error as exc:
+            raise _as_pre_write_error(exc) from exc
+        version = _status_version(status)
+        if not version.startswith("3.1."):
+            raise Stage1Error(
+                "ab_unsupported_version",
+                "当前 Auto Bangumi 版本暂不受支持",
+                "create_ab_subscription",
+            )
+
 
     def _authenticate(self) -> None:
         login = self._request_json(
@@ -519,6 +556,47 @@ def _required_payload_string(value: Any, field: str) -> str:
             {"field": field, "expected_type": "string"},
         )
     return value.strip()
+
+
+#: Conservative markers for "this subscription already exists" in the public
+#: message fields Auto Bangumi can return.  Only a boolean ever escapes this
+#: check: the upstream text is never returned, logged or persisted (issue #86).
+_DUPLICATE_SUBSCRIPTION_MARKERS = (
+    "已存在",
+    "已经存在",
+    "重复订阅",
+    "duplicate",
+    "already exists",
+    "already subscribed",
+)
+
+
+def _looks_like_duplicate_subscription(response: Mapping[str, Any]) -> bool:
+    for field in ("msg", "message", "detail", "error"):
+        value = response.get(field)
+        if not isinstance(value, str):
+            continue
+        folded = value.casefold()
+        if any(marker in folded for marker in _DUPLICATE_SUBSCRIPTION_MARKERS):
+            return True
+    return False
+
+
+#: Pre-write failures that prove nothing was written, so the submit classifier
+#: may report a definite (safely retryable) category.  The same network error
+#: *during* the write stays ambiguous and must go through recovery.
+_PRE_WRITE_ERROR_TYPES = {
+    "ab_connection_failed": "ab_connection_failed_pre_write",
+    "ab_timeout": "ab_timeout_pre_write",
+}
+
+
+def _as_pre_write_error(error: Stage1Error) -> Stage1Error:
+    """Relabel a failure raised before the write boundary, keeping it safe."""
+    replacement = _PRE_WRITE_ERROR_TYPES.get(error.error_type)
+    if replacement is None:
+        return error
+    return Stage1Error(replacement, error.message, error.failed_step, error.details)
 
 
 def _http_error_to_stage1_error(error: HTTPError, *, step: str = "create_ab_subscription") -> Stage1Error:

@@ -63,22 +63,28 @@ describe('TrackingView saved connection flow', () => {
     expect(probeCall()?.[1]).toEqual({ body: { connection_ref: '11111111-1111-4111-8111-111111111111', configuration_revision: 3 } })
     expect(JSON.stringify(probeCall()?.[1])).not.toContain('password')
   })
-  it('keeps local recovery connection-free while unknown capability disables external actions', async () => {
+  it('keeps local recovery connection-free and never lets a probe result disable sync', async () => {
     apiPost.mockResolvedValue({ ...caps, probe_status: 'UNKNOWN', subscription_submit: 'UNKNOWN' } as never)
     const { wrapper } = await mountSaved([{ code: 'AUTO', label: '本地恢复', style: 'SECONDARY', requires_confirmation: false, target_scopes: [] }])
     await wrapper.find('#tracking-probe-saved').trigger('click'); await flushPromises()
-    expect(wrapper.find('#tracking-sync').attributes('disabled')).toBeDefined()
+    // Issue #86: the probe is diagnostic; the saved connection still offers the
+    // server-validated external action, and no business request was sent.
+    expect(wrapper.find('#tracking-sync').attributes('disabled')).toBeUndefined()
     expect(apiPost.mock.calls.filter((c) => c[0] !== '/api/v1/settings/autobangumi/probe')).toHaveLength(0)
   })
-  it('changing saved generation clears the prior capability state', async () => {
+  it('changing the saved generation clears the prior capability summary only', async () => {
     apiPost.mockResolvedValue(caps as never)
     const { wrapper } = await mountSaved(); await wrapper.find('#tracking-probe-saved').trigger('click'); await flushPromises()
     expect(wrapper.find('#tracking-sync').exists()).toBe(true)
+    expect(wrapper.find('#tracking-capability-summary').exists()).toBe(true)
     apiGet.mockImplementation(async (path) => path === '/api/v1/settings/autobangumi'
       ? { configured: true, credential_present: true, connection_ref: '22222222-2222-4222-8222-222222222222', configuration_revision: 4, connection_status: 'CONFIGURED', capabilities: null }
       : { items: [row()], summary: {}, warnings: [] })
     await wrapper.find('#tracking-refresh').trigger('click'); await flushPromises()
-    expect(wrapper.find('#tracking-sync').exists()).toBe(false)
+    // The stale diagnostic summary is dropped, but the saved connection keeps
+    // offering the server-validated action (issue #86).
+    expect(wrapper.find('#tracking-capability-summary').exists()).toBe(false)
+    expect(wrapper.find('#tracking-sync').exists()).toBe(true)
   })
 
   it('renders the persisted same-origin cover for a listed record', async () => {

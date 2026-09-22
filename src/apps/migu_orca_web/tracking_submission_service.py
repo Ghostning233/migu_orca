@@ -90,6 +90,7 @@ from tracking_engine.controllers.submit import (
     classify_external_submit_result,
     external_submit_error_type,
     external_submit_result_id,
+    submit_failure_category,
     tracking_status_for_operation_state,
 )
 from tracking_engine.models.operation import (
@@ -622,6 +623,7 @@ def _replay_terminal_outcome(
         issues=(),
         request=None,
         timestamp=timestamp,
+        error_type=operation.error_type,
     )
 
 
@@ -863,6 +865,7 @@ def _finalize_external_outcome(
         issues=(),
         request=request,
         timestamp=timestamp,
+        error_type=op_error_type,
     )
 
 
@@ -1191,8 +1194,14 @@ def _submit_result_payload(
     issues: tuple[RevalidationIssue, ...],
     request: dict[str, Any] | None,
     timestamp: str,
+    error_type: str | None = None,
 ) -> dict[str, Any]:
-    """Build the safe US-225 submit result (HTTP 200 business result)."""
+    """Build the safe US-225 submit result (HTTP 200 business result).
+
+    ``failure_category`` is the published, non-sensitive classification of a
+    failed/indeterminate outcome (issue #86): the client renders its fixed
+    next-step copy from this code and never from an upstream response.
+    """
     valid_count = 0
     if isinstance(request, dict):
         resources = serialize_request_safe_info(request, storage_profile=None).get("resources")
@@ -1206,6 +1215,7 @@ def _submit_result_payload(
         "next_revision": record.revision,
         "checked_at": timestamp,
         "operation_id": operation_id,
+        "failure_category": submit_failure_category(outcome=outcome, error_type=error_type),
         "issues": [
             {
                 "code": issue.code,

@@ -22001,6 +22001,27 @@
                           "default": null,
                           "title": "Operation Id"
                         },
+                        "failure_category": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "CONNECTION",
+                                "AUTHENTICATION",
+                                "VERSION",
+                                "DUPLICATE_SUBSCRIPTION",
+                                "VALIDATION",
+                                "REJECTED",
+                                "OUTCOME_UNKNOWN"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Failure Category"
+                        },
                         "issues": {
                           "items": {
                             "additionalProperties": false,
@@ -22300,6 +22321,7 @@
                     "next_revision": 1,
                     "checked_at": "示例",
                     "operation_id": null,
+                    "failure_category": null,
                     "issues": [
                       {
                         "code": "示例",
@@ -24015,6 +24037,27 @@
                           "default": null,
                           "title": "Operation Id"
                         },
+                        "failure_category": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "CONNECTION",
+                                "AUTHENTICATION",
+                                "VERSION",
+                                "DUPLICATE_SUBSCRIPTION",
+                                "VALIDATION",
+                                "REJECTED",
+                                "OUTCOME_UNKNOWN"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Failure Category"
+                        },
                         "issues": {
                           "items": {
                             "additionalProperties": false,
@@ -24314,6 +24357,7 @@
                     "next_revision": 1,
                     "checked_at": "示例",
                     "operation_id": null,
+                    "failure_category": null,
                     "issues": [
                       {
                         "code": "示例",

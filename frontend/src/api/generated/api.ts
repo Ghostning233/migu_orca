@@ -11211,6 +11211,7 @@ export interface operations {
                      *         "next_revision": 1,
                      *         "checked_at": "示例",
                      *         "operation_id": null,
+                     *         "failure_category": null,
                      *         "issues": [
                      *           {
                      *             "code": "示例",
@@ -11284,6 +11285,11 @@ export interface operations {
                              * @default null
                              */
                             operation_id: string | null;
+                            /**
+                             * Failure Category
+                             * @default null
+                             */
+                            failure_category: ("CONNECTION" | "AUTHENTICATION" | "VERSION" | "DUPLICATE_SUBSCRIPTION" | "VALIDATION" | "REJECTED" | "OUTCOME_UNKNOWN") | null;
                             /** Issues */
                             issues?: {
                                 /**
@@ -12338,6 +12344,7 @@ export interface operations {
                      *         "next_revision": 1,
                      *         "checked_at": "示例",
                      *         "operation_id": null,
+                     *         "failure_category": null,
                      *         "issues": [
                      *           {
                      *             "code": "示例",
@@ -12411,6 +12418,11 @@ export interface operations {
                              * @default null
                              */
                             operation_id: string | null;
+                            /**
+                             * Failure Category
+                             * @default null
+                             */
+                            failure_category: ("CONNECTION" | "AUTHENTICATION" | "VERSION" | "DUPLICATE_SUBSCRIPTION" | "VALIDATION" | "REJECTED" | "OUTCOME_UNKNOWN") | null;
                             /** Issues */
                             issues?: {
                                 /**

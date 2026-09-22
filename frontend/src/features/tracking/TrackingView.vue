@@ -14,6 +14,7 @@ import BaseInput from '@/components/forms/BaseInput.vue'
 import BaseSelect from '@/components/forms/BaseSelect.vue'
 import PanelSection from '@/components/layout/PanelSection.vue'
 import { routeLocation } from '@/app/router/catalog'
+import { useNotificationStore } from '@/app/stores/notification'
 import { refreshConnectionStatus } from '@/app/stores/connectionStatus'
 import { storageQuery } from '@/features/requests/requestStorage'
 import {
@@ -46,6 +47,7 @@ import {
   TRACKING_RECOVER_ENDPOINT,
   TRACKING_STATUS_GROUPS,
   WRITE_ACTION_CONFIRMATIONS,
+  WRITE_FAILURE_PRESENTATIONS,
   WRITE_ACTION_ENDPOINTS,
   writeSessionKeepsIntent,
   type TrackingAction,
@@ -97,6 +99,7 @@ type SyncResult = NonNullable<
 
 const route = useRoute()
 const router = useRouter()
+const notification = useNotificationStore()
 const items = ref<TrackingItem[]>([])
 const loading = ref(false)
 const failed = ref(false)
@@ -107,6 +110,15 @@ const listContainer = ref<HTMLElement | null>(null)
 type SavedConnectionState = Pick<SavedConnection, 'connection_ref' | 'configuration_revision'> & { capabilities: CapabilityResult }
 const savedConnection = ref<SavedConnection | null>(null)
 const savedState = ref<SavedConnectionState | null>(null)
+/**
+ * Issue #86: a saved Auto Bangumi connection is all a business action needs.
+ * The settings-page probe remains a diagnostic summary and never becomes a
+ * display condition or authorization state for tracking actions.
+ */
+const savedRef = computed<SavedConnection | null>(() => {
+  const summary = savedConnection.value
+  return summary?.connection_ref && summary.credential_present ? summary : null
+})
 const syncLoading = ref(false)
 const syncPending = ref(false)
 const syncMessage = ref('')
@@ -470,21 +482,22 @@ async function syncTracking(): Promise<void> {
   // One sync intent at a time: the guard is taken before the confirmation
   // dialog opens so a second click cannot supersede a pending intent.
   if (syncPending.value || syncLoading.value) return
-  if (!savedState.value) return
+  // Issue #86: the saved connection is enough; the server validates it.
+  if (!savedRef.value) return
   syncPending.value = true
   let confirmed = false
   try {
     confirmed = (await confirmDialog.value?.confirm({
       title: '同步 Auto Bangumi',
-      message: '将使用本页面已探测的连接读取外部追番并更新本地安全摘要，是否继续？',
+      message: '将使用已保存的 Auto Bangumi 连接读取外部追番并更新本地安全摘要，是否继续？',
       confirmLabel: '确认同步',
       cancelLabel: '取消',
     })) ?? false
   } finally {
     syncPending.value = false
   }
-  if (!confirmed || !savedState.value) return
-  const config = savedState.value
+  if (!confirmed || !savedRef.value) return
+  const config = savedRef.value
   const sequence = ++syncSequence
   const controller = new AbortController()
   syncController?.abort()
@@ -580,6 +593,32 @@ async function recheckAfterAction(trackingId: string, refreshList = false): Prom
 }
 
 /**
+ * Route one submit result to its fixed channel (issue #86).
+ *
+ * A blocking connection/credential/version problem takes over the page as an
+ * actionable dialog with a settings deep link; success is a lightweight global
+ * notice; every other failure keeps its copy on the affected record, where the
+ * recovery controls already live. The server sends only a category code — all
+ * user-facing sentences are fixed here.
+ */
+async function presentWriteFeedback(session: TrackingWriteSession): Promise<void> {
+  if (session.state === 'ACTIVE') {
+    notification.show('success', '提交成功', '已在 Auto Bangumi 创建外部订阅。')
+    return
+  }
+  const category = session.failureCategory
+  if (!category || WRITE_FAILURE_PRESENTATIONS[category].channel !== 'dialog') return
+  const presentation = WRITE_FAILURE_PRESENTATIONS[category]
+  const openSettings = (await confirmDialog.value?.confirm({
+    title: presentation.title,
+    message: presentation.message,
+    confirmLabel: '前往设置',
+    cancelLabel: '关闭',
+  })) ?? false
+  if (openSettings) await router.push(routeLocation('settings'))
+}
+
+/**
  * Run one explicit submit-family external write (US-310, US-311).
  *
  * ``SUBMIT`` and ``RETRY`` share this single path: the endpoint, the impact
@@ -597,10 +636,11 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
     blockReplay(trackingId)
     return
   }
-  const config = savedState.value
-  const capabilities = savedState.value?.capabilities
-  // No page credential session means no external write at all.
-  if (!config || !capabilities) return
+  // Issue #86: a saved Auto Bangumi connection is all an external write needs.
+  // The server re-validates the connection, credentials, exact version and write
+  // capability inside the same request and fails closed, so a settings-page
+  // probe is never a precondition for submitting.
+  if (!savedRef.value) return
   const sameItemRecovery = recoverySession.value?.trackingId === trackingId
     && recoverySessionKeepsLock(recoverySession.value.state)
   const sameItemManagement = managementSession.value?.trackingId === trackingId
@@ -643,15 +683,17 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
     writePending.value = false
   }
   // Cancelling the impact confirmation sends zero requests.
-  if (!confirmed || !savedState.value) return
+  if (!confirmed || !savedRef.value) return
 
   // One opaque key per confirmation.  Only an indeterminate earlier result keeps
   // its locked intent, so a transport retry reuses the very same key (and the
   // very same revision binding) instead of risking a second external
-  // subscription; a definite failure always mints a fresh one.
-  const intent = locked ?? createTrackingActionIntent(payload.item, payload.action, undefined, savedState.value.capabilities)
+  // subscription; a definite failure always mints a fresh one.  Issue #86: the
+  // saved connection is enough to submit — the server performs the authoritative
+  // connection/authentication/version/capability check in the same request.
+  const intent = locked ?? createTrackingActionIntent(payload.item, payload.action)
   if (!intent) return
-  const requestConfig = locked ? writeConfigSnapshot : savedState.value
+  const requestConfig = locked ? writeConfigSnapshot : savedRef.value
   if (!requestConfig) {
     blockReplay(trackingId)
     return
@@ -684,6 +726,7 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
     writeSession.value = session
     if (!writeSessionKeepsIntent(session.state)) writeIntent = null
     await recheckAfterAction(trackingId)
+    await presentWriteFeedback(session)
   } catch (error) {
     if (sequence !== writeSequence) return
     const apiError = toApiError(error)
@@ -1021,7 +1064,7 @@ onBeforeUnmount(() => {
     <PanelSection title="我的追番" class="tracking-header">
       <template #actions>
         <BaseButton id="tracking-probe-saved" variant="secondary" :disabled="!savedConnection?.connection_ref" @click="probeSavedConnection">测试已保存连接</BaseButton>
-        <BaseButton v-if="savedState" id="tracking-sync" variant="secondary" :loading="syncLoading" :disabled="syncLoading || syncPending || savedState.capabilities.probe_status !== 'VERIFIED'" @click="syncTracking">同步 Auto Bangumi</BaseButton>
+        <BaseButton v-if="savedRef" id="tracking-sync" variant="secondary" :loading="syncLoading" :disabled="syncLoading || syncPending" @click="syncTracking">同步 Auto Bangumi</BaseButton>
         <BaseButton id="tracking-refresh" variant="secondary" :loading="loading" @click="refreshTracking">刷新列表</BaseButton>
       </template>
       <p id="tracking-heading" class="tracking-lede">管理待提交任务和正在运行的追番。</p>
@@ -1080,7 +1123,7 @@ onBeforeUnmount(() => {
           :key="`${selectedItem.tracking_id}:${detailRevision}`"
           :tracking-id="selectedItem.tracking_id"
           :capabilities="savedState?.capabilities ?? null"
-          :credential-ready="Boolean(savedState)"
+          :connection-ready="Boolean(savedRef)"
           :write-session="writeSession"
           :recovery-session="recoverySession"
           :management-session="managementSession"

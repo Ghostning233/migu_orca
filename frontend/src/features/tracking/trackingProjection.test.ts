@@ -149,7 +149,9 @@ describe('tracking projection (US-304)', () => {
     ] })
     expect(executableTrackingActions(rows, capabilities())).toHaveLength(1)
     expect(executableTrackingActions(rows, capabilities({ subscription_modify: 'UNKNOWN' }))).toHaveLength(0)
-    expect(executableTrackingActions(item({ available_actions: [action({ code: 'SUBMIT', target_scopes: [] })] }))).toHaveLength(0)
+    // Issue #86: submission is never gated on a probe result; the server
+    // re-validates the connection, credentials, version and capability.
+    expect(executableTrackingActions(item({ available_actions: [action({ code: 'SUBMIT', target_scopes: [] })] }))).toHaveLength(1)
   })
 
   it('creates one revision-bound opaque intent and reuses its key on transport retry', () => {
@@ -162,7 +164,7 @@ describe('tracking projection (US-304)', () => {
     expect(createTrackingActionIntent(current, candidate, 'ASSOCIATED_RSS', capabilities())).toBeNull()
   })
 
-  it('projects only supported scopes and gates submit on verified capability', () => {
+  it('projects only supported scopes and keeps submit independent of the probe', () => {
     const current = item({ available_actions: [
       action({ target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'] }),
       action({ code: 'SET_ENABLED', target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'] }),
@@ -170,7 +172,8 @@ describe('tracking projection (US-304)', () => {
     ] })
     const projected = executableTrackingActions(current, capabilities({ rss_modify: 'UNKNOWN', subscription_submit: 'UNSUPPORTED' }))
     expect(projected[0]?.target_scopes).toEqual(['SUBSCRIPTION'])
-    expect(projected.some((candidate) => candidate.code === 'SUBMIT')).toBe(false)
+    // A diagnostic "unsupported" capability no longer hides submission.
+    expect(projected.some((candidate) => candidate.code === 'SUBMIT')).toBe(true)
     expect(createTrackingActionIntent(current, projected[0]!, 'ASSOCIATED_RSS', capabilities({ rss_modify: 'UNKNOWN' }))).toBeNull()
     expect(createTrackingActionIntent(current, { ...projected[0]!, target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'] }, 'ASSOCIATED_RSS', capabilities({ rss_modify: 'UNKNOWN' }))).toBeNull()
   })
@@ -332,7 +335,7 @@ describe('tracking write session projection (US-310)', () => {
     const session = createWriteSession('tracking-1', 'SUBMIT', 'IN_FLIGHT')
     expect(session).toEqual({
       trackingId: 'tracking-1', action: 'SUBMIT', state: 'IN_FLIGHT',
-      message: writeSessionMessage('IN_FLIGHT'), issues: [],
+      message: writeSessionMessage('IN_FLIGHT'), issues: [], failureCategory: null,
     })
     expect(Object.keys(session)).not.toContain('idempotencyKey')
   })

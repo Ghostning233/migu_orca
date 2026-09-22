@@ -21,3 +21,10 @@ def _delete_detail(revision=1):
     item = _item("tracking-a", "测试番")
     item["available_actions"] = [{"code": "DELETE_EXTERNAL", "label": "删除外部订阅", "style": "DANGER", "requires_confirmation": True, "target_scopes": ["SUBSCRIPTION", "ASSOCIATED_RSS"]}]
     return {"ok": True, "result": {**_detail_payload(item), "revision": revision}}
+
+def _summary(total=1, **counts):
+    """Complete tracking-list summary with the authoritative inactive count."""
+    return {
+        "total": total, "pending": 0, "processing": 0, "active": 0,
+        "inactive": 0, "needs_attention": 0, "unreadable": 0, **counts,
+    }
