@@ -180,6 +180,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/autobangumi/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 瞬时测试 Auto Bangumi 连接
+         * @description 仅使用当前连接草稿执行只读探测，不保存配置或原始响应。
+         */
+        post: operations["testAutoBangumiConnection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tracking/items": {
         parameters: {
             query?: never;
@@ -4572,6 +4592,111 @@ export interface operations {
                      *       "ok": false,
                      *       "error_type": "storage_error",
                      *       "error_message": "Auto Bangumi 配置存储不可用",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
+    testAutoBangumiConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 瞬时测试 Auto Bangumi 连接 */
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "config": "示例"
+                 *     }
+                 */
+                "application/json": {
+                    config: {
+                        /** @constant */
+                        auth_mode: "password";
+                        base_url: string;
+                        username: string;
+                        password: string;
+                    } | {
+                        /** @constant */
+                        auth_mode: "api_token";
+                        base_url: string;
+                        token: string;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "success": true,
+                     *         "summary": {},
+                     *         "error": {}
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /** AutoBangumiConnectionTestResultDTO */
+                        result: {
+                            /** Success */
+                            success: boolean;
+                            /** Summary */
+                            summary: {
+                                [key: string]: unknown;
+                            } | null;
+                            /** Error */
+                            error: {
+                                [key: string]: unknown;
+                            } | null;
+                        };
+                    };
+                };
+            };
+            /** @description validation_error: 请求参数校验失败 / config_error: Auto Bangumi 配置无效 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "validation_error",
+                     *       "error_message": "请求参数校验失败",
                      *       "error_data": {
                      *         "failed_step": "示例步骤"
                      *       }

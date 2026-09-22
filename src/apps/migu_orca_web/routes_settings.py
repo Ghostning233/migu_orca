@@ -9,6 +9,7 @@ storage repositories.
 
 from flask import request
 
+from ab_engine.controllers.ab_connection_controller import test_ab_connection
 from apps.migu_orca_web.autobangumi_probe_service import (
     invalidate_saved_capabilities,
     probe_saved_capabilities,
@@ -17,6 +18,7 @@ from apps.migu_orca_web.blueprints import api_blueprint
 from apps.migu_orca_web.schemas import (
     AutoBangumiConfigDeletePayload,
     AutoBangumiConfigSavePayload,
+    AutoBangumiConnectionTestPayload,
     CorrectionQuery,
     CorrectionSavePayload,
     PreferenceQuery,
@@ -75,6 +77,21 @@ class AutoBangumiConfigSaveView(PostView):
 
     def put(self) -> object:
         return self.post()
+
+
+@class_route(api_blueprint, "/api/v1/settings/autobangumi/test", methods=["POST"])
+class AutoBangumiConnectionTestView(PostView):
+    """Probe the current draft without saving it or creating a repository record."""
+
+    request_validator_model = AutoBangumiConnectionTestPayload
+
+    def save(self) -> dict[str, object]:
+        _require_json()
+        assert isinstance(self.request_validator_model, AutoBangumiConnectionTestPayload)
+        return test_ab_connection(
+            ab_config=self.request_validator_model.config.model_dump(exclude_none=True)
+            | {"fallback_enabled": False}
+        )
 
 
 @class_route(api_blueprint, "/api/v1/settings/autobangumi", methods=["DELETE"])

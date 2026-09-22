@@ -20,6 +20,7 @@ import { useNotificationStore } from '@/app/stores/notification'
 import ConfirmDialog from '@/components/feedback/ConfirmDialog.vue'
 import BaseButton from '@/components/forms/BaseButton.vue'
 import LoadingState from '@/components/feedback/LoadingState.vue'
+import StatusAlert from '@/components/feedback/StatusAlert.vue'
 import AnimeDraftEditor from '@/features/workbench/AnimeDraftEditor.vue'
 import AnimeModeSwitch, { type AnimeMode } from '@/features/workbench/AnimeModeSwitch.vue'
 import { useDraftEditScheduler } from '@/features/workbench/draftEditScheduler'
@@ -146,7 +147,7 @@ function handoffFrom(result: ConfirmRequestSaveResult): NonNullable<ConfirmReque
   if (!handoff) return null
   if (result.outcome !== 'CONFIRMED') return null
   if (!isPublicRouteIdentifier(handoff.request_id)) return null
-  if (handoff.status !== 'CONFIRMED' || handoff.next_action !== 'TRACKING') return null
+  if (handoff.status !== 'ACCEPTED' || handoff.next_action !== 'OPEN_TRACKING') return null
   if (!isPublicRouteIdentifier(handoff.tracking_id)) return null
   if (typeof handoff.tracking_ready !== 'boolean') return null
   if (handoff.tracking_status !== null && typeof handoff.tracking_status !== 'string') return null
@@ -197,7 +198,8 @@ async function saveAndConfirm(): Promise<void> {
   } catch (cause) {
     const safeError = toApiError(cause)
     journey.fail(safeError)
-    confirmError.value = journey.state.error?.message ?? '保存并确认失败，请重试。'
+    confirmError.value = '保存并确认失败，请重试。'
+    notification.error('保存并确认失败', '请检查订阅方案后重试。')
     if (safeError.type === 'save_confirm_failed' && journey.state.phase === 'saved_pending_confirm') {
       session.invalidate()
     }
@@ -418,7 +420,7 @@ defineExpose({ session, editor, leaveGuard })
         <p v-if="trackingLocated" id="single-review-tracking-success" class="field-help" role="status">订阅方案已确认，并已定位到追番记录。</p>
         <p v-else-if="confirmedRequestId" id="single-review-save-success" class="field-help" role="status">订阅方案已经确认，正在准备后续定位。</p>
         <p v-else-if="journey.state.phase === 'saved_pending_confirm'" id="single-review-accept-recovery" class="field-help" role="status">订阅方案已保存但确认未完成，可直接重试确认；不会重复保存。</p>
-        <p v-else-if="confirmError" id="single-review-save-error" class="field-error" role="alert">{{ confirmError }}</p>
+        <StatusAlert v-else-if="confirmError" id="single-review-save-error" kind="error" :message="confirmError" />
         <p v-if="acceptError" id="single-review-accept-error" class="field-error" role="alert">{{ acceptError }}</p>
         <p v-else id="single-review-save-blockers" class="field-help">保存并确认{{ saveBlockers.length ? `暂不可用：${saveBlockers.join('；')}` : '可用' }}。</p>
       </div>

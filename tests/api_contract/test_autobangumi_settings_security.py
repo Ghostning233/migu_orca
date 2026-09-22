@@ -23,6 +23,22 @@ def test_settings_summary_is_exactly_safe_and_uncached(monkeypatch, tmp_path: Pa
     assert response.get_json()["result"]["connection_status"] == "UNCONFIGURED"
 
 
+def test_issue81_connection_test_is_transient_and_has_no_legacy_fallback(monkeypatch, tmp_path: Path) -> None:
+    from apps.migu_orca_web import routes_settings
+
+    seen: list[dict] = []
+    monkeypatch.setattr(routes_settings, "test_ab_connection", lambda *, ab_config: seen.append(ab_config) or {
+        "success": True, "summary": {"reachable": True}, "error": None,
+    })
+    client = _client(monkeypatch, tmp_path)
+    config = {"auth_mode": "password", "base_url": "http://ab.example.invalid", "username": "u", "password": "p"}
+    response = client.post("/api/v1/settings/autobangumi/test", json={"config": config})
+    assert response.status_code == 200
+    assert seen == [{**config, "fallback_enabled": False}]
+    assert client.get("/api/v1/settings/autobangumi").get_json()["result"]["configured"] is False
+    assert client.post("/api/v1/settings/autobangumi/test", json={"config": {**config, "fallback_enabled": True}}).status_code == 400
+
+
 def test_settings_rejects_untrusted_host_origin_form_and_non_strict_confirm(monkeypatch, tmp_path: Path) -> None:
     client = _client(monkeypatch, tmp_path)
     assert client.get("/api/v1/settings/autobangumi", headers={"Host": "evil.invalid"}).status_code == 400

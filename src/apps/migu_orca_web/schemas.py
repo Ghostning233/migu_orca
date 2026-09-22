@@ -325,6 +325,13 @@ class AutoBangumiConfigPayload(BaseModel):
         return self
 
 
+class AutoBangumiConnectionTestPayload(BaseModel):
+    """One-shot connection test; never persisted."""
+
+    model_config = ConfigDict(extra="forbid")
+    config: AutoBangumiConfigPayload
+
+
 class AutoBangumiConfigSavePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
     confirm: StrictBool

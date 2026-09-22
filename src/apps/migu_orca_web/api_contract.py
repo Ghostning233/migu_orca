@@ -1123,6 +1123,12 @@ class AutoBangumiConnectionSummaryDTO(_StrictBase):
     capabilities: AutoBangumiCapabilitiesDTO | None = None
 
 
+class AutoBangumiConnectionTestResultDTO(_StrictBase):
+    success: bool
+    summary: dict[str, Any] | None
+    error: dict[str, Any] | None
+
+
 class TrackingSyncSummaryDTO(_StrictBase):
     checked: int
     created: int
