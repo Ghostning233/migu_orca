@@ -1026,10 +1026,10 @@ async function runTrackingManagement(payload: {
     blockReplay(trackingId)
     return
   }
-  const config = savedState.value
-  const capabilities = savedState.value?.capabilities
-  // No page credential session means no external management write at all.
-  if (!config || !capabilities) return
+  // Issue #89: a saved Auto Bangumi connection is all an external management
+  // write needs. The server re-validates connection, credentials, exact version
+  // and write capability in the same request and fails closed.
+  if (!savedRef.value) return
   const requested = payload.action.code
   // Only the management actions this page can actually send are accepted;
   // DELETE_EXTERNAL waits for its own story and still sends zero requests.
@@ -1054,11 +1054,11 @@ async function runTrackingManagement(payload: {
 
   // The page re-validates the emitted request against the current server
   // projection: the action and scope must still be offered for this revision,
-  // the live session must still prove the capability, the patch must belong to
-  // the chosen scope and the enable direction must still be the one the
-  // record's own status implies.
+  // the patch must belong to the chosen scope and the enable direction must
+  // still be the one the record's own status implies. The server validates the
+  // connection, credentials, version and write capability itself (issue #89).
   const projectedIntent = createTrackingManagementActionIntent(
-    payload.item, action, targetScope, payload.patch, capabilities,
+    payload.item, action, targetScope, payload.patch,
   )
   if (!projectedIntent) return
   // A locked intent still owns the single opaque key *and* the request it was
@@ -1086,9 +1086,9 @@ async function runTrackingManagement(payload: {
     managementPending.value = false
   }
   // Cancelling the impact confirmation sends zero requests.
-  if (!confirmed || !savedState.value) return
+  if (!confirmed || !savedRef.value) return
 
-  const requestConfig = locked ? managementConfigSnapshot : savedState.value
+  const requestConfig = locked ? managementConfigSnapshot : savedRef.value
   if (!requestConfig) {
     blockReplay(trackingId)
     return

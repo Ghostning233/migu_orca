@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { managementSessionKeepsIntent, type CapabilityResult, type TrackingItem } from './trackingProjection'
+import { managementSessionKeepsIntent, type TrackingItem } from './trackingProjection'
 import {
   buildRssPatch,
   buildSubscriptionPatch,
@@ -59,16 +59,6 @@ function item(overrides: Partial<TrackingItem> = {}): TrackingItem {
   }
 }
 
-function capabilities(overrides: Partial<CapabilityResult> = {}): CapabilityResult {
-  return {
-    probe_status: 'VERIFIED', version: '3.1.18', adapter: 'legacy_3_1',
-    subscription_list: 'SUPPORTED', subscription_detail: 'SUPPORTED', subscription_submit: 'SUPPORTED',
-    subscription_modify: 'SUPPORTED', subscription_enable: 'SUPPORTED', subscription_disable: 'SUPPORTED',
-    subscription_delete: 'SUPPORTED', rss_list: 'SUPPORTED', rss_modify: 'SUPPORTED', rss_enable: 'SUPPORTED',
-    rss_disable: 'SUPPORTED', rss_delete: 'SUPPORTED', rss_refresh: 'SUPPORTED', external_verify: 'SUPPORTED',
-    checked_at: null, safe_message: null, ...overrides,
-  }
-}
 
 const abConfig = {
   auth_mode: 'password' as const, base_url: 'https://ab.invalid', username: 'user',
@@ -201,7 +191,7 @@ describe('tracking modify request (saved connection body)', () => {
   it('accepts only an action and scope the live session still projects', () => {
     const record = item()
     const intent = createTrackingManagementIntent(
-      record, 'MODIFY', 'SUBSCRIPTION', { title: '新标题' }, capabilities(),
+      record, 'MODIFY', 'SUBSCRIPTION', { title: '新标题' },
     )
     expect(intent).toMatchObject({
       action: 'MODIFY', targetScope: 'SUBSCRIPTION', patch: { title: '新标题' },
@@ -209,28 +199,28 @@ describe('tracking modify request (saved connection body)', () => {
     })
     expect(intent?.idempotencyKey.length).toBeGreaterThanOrEqual(8)
 
-    // A scope the server did not offer is refused even when the capability is
-    // proven, and a scope whose capability is unproven is refused too.
+    // A scope the server did not offer for this record is refused.
     expect(createTrackingManagementIntent(
       item({ available_actions: [action({ target_scopes: ['SUBSCRIPTION'] })] }),
-      'MODIFY', 'ASSOCIATED_RSS', { name: 'x' }, capabilities(),
+      'MODIFY', 'ASSOCIATED_RSS', { name: 'x' },
     )).toBeNull()
+    // Issue #89: a scope the server did offer stays requestable with no probe.
     expect(createTrackingManagementIntent(
-      record, 'MODIFY', 'ASSOCIATED_RSS', { name: 'x' }, capabilities({ rss_modify: 'UNSUPPORTED' }),
-    )).toBeNull()
+      record, 'MODIFY', 'ASSOCIATED_RSS', { name: 'x' },
+    )).toMatchObject({ action: 'MODIFY', targetScope: 'ASSOCIATED_RSS' })
     // An empty or cross-scope patch never becomes an intent.
-    expect(createTrackingManagementIntent(record, 'MODIFY', 'SUBSCRIPTION', {}, capabilities())).toBeNull()
-    expect(createTrackingManagementIntent(record, 'MODIFY', 'SUBSCRIPTION', { name: 'x' }, capabilities())).toBeNull()
-    expect(createTrackingManagementIntent(record, 'MODIFY', 'SUBSCRIPTION', { title: 'x' }, null)).toBeNull()
+    expect(createTrackingManagementIntent(record, 'MODIFY', 'SUBSCRIPTION', {})).toBeNull()
+    expect(createTrackingManagementIntent(record, 'MODIFY', 'SUBSCRIPTION', { name: 'x' })).toBeNull()
+    expect(createTrackingManagementIntent(record, 'MODIFY', 'SUBSCRIPTION', { title: 'x' })).not.toBeNull()
     // A revision the server could not have issued is refused.
     expect(createTrackingManagementIntent(
-      item({ revision: 0 }), 'MODIFY', 'SUBSCRIPTION', { title: 'x' }, capabilities(),
+      item({ revision: 0 }), 'MODIFY', 'SUBSCRIPTION', { title: 'x' },
     )).toBeNull()
   })
 
   it('builds the scope-discriminated body once, with one credential and one key', () => {
     const subscription = createTrackingManagementIntent(
-      item(), 'MODIFY', 'SUBSCRIPTION', { title: '新标题', season: 2 }, capabilities(),
+      item(), 'MODIFY', 'SUBSCRIPTION', { title: '新标题', season: 2 },
     )!
     const body = createTrackingManagementBody(subscription, savedConnection, 'profile')
     expect(body).toEqual({
@@ -245,7 +235,7 @@ describe('tracking modify request (saved connection body)', () => {
     // The same intent replays the very same key and revision binding.
     expect(createTrackingManagementBody(subscription, savedConnection, 'profile')).toEqual(body)
 
-    const rss = createTrackingManagementIntent(item(), 'MODIFY', 'ASSOCIATED_RSS', { name: 'x' }, capabilities())!
+    const rss = createTrackingManagementIntent(item(), 'MODIFY', 'ASSOCIATED_RSS', { name: 'x' })!
     const rssBody = createTrackingManagementBody(rss, savedConnection)
     expect(rssBody).toEqual({
       target_scope: 'ASSOCIATED_RSS',
@@ -324,7 +314,7 @@ describe('tracking modify result (US-313)', () => {
     // ``createTrackingManagementBody`` refuses a session without a server
     // address; the page must never keep such a request in IN_FLIGHT.
     const intent = createTrackingManagementIntent(
-      item(), 'MODIFY', 'SUBSCRIPTION', { title: 'x' }, capabilities(),
+      item(), 'MODIFY', 'SUBSCRIPTION', { title: 'x' },
     )!
     expect(createTrackingManagementBody(intent, { ...abConfig, base_url: undefined })).toBeNull()
 
@@ -353,12 +343,12 @@ describe('tracking modify result (US-313)', () => {
 // -- US-314: enable/disable and associated-RSS refresh -----------------------
 
 const ENABLE_ACTION = {
-  code: 'SET_ENABLED', label: '启用外部订阅', style: 'PRIMARY',
+  code: 'SET_ENABLED', label: '启用追番', style: 'PRIMARY',
   requires_confirmation: true, target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'],
 } satisfies ItemAction
-const DISABLE_ACTION = { ...ENABLE_ACTION, label: '停用外部订阅', style: 'SECONDARY' } satisfies ItemAction
+const DISABLE_ACTION = { ...ENABLE_ACTION, label: '停用追番', style: 'SECONDARY' } satisfies ItemAction
 const REFRESH_ACTION = {
-  code: 'REFRESH_RSS', label: '刷新关联 RSS', style: 'SECONDARY',
+  code: 'REFRESH_RSS', label: '立即刷新资源', style: 'SECONDARY',
   requires_confirmation: true, target_scopes: ['ASSOCIATED_RSS'],
 } satisfies ItemAction
 
@@ -368,54 +358,55 @@ function enableDetail(overrides: Partial<TrackingItem> = {}): TrackingItem {
 
 describe('tracking set-enabled request (saved connection body)', () => {
   it('derives the direction from the record status, never from the caller', () => {
-    expect(createTrackingSetEnabledIntent(enableDetail(), 'SUBSCRIPTION', capabilities()))
+    expect(createTrackingSetEnabledIntent(enableDetail(), 'SUBSCRIPTION'))
       .toMatchObject({ action: 'SET_ENABLED', targetScope: 'SUBSCRIPTION', enabled: true, patch: null })
 
     for (const status of ['ACTIVE', 'EXTERNAL_ONLY'] as const) {
       expect(createTrackingSetEnabledIntent(
-        item({ status, available_actions: [DISABLE_ACTION] }), 'SUBSCRIPTION', capabilities(),
+        item({ status, available_actions: [DISABLE_ACTION] }), 'SUBSCRIPTION',
       )).toMatchObject({ enabled: false })
     }
     // A status that names no direction never becomes a request even when the
     // action object claims to offer one.
     for (const status of ['PENDING_SUBMIT', 'SUBMITTING', 'UNKNOWN'] as const) {
       expect(createTrackingSetEnabledIntent(
-        item({ status, available_actions: [ENABLE_ACTION] }), 'SUBSCRIPTION', capabilities(),
+        item({ status, available_actions: [ENABLE_ACTION] }), 'SUBSCRIPTION',
       )).toBeNull()
     }
-    expect(createTrackingSetEnabledIntent(item({ revision: 0, status: 'DISABLED' }), 'SUBSCRIPTION', capabilities()))
+    expect(createTrackingSetEnabledIntent(item({ revision: 0, status: 'DISABLED' }), 'SUBSCRIPTION'))
       .toBeNull()
   })
 
-  it('intersects the server-offered scope with the capability of that direction', () => {
+  it('derives the direction and scope from the server projection alone', () => {
     const record = enableDetail()
-    expect(createTrackingSetEnabledIntent(
-      record, 'ASSOCIATED_RSS', capabilities({ rss_enable: 'UNSUPPORTED' }),
-    )).toBeNull()
-    expect(createTrackingSetEnabledIntent(
-      record, 'ASSOCIATED_RSS', capabilities({ rss_enable: 'UNKNOWN' }),
-    )).toBeNull()
-    expect(createTrackingSetEnabledIntent(record, 'ASSOCIATED_RSS', capabilities()))
+    // Both projected scopes are requestable without any probe (issue #89).
+    expect(createTrackingSetEnabledIntent(record, 'ASSOCIATED_RSS'))
       .toMatchObject({ targetScope: 'ASSOCIATED_RSS', enabled: true })
-    // A scope the server did not offer is refused even with the capability.
+    expect(createTrackingSetEnabledIntent(record, 'SUBSCRIPTION'))
+      .toMatchObject({ targetScope: 'SUBSCRIPTION', enabled: true })
+    // A scope the server did not offer is still refused.
     expect(createTrackingSetEnabledIntent(
       enableDetail({ available_actions: [{ ...ENABLE_ACTION, target_scopes: ['SUBSCRIPTION'] }] }),
-      'ASSOCIATED_RSS', capabilities(),
+      'ASSOCIATED_RSS',
     )).toBeNull()
-    // The enable direction needs the *enable* capability; the disable direction
-    // needs only the disable one, so a proven enable alone cannot disable.
+    // The direction comes from the record's own status and the offered action
+    // only; a diagnostic probe never gates it.
     const active = item({ status: 'ACTIVE', available_actions: [DISABLE_ACTION] })
-    expect(createTrackingSetEnabledIntent(active, 'SUBSCRIPTION', capabilities({
-      subscription_enable: 'UNSUPPORTED',
-    }))).toMatchObject({ enabled: false })
-    expect(createTrackingSetEnabledIntent(active, 'SUBSCRIPTION', capabilities({
-      subscription_disable: 'UNSUPPORTED',
-    }))).toBeNull()
-    expect(createTrackingSetEnabledIntent(active, 'SUBSCRIPTION', null)).toBeNull()
+    expect(createTrackingSetEnabledIntent(active, 'SUBSCRIPTION')).toMatchObject({ enabled: false })
+    const disabled = item({ status: 'DISABLED', available_actions: [ENABLE_ACTION] })
+    expect(createTrackingSetEnabledIntent(disabled, 'SUBSCRIPTION')).toMatchObject({ enabled: true })
+    // A status that implies no direction is not actionable at all.
+    const pending = item({ status: 'PENDING_SUBMIT', available_actions: [DISABLE_ACTION] })
+    expect(createTrackingSetEnabledIntent(pending, 'SUBSCRIPTION')).toBeNull()
+    // The scope must still be one the server actually projected.
+    expect(createTrackingSetEnabledIntent(
+      item({ status: 'ACTIVE', available_actions: [{ ...DISABLE_ACTION, target_scopes: ['ASSOCIATED_RSS'] }] }),
+      'SUBSCRIPTION',
+    )).toBeNull()
   })
 
   it('builds only the boolean direction for the chosen scope', () => {
-    const intent = createTrackingSetEnabledIntent(enableDetail(), 'SUBSCRIPTION', capabilities())!
+    const intent = createTrackingSetEnabledIntent(enableDetail(), 'SUBSCRIPTION')!
     const body = createTrackingManagementBody(intent, savedConnection, 'profile')
     expect(body).toEqual({
       target_scope: 'SUBSCRIPTION',
@@ -436,7 +427,7 @@ describe('tracking set-enabled request (saved connection body)', () => {
 
 describe('tracking refresh request (saved connection body)', () => {
   it('only ever targets the current record own associated RSS', () => {
-    const intent = createTrackingRefreshRssIntent(item({ available_actions: [REFRESH_ACTION] }), capabilities())
+    const intent = createTrackingRefreshRssIntent(item({ available_actions: [REFRESH_ACTION] }))
     expect(intent).toMatchObject({
       action: 'REFRESH_RSS', targetScope: 'ASSOCIATED_RSS', patch: null, enabled: null,
     })
@@ -455,22 +446,19 @@ describe('tracking refresh request (saved connection body)', () => {
     )
   })
 
-  it('fails closed without the server action or the proven refresh capability', () => {
-    expect(createTrackingRefreshRssIntent(item(), capabilities())).toBeNull()
-    for (const value of ['UNSUPPORTED', 'UNKNOWN'] as const) {
-      expect(createTrackingRefreshRssIntent(item({ available_actions: [REFRESH_ACTION] }),
-        capabilities({ rss_refresh: value }))).toBeNull()
-    }
+  it('offers an RSS refresh from the server projection only', () => {
+    // No server action for this record means no request.
+    expect(createTrackingRefreshRssIntent(item())).toBeNull()
+    // An offered refresh is requestable without any probe (issue #89).
+    const offered = item({ available_actions: [REFRESH_ACTION] })
+    expect(createTrackingRefreshRssIntent(offered)).toMatchObject({ action: 'REFRESH_RSS' })
+    // A subscription-scoped refresh never travels through the RSS route.
     expect(createTrackingRefreshRssIntent(
-      item({ available_actions: [REFRESH_ACTION] }), capabilities({ probe_status: 'PARTIAL' }),
+      item({ available_actions: [{ ...REFRESH_ACTION, target_scopes: ['SUBSCRIPTION'] }] }),
     )).toBeNull()
-    // The server would never offer a subscription refresh; if it did, the scope
-    // intersection drops it instead of sending it.
+    // A revision the server could not have issued is refused.
     expect(createTrackingRefreshRssIntent(
-      item({ available_actions: [{ ...REFRESH_ACTION, target_scopes: ['SUBSCRIPTION'] }] }), capabilities(),
-    )).toBeNull()
-    expect(createTrackingRefreshRssIntent(
-      item({ revision: 0, available_actions: [REFRESH_ACTION] }), capabilities(),
+      item({ revision: 0, available_actions: [REFRESH_ACTION] }),
     )).toBeNull()
   })
 })
@@ -480,22 +468,22 @@ describe('tracking management dispatch and locking (US-314)', () => {
     const record = item({
       available_actions: [DELETE_ACTION, DISABLE_ACTION, REFRESH_ACTION],
     })
-    expect(createTrackingManagementActionIntent(record, 'DELETE_EXTERNAL', 'SUBSCRIPTION', null, capabilities()))
+    expect(createTrackingManagementActionIntent(record, 'DELETE_EXTERNAL', 'SUBSCRIPTION', null))
       .toMatchObject({ action: 'DELETE_EXTERNAL', targetScope: 'SUBSCRIPTION' })
-    expect(createTrackingManagementActionIntent(record, 'SET_ENABLED', 'SUBSCRIPTION', null, capabilities()))
+    expect(createTrackingManagementActionIntent(record, 'SET_ENABLED', 'SUBSCRIPTION', null))
       .toMatchObject({ action: 'SET_ENABLED', enabled: false })
-    expect(createTrackingManagementActionIntent(record, 'REFRESH_RSS', 'ASSOCIATED_RSS', null, capabilities()))
+    expect(createTrackingManagementActionIntent(record, 'REFRESH_RSS', 'ASSOCIATED_RSS', null))
       .toMatchObject({ action: 'REFRESH_RSS', targetScope: 'ASSOCIATED_RSS' })
   })
 
   it('replays a locked intent only for the identical request, revision aside', () => {
     const record = enableDetail()
-    const first = createTrackingSetEnabledIntent(record, 'SUBSCRIPTION', capabilities())!
+    const first = createTrackingSetEnabledIntent(record, 'SUBSCRIPTION')!
     // The record moved on while the first request was in flight, so the fresh
     // intent carries another revision and another key. The request itself is
     // unchanged, which is exactly what a locked replay must recognise.
     const bumped = createTrackingSetEnabledIntent(
-      { ...record, revision: 9 }, 'SUBSCRIPTION', capabilities(),
+      { ...record, revision: 9 }, 'SUBSCRIPTION',
     )!
     expect(bumped.expectedRevision).toBe(9)
     expect(bumped.idempotencyKey).not.toBe(first.idempotencyKey)
@@ -503,19 +491,19 @@ describe('tracking management dispatch and locking (US-314)', () => {
 
     // A different scope, a different direction or a different action is not the
     // same request, however identical the rest of the envelope looks.
-    const otherScope = createTrackingSetEnabledIntent(record, 'ASSOCIATED_RSS', capabilities())!
+    const otherScope = createTrackingSetEnabledIntent(record, 'ASSOCIATED_RSS')!
     expect(sameManagementRequest(first, otherScope)).toBe(false)
     const otherDirection = createTrackingSetEnabledIntent(
-      item({ status: 'ACTIVE', available_actions: [DISABLE_ACTION] }), 'ASSOCIATED_RSS', capabilities(),
+      item({ status: 'ACTIVE', available_actions: [DISABLE_ACTION] }), 'ASSOCIATED_RSS',
     )!
     expect(otherDirection.enabled).toBe(false)
     expect(sameManagementRequest(otherScope, otherDirection)).toBe(false)
-    const modify = createTrackingManagementIntent(item(), 'MODIFY', 'SUBSCRIPTION', { title: 'x' }, capabilities())!
+    const modify = createTrackingManagementIntent(item(), 'MODIFY', 'SUBSCRIPTION', { title: 'x' })!
     expect(sameManagementRequest(first, modify)).toBe(false)
 
-    const otherPatch = createTrackingManagementIntent(item(), 'MODIFY', 'SUBSCRIPTION', { title: 'y' }, capabilities())!
+    const otherPatch = createTrackingManagementIntent(item(), 'MODIFY', 'SUBSCRIPTION', { title: 'y' })!
     const samePatchLater = createTrackingManagementIntent(
-      item({ revision: 9 }), 'MODIFY', 'SUBSCRIPTION', { title: 'x' }, capabilities(),
+      item({ revision: 9 }), 'MODIFY', 'SUBSCRIPTION', { title: 'x' },
     )!
     expect(sameManagementRequest(modify, otherPatch)).toBe(false)
     expect(sameManagementRequest(modify, samePatchLater)).toBe(true)
@@ -532,7 +520,7 @@ const DELETE_ACTION = {
 describe('tracking external delete request (saved connection body)', () => {
   it('deletes exactly one explicitly chosen external object of this record', () => {
     const record = item({ available_actions: [DELETE_ACTION] })
-    const intent = createTrackingDeleteExternalIntent(record, 'SUBSCRIPTION', capabilities())!
+    const intent = createTrackingDeleteExternalIntent(record, 'SUBSCRIPTION')!
     expect(intent).toMatchObject({
       action: 'DELETE_EXTERNAL', targetScope: 'SUBSCRIPTION', patch: null, enabled: null,
       expectedRevision: 4, confirm: true,
@@ -555,49 +543,42 @@ describe('tracking external delete request (saved connection body)', () => {
 
     // A different scope is a different request, so a locked delete is replayed
     // only for the very scope the user confirmed.
-    const rss = createTrackingDeleteExternalIntent(record, 'ASSOCIATED_RSS', capabilities())!
+    const rss = createTrackingDeleteExternalIntent(record, 'ASSOCIATED_RSS')!
     expect(rss.targetScope).toBe('ASSOCIATED_RSS')
     expect(sameManagementRequest(intent, rss)).toBe(false)
     expect(sameManagementRequest(intent, createTrackingDeleteExternalIntent(
-      { ...record, revision: 9 }, 'SUBSCRIPTION', capabilities(),
+      { ...record, revision: 9 }, 'SUBSCRIPTION',
     )!)).toBe(true)
   })
 
-  it('fails closed without the server action, the chosen scope or the capability', () => {
+  it('offers delete only for the scopes the server actually projected', () => {
     // The server does not offer the delete for this record at all.
-    expect(createTrackingDeleteExternalIntent(item(), 'SUBSCRIPTION', capabilities())).toBeNull()
+    expect(createTrackingDeleteExternalIntent(item(), 'SUBSCRIPTION')).toBeNull()
     // The server offers only the subscription scope; the RSS choice is dropped.
     expect(createTrackingDeleteExternalIntent(
       item({ available_actions: [{ ...DELETE_ACTION, target_scopes: ['SUBSCRIPTION'] }] }),
-      'ASSOCIATED_RSS', capabilities(),
+      'ASSOCIATED_RSS',
     )).toBeNull()
-    // A delete capability that is not proven for this very scope is no delete.
-    for (const value of ['UNSUPPORTED', 'UNKNOWN'] as const) {
-      expect(createTrackingDeleteExternalIntent(
-        item({ available_actions: [DELETE_ACTION] }), 'SUBSCRIPTION',
-        capabilities({ subscription_delete: value }),
-      )).toBeNull()
-      expect(createTrackingDeleteExternalIntent(
-        item({ available_actions: [DELETE_ACTION] }), 'ASSOCIATED_RSS',
-        capabilities({ rss_delete: value }),
-      )).toBeNull()
-    }
+    // Both projected scopes are requestable without any probe (issue #89).
+    const offered = item({ available_actions: [DELETE_ACTION] })
+    expect(createTrackingDeleteExternalIntent(offered, 'SUBSCRIPTION')).toMatchObject({
+      action: 'DELETE_EXTERNAL', targetScope: 'SUBSCRIPTION',
+    })
+    expect(createTrackingDeleteExternalIntent(offered, 'ASSOCIATED_RSS')).toMatchObject({
+      action: 'DELETE_EXTERNAL', targetScope: 'ASSOCIATED_RSS',
+    })
     expect(createTrackingDeleteExternalIntent(
-      item({ available_actions: [DELETE_ACTION] }), 'SUBSCRIPTION',
-      capabilities({ probe_status: 'PARTIAL' }),
-    )).toBeNull()
-    expect(createTrackingDeleteExternalIntent(
-      item({ revision: 0, available_actions: [DELETE_ACTION] }), 'SUBSCRIPTION', capabilities(),
+      item({ revision: 0, available_actions: [DELETE_ACTION] }), 'SUBSCRIPTION',
     )).toBeNull()
     // A scope the generated contract does not know can never become a request.
     expect(createTrackingDeleteExternalIntent(
-      item({ available_actions: [DELETE_ACTION] }), 'EVERYTHING' as never, capabilities(),
+      item({ available_actions: [DELETE_ACTION] }), 'EVERYTHING' as never,
     )).toBeNull()
   })
 
   it('confirms the delete as a danger that keeps every local record', () => {
     const intent = createTrackingDeleteExternalIntent(
-      item({ available_actions: [DELETE_ACTION] }), 'SUBSCRIPTION', capabilities(),
+      item({ available_actions: [DELETE_ACTION] }), 'SUBSCRIPTION',
     )!
     const copy = managementConfirmation(intent)
     expect(copy.danger).toBe(true)
@@ -607,10 +588,10 @@ describe('tracking external delete request (saved connection body)', () => {
       expect(copy.message).toContain(kept)
     }
     // The other management dialogs stay non-dangerous.
-    const refresh = createTrackingRefreshRssIntent(item({ available_actions: [REFRESH_ACTION] }), capabilities())!
+    const refresh = createTrackingRefreshRssIntent(item({ available_actions: [REFRESH_ACTION] }))!
     expect(managementConfirmation(refresh).danger).toBeUndefined()
     expect(managementConfirmation(
-      createTrackingSetEnabledIntent(enableDetail(), 'SUBSCRIPTION', capabilities())!,
+      createTrackingSetEnabledIntent(enableDetail(), 'SUBSCRIPTION')!,
     ).danger).toBeUndefined()
     expect(DELETE_EXTERNAL_HELP).toContain('没有勾选、批量或全局删除')
   })
@@ -655,26 +636,26 @@ describe('tracking external delete request (saved connection body)', () => {
 
 describe('tracking management copy and results (US-314)', () => {
   it('names the action, the scope and the direction in each confirmation', () => {
-    const enable = createTrackingSetEnabledIntent(enableDetail(), 'SUBSCRIPTION', capabilities())!
+    const enable = createTrackingSetEnabledIntent(enableDetail(), 'SUBSCRIPTION')!
     expect(managementConfirmation(enable)).toEqual({
       title: '启用 Auto Bangumi 番剧订阅',
       message: expect.stringContaining('不修改 MiGuOrca 本地方案'),
       confirmLabel: '确认启用订阅',
     })
     const disable = createTrackingSetEnabledIntent(
-      item({ status: 'ACTIVE', available_actions: [DISABLE_ACTION] }), 'ASSOCIATED_RSS', capabilities(),
+      item({ status: 'ACTIVE', available_actions: [DISABLE_ACTION] }), 'ASSOCIATED_RSS',
     )!
     const disableCopy = managementConfirmation(disable)
     expect(disableCopy.title).toContain('停用')
     expect(disableCopy.message).toContain('关联 RSS')
     expect(disableCopy.confirmLabel).toBe('确认停用 RSS')
 
-    const refresh = createTrackingRefreshRssIntent(item({ available_actions: [REFRESH_ACTION] }), capabilities())!
+    const refresh = createTrackingRefreshRssIntent(item({ available_actions: [REFRESH_ACTION] }))!
     const refreshCopy = managementConfirmation(refresh)
     expect(refreshCopy.message).toContain('不会刷新全局 RSS')
-    expect(refreshCopy.confirmLabel).toBe('确认刷新关联 RSS')
+    expect(refreshCopy.confirmLabel).toBe('确认立即刷新资源')
 
-    const modify = createTrackingManagementIntent(item(), 'MODIFY', 'SUBSCRIPTION', { title: 'x' }, capabilities())!
+    const modify = createTrackingManagementIntent(item(), 'MODIFY', 'SUBSCRIPTION', { title: 'x' })!
     expect(managementConfirmation(modify)).toEqual(MODIFY_SCOPE_CONFIRMATIONS.SUBSCRIPTION)
   })
 
@@ -731,6 +712,6 @@ describe('tracking management copy and results (US-314)', () => {
 
     const inFlight = createManagementInFlightSession('tracking-1', 'REFRESH_RSS', 'ASSOCIATED_RSS')
     expect(inFlight.state).toBe('IN_FLIGHT')
-    expect(inFlight.message).toContain('正在请求刷新关联 RSS')
+    expect(inFlight.message).toContain('正在请求立即刷新资源')
   })
 })

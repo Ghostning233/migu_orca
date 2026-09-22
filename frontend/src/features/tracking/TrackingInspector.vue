@@ -12,13 +12,11 @@ import {
   canVerifyExternally,
   executableTrackingActions,
   MANAGEMENT_NEEDS_MANUAL_NOTICE,
-  MANAGEMENT_SCOPE_LABELS,
   projectTrackingActionScopes,
   RECOVERY_NEEDS_MANUAL_NOTICE,
   type CapabilityResult,
   type TrackingAction,
   type TrackingItem,
-  type TrackingManagementActionCode,
   type TrackingManagementScope,
   type TrackingManagementSession,
   type TrackingRecoveryActionCode,
@@ -101,7 +99,7 @@ const thisWrite = computed(() => (
 ))
 /** The server-computed write actions, intersected only with known values. */
 const writeActions = computed(() => (
-  detail.value ? executableTrackingActions(detail.value, null) : []
+  detail.value ? executableTrackingActions(detail.value) : []
 ))
 const submitAction = computed(() => writeActions.value.find((action) => action.code === 'SUBMIT') ?? null)
 const retryAction = computed(() => writeActions.value.find((action) => action.code === 'RETRY') ?? null)
@@ -138,7 +136,7 @@ const RECOVERY_VARIANTS = {
 /** Only the server-computed local recovery actions, in server order. */
 const recoveryActions = computed(() => (
   detail.value
-    ? executableTrackingActions(detail.value, null).filter(
+    ? executableTrackingActions(detail.value).filter(
         (action): action is TrackingAction & { code: keyof typeof RECOVERY_BUTTON_IDS } =>
           action.code === 'RECOVER_AUTO' || action.code === 'MARK_SUCCEEDED' || action.code === 'MARK_FAILED',
       )
@@ -214,16 +212,20 @@ interface ManagementOfferView {
   scopes: TrackingManagementScope[]
 }
 
+// Issue #89: management actions come from the server projection alone. The
+// server re-validates the saved connection, credentials, exact version and write
+// capability inside the same request and fails closed, so a settings-page probe
+// never gates them.
 const managementOffers = computed<ManagementOfferView[]>(() => {
-  if (!detail.value || props.connectionReady !== true) return []
+  if (!detail.value) return []
   const offers: ManagementOfferView[] = []
-  for (const action of executableTrackingActions(detail.value, props.capabilities)) {
+  for (const action of executableTrackingActions(detail.value)) {
     if (!isSendableManagementActionCode(action.code)) continue
     const code = action.code
     const scopes = (action.target_scopes ?? [])
       .filter((scope): scope is TrackingManagementScope =>
         scope === 'SUBSCRIPTION' || scope === 'ASSOCIATED_RSS')
-      .filter((scope) => projectTrackingActionScopes(detail.value!, code, scope, props.capabilities).length > 0)
+      .filter((scope) => projectTrackingActionScopes(detail.value!, code, scope).length > 0)
     if (scopes.length) offers.push({ code, action, scopes })
   }
   return offers
@@ -237,19 +239,16 @@ const modifyOffer = computed(() => offerFor('MODIFY'))
 const setEnabledOffer = computed(() => offerFor('SET_ENABLED'))
 const refreshOffer = computed(() => offerFor('REFRESH_RSS'))
 const deleteOffer = computed(() => offerFor('DELETE_EXTERNAL'))
-const modifyScopes = computed(() => modifyOffer.value?.scopes ?? [])
 
-/** Fixed read-only degradation copy when the live session cannot offer an action. */
-function managementHint(code: TrackingManagementActionCode, verb: string): string {
-  if (props.connectionReady !== true) return `需要先在页面连接 Auto Bangumi，才能${verb}。`
-  const offered = (detail.value?.available_actions ?? []).some((action) => action.code === code)
-  return offered ? '当前连接未确认该能力，已降级为只读。' : `当前状态不可${verb}。`
+/** Fixed read-only copy when the server does not offer the action at all. */
+function managementHint(verb: string): string {
+  return `当前状态不可${verb}。`
 }
 
-const modifyHint = computed(() => managementHint('MODIFY', '修改外部方案'))
-const setEnabledHint = computed(() => managementHint('SET_ENABLED', '启停外部订阅或关联 RSS'))
-const refreshHint = computed(() => managementHint('REFRESH_RSS', '刷新关联 RSS'))
-const deleteHint = computed(() => managementHint('DELETE_EXTERNAL', '删除外部对象'))
+const modifyHint = computed(() => managementHint('修改外部方案'))
+const setEnabledHint = computed(() => managementHint('启停外部订阅或关联 RSS'))
+const refreshHint = computed(() => managementHint('立即刷新资源'))
+const deleteHint = computed(() => managementHint('删除外部对象'))
 
 function requestManagement(payload: {
   action: TrackingAction
@@ -434,8 +433,7 @@ defineExpose({ reload: () => fetchDetail(true) })
         <h4 id="tracking-modify-heading">修改 Auto Bangumi 外部方案</h4>
         <template v-if="modifyOffer">
           <p class="field-help">
-            可用修改范围（只影响 Auto Bangumi 外部对象，不显示外部 ID）：
-            <span v-for="scope in modifyScopes" :key="scope" class="tracking-modify-scope">{{ MANAGEMENT_SCOPE_LABELS[scope] }}</span>
+            修改只作用于当前受控外部订阅及其关联 RSS，不显示外部对象标识。
           </p>
           <TrackingModifyForm
             :item="detail"
@@ -453,9 +451,7 @@ defineExpose({ reload: () => fetchDetail(true) })
           :class="`is-${thisModify.state.toLowerCase()}`"
           role="status"
         >
-          <p class="tracking-modify-verdict">
-            本次目标：{{ MANAGEMENT_SCOPE_LABELS[thisModify.targetScope] }}。{{ thisModify.message }}
-          </p>
+          <p class="tracking-modify-verdict">{{ thisModify.message }}</p>
           <p v-if="thisModify.needsManual" id="tracking-modify-manual-notice" class="tracking-modify-manual">
             {{ MANAGEMENT_NEEDS_MANUAL_NOTICE }}
           </p>

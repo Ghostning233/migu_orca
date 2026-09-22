@@ -473,7 +473,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "deleteExternalTrackingItem", "删除外部追番方案（保留本地数据）"
     ),
     "POST /api/v1/tracking/items/<path:tracking_id>/refresh": _management_endpoint(
-        "refreshTrackingRss", "刷新关联 RSS", scope=["ASSOCIATED_RSS"]
+        "refreshTrackingRss", "立即刷新资源", scope=["ASSOCIATED_RSS"]
     ),
     "GET /api/v1/requests": {
         "operationId": "listRequests",

@@ -21,7 +21,6 @@ import {
   managementEnableDirection,
   managementSessionNeedsManual,
   projectTrackingActionScopes,
-  type CapabilityResult,
   type TrackingActionCode,
   type TrackingItem,
   type TrackingManagementActionCode,
@@ -375,14 +374,13 @@ export function createTrackingManagementIntent(
   action: TrackingManagementActionCode,
   targetScope: TrackingManagementScope,
   patch: unknown,
-  capabilities?: CapabilityResult | null,
 ): TrackingManagementIntent | null {
   if (!isModifyActionCode(action)) return null
   if (!validRevision(item) || !managementPatchPresent(targetScope, patch)) return null
   // The page re-checks the server projection itself instead of trusting the
   // emit: the action must still be offered for this record's current revision
   // and the live session must still prove the capability for this very scope.
-  if (!projectTrackingActionScopes(item, action, targetScope, capabilities).length) return null
+  if (!projectTrackingActionScopes(item, action, targetScope).length) return null
   return {
     action: 'MODIFY',
     targetScope,
@@ -405,12 +403,11 @@ export function createTrackingManagementIntent(
 export function createTrackingSetEnabledIntent(
   item: TrackingItem,
   targetScope: TrackingManagementScope,
-  capabilities?: CapabilityResult | null,
 ): TrackingManagementIntent | null {
   if (!validRevision(item)) return null
   const enabled = managementEnableDirection(item.status)
   if (enabled === null) return null
-  if (!projectTrackingActionScopes(item, 'SET_ENABLED', targetScope, capabilities).length) return null
+  if (!projectTrackingActionScopes(item, 'SET_ENABLED', targetScope).length) return null
   return {
     action: 'SET_ENABLED',
     targetScope,
@@ -431,10 +428,9 @@ export function createTrackingSetEnabledIntent(
  */
 export function createTrackingRefreshRssIntent(
   item: TrackingItem,
-  capabilities?: CapabilityResult | null,
 ): TrackingManagementIntent | null {
   if (!validRevision(item)) return null
-  if (!projectTrackingActionScopes(item, 'REFRESH_RSS', 'ASSOCIATED_RSS', capabilities).length) return null
+  if (!projectTrackingActionScopes(item, 'REFRESH_RSS', 'ASSOCIATED_RSS').length) return null
   return {
     action: 'REFRESH_RSS',
     targetScope: 'ASSOCIATED_RSS',
@@ -458,10 +454,9 @@ export function createTrackingRefreshRssIntent(
 export function createTrackingDeleteExternalIntent(
   item: TrackingItem,
   targetScope: TrackingManagementScope,
-  capabilities?: CapabilityResult | null,
 ): TrackingManagementIntent | null {
   if (!validRevision(item)) return null
-  if (!projectTrackingActionScopes(item, 'DELETE_EXTERNAL', targetScope, capabilities).length) return null
+  if (!projectTrackingActionScopes(item, 'DELETE_EXTERNAL', targetScope).length) return null
   return {
     action: 'DELETE_EXTERNAL',
     targetScope,
@@ -485,14 +480,13 @@ export function createTrackingManagementActionIntent(
   action: TrackingManagementActionCode,
   targetScope: TrackingManagementScope,
   patch: unknown,
-  capabilities?: CapabilityResult | null,
 ): TrackingManagementIntent | null {
   if (action === 'MODIFY') {
-    return createTrackingManagementIntent(item, action, targetScope, patch, capabilities)
+    return createTrackingManagementIntent(item, action, targetScope, patch)
   }
-  if (action === 'SET_ENABLED') return createTrackingSetEnabledIntent(item, targetScope, capabilities)
-  if (action === 'REFRESH_RSS') return createTrackingRefreshRssIntent(item, capabilities)
-  if (action === 'DELETE_EXTERNAL') return createTrackingDeleteExternalIntent(item, targetScope, capabilities)
+  if (action === 'SET_ENABLED') return createTrackingSetEnabledIntent(item, targetScope)
+  if (action === 'REFRESH_RSS') return createTrackingRefreshRssIntent(item)
+  if (action === 'DELETE_EXTERNAL') return createTrackingDeleteExternalIntent(item, targetScope)
   return null
 }
 
@@ -731,7 +725,7 @@ const DELETE_EXTERNAL_CONFIRMATION: TrackingManagementConfirmation = {
 const REFRESH_RSS_CONFIRMATION: TrackingManagementConfirmation = {
   title: '刷新 Auto Bangumi 关联 RSS',
   message: '将让 Auto Bangumi 重新拉取该追番当前关联的 RSS 内容；只刷新当前追番的关联 RSS，不会刷新全局 RSS，也不修改 MiGuOrca 本地方案。是否继续？',
-  confirmLabel: '确认刷新关联 RSS',
+  confirmLabel: '确认立即刷新资源',
 }
 
 /**

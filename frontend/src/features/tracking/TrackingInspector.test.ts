@@ -501,22 +501,24 @@ describe('TrackingInspector per-record external delete (US-315)', () => {
     requires_confirmation: true, target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'],
   }
 
-  it('offers the delete only with a live session and a proven per-scope capability', async () => {
+  it('offers the delete from the server projection alone', async () => {
     apiGet.mockResolvedValue(detail({ available_actions: [deleteAction] }) as never)
+
+    // No probe and no live page session is required (issue #89).
     const wrapper = await mountInspector()
-    expect(wrapper.find('#tracking-delete-external-submit').exists()).toBe(false)
-    expect(wrapper.find('.tracking-delete-external-section').text())
-      .toContain('需要先在页面连接 Auto Bangumi')
+    expect(wrapper.find('#tracking-delete-external-submit').exists()).toBe(true)
 
-    const connected = await mountInspector('tracking-1', LIVE_SESSION)
-    expect(connected.find('#tracking-delete-external-submit').exists()).toBe(true)
-
-    // Only the scope whose own delete capability is proven keeps a control.
+    // A diagnostic "unsupported" probe never hides a projected delete either.
     const degraded = await mountInspector('tracking-1', {
       ...LIVE_SESSION, capabilities: capabilities({ subscription_delete: 'UNSUPPORTED' }),
     })
-    expect(degraded.find('#tracking-delete-external-scope-SUBSCRIPTION').exists()).toBe(false)
+    expect(degraded.find('#tracking-delete-external-scope-SUBSCRIPTION').exists()).toBe(true)
     expect(degraded.find('#tracking-delete-external-scope-ASSOCIATED_RSS').exists()).toBe(true)
+
+    // A record the server does not project the action for keeps it hidden.
+    apiGet.mockResolvedValue(detail() as never)
+    const unoffered = await mountInspector()
+    expect(unoffered.find('#tracking-delete-external-submit').exists()).toBe(false)
   })
 
   it('never projects an unknown, out-of-family or scope-less delete', async () => {

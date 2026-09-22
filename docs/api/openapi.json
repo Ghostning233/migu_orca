@@ -21948,7 +21948,7 @@
     },
     "/api/v1/tracking/items/{tracking_id}/refresh": {
       "post": {
-        "summary": "刷新关联 RSS",
+        "summary": "立即刷新资源",
         "description": "",
         "operationId": "refreshTrackingRss",
         "responses": {
@@ -22619,7 +22619,7 @@
               }
             }
           },
-          "description": "刷新关联 RSS"
+          "description": "立即刷新资源"
         }
       }
     },

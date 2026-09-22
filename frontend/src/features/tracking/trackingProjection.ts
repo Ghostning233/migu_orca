@@ -261,11 +261,16 @@ function supported(capabilities: CapabilityResult | null | undefined, field: key
   return capabilities?.probe_status === 'VERIFIED' && capabilities[field] === 'SUPPORTED'
 }
 
-/** Filter server actions by strict known values and current proven capability. */
-export function executableTrackingActions(
-  item: TrackingItem,
-  capabilities?: CapabilityResult | null,
-): TrackingAction[] {
+/**
+ * Filter server actions by strict known values only.
+ *
+ * Issue #86/#89: a settings-page probe is diagnostic, never an authorization
+ * gate. Every external write re-validates the saved connection, credentials,
+ * exact version and write capability inside the same server request and fails
+ * closed, so unknown action/scope values still fail closed here while a
+ * diagnostic "unsupported" probe no longer hides an action.
+ */
+export function executableTrackingActions(item: TrackingItem): TrackingAction[] {
   const result: TrackingAction[] = []
   for (const action of item.available_actions ?? []) {
     if (!isKnownAction(action.code) || !isKnownStyle(action.style)) continue
@@ -274,22 +279,10 @@ export function executableTrackingActions(
     if (scopes.length !== rawScopes.length || new Set(scopes).size !== scopes.length) continue
     const capability = MANAGEMENT_CAPABILITY[action.code]
     if (capability) {
-      if (!capabilities || scopes.length === 0) continue
-      const supportedScopes = scopes.filter((scope) => {
-        let field: keyof CapabilityResult | undefined = capability[scope]
-        if (action.code === 'SET_ENABLED') {
-          if (item.status === 'DISABLED') {
-            field = scope === 'SUBSCRIPTION' ? 'subscription_enable' : 'rss_enable'
-          } else if (item.status === 'ACTIVE' || item.status === 'EXTERNAL_ONLY') {
-            field = scope === 'SUBSCRIPTION' ? 'subscription_disable' : 'rss_disable'
-          } else {
-            field = undefined
-          }
-        }
-        return field !== undefined && supported(capabilities, field)
-      })
-      if (!supportedScopes.length) continue
-      result.push({ ...action, target_scopes: supportedScopes })
+      // A management action needs a real, known target scope; the server owns
+      // whether this connection can actually perform it (issue #89).
+      if (scopes.length === 0) continue
+      result.push({ ...action, target_scopes: scopes })
       continue
     }
     if (action.code === 'SUBMIT' || action.code === 'RETRY') {
@@ -319,10 +312,9 @@ export function projectTrackingActionScopes(
   item: TrackingItem,
   actionCode: TrackingActionCode,
   targetScope: TrackingScope,
-  capabilities?: CapabilityResult | null,
 ): TrackingManagementScope[] {
   if (!isTrackingManagementScope(targetScope)) return []
-  const requested = executableTrackingActions(item, capabilities)
+  const requested = executableTrackingActions(item)
     .filter((candidate) => candidate.code === actionCode)
     .flatMap((candidate) => candidate.target_scopes ?? [])
     .filter((scope): scope is TrackingManagementScope => scope === targetScope)
@@ -341,9 +333,8 @@ export function createTrackingActionIntent(
   item: TrackingItem,
   action: TrackingAction,
   targetScope?: TrackingScope,
-  capabilities?: CapabilityResult | null,
 ): TrackingActionIntent | null {
-  const executable = executableTrackingActions(item, capabilities)
+  const executable = executableTrackingActions(item)
   const projected = executable.find((candidate) => candidate === action || (
     candidate.code === action.code && candidate.label === action.label && candidate.style === action.style &&
     candidate.requires_confirmation === action.requires_confirmation &&
@@ -909,7 +900,7 @@ export function createTrackingRecoveryIntent(
 ): TrackingRecoveryIntent | null {
   if (!isRecoveryActionCode(action)) return null
   if (!Number.isInteger(item.revision) || item.revision < 1) return null
-  const offered = executableTrackingActions(item, null).map((candidate) => candidate.code)
+  const offered = executableTrackingActions(item).map((candidate) => candidate.code)
   if (action === 'VERIFY_EXTERNAL') {
     if (!offered.includes('RECOVER_AUTO') || !canVerifyExternally(capabilities)) return null
   } else if (!offered.includes(action)) {
@@ -1065,10 +1056,10 @@ const MANAGEMENT_ACTION_MESSAGES: Record<
     UNKNOWN: '外部启停结果未知，正在只读回查；未确认生效前不会自动重试。',
   },
   REFRESH_RSS: {
-    IN_FLIGHT: '正在请求刷新关联 RSS，请稍候…',
+    IN_FLIGHT: '正在请求立即刷新资源，请稍候…',
     SUCCEEDED: '关联 RSS 刷新已完成：Auto Bangumi 已接受本次刷新请求。',
     FAILED: '关联 RSS 刷新明确失败，Auto Bangumi 未接受本次刷新；可核对后重新发起。',
-    CONFLICT: '追番记录已变化或当前状态不允许刷新关联 RSS，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
+    CONFLICT: '追番记录已变化或当前状态不允许立即刷新资源，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
     REJECTED: '服务端明确拒绝了本次刷新请求，本次未刷新 Auto Bangumi 关联 RSS；正在刷新最新详情，请重新确认。',
     UNKNOWN: '关联 RSS 刷新结果未知，正在只读回查；未确认完成前不会自动重试。',
   },

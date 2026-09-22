@@ -491,7 +491,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 刷新关联 RSS */
+        /** 立即刷新资源 */
         post: operations["refreshTrackingRss"];
         delete?: never;
         options?: never;
@@ -11170,7 +11170,7 @@ export interface operations {
             };
             cookie?: never;
         };
-        /** @description 刷新关联 RSS */
+        /** @description 立即刷新资源 */
         requestBody: {
             content: {
                 /**

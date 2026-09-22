@@ -121,7 +121,7 @@ def test_settings_draft_test_save_locks_and_tracking_summary_is_non_sensitive(pa
     ],
 )
 def test_saved_management_actions_send_only_bound_connection_fields(page, live_server_url, action, selector, setup):
-    """Each external management action is reached via explicit saved probe and has no credential/config snapshot."""
+    """Each management action is reached from the saved connection with no credential snapshot."""
     ref = "11111111-1111-4111-8111-111111111111"
     captured: list[dict] = []
     actions = (
@@ -247,23 +247,28 @@ def test_saved_management_actions_send_only_bound_connection_fields(page, live_s
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
     page.wait_for_selector("#tracking-overview")
-    page.locator("#tracking-probe-saved").click()
-    page.wait_for_timeout(50)
+    # #tracking-sync only appears once the saved connection summary is loaded;
+    # the management actions depend on that same saved connection.
+    page.wait_for_selector("#tracking-sync")
     page.locator(selector).scroll_into_view_if_needed()
     if setup == "modify":
         page.locator("#tracking-modify-title-enabled").check()
         page.locator("#tracking-modify-title").fill("新标题")
     elif setup == "enabled":
-        page.locator("#tracking-set-enabled-scope-SUBSCRIPTION").check()
+        # Issue #89: enable/disable always addresses the controlled external
+        # anime subscription, so there is no scope choice to make.
+        assert page.locator("#tracking-set-enabled-scope-SUBSCRIPTION").count() == 0
     elif setup == "delete":
         page.locator("#tracking-delete-external-scope-ASSOCIATED_RSS").check()
     page.locator(selector).click()
-    if page.locator(".confirm-dialog").count():
-        page.locator(".confirm-dialog .cancel-button, .confirm-dialog .secondary-button").first.click(timeout=2000)
-        assert captured == []
-        page.locator(selector).click()
-    if page.locator(".confirm-dialog").count():
-        page.locator(".confirm-dialog .danger-button, .confirm-dialog .primary-button").last.click(timeout=2000)
+    page.wait_for_selector(".confirm-dialog", timeout=10_000)
+    # Cancelling the impact confirmation sends zero requests.
+    page.locator(".confirm-dialog .cancel-button, .confirm-dialog .secondary-button").first.click(timeout=2000)
+    page.wait_for_timeout(50)
+    assert captured == []
+    page.locator(selector).click()
+    page.wait_for_selector(".confirm-dialog", timeout=10_000)
+    page.locator(".confirm-dialog .danger-button, .confirm-dialog .primary-button").last.click(timeout=2000)
     page.wait_for_timeout(500)
     assert captured, action
     body = captured[-1]
@@ -638,8 +643,8 @@ def test_tracking_refresh_does_not_probe_or_sync_saved_connection(page, live_ser
 
 
 @pytest.mark.browser
-def test_tracking_saved_capability_degrade_hides_management_actions(page, live_server_url):
-    """Unsupported capabilities fail closed and cannot produce a management write."""
+def test_tracking_capability_degrade_does_not_hide_management_actions(page, live_server_url):
+    """Issue #89: a diagnostic probe never gates a server-projected action."""
     ref = "11111111-1111-4111-8111-111111111111"
     item = {**_item("tracking-a", "降级番"), "available_actions": _management_actions("ACTIVE"), "revision": 1}
     detail = {
@@ -678,7 +683,7 @@ def test_tracking_saved_capability_degrade_hides_management_actions(page, live_s
             )
             return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}})
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1), "warnings": []}})
             return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
             route.fulfill(json=detail)
@@ -702,14 +707,22 @@ def test_tracking_saved_capability_degrade_hides_management_actions(page, live_s
 
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
-    page.wait_for_selector("#tracking-probe-saved")
+    page.wait_for_selector("#tracking-overview")
+    page.wait_for_selector("#tracking-sync")
+    page.wait_for_selector(".tracking-inspector-content")
+
+    # No probe was clicked: the saved connection already offers every action the
+    # server projected for this record.
+    expect(page.locator("#tracking-set-enabled-submit")).to_be_enabled()
+    expect(page.locator("#tracking-refresh-rss-submit")).to_be_enabled()
+    # Merely looking at the page writes nothing.
+    assert writes == []
+
+    # A diagnostic "unsupported" probe does not hide them either.
     page.locator("#tracking-probe-saved").click()
     page.wait_for_timeout(150)
-    assert page.locator("#tracking-modify-subscription-submit").count() == 0
-    if page.locator("#tracking-set-enabled-submit").count():
-        expect(page.locator("#tracking-set-enabled-submit")).to_be_disabled()
-    if page.locator("#tracking-refresh-rss-submit").count():
-        expect(page.locator("#tracking-refresh-rss-submit")).to_be_disabled()
+    expect(page.locator("#tracking-set-enabled-submit")).to_be_enabled()
+    expect(page.locator("#tracking-refresh-rss-submit")).to_be_enabled()
     assert writes == []
 
 
