@@ -1325,7 +1325,7 @@ describe('BatchWorkbenchView confirm-all dialog intent (US-348)', () => {
     expect(message).toContain('完整批次 3 部中当前可确认 2 部')
     expect(message).toContain('已排除 1 部')
     expect(message).toContain('仅保存本地订阅方案')
-    expect(message).toContain('追番管理再次确认')
+    expect(message).toContain('我的追番再次确认')
     // 能力只留在内存 intent 里，不进入弹窗文案。
     expect(dialog.text()).not.toContain('draft-a')
     expect(dialog.text()).not.toContain('draft-b')
@@ -2034,7 +2034,7 @@ describe('BatchWorkbenchView selection scope (US-356)', () => {
     const message = dialog.find('.confirm-dialog-message').text()
     expect(message).toContain('已勾选但当前不可确认的 1 部被排除')
     expect(message).toContain('仅保存本地订阅方案')
-    expect(message).toContain('追番管理再次确认')
+    expect(message).toContain('我的追番再次确认')
     expect(dialog.findAll('.confirm-dialog-items li').map((entry) => entry.text())).toEqual(['甲 第一季'])
 
     await confirmDialog()

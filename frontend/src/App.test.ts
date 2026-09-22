@@ -67,7 +67,7 @@ describe('App shell (US-260)', () => {
     const navLinks = wrapper.findAll('.top-nav .nav-link')
     expect(navLinks).toHaveLength(3)
     expect(navLinks[0]?.text()).toContain('添加番剧')
-    expect(navLinks[1]?.text()).toContain('追番管理')
+    expect(navLinks[1]?.text()).toContain('我的追番')
     expect(navLinks[2]?.text()).toContain('设置')
     expect(navLinks[0]?.attributes('id')).toBe('shell-nav-1')
     expect(navLinks[2]?.attributes('id')).toBe('shell-nav-3')

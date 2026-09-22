@@ -1163,7 +1163,7 @@ class TestAppBatchAccept:
         page.wait_for_selector(".confirm-dialog", timeout=5000)
         expect(page.locator(".confirm-dialog-title")).to_have_text("保存并确认全部 2 部")
         expect(page.locator(".confirm-dialog-message")).to_contain_text("仅保存本地订阅方案")
-        expect(page.locator(".confirm-dialog-message")).to_contain_text("外部提交需在追番管理再次确认")
+        expect(page.locator(".confirm-dialog-message")).to_contain_text("外部提交需在我的追番再次确认")
         # 草案能力只在内存 intent 里：弹窗文案、URL 与浏览器存储都不含它。
         dialog_text = page.locator(".confirm-dialog").inner_text()
         assert draft_a not in dialog_text
@@ -1884,7 +1884,7 @@ class TestAppBatchConfirmScope:
         expect(dialog.locator(".confirm-dialog-message")).to_contain_text("完整批次 3 部中已勾选且当前可确认的 2 部")
         expect(dialog.locator(".confirm-dialog-message")).to_contain_text("其中 1 部被筛选隐藏，仍会一并保存并确认")
         expect(dialog.locator(".confirm-dialog-message")).to_contain_text("仅保存本地订阅方案")
-        expect(dialog.locator(".confirm-dialog-message")).to_contain_text("外部提交需在追番管理再次确认")
+        expect(dialog.locator(".confirm-dialog-message")).to_contain_text("外部提交需在我的追番再次确认")
         expect(dialog.locator(".confirm-dialog-items li")).to_have_count(2)
         assert dialog.locator(".confirm-dialog-items li").all_inner_texts() == ["甲 第一季", "乙 第一季"]
         # 草案能力只留在内存 intent 里，不进入弹窗。

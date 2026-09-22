@@ -118,7 +118,7 @@ class TestAppShellVisual:
 
         links = page.locator(".top-nav .nav-link")
         expect(links).to_have_count(3)
-        assert links.all_inner_texts() == ["添加番剧", "追番管理", "设置"]
+        assert links.all_inner_texts() == ["添加番剧", "我的追番", "设置"]
         expect(links.nth(0)).to_have_attribute("aria-current", "page")
         for index in (1, 2):
             assert links.nth(index).get_attribute("aria-current") is None
@@ -354,7 +354,7 @@ class TestAppShellVisual:
         page.goto(f"{live_server_url}/app/tracking")
         page.wait_for_selector(".app-header", timeout=10_000)
         current = page.locator('.nav-link[aria-current="page"]')
-        expect(current).to_have_text("追番管理")
+        expect(current).to_have_text("我的追番")
         styles = page.evaluate(
             """() => {
                 const el = document.querySelector('.nav-link[aria-current="page"]')

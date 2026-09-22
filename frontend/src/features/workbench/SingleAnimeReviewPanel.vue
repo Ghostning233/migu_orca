@@ -394,7 +394,7 @@ defineExpose({ session, editor, leaveGuard })
       <p v-if="journey.state.phase === 'review'" class="review-summary preview-mode-note" role="status">订阅草案（未保存）：当前修改只保留在本次页面操作中。</p>
 
       <!-- 最终确认必须在完整审核内容之后；这是保存本地方案的入口，
-           追番管理仍会再次要求用户确认外部提交。 -->
+           我的追番仍会再次要求用户确认外部提交。 -->
       <div class="review-action-row" aria-label="审核操作">
         <AnimeModeSwitch :model-value="'single'" :disabled="navigationLoading || session.applying.value || confirmLoading" @update:model-value="emit('change-mode', $event)" />
         <div class="review-navigation" aria-label="审核步骤导航">
@@ -410,13 +410,13 @@ defineExpose({ session, editor, leaveGuard })
           <BaseButton id="single-review-back-candidates" variant="secondary" :disabled="navigationLoading || session.applying.value" @click="leave('candidates')">重新选择合集</BaseButton>
           <BaseButton id="single-review-edit-search" variant="secondary" :disabled="navigationLoading || session.applying.value" @click="leave('input')">修改搜索</BaseButton>
         </div>
-        <p class="review-confirmation-boundary">仅保存本地方案、追番管理再次确认外部提交。</p>
+        <p class="review-confirmation-boundary">仅保存本地方案、我的追番再次确认外部提交。</p>
         <div v-if="journey.state.phase === 'review'" id="detail-save-confirm" class="detail-save-confirm-control">
           <BaseButton id="single-review-save-button" variant="primary" size="lg" :loading="confirmLoading" :disabled="saveButtonDisabled" aria-describedby="single-review-save-blockers" @click="saveAndConfirm">保存并确认</BaseButton>
         </div>
         <BaseButton v-else-if="journey.state.phase === 'saved_pending_confirm'" id="single-review-retry-accept" variant="primary" :loading="confirmLoading" :disabled="confirmLoading" @click="retrySavedConfirmation">重试确认</BaseButton>
         <BaseButton v-if="journey.state.phase === 'verification_pending' || journey.state.phase === 'confirmed_pending_tracking'" id="single-review-retry-locate" variant="secondary" :loading="confirmLoading" :disabled="confirmLoading" @click="retryTrackingLocation">重试定位</BaseButton>
-        <BaseButton v-if="journey.state.phase === 'confirmed_pending_tracking'" id="single-review-open-unlocated" variant="secondary" :disabled="confirmLoading" @click="openUnlocatedTracking">打开无定位追番管理</BaseButton>
+        <BaseButton v-if="journey.state.phase === 'confirmed_pending_tracking'" id="single-review-open-unlocated" variant="secondary" :disabled="confirmLoading" @click="openUnlocatedTracking">打开无定位我的追番</BaseButton>
         <p v-if="trackingLocated" id="single-review-tracking-success" class="field-help" role="status">订阅方案已确认，并已定位到追番记录。</p>
         <p v-else-if="confirmedRequestId" id="single-review-save-success" class="field-help" role="status">订阅方案已经确认，正在准备后续定位。</p>
         <p v-else-if="journey.state.phase === 'saved_pending_confirm'" id="single-review-accept-recovery" class="field-help" role="status">订阅方案已保存但确认未完成，可直接重试确认；不会重复保存。</p>

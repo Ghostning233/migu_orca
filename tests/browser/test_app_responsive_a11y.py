@@ -69,8 +69,8 @@ def _nav_targets() -> list[tuple[str, str]]:
     """(nav link text, expected route marker selector) for the four SPA routes."""
     return [
         ("添加番剧", "#workbench-heading"),
-        # US-316: 追番管理 mounts the formal tracking screen, not the retired queue.
-        ("追番管理", "#tracking-overview"),
+        # US-316: 我的追番 mounts the formal tracking screen, not the retired queue.
+        ("我的追番", "#tracking-overview"),
         ("设置", "#settings-heading"),
     ]
 
@@ -300,11 +300,11 @@ class TestCrossFeatureResponsive:
                 """() => document.activeElement?.getAttribute('aria-label') ||
                 document.activeElement?.textContent?.trim() || ''"""
             )
-            for expected in ("添加番剧", "追番管理", "设置"):
+            for expected in ("添加番剧", "我的追番", "设置"):
                 if expected in label and expected not in focused_labels:
                     focused_labels.append(expected)
 
-        assert focused_labels == ["添加番剧", "追番管理", "设置"]
+        assert focused_labels == ["添加番剧", "我的追番", "设置"]
 
     def test_batch_candidate_selection_stays_in_right_detail(
         self, page: Page, live_server_url: str

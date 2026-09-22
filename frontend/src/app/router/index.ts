@@ -24,7 +24,7 @@ const routeComponents = {
 
 const routeTitles = {
   add: '添加番剧',
-  tracking: '追番管理',
+  tracking: '我的追番',
   settings: '设置',
 } satisfies Record<AppRouteKey, string>
 

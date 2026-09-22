@@ -331,7 +331,7 @@ describe('batch confirm-all confirm copy (US-348)', () => {
     expect(copy.message).toContain('完整批次 2 部中当前可确认 2 部')
     expect(copy.message).not.toContain('已排除')
     expect(copy.message).toContain('仅保存本地订阅方案，不会提交到 Auto Bangumi')
-    expect(copy.message).toContain('外部提交需在追番管理再次确认')
+    expect(copy.message).toContain('外部提交需在我的追番再次确认')
   })
 
   it('explains hidden participants and excluded items without naming capabilities', () => {
@@ -398,7 +398,7 @@ describe('batch card default layer (US-355)', () => {
     expect(batchCardNextStep(guidance({ status: 'RESPONSE_UNKNOWN', hasDraft: false }))).toContain('重试定位')
     expect(batchCardNextStep(guidance({ savedPendingConfirm: true }))).toContain('重试确认')
     expect(batchCardNextStep(guidance({ status: 'SAVED_PENDING_CONFIRM' }))).toContain('不会重复保存')
-    expect(batchCardNextStep(guidance({ status: 'CONFIRMED', trackingLocated: true, hasDraft: false }))).toContain('追番管理')
+    expect(batchCardNextStep(guidance({ status: 'CONFIRMED', trackingLocated: true, hasDraft: false }))).toContain('我的追番')
     expect(batchCardNextStep(guidance({ status: 'CONFIRMED', hasDraft: false }))).toContain('重试定位')
     expect(batchCardNextStep(guidance({ status: 'FAILED', blocker: '需先生成可审核草案', hasDraft: false }))).toContain('删除该条目')
     expect(batchCardNextStep(guidance({ status: 'EMPTY', blocker: '需先生成可审核草案', hasDraft: false }))).toContain('更完整的名称')
@@ -458,7 +458,7 @@ describe('batch N-part selection scope (US-356)', () => {
     expect(copy.message).toContain('完整批次 3 部中已勾选且当前可确认的 2 部')
     expect(copy.message).toContain('其中 1 部被筛选隐藏，仍会一并保存并确认')
     expect(copy.message).toContain('仅保存本地订阅方案，不会提交到 Auto Bangumi')
-    expect(copy.message).toContain('外部提交需在追番管理再次确认')
+    expect(copy.message).toContain('外部提交需在我的追番再次确认')
     expect(copy.message).not.toContain('draft')
   })
 

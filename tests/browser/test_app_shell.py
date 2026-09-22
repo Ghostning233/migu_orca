@@ -61,7 +61,7 @@ def test_app_shell_loads_and_mounts_spa(page: Page, live_server_url: str) -> Non
     # Issue #93: the primary navigation is exactly three entries.
     assert nav.count() == 3
     assert nav.nth(0).locator("span").first.inner_text().strip() == "添加番剧"
-    assert nav.nth(1).locator("span").first.inner_text().strip() == "追番管理"
+    assert nav.nth(1).locator("span").first.inner_text().strip() == "我的追番"
     assert nav.nth(2).locator("span").first.inner_text().strip() == "设置"
     assert nav.nth(0).get_attribute("aria-current") == "page"
     # Stage 46 (US-361): the design's current item is text + coral underline
@@ -116,16 +116,16 @@ def test_app_spa_navigation_between_routes(page: Page, live_server_url: str) -> 
     page.goto(f"{live_server_url}/app/add")
     page.wait_for_selector(".app-title")
 
-    page.get_by_role("link", name="追番管理", exact=True).click()
+    page.get_by_role("link", name="我的追番", exact=True).click()
     page.wait_for_url("**/app/tracking", timeout=5000)
     # Route changes move focus to the main landmark; poll instead of reading
     # document.activeElement once, since the focus move is not synchronous with
     # the URL change.
     expect(page.locator("#app-main")).to_be_focused()
-    assert page.get_by_role("link", name="追番管理", exact=True).get_attribute("aria-current") == "page"
+    assert page.get_by_role("link", name="我的追番", exact=True).get_attribute("aria-current") == "page"
     assert page.locator("#tracking-overview").count() >= 1
 
-    page.get_by_role("link", name="追番管理", exact=True).click()
+    page.get_by_role("link", name="我的追番", exact=True).click()
     page.wait_for_url("**/app/tracking", timeout=5000)
     # US-316: the tracking link mounts the formal tracking screen, never the
     # retired queue view.
