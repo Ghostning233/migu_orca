@@ -329,6 +329,8 @@ export type TrackingManagementIntent =
       readonly action: 'MODIFY'
       readonly targetScope: TrackingManagementScope
       readonly patch: TrackingSubscriptionPatch | TrackingRssPatch
+      /** Local plan values the server raises only after a confirmed write. */
+      readonly localPlan?: TrackingSubscriptionPatch | null
       readonly enabled: null
     })
   | (TrackingManagementIntentBase & {
@@ -374,6 +376,7 @@ export function createTrackingManagementIntent(
   action: TrackingManagementActionCode,
   targetScope: TrackingManagementScope,
   patch: unknown,
+  localPlan?: unknown,
 ): TrackingManagementIntent | null {
   if (!isModifyActionCode(action)) return null
   if (!validRevision(item) || !managementPatchPresent(targetScope, patch)) return null
@@ -384,6 +387,9 @@ export function createTrackingManagementIntent(
   return {
     action: 'MODIFY',
     targetScope,
+    ...(localPlan && Object.keys(localPlan as object).length
+      ? { localPlan: localPlan as TrackingSubscriptionPatch }
+      : {}),
     patch: patch as TrackingSubscriptionPatch | TrackingRssPatch,
     enabled: null,
     expectedRevision: item.revision,
@@ -480,9 +486,10 @@ export function createTrackingManagementActionIntent(
   action: TrackingManagementActionCode,
   targetScope: TrackingManagementScope,
   patch: unknown,
+  localPlan?: unknown,
 ): TrackingManagementIntent | null {
   if (action === 'MODIFY') {
-    return createTrackingManagementIntent(item, action, targetScope, patch)
+    return createTrackingManagementIntent(item, action, targetScope, patch, localPlan)
   }
   if (action === 'SET_ENABLED') return createTrackingSetEnabledIntent(item, targetScope)
   if (action === 'REFRESH_RSS') return createTrackingRefreshRssIntent(item)
@@ -543,7 +550,13 @@ export function createTrackingManagementBody(
   }
   if (intent.targetScope === 'SUBSCRIPTION') {
     if (!managementPatchPresent('SUBSCRIPTION', intent.patch)) return null
-    return { ...common, target_scope: 'SUBSCRIPTION', patch: intent.patch as TrackingSubscriptionPatch }
+    const localPlan = intent.localPlan
+    return {
+      ...common,
+      target_scope: 'SUBSCRIPTION',
+      patch: intent.patch as TrackingSubscriptionPatch,
+      ...(localPlan && Object.keys(localPlan).length ? { local_plan: localPlan } : {}),
+    }
   }
   if (!managementPatchPresent('ASSOCIATED_RSS', intent.patch)) return null
   return { ...common, target_scope: 'ASSOCIATED_RSS', patch: intent.patch as TrackingRssPatch }

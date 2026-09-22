@@ -35,6 +35,7 @@ import {
   type SavedPlanFetch,
 } from '@/features/requests/useSavedPlanEditor'
 import type { RequestDetailResult } from '@/features/requests/requestDetail'
+import type { PreviewPatch } from '@/features/workbench/candidateSearch'
 import TrackingExternalDelete from './TrackingExternalDelete.vue'
 import TrackingManagementActions from './TrackingManagementActions.vue'
 import TrackingModifyForm from './TrackingModifyForm.vue'
@@ -82,6 +83,8 @@ const emit = defineEmits<{
     item: TrackingItem
     targetScope: TrackingManagementScope
     patch: unknown
+    /** Issue #91: local plan values raised only after a confirmed write. */
+    localPlan?: unknown
   }): void
 }>()
 const detail = ref<TrackingDetail | null>(null)
@@ -307,6 +310,54 @@ const setEnabledHint = computed(() => managementHint('启停外部订阅或关�
 const refreshHint = computed(() => managementHint('立即刷新资源'))
 const deleteHint = computed(() => managementHint('删除外部对象'))
 
+// -- apply an edited plan to the controlled external subscription (issue #91) --
+// The already-active plan is edited with the same shared core, but saving is a
+// real external write: the page confirms it, sends the patch plus the local plan
+// values, and only a confirmed read-back raises both sides.
+const APPLY_PLAN_STATUSES = new Set(['ACTIVE', 'DISABLED'])
+const applyPlanOpen = ref(false)
+
+const canApplyPlan = computed(() => Boolean(
+  detail.value?.request_id
+  && detail.value.external_mapping
+  && APPLY_PLAN_STATUSES.has(detail.value.status)
+))
+
+async function toggleApplyPlan(): Promise<void> {
+  if (!applyPlanOpen.value && !planSnapshot.value) {
+    planLoading.value = true
+    try {
+      await fetchPlanSnapshot()
+    } finally {
+      planLoading.value = false
+    }
+  }
+  applyPlanOpen.value = !applyPlanOpen.value
+}
+
+/** Only the editable plan fields travel; identity fields are never sent. */
+function applyPatchFromEditor(patch: PreviewPatch): Record<string, unknown> {
+  const candidate: Record<string, unknown> = {}
+  if (patch.filter_rule) candidate.filter_rule = patch.filter_rule
+  if (patch.expected_folder_name) candidate.expected_folder_name = patch.expected_folder_name
+  return candidate
+}
+
+function applyPlanToExternal(patch: PreviewPatch): void {
+  const offer = modifyOffer.value
+  if (!offer || !detail.value || actionBusy.value) return
+  const externalPatch = applyPatchFromEditor(patch)
+  if (!Object.keys(externalPatch).length) return
+  emit('management-requested', {
+    action: offer.action,
+    item: detail.value,
+    targetScope: 'SUBSCRIPTION',
+    patch: externalPatch,
+    // The same values raise the local snapshot once the write is confirmed.
+    localPlan: externalPatch,
+  })
+}
+
 function requestManagement(payload: {
   action: TrackingAction
   item: TrackingItem
@@ -409,6 +460,44 @@ defineExpose({ reload: () => fetchDetail(true) })
         class="tracking-intent-notice"
         role="status"
       >{{ intentNotice }}</p>
+
+      <section
+        v-if="canApplyPlan"
+        class="tracking-inspector-section tracking-plan-apply-section"
+        aria-labelledby="tracking-plan-apply-heading"
+      >
+        <h4 id="tracking-plan-apply-heading">已生效追番方案</h4>
+        <p class="field-help">
+          过滤规则与存储目录名会同时应用到本地方案与受控外部订阅；字幕组等身份字段为只读，
+          更换真实 RSS 来源需要删除该追番后重新添加。
+        </p>
+        <BaseButton
+          id="tracking-apply-plan"
+          variant="secondary"
+          :aria-expanded="applyPlanOpen"
+          :disabled="actionBusy"
+          @click="toggleApplyPlan"
+        >保存并应用到 Auto Bangumi</BaseButton>
+        <AnimeDraftEditor
+          v-if="applyPlanOpen && planSnapshot?.request"
+          :request="planSnapshot.request"
+          mode="saved"
+          heading="保存并应用到 Auto Bangumi"
+          form-heading="编辑已生效追番方案"
+          apply-label="保存并应用到 Auto Bangumi"
+          id-prefix="tracking-apply"
+          container-id="tracking-apply-editor"
+          form-id="tracking-apply-form"
+          :applying="managementInFlight"
+          :disabled="actionBusy"
+          subtitle-group-read-only
+          @apply="applyPlanToExternal"
+          @empty-apply="applyPlanToExternal({})"
+        />
+        <p v-if="thisManagementAction" id="tracking-apply-result" class="field-help" role="status">
+          {{ thisManagementAction.message }}
+        </p>
+      </section>
 
       <section
         v-if="canEditPlan"

@@ -377,3 +377,92 @@ class TestPendingPlanEditing:
             assert forbidden not in rendered
         # A confirmed save collapses the editor again.
         assert page.locator("#tracking-plan-editor").count() == 0
+
+class TestActivePlanApply:
+    """Issue #91: an active plan raises local and external only on confirmation."""
+
+    def test_active_plan_applies_editable_fields_with_the_local_plan(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        item = {
+            **_item("tracking-a", "葬送的芙莉莲"),
+            "request_id": "request-plan",
+            "status": "ACTIVE",
+            "status_label": "追番中",
+            "status_group": "ACTIVE",
+            "available_actions": [{
+                "code": "MODIFY", "label": "修改外部订阅", "style": "SECONDARY",
+                "requires_confirmation": True, "target_scopes": ["SUBSCRIPTION", "ASSOCIATED_RSS"],
+            }],
+        }
+        state = {"folder": "芙莉莲"}
+        modifies: list[dict[str, Any]] = []
+
+        def handler(route: Any, request: Any) -> None:
+            path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+            if request.method == "GET" and path == "/settings/autobangumi":
+                route.fulfill(json={"ok": True, "result": {
+                    "configured": True, "credential_present": True,
+                    "connection_ref": "11111111-1111-4111-8111-111111111111",
+                    "configuration_revision": 1, "connection_status": "CONFIGURED",
+                }})
+                return
+            if request.method == "GET" and path == "/tracking/items":
+                route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1, active=1), "warnings": []}})
+                return
+            if request.method == "GET" and path == "/tracking/items/tracking-a":
+                route.fulfill(json={"ok": True, "result": {
+                    **item, "origin": "single", "batch_id": None, "created_at": "2026-09-01T00:00:00Z",
+                    "last_synced_at": None, "safe_info": None, "current_operation": None,
+                    "revalidation_issues": [], "audit_events": [], "warnings": [],
+                    "external_mapping": {"match_reason": "标题", "enabled": True, "external_deleted": False},
+                }})
+                return
+            if request.method == "GET" and path == "/requests/request-plan":
+                route.fulfill(json={"ok": True, "result": _plan_snapshot(state["folder"])})
+                return
+            if request.method == "POST" and path == "/tracking/items/tracking-a/modify":
+                body = request.post_data_json or {}
+                modifies.append(body)
+                patch = body.get("patch") or {}
+                if "expected_folder_name" in patch:
+                    state["folder"] = patch["expected_folder_name"]
+                route.fulfill(json={"ok": True, "result": {
+                    "operation_id": "op-plan", "management_status": "SUCCEEDED",
+                    "outcome": "SUCCESS", "needs_manual": False, "created": True,
+                }})
+                return
+            route.continue_()
+
+        page.route("**/api/v1/**", handler)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-apply-plan")
+        expect(page.locator("#tracking-apply-plan")).to_have_text("保存并应用到 Auto Bangumi")
+
+        page.locator("#tracking-apply-plan").click()
+        page.wait_for_selector("#tracking-apply-editor")
+        # Identity stays read-only: the subtitle group control is disabled.
+        expect(page.locator("#tracking-apply-subtitle-group")).to_be_disabled()
+
+        page.evaluate(
+            "() => document.querySelectorAll('#tracking-apply-editor details')"
+            ".forEach((el) => { el.open = true; })"
+        )
+        page.locator("#tracking-apply-folder-name").fill("新目录")
+        page.locator("#tracking-apply-apply-button").click()
+        page.wait_for_selector(".confirm-dialog", timeout=10_000)
+        page.locator(".confirm-dialog .primary-button").click()
+        page.wait_for_timeout(400)
+
+        assert len(modifies) == 1
+        body = modifies[0]
+        assert body["target_scope"] == "SUBSCRIPTION"
+        assert body["confirm"] is True
+        assert body["patch"] == {"expected_folder_name": "新目录"}
+        # The local plan travels alongside, so the server raises both sides.
+        assert body["local_plan"] == {"expected_folder_name": "新目录"}
+        rendered = json.dumps(body, ensure_ascii=False)
+        for forbidden in ("subtitle_group", "password", "token", "rss_url"):
+            assert forbidden not in rendered

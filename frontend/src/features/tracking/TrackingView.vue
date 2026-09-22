@@ -1018,6 +1018,8 @@ async function runTrackingManagement(payload: {
   item: TrackingItem
   targetScope: TrackingManagementScope
   patch: unknown
+  /** Issue #91: local plan values raised with a confirmed subscription modify. */
+  localPlan?: unknown
 }): Promise<void> {
   const trackingId = payload.item.tracking_id
   if (managementPending.value || managementLoading.value || writePending.value || writeLoading.value
@@ -1058,7 +1060,7 @@ async function runTrackingManagement(payload: {
   // still be the one the record's own status implies. The server validates the
   // connection, credentials, version and write capability itself (issue #89).
   const projectedIntent = createTrackingManagementActionIntent(
-    payload.item, action, targetScope, payload.patch,
+    payload.item, action, targetScope, payload.patch, payload.localPlan,
   )
   if (!projectedIntent) return
   // A locked intent still owns the single opaque key *and* the request it was

@@ -659,3 +659,80 @@ describe('TrackingInspector saved plan editing (issue #90)', () => {
     expect(wrapper.find('#tracking-edit-plan').attributes('disabled')).toBeUndefined()
   })
 })
+
+const applyModifyAction = {
+  code: 'MODIFY', label: '修改外部订阅', style: 'SECONDARY',
+  requires_confirmation: true, target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'],
+}
+
+function activeRecord(overrides: Record<string, unknown> = {}) {
+  return detail({
+    status: 'ACTIVE',
+    status_label: '追番中',
+    available_actions: [applyModifyAction],
+    external_mapping: { match_reason: '标题', enabled: true, external_deleted: false },
+    ...overrides,
+  })
+}
+
+describe('TrackingInspector apply-to-Auto-Bangumi (issue #91)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  it('offers the apply entry only for a controlled active record', async () => {
+    apiGet.mockResolvedValue(activeRecord() as never)
+    const wrapper = await mountInspector()
+    expect(wrapper.find('#tracking-apply-plan').exists()).toBe(true)
+    expect(wrapper.find('#tracking-apply-plan').text()).toBe('保存并应用到 Auto Bangumi')
+
+    // A record without a controlled external mapping has nothing to apply to.
+    apiGet.mockResolvedValue(detail({ status: 'ACTIVE', available_actions: [applyModifyAction] }) as never)
+    const unmapped = await mountInspector()
+    expect(unmapped.find('#tracking-apply-plan').exists()).toBe(false)
+  })
+
+  it('opens the shared editor and states the identity boundary', async () => {
+    apiGet.mockImplementation(async (path: string) => (
+      path === '/api/v1/requests/{request_id}' ? requestSnapshot() : activeRecord() as never
+    ))
+    const wrapper = await mountInspector()
+
+    await wrapper.find('#tracking-apply-plan').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#tracking-apply-editor').exists()).toBe(true)
+    expect(wrapper.text()).toContain('更换真实 RSS 来源需要删除该追番后重新添加')
+    // The subtitle group is part of the plan's identity, so it is read-only.
+    expect(wrapper.find('#tracking-apply-subtitle-group').exists()).toBe(true)
+  })
+
+  it('sends only the editable fields and asks the server to raise the local plan', async () => {
+    apiGet.mockImplementation(async (path: string) => (
+      path === '/api/v1/requests/{request_id}' ? requestSnapshot() : activeRecord() as never
+    ))
+    const wrapper = await mountInspector()
+    await wrapper.find('#tracking-apply-plan').trigger('click')
+    await flushPromises()
+
+    const editor = wrapper.findComponent({ name: 'AnimeDraftEditor' })
+    expect(editor.exists()).toBe(true)
+    editor.vm.$emit('apply', {
+      selected_subtitle_group: '别的字幕组',
+      filter_rule: { must_contain: '1080p' },
+      expected_folder_name: '新目录',
+    })
+    await flushPromises()
+
+    const payload = wrapper.emitted('management-requested')?.at(-1)?.[0] as {
+      targetScope: string
+      patch: Record<string, unknown>
+      localPlan: Record<string, unknown>
+    }
+    expect(payload.targetScope).toBe('SUBSCRIPTION')
+    // Identity fields never travel: no subtitle group, only the plan's own.
+    expect(payload.patch).toEqual({
+      filter_rule: { must_contain: '1080p' },
+      expected_folder_name: '新目录',
+    })
+    expect(payload.localPlan).toEqual(payload.patch)
+  })
+})
