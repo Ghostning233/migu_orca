@@ -18,9 +18,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from playwright.sync_api import Page
+from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import set_storage_preferences
+from tests.browser.saved_tracking_fixtures import _summary
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -266,3 +267,113 @@ class TestTrackingWorkbench:
         page.keyboard.press("Enter")
         page.wait_for_selector(".tracking-inspector-content")
         assert row.get_attribute("aria-current") == "true"
+
+def _plan_snapshot(folder: str) -> dict[str, Any]:
+    return {
+        "request": {
+            "request_id": "request-plan",
+            "status": "ACCEPTED",
+            "input": {"raw_title": "芙莉莲"},
+            "source_info": {
+                "matched_bangumi": {"title": "葬送的芙莉莲", "season": 1, "aliases": [], "mikan_url": None, "match_score": 1},
+                "rss_sources": [{
+                    "subtitle_group": "喵萌奶茶屋", "rss_url": None, "source_type": "rss",
+                    "valid_seed_names": ["第一集.mkv"], "excluded_seed_names": [],
+                }],
+            },
+            "confirmable_config": {
+                "selected_subtitle_group": "喵萌奶茶屋",
+                "selected_rss_url": None,
+                "filter_rule": {"must_contain": "", "must_not_contain": "", "use_regex": False, "case_sensitive": False},
+                "effective_seed_names": ["第一集.mkv"],
+                "expected_folder_name": folder,
+                "warnings": [],
+            },
+            "ab_submit_result": None,
+            "created_at": "2026-09-01T00:00:00Z",
+            "updated_at": "2026-09-01T00:00:00Z",
+        },
+    }
+
+
+class TestPendingPlanEditing:
+    """Issue #90: a pending plan is edited in place with the shared core."""
+
+    def test_pending_plan_edits_in_place_and_saves_only_a_patch(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        item = {
+            **_item("tracking-a", "葬送的芙莉莲"),
+            "request_id": "request-plan",
+            "status": "PENDING_SUBMIT",
+            "status_label": "待提交",
+            "status_group": "PENDING",
+            "available_actions": [],
+        }
+        state = {"folder": "芙莉莲"}
+        modifies: list[dict[str, Any]] = []
+
+        def handler(route: Any, request: Any) -> None:
+            path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+            if request.method == "GET" and path == "/settings/autobangumi":
+                route.fulfill(json={"ok": True, "result": {
+                    "configured": True, "credential_present": True,
+                    "connection_ref": "11111111-1111-4111-8111-111111111111",
+                    "configuration_revision": 1, "connection_status": "CONFIGURED",
+                }})
+                return
+            if request.method == "GET" and path == "/tracking/items":
+                route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1, pending=1), "warnings": []}})
+                return
+            if request.method == "GET" and path == "/tracking/items/tracking-a":
+                route.fulfill(json={"ok": True, "result": {**item, "origin": "single", "batch_id": None,
+                    "created_at": "2026-09-01T00:00:00Z", "last_synced_at": None, "safe_info": None,
+                    "current_operation": None, "revalidation_issues": [], "external_mapping": None,
+                    "audit_events": [], "warnings": []}})
+                return
+            if request.method == "GET" and path == "/requests/request-plan":
+                route.fulfill(json={"ok": True, "result": _plan_snapshot(state["folder"])})
+                return
+            if request.method == "POST" and path == "/requests/request-plan/modify":
+                body = request.post_data_json or {}
+                modifies.append(body)
+                patch = body.get("patch") or {}
+                if "expected_folder_name" in patch:
+                    state["folder"] = patch["expected_folder_name"]
+                route.fulfill(json={"ok": True, "result": {"applied": True, "warnings": []}})
+                return
+            route.continue_()
+
+        page.route("**/api/v1/**", handler)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-edit-plan")
+
+        # The entry point names the business action and stays collapsed.
+        expect(page.locator("#tracking-edit-plan")).to_have_text("修改追番方案")
+        assert page.locator("#tracking-plan-editor").count() == 0
+
+        page.locator("#tracking-edit-plan").click()
+        page.wait_for_selector("#tracking-plan-editor")
+
+        # The editable fields live in the editor's own disclosure; open it.
+        page.evaluate(
+            "() => document.querySelectorAll('#tracking-plan-editor details')"
+            ".forEach((el) => { el.open = true; })"
+        )
+        # Identity fields stay read-only; the editable fields are the plan's own.
+        page.locator("#tracking-plan-folder-name").fill("新目录")
+        page.locator("#tracking-plan-apply-button").click()
+        page.wait_for_timeout(300)
+
+        assert len(modifies) == 1
+        body = modifies[0]
+        assert body["patch"] == {"expected_folder_name": "新目录"}
+        assert "storage_dir" in body
+        # The browser never sends a whole Request, a credential or a secret.
+        rendered = json.dumps(body, ensure_ascii=False)
+        for forbidden in ("confirmable_config", "rss_url", "password", "token"):
+            assert forbidden not in rendered
+        # A confirmed save collapses the editor again.
+        assert page.locator("#tracking-plan-editor").count() == 0

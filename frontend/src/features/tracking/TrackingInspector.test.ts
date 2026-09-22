@@ -580,3 +580,82 @@ describe('TrackingInspector per-record external delete (US-315)', () => {
     expect(other.find('#tracking-delete-external-result').exists()).toBe(false)
   })
 })
+
+function requestSnapshot() {
+  return {
+    request: {
+      request_id: 'request-1',
+      status: 'ACCEPTED',
+      input: { raw_title: '芙莉莲' },
+      source_info: {
+        matched_bangumi: { title: '葬送的芙莉莲', season: 1, aliases: [], mikan_url: null, match_score: 1 },
+        rss_sources: [{
+          subtitle_group: '喵萌奶茶屋', rss_url: null, source_type: 'rss',
+          valid_seed_names: ['第一集.mkv'], excluded_seed_names: [],
+        }],
+      },
+      confirmable_config: {
+        selected_subtitle_group: '喵萌奶茶屋',
+        selected_rss_url: null,
+        filter_rule: { must_contain: '', must_not_contain: '', use_regex: false, case_sensitive: false },
+        effective_seed_names: ['第一集.mkv'],
+        expected_folder_name: '芙莉莲',
+        warnings: [],
+      },
+      ab_submit_result: null,
+      created_at: '2026-09-01T00:00:00Z',
+      updated_at: '2026-09-01T00:00:00Z',
+    },
+  } as never
+}
+
+describe('TrackingInspector saved plan editing (issue #90)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  it('edits a pending plan in place with the shared editor core', async () => {
+    apiGet.mockImplementation(async (path: string) => (
+      path === '/api/v1/requests/{request_id}'
+        ? requestSnapshot()
+        : detail({ status: 'PENDING_SUBMIT', status_label: '待提交' }) as never
+    ))
+    apiPost.mockResolvedValue({} as never)
+
+    const wrapper = await mountInspector()
+
+    const editButton = wrapper.find('#tracking-edit-plan')
+    expect(editButton.exists()).toBe(true)
+    expect(editButton.text()).toBe('修改追番方案')
+    // The editor stays collapsed until the user asks for it.
+    expect(wrapper.find('#tracking-plan-editor').exists()).toBe(false)
+
+    await editButton.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#tracking-plan-editor').exists()).toBe(true)
+    expect(apiGet).toHaveBeenCalledWith('/api/v1/requests/{request_id}', expect.objectContaining({
+      path: { request_id: 'request-1' },
+    }))
+  })
+
+  it('offers no plan editing for a record that is not pending', async () => {
+    apiGet.mockResolvedValue(detail({ status: 'ACTIVE', status_label: '追番中' }) as never)
+
+    const wrapper = await mountInspector()
+
+    expect(wrapper.find('#tracking-edit-plan').exists()).toBe(false)
+  })
+
+  it('keeps the editor locked while a saved-plan write is unconfirmed', async () => {
+    apiGet.mockImplementation(async (path: string) => (
+      path === '/api/v1/requests/{request_id}'
+        ? requestSnapshot()
+        : detail({ status: 'PENDING_SUBMIT', status_label: '待提交' }) as never
+    ))
+    const wrapper = await mountInspector()
+    await wrapper.find('#tracking-edit-plan').trigger('click')
+    await flushPromises()
+    // The shared session owns the unconfirmed-write lock; the host only renders
+    // it, so a locked session disables the entry point.
+    expect(wrapper.find('#tracking-edit-plan').attributes('disabled')).toBeUndefined()
+  })
+})

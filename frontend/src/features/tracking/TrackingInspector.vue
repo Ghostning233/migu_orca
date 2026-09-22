@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
-import { api } from '@/api/client'
+import { api, toApiError } from '@/api/client'
 import type { operations } from '@/api/generated/api'
 import BaseButton from '@/components/forms/BaseButton.vue'
 import ErrorState from '@/components/feedback/ErrorState.vue'
@@ -29,6 +29,12 @@ import {
   MANAGEMENT_ACTIONS_HELP,
   type SendableManagementActionCode,
 } from './trackingManagement'
+import AnimeDraftEditor from '@/features/workbench/AnimeDraftEditor.vue'
+import {
+  useSavedPlanEditor,
+  type SavedPlanFetch,
+} from '@/features/requests/useSavedPlanEditor'
+import type { RequestDetailResult } from '@/features/requests/requestDetail'
 import TrackingExternalDelete from './TrackingExternalDelete.vue'
 import TrackingManagementActions from './TrackingManagementActions.vue'
 import TrackingModifyForm from './TrackingModifyForm.vue'
@@ -109,6 +115,57 @@ const writeHint = computed(() => {
   )
   return offered ? '当前动作不在受支持的提交范围内，已降级为只读。' : '当前状态不可提交或重试外部订阅。'
 })
+
+// -- saved local plan editing (issue #90) ------------------------------------
+// The pending/needs-reconfirm/failed plan is edited with the same shared editor
+// core the add journeys use. Saving is revision-authoritative on the server: the
+// browser sends only the patch and re-reads the snapshot; an unconfirmed write
+// locks the editor until the user explicitly re-checks it.
+const EDITABLE_PLAN_STATUSES = new Set(['PENDING_SUBMIT', 'NEEDS_RECONFIRM', 'SUBMIT_FAILED'])
+const planSnapshot = ref<RequestDetailResult | null>(null)
+const planLoading = ref(false)
+const planLoadFailed = ref(false)
+
+const canEditPlan = computed(() => Boolean(
+  detail.value?.request_id && EDITABLE_PLAN_STATUSES.has(detail.value.status),
+))
+
+async function fetchPlanSnapshot(): Promise<SavedPlanFetch> {
+  const requestId = detail.value?.request_id
+  if (!requestId) return { result: null, error: { type: 'invalid_tracking_id' } as never }
+  try {
+    const result = await api.get<RequestDetailResult>('/api/v1/requests/{request_id}', {
+      path: { request_id: requestId },
+      query: storageQuery(),
+    })
+    planSnapshot.value = result
+    planLoadFailed.value = false
+    return { result, error: null }
+  } catch (error) {
+    planLoadFailed.value = true
+    return { result: null, error: toApiError(error) }
+  }
+}
+
+const planEditor = useSavedPlanEditor({
+  requestId: () => detail.value?.request_id ?? '',
+  fetchSnapshot: fetchPlanSnapshot,
+  commitSnapshot: (snapshot) => { planSnapshot.value = snapshot },
+  storageQuery,
+  onApplied: () => { void loadDetail() },
+})
+
+async function togglePlanEditor(): Promise<void> {
+  if (!planEditor.formOpen.value && !planSnapshot.value) {
+    planLoading.value = true
+    try {
+      await fetchPlanSnapshot()
+    } finally {
+      planLoading.value = false
+    }
+  }
+  planEditor.toggle()
+}
 
 function requestWrite(action: TrackingAction | null): void {
   if (!action || !detail.value || actionBusy.value) return
@@ -352,6 +409,48 @@ defineExpose({ reload: () => fetchDetail(true) })
         class="tracking-intent-notice"
         role="status"
       >{{ intentNotice }}</p>
+
+      <section
+        v-if="canEditPlan"
+        class="tracking-inspector-section tracking-plan-edit-section"
+        aria-labelledby="tracking-plan-edit-heading"
+      >
+        <h4 id="tracking-plan-edit-heading">追番方案</h4>
+        <p class="field-help">
+          修改只更新本地追番方案（身份字段保持只读）；保存后请重新确认再提交到 Auto Bangumi。
+        </p>
+        <BaseButton
+          id="tracking-edit-plan"
+          variant="secondary"
+          :loading="planLoading"
+          :aria-expanded="planEditor.formOpen.value"
+          :disabled="planEditor.inFlight.value || planEditor.resultUnknown.value"
+          @click="togglePlanEditor"
+        >修改追番方案</BaseButton>
+        <p v-if="planLoadFailed" id="tracking-plan-load-failed" class="field-help" role="status">
+          暂时无法读取本地追番方案，请稍后重试。
+        </p>
+        <AnimeDraftEditor
+          v-if="planEditor.formOpen.value && planSnapshot?.request"
+          :request="planSnapshot.request"
+          mode="saved"
+          heading="修改追番方案"
+          form-heading="编辑本地追番方案"
+          apply-label="保存追番方案"
+          id-prefix="tracking-plan"
+          container-id="tracking-plan-editor"
+          form-id="tracking-plan-form"
+          :applying="planEditor.inFlight.value"
+          :error="planEditor.error.value"
+          :can-retry="Boolean(planEditor.error.value)"
+          :retry-label="planEditor.resultUnknown.value ? '重新确认结果' : '重试修改'"
+          :disabled="planEditor.resultUnknown.value"
+          @apply="planEditor.submit"
+          @empty-apply="planEditor.submit({})"
+          @retry="planEditor.retry"
+          @reset="planEditor.recover"
+        />
+      </section>
 
       <section class="tracking-inspector-section tracking-submit" aria-labelledby="tracking-submit-heading">
         <h4 id="tracking-submit-heading">提交到 Auto Bangumi</h4>
