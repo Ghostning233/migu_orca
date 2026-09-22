@@ -1147,11 +1147,14 @@ class AutoBangumiConnectionTestResultDTO(_StrictBase):
 
 
 class TrackingSyncSummaryDTO(_StrictBase):
+    """Safe sync counts. ``ignored`` (issue #88) counts external subscriptions
+    this product does not control; they are never imported or adopted."""
+
     checked: int
     created: int
     updated: int
     unchanged: int
-    external_only: int
+    ignored: int
     failed: int
     unreadable: int
 

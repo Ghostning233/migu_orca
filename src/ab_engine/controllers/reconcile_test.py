@@ -62,32 +62,51 @@ def test_reconcile_can_emit_a_connection_bound_mapping_without_external_details(
     assert "https://ab.invalid" not in str(mapping)
 
 
-def test_unique_exact_fields_match_and_conflicting_rss_does_not_match() -> None:
+def test_similar_fields_are_never_ownership_evidence() -> None:
+    """Issue #88: a matching title/season/group/RSS set does not claim an object."""
     result = reconcile_subscription(external(), [local()])
-    assert result.match_reason == "EXACT_FIELDS"
-    assert result.tracking_id == "trk-local"
+
+    assert result.tracking_id is None
+    assert result.managed is False
+    assert result.match_reason == "UNMANAGED"
 
     conflict = reconcile_subscription(external(), [local(rss_urls=("https://ab.invalid/other",))])
     assert conflict.tracking_id is None
-    assert conflict.match_reason == "EXTERNAL_ONLY"
+    assert conflict.managed is False
 
 
-def test_zero_and_multiple_candidates_are_safe_external_only() -> None:
+def test_unmapped_objects_are_unmanaged_and_ambiguous_mappings_claim_nothing() -> None:
     zero = reconcile_subscription(external(), [local(plan_summary={"title": "different"})])
     assert zero.tracking_id is None
+    assert zero.managed is False
+    # Structural status stays a value the storage schema accepts; the sync use
+    # case is what refuses to write it (issue #88).
     assert zero.status == "EXTERNAL_ONLY"
 
-    ambiguous = reconcile_subscription(external(), [local(tracking_id="a"), local(tracking_id="b")])
+    ambiguous = reconcile_subscription(
+        external(),
+        [
+            local(tracking_id="a", external_mapping={"subscription_id": "sub-1"}),
+            local(tracking_id="b", external_mapping={"subscription_id": "sub-1"}),
+        ],
+    )
     assert ambiguous.tracking_id is None
+    assert ambiguous.managed is False
     assert ambiguous.warning == "AMBIGUOUS_EXTERNAL_MATCH"
 
 
 def test_deleted_and_in_progress_status_mapping() -> None:
-    deleted = reconcile_subscription(external(deleted=True), [local()])
+    deleted = reconcile_subscription(
+        external(deleted=True), [local(external_mapping={"subscription_id": "sub-1"})]
+    )
     assert deleted.status == "DISABLED"
+    assert deleted.managed is True
 
-    pending = reconcile_subscription(external(), [local(status="SUBMITTING")])
+    pending = reconcile_subscription(
+        external(), [local(status="SUBMITTING", external_mapping={"subscription_id": "sub-1"})]
+    )
     assert pending.status == "SUBMITTING"
+    assert pending.managed is True
 
     missing = classify_missing_mapping(
         local(status="ACTIVE", external_mapping={"subscription_id": "sub-1"}),
@@ -112,25 +131,39 @@ def test_saved_sync_excludes_other_connection_id_and_requires_rss_proof() -> Non
     assert reconcile_subscription(external(), [no_rss], connection_ref=ref).tracking_id is None
 
 
-def test_saved_sync_cross_connection_requires_unique_rss_evidence() -> None:
+def test_saved_sync_never_adopts_a_similar_object_from_another_connection() -> None:
+    """Issue #88: even with identical fields+RSS, another connection is not ours."""
     ref = "11111111-1111-4111-8111-111111111111"
-    candidate = local(external_mapping={"subscription_id": "sub-old", "connection_ref": "22222222-2222-4222-8222-222222222222"})
-    result = reconcile_subscription(external(), [candidate], connection_ref=ref)
-    assert result.tracking_id == "trk-local"
-    ambiguous = reconcile_subscription(external(), [candidate, local(tracking_id="other", external_mapping={"connection_ref": "33333333-3333-4333-8333-333333333333"})], connection_ref=ref)
-    assert ambiguous.tracking_id is None
-
-
-def test_saved_sync_same_connection_changed_mapping_requires_selected_rss() -> None:
-    ref = "11111111-1111-4111-8111-111111111111"
-    candidate = local(external_mapping={"subscription_id": "sub-old", "connection_ref": ref}, rss_urls=())
-    result = reconcile_subscription(external(), [candidate], connection_ref=ref)
-    assert result.tracking_id is None
-    candidate_with_rss = local(
-        external_mapping={"subscription_id": "sub-old", "connection_ref": ref},
+    other_connection = local(
+        external_mapping={"subscription_id": "sub-1", "connection_ref": "22222222-2222-4222-8222-222222222222"}
     )
-    proven = reconcile_subscription(external(), [candidate_with_rss], connection_ref=ref)
-    assert proven.tracking_id == "trk-local"
+    result = reconcile_subscription(external(), [other_connection], connection_ref=ref)
+    assert result.tracking_id is None
+    assert result.managed is False
+
+    ambiguous = reconcile_subscription(
+        external(),
+        [
+            other_connection,
+            local(tracking_id="other", external_mapping={"connection_ref": "33333333-3333-4333-8333-333333333333"}),
+        ],
+        connection_ref=ref,
+    )
+    assert ambiguous.tracking_id is None
+    assert ambiguous.managed is False
+
+
+def test_saved_sync_only_claims_an_exact_connection_bound_mapping() -> None:
+    """Issue #88: only the exact external id on the same connection is ours."""
+    ref = "11111111-1111-4111-8111-111111111111"
+    other_id = local(external_mapping={"subscription_id": "sub-old", "connection_ref": ref})
+    assert reconcile_subscription(external(), [other_id], connection_ref=ref).tracking_id is None
+
+    exact = local(external_mapping={"subscription_id": "sub-1", "connection_ref": ref})
+    claimed = reconcile_subscription(external(), [exact], connection_ref=ref)
+    assert claimed.tracking_id == "trk-local"
+    assert claimed.managed is True
+    assert claimed.match_reason == "EXTERNAL_ID"
 
 
 def test_saved_sync_same_connection_unbound_mapping_requires_selected_rss() -> None:

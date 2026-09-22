@@ -521,7 +521,10 @@ async function syncTracking(): Promise<void> {
       items.value = result.items
       detailRevision.value += 1
       syncSelection(true)
-      syncMessage.value = `同步完成：检查 ${result.summary.checked} 条，新增 ${result.summary.created} 条，更新 ${result.summary.updated} 条。`
+      // Issue #88: strangers in Auto Bangumi are counted, never imported.
+      syncMessage.value = result.summary.ignored
+        ? `同步完成：检查 ${result.summary.checked} 条，新增 ${result.summary.created} 条，更新 ${result.summary.updated} 条；忽略 ${result.summary.ignored} 条不属于 MiGuOrca 管理的外部订阅。`
+        : `同步完成：检查 ${result.summary.checked} 条，新增 ${result.summary.created} 条，更新 ${result.summary.updated} 条。`
     } else if (incomplete) {
       syncMessage.value = result.sync_status === 'PARTIAL'
         ? '同步部分完成，已保留原有本地列表；可重连或再次同步。'

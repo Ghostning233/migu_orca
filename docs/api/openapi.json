@@ -9127,6 +9127,7 @@
                         },
                         "summary": {
                           "additionalProperties": false,
+                          "description": "Safe sync counts. ``ignored`` (issue #88) counts external subscriptions\nthis product does not control; they are never imported or adopted.",
                           "properties": {
                             "checked": {
                               "title": "Checked",
@@ -9144,8 +9145,8 @@
                               "title": "Unchanged",
                               "type": "integer"
                             },
-                            "external_only": {
-                              "title": "External Only",
+                            "ignored": {
+                              "title": "Ignored",
                               "type": "integer"
                             },
                             "failed": {
@@ -9162,7 +9163,7 @@
                             "created",
                             "updated",
                             "unchanged",
-                            "external_only",
+                            "ignored",
                             "failed",
                             "unreadable"
                           ],
@@ -9441,7 +9442,7 @@
                       "created": 1,
                       "updated": 1,
                       "unchanged": 1,
-                      "external_only": 1,
+                      "ignored": 1,
                       "failed": 1,
                       "unreadable": 1
                     },

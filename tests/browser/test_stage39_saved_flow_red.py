@@ -382,7 +382,7 @@ def test_saved_sync_uses_the_saved_connection_and_sends_ref_revision(page, live_
                                 )
                             },
                         },
-                        "summary": {"checked": 1, "created": 0, "updated": 0, "unchanged": 1},
+                        "summary": {"checked": 1, "created": 0, "updated": 0, "unchanged": 1, "ignored": 2},
                         "items": [item],
                     },
                 }
@@ -400,6 +400,8 @@ def test_saved_sync_uses_the_saved_connection_and_sends_ref_revision(page, live_
     page.locator(".confirm-dialog .danger-button, .confirm-dialog .primary-button").last.click()
     page.wait_for_timeout(100)
     assert calls == [{"connection_ref": ref, "configuration_revision": 3, "confirm": True}]
+    # Issue #88: strangers are only counted and stated, never imported.
+    expect(page.locator("#tracking-sync-status")).to_contain_text("忽略 2 条不属于 MiGuOrca 管理的外部订阅")
 
 
 @pytest.mark.browser

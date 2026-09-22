@@ -5203,7 +5203,7 @@ export interface operations {
                      *           "created": 1,
                      *           "updated": 1,
                      *           "unchanged": 1,
-                     *           "external_only": 1,
+                     *           "ignored": 1,
                      *           "failed": 1,
                      *           "unreadable": 1
                      *         },
@@ -5337,7 +5337,11 @@ export interface operations {
                                 /** Safe Message */
                                 safe_message: string | null;
                             };
-                            /** TrackingSyncSummaryDTO */
+                            /**
+                             * TrackingSyncSummaryDTO
+                             * @description Safe sync counts. ``ignored`` (issue #88) counts external subscriptions
+                             *     this product does not control; they are never imported or adopted.
+                             */
                             summary: {
                                 /** Checked */
                                 checked: number;
@@ -5347,8 +5351,8 @@ export interface operations {
                                 updated: number;
                                 /** Unchanged */
                                 unchanged: number;
-                                /** External Only */
-                                external_only: number;
+                                /** Ignored */
+                                ignored: number;
                                 /** Failed */
                                 failed: number;
                                 /** Unreadable */

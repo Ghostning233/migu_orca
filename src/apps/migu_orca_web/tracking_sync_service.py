@@ -27,7 +27,6 @@ from storage_engine.controllers.request_repository import load_request_snapshot
 from storage_engine.controllers.storage_config import StorageConfig, load_storage_config
 from storage_engine.controllers.tracking_repository import (
     compare_and_swap_tracking_record,
-    ensure_tracking_record,
     list_tracking_records,
 )
 from tracking_engine.models.operation import (
@@ -40,7 +39,6 @@ from tracking_engine.models.tracking import (
     TRACKING_AUDIT_PLAN_CHANGE_DETECTED,
     TrackingRecord,
     build_audit_event,
-    create_external_tracking_record,
     tracking_to_storage_dict,
     transition_record,
     utc_now,
@@ -58,7 +56,9 @@ class TrackingSyncSummary:
     created: int = 0
     updated: int = 0
     unchanged: int = 0
-    external_only: int = 0
+    #: External subscriptions this product does not control (issue #88): they are
+    #: only counted, never imported, adopted or refreshed.
+    ignored: int = 0
     failed: int = 0
     unreadable: int = 0
 
@@ -156,24 +156,10 @@ def run_tracking_sync(
             if decision.warning == RECONCILE_WARNING_CONFLICT or decision.protected_tracking_ids:
                 counts = replace(counts, checked=counts.checked + 1, unchanged=counts.unchanged + 1)
                 continue
-            if connection_ref is not None:
-                existing_external = locals_by_id.get(
-                    _external_tracking_id(decision.external_id, connection_ref)
-                )
-                if existing_external is not None and existing_external.tracking_id in protected_ids:
-                    counts = replace(counts, checked=counts.checked + 1, unchanged=counts.unchanged + 1)
-                    continue
-            record, created, failed = _ensure_external(
-                resolved_config, decision, externals, checked_at, connection_ref
-            )
-            counts = replace(
-                counts,
-                checked=counts.checked + 1,
-                created=counts.created + int(created),
-                external_only=counts.external_only + 1,
-                unchanged=counts.unchanged + int(not created and not failed),
-                failed=counts.failed + int(failed),
-            )
+            # Issue #88: an unmapped external subscription is not controlled by
+            # this product. It is only counted — no tracking record is created,
+            # adopted or refreshed, and the sync never writes externally.
+            counts = replace(counts, checked=counts.checked + 1, ignored=counts.ignored + 1)
             continue
         local = locals_by_id.get(decision.tracking_id)
         if local is None:
@@ -287,25 +273,6 @@ def _apply_missing(config, record, decision, timestamp, connection_ref=None):
     except Stage1Error:
         return False, True
 
-
-def _ensure_external(config, decision, externals, timestamp, connection_ref=None):
-    external = next(item for item in externals if item.external_id == decision.external_id)
-    record = create_external_tracking_record(
-        adapter="legacy_3_1", object_kind="subscription", external_id=external.external_id,
-        title=external.title, season=external.season, subtitle_group=external.subtitle_group,
-        subscription_id=decision.subscription_id, rss_ids=decision.rss_ids,
-        match_reason=decision.match_reason, external_deleted=decision.external_deleted,
-        connection_ref=connection_ref,
-        enabled=not decision.external_deleted, last_verified_at=timestamp, now=timestamp,
-    )
-    try:
-        existing, created = ensure_tracking_record(config, record)
-        if created:
-            return existing, True, False
-        updated, failed = _apply_decision(config, existing, decision, timestamp, connection_ref)
-        return existing, False, failed
-    except Stage1Error:
-        return record, False, True
 
 
 def _merge_orphan(config, orphan: TrackingRecord, target_id: str, timestamp: str) -> tuple[bool, bool]:
