@@ -482,7 +482,7 @@ class TestAppSharedControlsVisual:
         require_dist()
         _install_routes(page)
         prepare_canvas(page)
-        for route in ("/app/plans", "/app/tracking", "/app/settings"):
+        for route in ("/app/tracking", "/app/settings"):
             page.goto(f"{live_server_url}{route}")
             page.wait_for_selector(".app-header", timeout=10_000)
             expect(page.locator("#app-main")).to_be_visible()

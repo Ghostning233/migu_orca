@@ -9,7 +9,6 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import create_saved_request, set_storage_preferences
-from tests.browser.test_app_safe_info_stage37 import _safe_info
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -70,7 +69,6 @@ def _nav_targets() -> list[tuple[str, str]]:
     """(nav link text, expected route marker selector) for the four SPA routes."""
     return [
         ("添加番剧", "#workbench-heading"),
-        ("追番方案", "#request-list-container"),
         # US-316: 追番管理 mounts the formal tracking screen, not the retired queue.
         ("追番管理", "#tracking-overview"),
         ("设置", "#settings-heading"),
@@ -135,7 +133,6 @@ class TestCrossFeatureResponsive:
         ("path", "selector"),
         [
             ("/app/add", "#workbench-heading"),
-            ("/app/plans", "#request-list-container"),
             ("/app/tracking", "#tracking-overview"),
             ("/app/settings", "#settings-heading"),
         ],
@@ -200,7 +197,6 @@ class TestCrossFeatureResponsive:
         "path, selector",
         [
             ("/app/add", "#workbench-heading"),
-            ("/app/plans", "#request-list-container"),
             ("/app/tracking", "#tracking-overview"),
             ("/app/settings", "#settings-heading"),
         ],
@@ -258,83 +254,6 @@ class TestCrossFeatureResponsive:
             assert canary not in browser_storage["session"]
             assert canary not in browser_storage["history"]
 
-    @pytest.mark.parametrize("viewport", [(1280, 720), (1440, 900), (1920, 1080)])
-    def test_stage37_plans_list_detail_actions_fit_desktop_viewport(
-        self, page: Page, live_server_url: str, storage_dir: Path, viewport: tuple[int, int]
-    ) -> None:
-        """Stage 37 plans list/detail actions remain visible and reachable at desktop sizes."""
-        create_saved_request(storage_dir, "葬送的芙莉莲", "req-responsive-stage37")
-        set_storage_preferences(page, storage_dir)
-        page.set_viewport_size({"width": viewport[0], "height": viewport[1]})
-        _goto(page, live_server_url, "/app/plans")
-        row = page.locator(".request-list-item").first
-        expect(row).to_be_visible()
-        row.click()
-        page.wait_for_url("**/app/plans?request_id=req-responsive-stage37", timeout=5000)
-        detail = page.locator("#request-detail-container")
-        expect(detail).to_be_visible()
-        for selector in (
-            "#detail-safe-info-button",
-            "#detail-accept-button",
-            "#detail-cancel-toggle",
-            "#detail-modify-toggle",
-        ):
-            control = page.locator(selector)
-            expect(control).to_be_visible()
-            control.focus()
-            expect(control).to_be_focused()
-        _no_horizontal_overflow(page, viewport[0])
-
-    def test_stage37_plans_200_percent_supports_modify_safe_info_and_reuse(
-        self, page: Page, live_server_url: str, storage_dir: Path
-    ) -> None:
-        """document.documentElement.zoom=2 models the existing 200% effective viewport convention."""
-        create_saved_request(storage_dir, "葬送的芙莉莲", "req-responsive-200")
-        set_storage_preferences(page, storage_dir)
-
-        def safe_info_route(route: object, request: object) -> None:
-            if getattr(request, "method", "") == "GET" and "/safe-info" in getattr(request, "url", ""):
-                route.fulfill(
-                    status=200,
-                    content_type="application/json",
-                    body=json.dumps({"ok": True, "result": {"safe_info": _safe_info()}}, ensure_ascii=False),
-                )
-            else:
-                route.continue_()
-
-        page.route("**/api/v1/requests/*/safe-info*", safe_info_route)
-        page.set_viewport_size({"width": 1280, "height": 900})
-        _goto(page, live_server_url, "/app/plans?request_id=req-responsive-200")
-        page.evaluate("() => { document.documentElement.style.zoom = '2' }")
-        expect(page.locator("#request-detail-container")).to_be_visible()
-        _no_horizontal_overflow(page, 1280)
-
-        page.locator("#detail-modify-toggle").click()
-        expect(page.locator("#detail-modify-form")).to_be_visible()
-        page.locator("#detail-modify-form details.advanced-settings").evaluate("el => el.open = true")
-        page.locator("#modify-folder-name").fill("200% 验收目录")
-        page.locator("#modify-apply-button").click()
-        expect(page.locator(".global-notification")).to_contain_text("修改成功", timeout=5000)
-        expect(page.locator("#request-detail-container")).to_contain_text("200% 验收目录")
-        page.locator("#detail-safe-info-button").click()
-        dialog = page.locator(".safe-info-dialog")
-        expect(dialog).to_be_visible()
-        expect(dialog.locator(".safe-info-reuse")).to_be_visible()
-        page.keyboard.press("Escape")
-        expect(dialog).to_have_count(0)
-        page.locator("#detail-safe-info-button").click()
-        # At 200% the dialog content is scrollable; keyboard activation proves
-        # the action remains reachable without relying on an off-screen mouse click.
-        reuse = page.locator(".safe-info-reuse")
-        reuse.focus()
-        reuse.press("Enter")
-        page.wait_for_url("**/app/add", timeout=5000)
-        expect(page.locator("#mikan-candidate-query")).to_have_value("葬送的芙莉莲")
-
-
-class TestKeyboardAndFocus:
-    """AC: 键盘导航、焦点恢复和 skip link."""
-
     def test_skip_link_focuses_main_content(
         self, page: Page, live_server_url: str
     ) -> None:
@@ -381,11 +300,11 @@ class TestKeyboardAndFocus:
                 """() => document.activeElement?.getAttribute('aria-label') ||
                 document.activeElement?.textContent?.trim() || ''"""
             )
-            for expected in ("添加番剧", "追番方案", "追番管理", "设置"):
+            for expected in ("添加番剧", "追番管理", "设置"):
                 if expected in label and expected not in focused_labels:
                     focused_labels.append(expected)
 
-        assert focused_labels == ["添加番剧", "追番方案", "追番管理", "设置"]
+        assert focused_labels == ["添加番剧", "追番管理", "设置"]
 
     def test_batch_candidate_selection_stays_in_right_detail(
         self, page: Page, live_server_url: str

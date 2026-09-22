@@ -6,7 +6,6 @@ import type { operations } from '@/api/generated/api'
 import BaseButton from '@/components/forms/BaseButton.vue'
 import ErrorState from '@/components/feedback/ErrorState.vue'
 import LoadingState from '@/components/feedback/LoadingState.vue'
-import { routeLocation } from '@/app/router/catalog'
 import { storageQuery } from '@/features/requests/requestStorage'
 import {
   canVerifyExternally,
@@ -862,15 +861,9 @@ defineExpose({ reload: () => fetchDetail(true) })
         />
       </section>
 
-      <p v-if="detail.status === 'EXTERNAL_ONLY'" class="field-help" role="status">
-        该记录是外部孤立项，没有可返回的本地订阅方案。
+      <p v-if="!detail.request_id" class="field-help" role="status">
+        该记录没有关联的本地追番方案。
       </p>
-      <p v-else-if="!detail.request_id" class="field-help" role="status">
-        该记录没有可返回的本地订阅方案。
-      </p>
-      <RouterLink v-else class="tracking-plan-link" :to="routeLocation('plans', { request_id: detail.request_id })">
-        返回修改方案
-      </RouterLink>
       <p v-if="detail.warnings?.length" class="field-help" role="status">{{ detail.warnings[0] }}</p>
     </div>
     <p v-else class="field-help">选择一条追番记录查看追番详情。</p>

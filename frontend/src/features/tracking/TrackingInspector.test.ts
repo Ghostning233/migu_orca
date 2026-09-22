@@ -71,16 +71,18 @@ describe('TrackingInspector secure detail (US-306)', () => {
     expect(wrapper.text()).toContain('有效资源')
     expect(wrapper.text()).toContain('已更新集数')
     expect(wrapper.text()).toContain('待开发')
-    expect(wrapper.find('.tracking-plan-link').exists()).toBe(true)
+    // Issue #93: the retired 追番方案 page is gone; reuse travels through the
+    // add journey instead of a link back to the old page.
+    expect(wrapper.find('.tracking-plan-link').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('request-1')
     expect(wrapper.text()).toContain('第一集.mkv')
   })
 
-  it('hides local plan link for external-only records', async () => {
-    apiGet.mockResolvedValue(detail({ status: 'EXTERNAL_ONLY', request_id: 'request-1' }) as never)
+  it('states the missing local plan instead of linking to a retired page', async () => {
+    apiGet.mockResolvedValue(detail({ status: 'EXTERNAL_ONLY', request_id: null }) as never)
     const wrapper = await mountInspector()
     expect(wrapper.find('.tracking-plan-link').exists()).toBe(false)
-    expect(wrapper.text()).toContain('没有可返回的本地订阅方案')
+    expect(wrapper.text()).toContain('没有关联的本地追番方案')
   })
 
   it('renders the persisted same-origin cover in the tracking detail', async () => {

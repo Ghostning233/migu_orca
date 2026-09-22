@@ -77,7 +77,6 @@ TRACKING_BODY = json.dumps({"ok": True, "result": {"items": []}}, ensure_ascii=F
 
 SHELL_ROUTES = {
     "add": "/app/add",
-    "plans": "/app/plans",
     "tracking": "/app/tracking",
     "settings": "/app/settings",
 }
@@ -118,10 +117,10 @@ class TestAppShellVisual:
         expect(page.locator(".brand-block")).to_have_attribute("aria-label", "返回添加番剧")
 
         links = page.locator(".top-nav .nav-link")
-        expect(links).to_have_count(4)
-        assert links.all_inner_texts() == ["添加番剧", "追番方案", "追番管理", "设置"]
+        expect(links).to_have_count(3)
+        assert links.all_inner_texts() == ["添加番剧", "追番管理", "设置"]
         expect(links.nth(0)).to_have_attribute("aria-current", "page")
-        for index in (1, 2, 3):
+        for index in (1, 2):
             assert links.nth(index).get_attribute("aria-current") is None
 
         status = page.locator(".workspace-status")
@@ -338,7 +337,8 @@ class TestAppShellVisual:
         index = labels.index("skip-link")
         # Skip link 是第一个可聚焦元素，其后是品牌返回与四项导航。
         assert labels[index + 1] == "返回添加番剧", labels
-        assert labels[index + 2 : index + 6] == ["shell-nav-1", "shell-nav-2", "shell-nav-3", "shell-nav-4"], labels
+        # Issue #93: three primary navigation entries.
+        assert labels[index + 2 : index + 5] == ["shell-nav-1", "shell-nav-2", "shell-nav-3"], labels
 
         page.locator("#skip-link").focus()
         page.keyboard.press("Enter")
@@ -351,10 +351,10 @@ class TestAppShellVisual:
         prepare_canvas(page)
         page.emulate_media(reduced_motion="reduce")
         _install_shell_routes(page)
-        page.goto(f"{live_server_url}/app/plans")
+        page.goto(f"{live_server_url}/app/tracking")
         page.wait_for_selector(".app-header", timeout=10_000)
         current = page.locator('.nav-link[aria-current="page"]')
-        expect(current).to_have_text("追番方案")
+        expect(current).to_have_text("追番管理")
         styles = page.evaluate(
             """() => {
                 const el = document.querySelector('.nav-link[aria-current="page"]')
@@ -367,13 +367,13 @@ class TestAppShellVisual:
         assert styles["background"] == "rgb(217, 67, 31)"
         assert styles["height"] == "4px"
 
-    @pytest.mark.parametrize("route_key", ["plans", "tracking", "settings"])
+    @pytest.mark.parametrize("route_key", ["tracking", "settings"])
     def test_other_primary_pages_keep_navigation_and_content(
         self, page: Page, live_server_url: str, route_key: str
     ) -> None:
         """三个非目标页面只做导航/内容定向回归，不做像素改版。"""
         _open_shell(page, live_server_url, SHELL_ROUTES[route_key])
-        expect(page.locator(".top-nav .nav-link")).to_have_count(4)
+        expect(page.locator(".top-nav .nav-link")).to_have_count(3)
         expect(page.locator(f'#shell-nav-{list(SHELL_ROUTES).index(route_key) + 1}')).to_have_attribute(
             "aria-current", "page"
         )

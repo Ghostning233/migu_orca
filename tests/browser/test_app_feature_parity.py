@@ -25,7 +25,6 @@ def _require_dist() -> None:
     ("path", "feature_root", "feature_control"),
     [
         ("/app/add", "#workbench-heading", "#mikan-candidate-query"),
-        ("/app/plans", "#request-list-container", "#request-list-search"),
         ("/app/tracking", "#tracking-overview", "#tracking-refresh"),
         ("/app/settings", "#settings-heading", "#settings-storage-dir"),
     ],

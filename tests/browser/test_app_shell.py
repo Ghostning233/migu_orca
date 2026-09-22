@@ -58,11 +58,11 @@ def test_app_shell_loads_and_mounts_spa(page: Page, live_server_url: str) -> Non
     page.wait_for_url("**/app/add", timeout=5000)
     assert page.locator(".app-title").inner_text() == "MiGuOrca"
     nav = page.locator(".top-nav .nav-link")
-    assert nav.count() == 4
+    # Issue #93: the primary navigation is exactly three entries.
+    assert nav.count() == 3
     assert nav.nth(0).locator("span").first.inner_text().strip() == "添加番剧"
-    assert nav.nth(1).locator("span").first.inner_text().strip() == "追番方案"
-    assert nav.nth(2).locator("span").first.inner_text().strip() == "追番管理"
-    assert nav.nth(3).locator("span").first.inner_text().strip() == "设置"
+    assert nav.nth(1).locator("span").first.inner_text().strip() == "追番管理"
+    assert nav.nth(2).locator("span").first.inner_text().strip() == "设置"
     assert nav.nth(0).get_attribute("aria-current") == "page"
     # Stage 46 (US-361): the design's current item is text + coral underline
     # only, so the redundant "当前" marker is gone; aria-current carries the
@@ -116,15 +116,14 @@ def test_app_spa_navigation_between_routes(page: Page, live_server_url: str) -> 
     page.goto(f"{live_server_url}/app/add")
     page.wait_for_selector(".app-title")
 
-    page.get_by_role("link", name="追番方案", exact=True).click()
-    page.wait_for_url("**/app/plans", timeout=5000)
+    page.get_by_role("link", name="追番管理", exact=True).click()
+    page.wait_for_url("**/app/tracking", timeout=5000)
     # Route changes move focus to the main landmark; poll instead of reading
     # document.activeElement once, since the focus move is not synchronous with
     # the URL change.
     expect(page.locator("#app-main")).to_be_focused()
-    assert page.get_by_role("link", name="追番方案", exact=True).get_attribute("aria-current") == "page"
-    assert page.locator("#request-list-container").count() >= 1
-    assert page.locator("#request-list-count").count() >= 1
+    assert page.get_by_role("link", name="追番管理", exact=True).get_attribute("aria-current") == "page"
+    assert page.locator("#tracking-overview").count() >= 1
 
     page.get_by_role("link", name="追番管理", exact=True).click()
     page.wait_for_url("**/app/tracking", timeout=5000)
@@ -170,11 +169,11 @@ def test_legacy_spa_routes_replace_with_sanitized_public_query(
     page.wait_for_url("**/app/add?batch_id=batch-browser", timeout=5000)
     assert page.locator("#workbench-heading").count() >= 1
 
-    page.goto(
-        f"{live_server_url}/app/requests?request_id=request-browser&batch_id=drop"
-    )
-    page.wait_for_url("**/app/plans?request_id=request-browser", timeout=5000)
-    assert page.locator("#request-list-container").count() >= 1
+    # Issue #93: the retired 追番方案 route and its compatibility redirect are
+    # gone, so the legacy path no longer mounts the old view.
+    page.goto(f"{live_server_url}/app/plans?request_id=request-browser")
+    page.wait_for_selector(".app-title", timeout=5000)
+    assert page.locator("#request-list-container").count() == 0
 
 
 def test_app_shell_no_console_errors(page: Page, live_server_url: str) -> None:
