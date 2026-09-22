@@ -82,6 +82,20 @@ import {
 } from './trackingManagement'
 import TrackingInspector from './TrackingInspector.vue'
 import TrackingPoster from './TrackingPoster.vue'
+import {
+  EMPTY_BATCH_SELECTION,
+  batchSelectionSummary,
+  batchSkipReason,
+  buildBatchSubmitBody,
+  clearBatchSelection,
+  isBatchSelected,
+  projectBatchOutcome,
+  selectAllBatch,
+  selectionAfterBatch,
+  toggleBatchSelection,
+  type TrackingBatchOutcome,
+  type TrackingBatchSelection,
+} from './batchSelection'
 
 type ListResult = NonNullable<
   operations['listTrackingItems']['responses']['200']['content']['application/json']['result']
@@ -90,6 +104,9 @@ type CapabilityResult = NonNullable<
   operations['probeSavedAutoBangumiCapabilities']['responses']['200']['content']['application/json']['result']
 >
 type SavedConnection = NonNullable<operations['getAutoBangumiConnection']['responses']['200']['content']['application/json']['result']>
+type BatchResult = NonNullable<
+  operations['submitTrackingBatch']['responses']['200']['content']['application/json']['result']
+>
 type SyncBody = NonNullable<
   operations['syncTrackingItems']['requestBody']['content']['application/json']
 >
@@ -595,6 +612,119 @@ async function recheckAfterAction(trackingId: string, refreshList = false): Prom
   await inspector.value?.reload()
 }
 
+// -- explicit batch submit (issue #87) --------------------------------------
+// A batch is a user-visible selection of *independent* reliable submissions:
+// the page owns the single confirmation and the request, every entry keeps its
+// own revision and opaque key, and filtering never clears the selection.
+const TRACKING_BATCH_SUBMIT_ENDPOINT = '/api/v1/tracking/batch-submit'
+const batchMode = ref(false)
+const batchSelection = ref<TrackingBatchSelection>(EMPTY_BATCH_SELECTION)
+const batchPending = ref(false)
+const batchLoading = ref(false)
+const batchOutcome = ref<TrackingBatchOutcome | null>(null)
+const batchNotice = ref('')
+let batchSequence = 0
+
+const batchSummary = computed(() => (
+  batchSelectionSummary(batchSelection.value, filteredItems.value)
+))
+const batchSkippedNotice = computed(() => {
+  const reasons = Object.values(batchSelection.value.skipped)
+  if (!reasons.length) return ''
+  const counts = new Map<string, number>()
+  for (const reason of reasons) counts.set(reason, (counts.get(reason) ?? 0) + 1)
+  const detail = [...counts].map(([reason, count]) => `${reason}（${count} 条）`).join('；')
+  return `已跳过 ${reasons.length} 条不可提交记录：${detail}。`
+})
+
+function toggleBatchMode(): void {
+  batchMode.value = !batchMode.value
+  batchSelection.value = clearBatchSelection()
+  batchOutcome.value = null
+  batchNotice.value = ''
+}
+
+function toggleRow(trackingId: string): void {
+  batchSelection.value = toggleBatchSelection(batchSelection.value, trackingId)
+}
+
+function selectAllCurrent(): void {
+  batchSelection.value = selectAllBatch(filteredItems.value)
+}
+
+function clearSelection(): void {
+  batchSelection.value = clearBatchSelection()
+}
+
+function titleFor(trackingId: string): string {
+  return items.value.find((item) => item.tracking_id === trackingId)?.title || '未命名番剧'
+}
+
+/**
+ * Run one explicitly confirmed batch.
+ *
+ * Each entry is sent once with its own revision and opaque key. A transport
+ * failure keeps the selection untouched and resends nothing; a persisted
+ * per-entry result converges the success list and leaves every failed or
+ * unresolved row selected for the user's next explicit action.
+ */
+async function runBatchSubmit(): Promise<void> {
+  if (batchPending.value || batchLoading.value) return
+  const config = savedRef.value
+  if (!config?.connection_ref) return
+  if (!batchSummary.value.selected) return
+  batchPending.value = true
+  let confirmed = false
+  try {
+    confirmed = (await confirmDialog.value?.confirm({
+      title: `提交所选 ${batchSummary.value.selected} 条`,
+      message: `将在 Auto Bangumi 为所选 ${batchSummary.value.selected} 条追番分别创建外部订阅，并可能触发下载。每条独立成功或失败，单条失败不会回滚已成功的条目；是否继续？`,
+      confirmLabel: '确认批量提交',
+      cancelLabel: '取消',
+    })) ?? false
+  } finally {
+    batchPending.value = false
+  }
+  if (!confirmed) return
+
+  const body = buildBatchSubmitBody(
+    batchSelection.value,
+    items.value,
+    {
+      connection_ref: config.connection_ref,
+      configuration_revision: config.configuration_revision,
+    },
+    storageQuery().storage_dir,
+  )
+  if (!body) return
+
+  const sequence = ++batchSequence
+  batchLoading.value = true
+  batchNotice.value = ''
+  batchOutcome.value = null
+  try {
+    const result = await api.post<BatchResult>(TRACKING_BATCH_SUBMIT_ENDPOINT, { body })
+    if (sequence !== batchSequence) return
+    const outcome = projectBatchOutcome(result)
+    batchOutcome.value = outcome
+    batchSelection.value = selectionAfterBatch(batchSelection.value, outcome)
+    const unknown = outcome.unresolved.length
+    batchNotice.value = `本次批量提交：成功 ${outcome.succeeded} 条，失败 ${outcome.failed} 条${unknown ? `，其中 ${unknown} 条结果未知需先恢复` : ''}。`
+    if (outcome.succeeded) {
+      notification.show('success', '批量提交完成', `已在 Auto Bangumi 创建 ${outcome.succeeded} 条外部订阅。`)
+    }
+    await loadList(true)
+  } catch (error) {
+    if (sequence !== batchSequence) return
+    const apiError = toApiError(error)
+    if (apiError.cancelled && !apiError.httpError) return
+    // Nothing was resolved: keep the selection and never resend on our own.
+    batchNotice.value = '批量提交请求未能确认送达，已保留当前选择；请核对连接后重新确认。'
+  } finally {
+    if (sequence === batchSequence) batchLoading.value = false
+  }
+}
+
 /**
  * Route one submit result to its fixed channel (issue #86).
  *
@@ -1069,6 +1199,9 @@ onBeforeUnmount(() => {
         <BaseButton id="tracking-probe-saved" variant="secondary" :disabled="!savedConnection?.connection_ref" @click="probeSavedConnection">测试已保存连接</BaseButton>
         <BaseButton v-if="savedRef" id="tracking-sync" variant="secondary" :loading="syncLoading" :disabled="syncLoading || syncPending" @click="syncTracking">同步 Auto Bangumi</BaseButton>
         <BaseButton id="tracking-refresh" variant="secondary" :loading="loading" @click="refreshTracking">刷新列表</BaseButton>
+        <BaseButton v-if="savedRef" id="tracking-batch-mode" variant="secondary" @click="toggleBatchMode">
+          {{ batchMode ? '退出批量提交模式' : '批量提交模式' }}
+        </BaseButton>
       </template>
       <p id="tracking-heading" class="tracking-lede">管理待提交任务和正在运行的追番。</p>
     </PanelSection>
@@ -1100,10 +1233,31 @@ onBeforeUnmount(() => {
         <ErrorState v-else-if="failed" title="追番列表读取失败" message="暂时无法读取本地追番列表，请稍后重试。" retry-label="重试读取" @retry="loadList()" />
         <EmptyState v-else-if="!items.length" message="还没有本地追番记录。" />
         <EmptyState v-else-if="!filteredItems.length" message="没有符合当前搜索或状态筛选的记录。" />
+        <div v-if="batchMode" class="tracking-batch-toolbar" aria-label="批量提交">
+          <span id="tracking-batch-count" class="tracking-batch-count" role="status">
+            已选 {{ batchSummary.selected }} 条<template v-if="batchSummary.hidden">（其中 {{ batchSummary.hidden }} 条不在当前筛选内）</template>
+          </span>
+          <BaseButton id="tracking-batch-select-all" variant="secondary" @click="selectAllCurrent">全选当前结果</BaseButton>
+          <BaseButton id="tracking-batch-clear" variant="secondary" :disabled="!batchSummary.selected" @click="clearSelection">清除选择</BaseButton>
+          <BaseButton id="tracking-batch-submit" :loading="batchLoading" :disabled="batchLoading || batchPending || !batchSummary.selected" @click="runBatchSubmit">
+            提交所选 {{ batchSummary.selected }} 条
+          </BaseButton>
+        </div>
+        <p v-if="batchMode && batchSkippedNotice" id="tracking-batch-skipped" class="tracking-batch-skipped" role="status">{{ batchSkippedNotice }}</p>
         <div v-else id="tracking-list-container" ref="listContainer" class="tracking-list" tabindex="-1" aria-label="追番记录列表">
           <button v-for="item in filteredItems" :key="item.tracking_id" type="button" class="tracking-list-item"
-            :class="{ 'is-selected': selectedTrackingId === item.tracking_id }" :data-tracking-id="item.tracking_id"
+            :class="{ 'is-selected': selectedTrackingId === item.tracking_id, 'is-batch': batchMode }" :data-tracking-id="item.tracking_id"
             :aria-current="selectedTrackingId === item.tracking_id ? 'true' : undefined" @click="selectItem(item.tracking_id)">
+            <input
+              v-if="batchMode"
+              type="checkbox"
+              class="tracking-list-checkbox"
+              :checked="isBatchSelected(batchSelection, item.tracking_id)"
+              :disabled="Boolean(batchSkipReason(item))"
+              :aria-label="`选择提交 ${item.title || '未命名番剧'}`"
+              @click.stop
+              @change="toggleRow(item.tracking_id)"
+            >
             <span class="tracking-list-indicator" aria-hidden="true" />
             <TrackingPoster :poster-path="item.poster_path" variant="list" />
             <span class="tracking-list-copy">
@@ -1143,6 +1297,22 @@ onBeforeUnmount(() => {
         </template>
       </aside>
     </section>
+    <section
+      v-if="batchMode && (batchOutcome || batchNotice)"
+      id="tracking-batch-result"
+      class="tracking-batch-result"
+      aria-labelledby="tracking-batch-result-heading"
+      role="status"
+    >
+      <h2 id="tracking-batch-result-heading">批量提交结果</h2>
+      <p v-if="batchNotice" class="tracking-batch-verdict">{{ batchNotice }}</p>
+      <ul v-if="batchOutcome" class="tracking-batch-entries">
+        <li v-for="entry in batchOutcome.entries" :key="entry.trackingId" :class="entry.ok ? 'is-ok' : 'is-failed'">
+          <strong>{{ titleFor(entry.trackingId) }}</strong>：{{ entry.message }}
+        </li>
+      </ul>
+    </section>
+
     <section v-if="savedState" class="tracking-connection-status" aria-labelledby="tracking-connection-heading">
       <h2 id="tracking-connection-heading">Auto Bangumi 页面连接</h2>
       <p role="status">
@@ -1184,6 +1354,16 @@ onBeforeUnmount(() => {
 .tracking-list-item:hover, .tracking-list-item:focus-visible, .tracking-list-item.is-selected { border-color: var(--color-primary); background: var(--color-surface-subtle); }
 .tracking-list-item.is-selected .tracking-list-indicator { background: var(--color-primary); }
 .tracking-list-indicator { align-self: stretch; min-height: 2rem; border-radius: 99px; background: var(--color-border); }
+.tracking-list-item.is-batch { grid-template-columns: auto .35rem auto minmax(0, 1fr) auto; }
+.tracking-list-checkbox { inline-size: 1.05rem; block-size: 1.05rem; accent-color: var(--color-primary); }
+.tracking-batch-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-subtle); }
+.tracking-batch-count { margin-inline-end: auto; font-weight: 600; }
+.tracking-batch-skipped { margin: var(--space-2) 0 0; color: var(--color-text-muted); }
+.tracking-batch-result { display: grid; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); }
+.tracking-batch-result h2 { margin: 0; font-size: 1.05rem; }
+.tracking-batch-verdict { margin: 0; font-weight: 600; }
+.tracking-batch-entries { display: grid; gap: .3rem; margin: 0; padding-left: 1.2rem; }
+.tracking-batch-entries li.is-failed { color: var(--color-danger); }
 .tracking-list-copy, .tracking-list-meta { display: grid; gap: .25rem; min-width: 0; }
 .tracking-list-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tracking-list-copy span, .tracking-list-meta small { color: var(--color-text-muted); }

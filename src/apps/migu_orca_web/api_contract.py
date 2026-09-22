@@ -1058,6 +1058,38 @@ class TrackingSubmitResultDTO(_StrictBase):
     tracking: TrackingItemDTO
 
 
+class TrackingBatchSubmitItemResultDTO(_StrictBase):
+    """One independent entry result inside a batch submit (issue #87).
+
+    ``ok`` is true only for a definite success.  ``error_type`` is a stable
+    pre-boundary refusal code (nothing was written); otherwise ``result`` carries
+    the same strict per-entry business result a single submit returns, including
+    its published ``failure_category``.
+    """
+
+    tracking_id: str
+    ok: bool
+    error_type: str | None = None
+    result: TrackingSubmitResultDTO | None = None
+
+
+class TrackingBatchSubmitSummaryDTO(_StrictBase):
+    """Safe batch counts. The buckets are disjoint per entry."""
+
+    total: int
+    succeeded: int
+    failed: int
+    unknown: int
+    blocked: int
+
+
+class TrackingBatchSubmitResultDTO(_StrictBase):
+    """Result of ``POST /api/v1/tracking/batch-submit`` (issue #87)."""
+
+    items: list[TrackingBatchSubmitItemResultDTO]
+    summary: TrackingBatchSubmitSummaryDTO
+
+
 class TrackingRecoverResultDTO(_StrictBase):
     """Result of ``POST /api/v1/tracking/items/{tracking_id}/recover`` (US-226).
 

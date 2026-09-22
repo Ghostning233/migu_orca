@@ -18,6 +18,7 @@ local storage is read — no external system is ever contacted.
 
 from apps.migu_orca_web.blueprints import api_blueprint
 from apps.migu_orca_web.schemas import (
+    SavedTrackingBatchSubmitInput,
     SavedTrackingManagementInput,
     SavedTrackingRecoveryInput,
     SavedTrackingSubmitInput,
@@ -44,6 +45,7 @@ from apps.migu_orca_web.tracking_saved_recovery_service import run_saved_trackin
 from apps.migu_orca_web.tracking_saved_sync_service import run_saved_tracking_sync
 from apps.migu_orca_web.tracking_serializers import serialize_tracking_operation_summary, tracking_summary_fields
 from apps.migu_orca_web.tracking_submission_service import (
+    run_saved_tracking_batch_submit,
     run_saved_tracking_retry,
     run_saved_tracking_submit,
 )
@@ -172,6 +174,33 @@ class TrackingItemSubmitView(PostView):
         body = request.get_json(silent=True) or {}
         payload = SavedTrackingSubmitInput.model_validate({**body, "tracking_id": request.view_args["tracking_id"]})
         return run_saved_tracking_submit(load_storage_config(_storage_dir(payload.storage_dir)), payload=payload)
+
+
+@class_route(
+    api_blueprint,
+    "/api/v1/tracking/batch-submit",
+    methods=["POST"],
+)
+class TrackingBatchSubmitView(PostView):
+    """Run an explicit batch of independent reliable submissions (issue #87).
+
+    ``items`` holds 1..36 distinct tracking records, each with its own expected
+    revision and opaque idempotency key.  The service resolves every entry
+    through the single reliable submit sequence, so each one succeeds or fails on
+    its own: there is no whole-batch transaction and a success is never rolled
+    back by a later failure.  Every entry returns its own business result (or a
+    stable pre-boundary ``error_type``); the batch request itself is HTTP 200
+    whenever it was accepted.
+    """
+
+    request_validator_model = SavedTrackingBatchSubmitInput
+
+    def save(self) -> dict[str, object]:
+        payload = self.request_validator_model
+        assert isinstance(payload, SavedTrackingBatchSubmitInput)
+        return run_saved_tracking_batch_submit(
+            load_storage_config(_storage_dir(payload.storage_dir)), payload=payload
+        )
 
 
 @class_route(

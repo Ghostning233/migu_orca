@@ -200,6 +200,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tracking/batch-submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 批量提交显式选择的追番方案（逐条独立结果）
+         * @description issue #87：一次显式批量提交 1～36 条互不相同的追番记录。每条携带自己的 expected_revision 与 opaque idempotency_key，并由服务端逐条走单条可靠提交序列；批量不是整批事务，单条失败不回滚已成功条目。逐条返回业务结果（或外部边界前的稳定 error_type），请求被接受时整体为 HTTP 200。同键重放复用原 operation，不会创建第二个外部订阅。
+         */
+        post: operations["submitTrackingBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tracking/items": {
         parameters: {
             query?: never;
@@ -4697,6 +4717,336 @@ export interface operations {
                      *       "ok": false,
                      *       "error_type": "validation_error",
                      *       "error_message": "请求参数校验失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
+    submitTrackingBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 批量提交显式选择的追番方案（逐条独立结果） */
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "items": [
+                 *         {
+                 *           "tracking_id": "示例",
+                 *           "expected_revision": 1,
+                 *           "idempotency_key": "示例"
+                 *         }
+                 *       ],
+                 *       "confirm": true,
+                 *       "connection_ref": "示例",
+                 *       "configuration_revision": 1
+                 *     }
+                 */
+                "application/json": {
+                    /** @description 显式选择的追番记录；每条独立提交，不重复指向同一记录。 */
+                    items: {
+                        tracking_id: string;
+                        expected_revision: number;
+                        /** @description opaque 客户端操作 id；同键网络重放收敛到同一次外部调用。 */
+                        idempotency_key: string;
+                    }[];
+                    /**
+                     * @description 必须为 true：用户显式确认这一批外部提交。
+                     * @enum {boolean}
+                     */
+                    confirm: true;
+                    /** Format: uuid */
+                    connection_ref: string;
+                    configuration_revision: number;
+                    /** @description 存储目录（服务端允许根目录下的相对目录 profile）。 */
+                    storage_dir?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "items": [
+                     *           {
+                     *             "tracking_id": "示例",
+                     *             "ok": true,
+                     *             "error_type": null,
+                     *             "result": null
+                     *           }
+                     *         ],
+                     *         "summary": {
+                     *           "total": 1,
+                     *           "succeeded": 1,
+                     *           "failed": 1,
+                     *           "unknown": 1,
+                     *           "blocked": 1
+                     *         }
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /**
+                         * TrackingBatchSubmitResultDTO
+                         * @description Result of ``POST /api/v1/tracking/batch-submit`` (issue #87).
+                         */
+                        result: {
+                            /** Items */
+                            items: {
+                                /** Tracking Id */
+                                tracking_id: string;
+                                /** Ok */
+                                ok: boolean;
+                                /**
+                                 * Error Type
+                                 * @default null
+                                 */
+                                error_type: string | null;
+                                /** @default null */
+                                result: {
+                                    /** Tracking Id */
+                                    tracking_id: string;
+                                    /**
+                                     * Outcome
+                                     * @enum {string}
+                                     */
+                                    outcome: "ACTIVE" | "SUBMIT_FAILED" | "VERIFYING_EXTERNAL" | "RECOVERY_REQUIRED" | "NEEDS_RECONFIRM";
+                                    /** Checked Revision */
+                                    checked_revision: number;
+                                    /** Next Revision */
+                                    next_revision: number;
+                                    /** Checked At */
+                                    checked_at: string;
+                                    /**
+                                     * Operation Id
+                                     * @default null
+                                     */
+                                    operation_id: string | null;
+                                    /**
+                                     * Failure Category
+                                     * @default null
+                                     */
+                                    failure_category: ("CONNECTION" | "AUTHENTICATION" | "VERSION" | "DUPLICATE_SUBSCRIPTION" | "VALIDATION" | "REJECTED" | "OUTCOME_UNKNOWN") | null;
+                                    /** Issues */
+                                    issues?: {
+                                        /**
+                                         * Code
+                                         * @enum {string}
+                                         */
+                                        code: "REQUEST_MISSING" | "REQUEST_NOT_ACCEPTED" | "REQUEST_CHANGED" | "TITLE_MISSING" | "SEASON_REVIEW_REQUIRED" | "MIKAN_SELECTION_MISSING" | "SUBTITLE_GROUP_MISSING" | "NO_VALID_RESOURCES" | "EXTERNAL_ALREADY_LINKED" | "OPERATION_IN_PROGRESS" | "TRACKING_STATE_INVALID";
+                                        /**
+                                         * Field
+                                         * @default null
+                                         */
+                                        field: string | null;
+                                        /** Message */
+                                        message: string;
+                                        /**
+                                         * Recovery Action
+                                         * @enum {string}
+                                         */
+                                        recovery_action: "" | "SUBMIT";
+                                    }[];
+                                    /**
+                                     * TrackingItemDTO
+                                     * @description One unified tracking list item (Stage 29 PRD §11.2).
+                                     *
+                                     *     ``updated_episode`` is always null and ``updated_episode_status`` is always
+                                     *     NOT_IMPLEMENTED (BL-020 out of scope — never guessed from seeds/RSS).
+                                     *     ``poster_path`` may only be a same-origin opaque poster proxy route.
+                                     */
+                                    tracking: {
+                                        /** Tracking Id */
+                                        tracking_id: string;
+                                        /**
+                                         * Request Id
+                                         * @default null
+                                         */
+                                        request_id: string | null;
+                                        /**
+                                         * Title
+                                         * @default null
+                                         */
+                                        title: string | null;
+                                        /**
+                                         * Season
+                                         * @default null
+                                         */
+                                        season: number | null;
+                                        /**
+                                         * Subtitle Group
+                                         * @default null
+                                         */
+                                        subtitle_group: string | null;
+                                        /**
+                                         * Poster Path
+                                         * @default null
+                                         */
+                                        poster_path: string | null;
+                                        /**
+                                         * Status
+                                         * @enum {string}
+                                         */
+                                        status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY";
+                                        /** Status Label */
+                                        status_label: string;
+                                        /**
+                                         * Status Group
+                                         * @enum {string}
+                                         */
+                                        status_group: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
+                                        /** Available Actions */
+                                        available_actions?: {
+                                            /**
+                                             * Code
+                                             * @enum {string}
+                                             */
+                                            code: "REVALIDATE" | "SUBMIT" | "RETRY" | "RECOVER_AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS" | "DELETE_EXTERNAL";
+                                            /** Label */
+                                            label: string;
+                                            /**
+                                             * Style
+                                             * @enum {string}
+                                             */
+                                            style: "PRIMARY" | "SECONDARY" | "DANGER";
+                                            /** Requires Confirmation */
+                                            requires_confirmation: boolean;
+                                            /** Target Scopes */
+                                            target_scopes?: ("SUBSCRIPTION" | "ASSOCIATED_RSS")[];
+                                        }[];
+                                        /**
+                                         * Valid Resource Count
+                                         * @default 0
+                                         */
+                                        valid_resource_count: number;
+                                        /**
+                                         * Updated Episode
+                                         * @default null
+                                         */
+                                        updated_episode: null;
+                                        /**
+                                         * Updated Episode Status
+                                         * @default NOT_IMPLEMENTED
+                                         * @constant
+                                         */
+                                        updated_episode_status: "NOT_IMPLEMENTED";
+                                        /**
+                                         * Total Episodes
+                                         * @default null
+                                         */
+                                        total_episodes: number | null;
+                                        /** Revision */
+                                        revision: number;
+                                        /**
+                                         * Updated At
+                                         * @default null
+                                         */
+                                        updated_at: string | null;
+                                    };
+                                } | null;
+                            }[];
+                            /**
+                             * TrackingBatchSubmitSummaryDTO
+                             * @description Safe batch counts. The buckets are disjoint per entry.
+                             */
+                            summary: {
+                                /** Total */
+                                total: number;
+                                /** Succeeded */
+                                succeeded: number;
+                                /** Failed */
+                                failed: number;
+                                /** Unknown */
+                                unknown: number;
+                                /** Blocked */
+                                blocked: number;
+                            };
+                        };
+                    };
+                };
+            };
+            /** @description data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / tracking_confirmation_required: 批量提交 Auto Bangumi 必须显式确认 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "data_validation_errors",
+                     *       "error_message": "请求参数校验失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description storage_error: 写入/读取追番记录失败 / storage_json_error: 追番记录 JSON 损坏 / tracking_storage_error: 追番记录存储失败 / tracking_migration_error: 历史数据迁移失败 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "storage_error",
+                     *       "error_message": "写入/读取追番记录失败",
                      *       "error_data": {
                      *         "failed_step": "示例步骤"
                      *       }

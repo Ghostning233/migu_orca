@@ -329,7 +329,7 @@ export function projectTrackingActionScopes(
   return requested.length === 1 ? requested : []
 }
 
-function makeOpaqueKey(): string {
+export function makeOpaqueKey(): string {
   const candidate = globalThis.crypto?.randomUUID?.()
   return candidate && /^[A-Za-z0-9-]{8,128}$/.test(candidate)
     ? candidate

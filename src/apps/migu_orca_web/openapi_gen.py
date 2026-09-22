@@ -53,6 +53,7 @@ from apps.migu_orca_web.api_contract import (
     RequestPreviewModifyResultDTO,
     RequestSafeInfoResultDTO,
     RequestSaveConfirmResultDTO,
+    TrackingBatchSubmitResultDTO,
     TrackingDetailResultDTO,
     TrackingItemListResultDTO,
     TrackingManagementResultDTO,
@@ -932,6 +933,60 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             },
             "500": {
                 "storage_error": "读取追番记录失败",
+                "storage_json_error": "追番记录 JSON 损坏",
+                "tracking_storage_error": "追番记录存储失败",
+                "tracking_migration_error": "历史数据迁移失败",
+            },
+        },
+    },
+    "POST /api/v1/tracking/batch-submit": {
+        "operationId": "submitTrackingBatch",
+        "summary": "批量提交显式选择的追番方案（逐条独立结果）",
+        "description": "issue #87：一次显式批量提交 1～36 条互不相同的追番记录。每条携带自己的 expected_revision 与 opaque idempotency_key，并由服务端逐条走单条可靠提交序列；批量不是整批事务，单条失败不回滚已成功条目。逐条返回业务结果（或外部边界前的稳定 error_type），请求被接受时整体为 HTTP 200。同键重放复用原 operation，不会创建第二个外部订阅。",
+        "requestBody": {
+            "type": "object",
+            "required": ["items", "confirm", "connection_ref", "configuration_revision"],
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 36,
+                    "description": "显式选择的追番记录；每条独立提交，不重复指向同一记录。",
+                    "items": {
+                        "type": "object",
+                        "required": ["tracking_id", "expected_revision", "idempotency_key"],
+                        "properties": {
+                            "tracking_id": {"type": "string"},
+                            "expected_revision": {"type": "integer", "minimum": 1},
+                            "idempotency_key": {
+                                "type": "string",
+                                "description": "opaque 客户端操作 id；同键网络重放收敛到同一次外部调用。",
+                            },
+                        },
+                    },
+                },
+                "confirm": {
+                    "type": "boolean",
+                    "enum": [True],
+                    "description": "必须为 true：用户显式确认这一批外部提交。",
+                },
+                "connection_ref": {"type": "string", "format": "uuid"},
+                "configuration_revision": {"type": "integer", "minimum": 0},
+                "storage_dir": {
+                    "type": "string",
+                    "description": "存储目录（服务端允许根目录下的相对目录 profile）。",
+                },
+            },
+        },
+        "success": TrackingBatchSubmitResultDTO,
+        "errors": {
+            "400": {
+                "data_validation_errors": "请求参数校验失败",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+                "tracking_confirmation_required": "批量提交 Auto Bangumi 必须显式确认",
+            },
+            "500": {
+                "storage_error": "写入/读取追番记录失败",
                 "storage_json_error": "追番记录 JSON 损坏",
                 "tracking_storage_error": "追番记录存储失败",
                 "tracking_migration_error": "历史数据迁移失败",

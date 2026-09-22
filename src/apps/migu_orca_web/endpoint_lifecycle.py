@@ -54,6 +54,7 @@ ENDPOINT_LIFECYCLE: Final[dict[tuple[str, str], EndpointLifecycle]] = {
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/revalidate"): _entry(_PRIMARY, "提交前本地复核", "TrackingRecord"),
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/submit"): _entry(_PRIMARY, "可靠外部提交", "TrackingRecord + operation"),
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/retry"): _entry(_PRIMARY, "明确失败的可靠重试", "TrackingRecord + operation"),
+    ("POST", "/api/v1/tracking/batch-submit"): _entry(_PRIMARY, "显式批量可靠提交（逐条独立结果）", "TrackingRecord + operation"),
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/modify"): _entry(_PRIMARY, "外部方案修改", "TrackingRecord + operation"),
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/set-enabled"): _entry(_PRIMARY, "外部方案启停", "TrackingRecord + operation"),
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/delete-external"): _entry(_PRIMARY, "外部删除并保留本地数据", "TrackingRecord + operation"),
