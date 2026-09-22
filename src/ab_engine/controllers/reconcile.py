@@ -113,9 +113,10 @@ def reconcile_subscription(
     connection_ref: str | UUID | None = None,
 ) -> ReconcileDecision:
     """Classify one external subscription using deterministic strict evidence."""
-    # External-only records are projections of this same snapshot, not local
-    # evidence.  Including them would turn a stable EXTERNAL_ONLY result into
-    # an EXACT_FIELDS self-match on the next sync.
+    # Records created by an earlier external-only import are projections of this
+    # same snapshot, not local evidence: they carry no exact mapping, so they can
+    # never claim an external object. Issue #88 stopped creating them, so only
+    # historical ones remain.
     candidates = tuple(local for local in locals if local.origin != "EXTERNAL_SYNC")
     current_ref = str(connection_ref) if isinstance(connection_ref, UUID) else connection_ref
     external_id_matches = tuple(
