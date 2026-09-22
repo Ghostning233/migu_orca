@@ -445,6 +445,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tracking/items/{tracking_id}/delete-plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 删除追番方案（可选同时删除受控外部订阅）
+         * @description issue #92：删除本地追番方案与追番记录。存在受控外部订阅时可显式勾选同时删除该外部对象，默认不勾选；未勾选时外部订阅继续运行且 MiGuOrca 放弃管理。勾选时先以可靠管理序列删除精确映射的外部对象，只有明确成功才继续删除本地；明确失败或结果未知时保留本地方案、追番记录、映射与恢复依据。外部删除固定不删除已下载媒体。
+         */
+        post: operations["deleteTrackingPlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tracking/items/{tracking_id}/modify": {
         parameters: {
             query?: never;
@@ -10156,6 +10176,238 @@ export interface operations {
                      *       "ok": false,
                      *       "error_type": "tracking_management_capability_unknown",
                      *       "error_message": "当前 Auto Bangumi 管理能力未验证",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
+    deleteTrackingPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 删除追番方案（可选同时删除受控外部订阅） */
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "delete_external": false,
+                 *       "confirm": true,
+                 *       "idempotency_key": "示例",
+                 *       "connection_ref": "示例",
+                 *       "configuration_revision": 1
+                 *     }
+                 */
+                "application/json": {
+                    /**
+                     * @description 仅当用户显式勾选“同时删除 Auto Bangumi 中的受控外部订阅”时为 true。
+                     * @default false
+                     */
+                    delete_external?: boolean;
+                    /**
+                     * @description 必须为 true：用户显式确认删除追番方案。
+                     * @enum {boolean}
+                     */
+                    confirm: true;
+                    /** @description opaque 幂等键；同键重放复用同一次外部删除。 */
+                    idempotency_key: string;
+                    /** Format: uuid */
+                    connection_ref: string;
+                    configuration_revision: number;
+                    /** @description 服务端允许根目录下的相对目录 profile。 */
+                    storage_dir?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "tracking_id": "示例",
+                     *         "outcome": "示例",
+                     *         "external_deleted": false
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /**
+                         * TrackingPlanDeleteResultDTO
+                         * @description Result of ``POST /api/v1/tracking/items/{tracking_id}/delete-plan`` (#92).
+                         *
+                         *     ``DELETED`` means the local plan and its tracking record are gone (and, when
+                         *     requested, the controlled external subscription was removed first).
+                         *     ``EXTERNAL_FAILED``/``EXTERNAL_UNKNOWN`` mean nothing local was removed: the
+                         *     plan, record, mapping and recovery evidence are all kept.
+                         */
+                        result: {
+                            /** Tracking Id */
+                            tracking_id: string;
+                            /**
+                             * Outcome
+                             * @enum {string}
+                             */
+                            outcome: "DELETED" | "EXTERNAL_FAILED" | "EXTERNAL_UNKNOWN";
+                            /**
+                             * External Deleted
+                             * @default false
+                             */
+                            external_deleted: boolean;
+                        };
+                    };
+                };
+            };
+            /** @description data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / tracking_confirmation_required: 删除追番方案必须显式确认 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "data_validation_errors",
+                     *       "error_message": "请求参数校验失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description tracking_not_found: 未找到该追番记录 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "tracking_not_found",
+                     *       "error_message": "未找到该追番记录",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description tracking_state_conflict: 当前追番正在进行外部操作或存在未决结果，请先恢复后再删除 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "tracking_state_conflict",
+                     *       "error_message": "当前追番正在进行外部操作或存在未决结果，请先恢复后再删除",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description storage_error: 删除本地追番数据失败 / storage_json_error: 追番记录 JSON 损坏 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "storage_error",
+                     *       "error_message": "删除本地追番数据失败",
                      *       "error_data": {
                      *         "failed_step": "示例步骤"
                      *       }

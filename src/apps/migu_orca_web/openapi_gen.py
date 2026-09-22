@@ -57,6 +57,7 @@ from apps.migu_orca_web.api_contract import (
     TrackingDetailResultDTO,
     TrackingItemListResultDTO,
     TrackingManagementResultDTO,
+    TrackingPlanDeleteResultDTO,
     TrackingRecoverResultDTO,
     TrackingRevalidateResultDTO,
     TrackingSubmitResultDTO,
@@ -477,6 +478,42 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         },
         "success": AutoBangumiConnectionTestResultDTO,
         "errors": {"400": {"validation_error": "请求参数校验失败", "config_error": "Auto Bangumi 配置无效"}},
+    },
+    "POST /api/v1/tracking/items/<path:tracking_id>/delete-plan": {
+        "operationId": "deleteTrackingPlan",
+        "summary": "删除追番方案（可选同时删除受控外部订阅）",
+        "description": "issue #92：删除本地追番方案与追番记录。存在受控外部订阅时可显式勾选同时删除该外部对象，默认不勾选；未勾选时外部订阅继续运行且 MiGuOrca 放弃管理。勾选时先以可靠管理序列删除精确映射的外部对象，只有明确成功才继续删除本地；明确失败或结果未知时保留本地方案、追番记录、映射与恢复依据。外部删除固定不删除已下载媒体。",
+        "requestBody": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["confirm", "idempotency_key", "connection_ref", "configuration_revision"],
+            "properties": {
+                "delete_external": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "仅当用户显式勾选“同时删除 Auto Bangumi 中的受控外部订阅”时为 true。",
+                },
+                "confirm": {"type": "boolean", "enum": [True], "description": "必须为 true：用户显式确认删除追番方案。"},
+                "idempotency_key": {"type": "string", "description": "opaque 幂等键；同键重放复用同一次外部删除。"},
+                "connection_ref": {"type": "string", "format": "uuid"},
+                "configuration_revision": {"type": "integer", "minimum": 0},
+                "storage_dir": {"type": "string", "description": "服务端允许根目录下的相对目录 profile。"},
+            },
+        },
+        "success": TrackingPlanDeleteResultDTO,
+        "errors": {
+            "400": {
+                "data_validation_errors": "请求参数校验失败",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+                "tracking_confirmation_required": "删除追番方案必须显式确认",
+            },
+            "404": {"tracking_not_found": "未找到该追番记录"},
+            "409": {"tracking_state_conflict": "当前追番正在进行外部操作或存在未决结果，请先恢复后再删除"},
+            "500": {
+                "storage_error": "删除本地追番数据失败",
+                "storage_json_error": "追番记录 JSON 损坏",
+            },
+        },
     },
     "POST /api/v1/tracking/items/<path:tracking_id>/modify": {
         **_management_endpoint("modifyTrackingItem", "修改外部追番方案", required_extra=["patch"]),

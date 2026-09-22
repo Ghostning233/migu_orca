@@ -20,6 +20,7 @@ from apps.migu_orca_web.blueprints import api_blueprint
 from apps.migu_orca_web.schemas import (
     SavedTrackingBatchSubmitInput,
     SavedTrackingManagementInput,
+    SavedTrackingPlanDeleteInput,
     SavedTrackingRecoveryInput,
     SavedTrackingSubmitInput,
     SavedTrackingSyncInput,
@@ -35,6 +36,7 @@ from apps.migu_orca_web.schemas import (
 )
 from apps.migu_orca_web.services import _storage_dir
 from apps.migu_orca_web.tracking_management_service import management_writer
+from apps.migu_orca_web.tracking_plan_delete_service import run_saved_tracking_plan_delete
 from apps.migu_orca_web.tracking_read_service import (
     build_tracking_detail,
     list_tracking_items,
@@ -199,6 +201,33 @@ class TrackingBatchSubmitView(PostView):
         payload = self.request_validator_model
         assert isinstance(payload, SavedTrackingBatchSubmitInput)
         return run_saved_tracking_batch_submit(
+            load_storage_config(_storage_dir(payload.storage_dir)), payload=payload
+        )
+
+
+@class_route(
+    api_blueprint,
+    "/api/v1/tracking/items/<path:tracking_id>/delete-plan",
+    methods=["POST"],
+)
+class TrackingItemDeletePlanView(PostView):
+    """Delete one tracking plan, optionally with its controlled external object.
+
+    ``delete_external`` defaults to false, so the external subscription keeps
+    running unless the user explicitly ticked the option. A requested external
+    delete runs first through the reliable management sequence and only a
+    confirmed success is followed by the local plan/record delete; a failure or
+    an unknown outcome removes nothing local.
+    """
+
+    request_validator_model = None
+
+    def save(self) -> dict[str, object]:
+        body = request.get_json(silent=True) or {}
+        payload = SavedTrackingPlanDeleteInput.model_validate(
+            {**body, "tracking_id": request.view_args["tracking_id"]}
+        )
+        return run_saved_tracking_plan_delete(
             load_storage_config(_storage_dir(payload.storage_dir)), payload=payload
         )
 

@@ -893,6 +893,54 @@ class TrackingRefreshRssPayload(_TrackingManagementBasePayload):
         return value
 
 
+class SavedTrackingPlanDeleteInput(BaseModel):
+    """Strict handoff for one "delete the tracking plan" request (issue #92).
+
+    ``delete_external`` defaults to false: the external subscription keeps
+    running and MiGuOrca simply stops managing it. Only the checkbox the user
+    explicitly ticked can ask for the external object to be removed too.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tracking_id: StrictStr
+    confirm: StrictBool
+    delete_external: StrictBool = False
+    idempotency_key: StrictStr
+    connection_ref: UUID
+    configuration_revision: StrictInt = Field(ge=0)
+    storage_dir: str | None = None
+
+    @field_validator("tracking_id")
+    @classmethod
+    def _clean_delete_tracking_id(cls, value: str) -> str:
+        return _clean_tracking_id_value(value)
+
+    @field_validator("idempotency_key")
+    @classmethod
+    def _clean_delete_key(cls, value: str) -> str:
+        return _clean_idempotency_key_value(value)
+
+    @field_validator("connection_ref", mode="before")
+    @classmethod
+    def _canonical_delete_ref(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            raise ValueError("connection_ref 必须是规范 UUID")
+        try:
+            parsed = UUID(value)
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ValueError("connection_ref 必须是规范 UUID") from exc
+        if str(parsed) != value:
+            raise ValueError("connection_ref 必须是规范 UUID")
+        return value
+
+    @model_validator(mode="after")
+    def _require_delete_confirmation(self) -> SavedTrackingPlanDeleteInput:
+        if self.confirm is not True:
+            raise ValueError("confirm must be true")
+        return self
+
+
 class SavedTrackingLocalPlan(BaseModel):
     """Local plan values raised together with a confirmed external modify.
 

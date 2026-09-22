@@ -18941,6 +18941,352 @@
         }
       }
     },
+    "/api/v1/tracking/items/{tracking_id}/delete-plan": {
+      "post": {
+        "summary": "删除追番方案（可选同时删除受控外部订阅）",
+        "description": "issue #92：删除本地追番方案与追番记录。存在受控外部订阅时可显式勾选同时删除该外部对象，默认不勾选；未勾选时外部订阅继续运行且 MiGuOrca 放弃管理。勾选时先以可靠管理序列删除精确映射的外部对象，只有明确成功才继续删除本地；明确失败或结果未知时保留本地方案、追番记录、映射与恢复依据。外部删除固定不删除已下载媒体。",
+        "operationId": "deleteTrackingPlan",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "result"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "result": {
+                      "additionalProperties": false,
+                      "description": "Result of ``POST /api/v1/tracking/items/{tracking_id}/delete-plan`` (#92).\n\n``DELETED`` means the local plan and its tracking record are gone (and, when\nrequested, the controlled external subscription was removed first).\n``EXTERNAL_FAILED``/``EXTERNAL_UNKNOWN`` mean nothing local was removed: the\nplan, record, mapping and recovery evidence are all kept.",
+                      "properties": {
+                        "tracking_id": {
+                          "title": "Tracking Id",
+                          "type": "string"
+                        },
+                        "outcome": {
+                          "enum": [
+                            "DELETED",
+                            "EXTERNAL_FAILED",
+                            "EXTERNAL_UNKNOWN"
+                          ],
+                          "title": "Outcome",
+                          "type": "string"
+                        },
+                        "external_deleted": {
+                          "default": false,
+                          "title": "External Deleted",
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "tracking_id",
+                        "outcome"
+                      ],
+                      "title": "TrackingPlanDeleteResultDTO",
+                      "type": "object"
+                    }
+                  }
+                },
+                "example": {
+                  "ok": true,
+                  "result": {
+                    "tracking_id": "示例",
+                    "outcome": "示例",
+                    "external_deleted": false
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / tracking_confirmation_required: 删除追番方案必须显式确认",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "data_validation_errors",
+                  "error_message": "请求参数校验失败",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "tracking_not_found: 未找到该追番记录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "tracking_not_found",
+                  "error_message": "未找到该追番记录",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "tracking_state_conflict: 当前追番正在进行外部操作或存在未决结果，请先恢复后再删除",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "tracking_state_conflict",
+                  "error_message": "当前追番正在进行外部操作或存在未决结果，请先恢复后再删除",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "storage_error: 删除本地追番数据失败 / storage_json_error: 追番记录 JSON 损坏",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "storage_error",
+                  "error_message": "删除本地追番数据失败",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "删除追番方案（可选同时删除受控外部订阅）",
+          "authority": "Request + TrackingRecord + operation"
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "confirm",
+                  "idempotency_key",
+                  "connection_ref",
+                  "configuration_revision"
+                ],
+                "properties": {
+                  "delete_external": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "仅当用户显式勾选“同时删除 Auto Bangumi 中的受控外部订阅”时为 true。"
+                  },
+                  "confirm": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ],
+                    "description": "必须为 true：用户显式确认删除追番方案。"
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "description": "opaque 幂等键；同键重放复用同一次外部删除。"
+                  },
+                  "connection_ref": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "configuration_revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "storage_dir": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "服务端允许根目录下的相对目录 profile。"
+                  }
+                }
+              },
+              "example": {
+                "delete_external": false,
+                "confirm": true,
+                "idempotency_key": "示例",
+                "connection_ref": "示例",
+                "configuration_revision": 1
+              }
+            }
+          },
+          "description": "删除追番方案（可选同时删除受控外部订阅）"
+        }
+      }
+    },
     "/api/v1/tracking/items/{tracking_id}/modify": {
       "post": {
         "summary": "修改外部追番方案",

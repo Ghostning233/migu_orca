@@ -1083,6 +1083,20 @@ class TrackingBatchSubmitSummaryDTO(_StrictBase):
     blocked: int
 
 
+class TrackingPlanDeleteResultDTO(_StrictBase):
+    """Result of ``POST /api/v1/tracking/items/{tracking_id}/delete-plan`` (#92).
+
+    ``DELETED`` means the local plan and its tracking record are gone (and, when
+    requested, the controlled external subscription was removed first).
+    ``EXTERNAL_FAILED``/``EXTERNAL_UNKNOWN`` mean nothing local was removed: the
+    plan, record, mapping and recovery evidence are all kept.
+    """
+
+    tracking_id: str
+    outcome: Literal["DELETED", "EXTERNAL_FAILED", "EXTERNAL_UNKNOWN"]
+    external_deleted: bool = False
+
+
 class TrackingBatchSubmitResultDTO(_StrictBase):
     """Result of ``POST /api/v1/tracking/batch-submit`` (issue #87)."""
 
