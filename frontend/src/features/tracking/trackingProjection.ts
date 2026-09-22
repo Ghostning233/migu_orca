@@ -321,6 +321,35 @@ export function projectTrackingActionScopes(
   return requested.length === 1 ? requested : []
 }
 
+/**
+ * Page-owned result of one unified plan delete (issue #92).
+ *
+ * ``DELETED`` is the only state where the local plan and its tracking record are
+ * gone; the two external states mean nothing local was removed and the user must
+ * retry or recover deliberately.
+ */
+export type TrackingPlanDeleteState = 'IN_FLIGHT' | 'DELETED' | 'EXTERNAL_FAILED' | 'EXTERNAL_UNKNOWN'
+
+export interface TrackingPlanDeleteSession {
+  readonly trackingId: string
+  readonly state: TrackingPlanDeleteState
+  readonly message: string
+}
+
+const PLAN_DELETE_MESSAGES: Record<TrackingPlanDeleteState, string> = {
+  IN_FLIGHT: '正在删除追番方案，请稍候…',
+  DELETED: '追番方案已删除。',
+  EXTERNAL_FAILED: 'Auto Bangumi 未删除该受控外部订阅，本地方案与追番记录均已保留；请核对后重试。',
+  EXTERNAL_UNKNOWN: '外部删除结果未知，本地方案与追番记录均已保留；请先恢复核验后再决定。',
+}
+
+export function createPlanDeleteSession(
+  trackingId: string,
+  state: TrackingPlanDeleteState,
+): TrackingPlanDeleteSession {
+  return { trackingId, state, message: PLAN_DELETE_MESSAGES[state] }
+}
+
 export function makeOpaqueKey(): string {
   const candidate = globalThis.crypto?.randomUUID?.()
   return candidate && /^[A-Za-z0-9-]{8,128}$/.test(candidate)

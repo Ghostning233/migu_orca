@@ -466,3 +466,131 @@ class TestActivePlanApply:
         rendered = json.dumps(body, ensure_ascii=False)
         for forbidden in ("subtitle_group", "password", "token", "rss_url"):
             assert forbidden not in rendered
+
+class TestPlanDelete:
+    """Issue #92: the unified delete removes local data and keeps media."""
+
+    def test_delete_plan_defaults_to_keeping_the_external_subscription(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        item = {
+            **_item("tracking-a", "葬送的芙莉莲"),
+            "request_id": "request-plan",
+            "status": "ACTIVE",
+            "status_label": "追番中",
+            "status_group": "ACTIVE",
+            "available_actions": [],
+        }
+        deletes: list[dict[str, Any]] = []
+        state = {"deleted": False}
+
+        def handler(route: Any, request: Any) -> None:
+            path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+            if request.method == "GET" and path == "/settings/autobangumi":
+                route.fulfill(json={"ok": True, "result": {
+                    "configured": True, "credential_present": True,
+                    "connection_ref": "11111111-1111-4111-8111-111111111111",
+                    "configuration_revision": 1, "connection_status": "CONFIGURED",
+                }})
+                return
+            if request.method == "GET" and path == "/tracking/items":
+                items = [] if state["deleted"] else [item]
+                route.fulfill(json={"ok": True, "result": {
+                    "items": items, "summary": _summary(len(items), active=len(items)), "warnings": [],
+                }})
+                return
+            if request.method == "GET" and path == "/tracking/items/tracking-a":
+                route.fulfill(json={"ok": True, "result": {
+                    **item, "origin": "single", "batch_id": None, "created_at": "2026-09-01T00:00:00Z",
+                    "last_synced_at": None, "safe_info": None, "current_operation": None,
+                    "revalidation_issues": [], "audit_events": [], "warnings": [],
+                    "external_mapping": {"match_reason": "标题", "enabled": True, "external_deleted": False},
+                }})
+                return
+            if request.method == "POST" and path == "/tracking/items/tracking-a/delete-plan":
+                body = request.post_data_json or {}
+                deletes.append(body)
+                state["deleted"] = True
+                route.fulfill(json={"ok": True, "result": {
+                    "tracking_id": "tracking-a", "outcome": "DELETED", "external_deleted": False,
+                }})
+                return
+            route.continue_()
+
+        page.route("**/api/v1/**", handler)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-delete-plan")
+
+        page.locator("#tracking-delete-plan").click()
+        # The option is present but off by default, and the confirm label is fixed.
+        expect(page.locator("#tracking-delete-plan-external")).not_to_be_checked()
+        expect(page.locator("#tracking-delete-plan-confirm")).to_have_text("删除追番方案")
+
+        page.locator("#tracking-delete-plan-confirm").click()
+        page.wait_for_timeout(400)
+
+        assert len(deletes) == 1
+        body = deletes[0]
+        assert body["confirm"] is True
+        assert body["delete_external"] is False
+        rendered = json.dumps(body, ensure_ascii=False)
+        for forbidden in ("file", "delete_files", "password", "token"):
+            assert forbidden not in rendered
+        # The deleted plan leaves the list and the page states the outcome.
+        expect(page.locator(".tracking-list-item")).to_have_count(0)
+
+    def test_cancelling_the_delete_asks_for_nothing(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        item = {
+            **_item("tracking-a", "葬送的芙莉莲"),
+            "request_id": "request-plan",
+            "status": "ACTIVE",
+            "status_label": "追番中",
+            "status_group": "ACTIVE",
+            "available_actions": [],
+        }
+        deletes: list[dict[str, Any]] = []
+
+        def handler(route: Any, request: Any) -> None:
+            path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+            if request.method == "GET" and path == "/settings/autobangumi":
+                route.fulfill(json={"ok": True, "result": {
+                    "configured": True, "credential_present": True,
+                    "connection_ref": "11111111-1111-4111-8111-111111111111",
+                    "configuration_revision": 1, "connection_status": "CONFIGURED",
+                }})
+                return
+            if request.method == "GET" and path == "/tracking/items":
+                route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1, active=1), "warnings": []}})
+                return
+            if request.method == "GET" and path == "/tracking/items/tracking-a":
+                route.fulfill(json={"ok": True, "result": {
+                    **item, "origin": "single", "batch_id": None, "created_at": "2026-09-01T00:00:00Z",
+                    "last_synced_at": None, "safe_info": None, "current_operation": None,
+                    "revalidation_issues": [], "audit_events": [], "warnings": [],
+                    "external_mapping": {"match_reason": "标题", "enabled": True, "external_deleted": False},
+                }})
+                return
+            if request.method == "POST" and path.endswith("/delete-plan"):
+                deletes.append(request.post_data_json or {})
+                route.continue_()
+                return
+            route.continue_()
+
+        page.route("**/api/v1/**", handler)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-delete-plan")
+
+        page.locator("#tracking-delete-plan").click()
+        page.locator("#tracking-delete-plan-cancel").click()
+        page.wait_for_timeout(200)
+
+        assert deletes == []
+        # Back to the idle entry point, with the record still listed.
+        expect(page.locator("#tracking-delete-plan")).to_be_visible()
+        expect(page.locator(".tracking-list-item")).to_have_count(1)

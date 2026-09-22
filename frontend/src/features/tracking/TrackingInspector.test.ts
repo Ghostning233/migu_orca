@@ -736,3 +736,81 @@ describe('TrackingInspector apply-to-Auto-Bangumi (issue #91)', () => {
     expect(payload.localPlan).toEqual(payload.patch)
   })
 })
+
+describe('TrackingInspector unified plan delete (issue #92)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  function deletable(overrides: Record<string, unknown> = {}) {
+    return detail({
+      status: 'ACTIVE',
+      status_label: '追番中',
+      available_actions: [],
+      external_mapping: { match_reason: '标题', enabled: true, external_deleted: false },
+      ...overrides,
+    })
+  }
+
+  it('offers the delete entry only while no external action is unresolved', async () => {
+    apiGet.mockResolvedValue(deletable() as never)
+    const wrapper = await mountInspector()
+    expect(wrapper.find('#tracking-delete-plan').text()).toBe('删除追番方案')
+
+    for (const status of ['SUBMITTING', 'REVALIDATING', 'VERIFYING_EXTERNAL', 'RECOVERY_REQUIRED']) {
+      apiGet.mockResolvedValue(deletable({ status }) as never)
+      const blocked = await mountInspector()
+      expect(blocked.find('#tracking-delete-plan').exists()).toBe(false)
+    }
+  })
+
+  it('keeps the external option off by default and never changes the confirm label', async () => {
+    apiGet.mockResolvedValue(deletable() as never)
+    const wrapper = await mountInspector()
+
+    await wrapper.find('#tracking-delete-plan').trigger('click')
+
+    const checkbox = wrapper.find('#tracking-delete-plan-external')
+    expect(checkbox.exists()).toBe(true)
+    expect((checkbox.element as HTMLInputElement).checked).toBe(false)
+    expect(wrapper.find('#tracking-delete-plan-confirm').text()).toBe('删除追番方案')
+
+    await checkbox.setValue(true)
+    expect(wrapper.find('#tracking-delete-plan-confirm').text()).toBe('删除追番方案')
+    expect(wrapper.find('#tracking-delete-plan-section').text()).toContain('先删除 Auto Bangumi 中的受控外部订阅')
+
+    await checkbox.setValue(false)
+    expect(wrapper.find('#tracking-delete-plan-confirm').text()).toBe('删除追番方案')
+    expect(wrapper.find('#tracking-delete-plan-section').text()).toContain('MiGuOrca 不再管理')
+  })
+
+  it('asks for nothing on cancel and sends the ticked choice on confirm', async () => {
+    apiGet.mockResolvedValue(deletable() as never)
+    const wrapper = await mountInspector()
+    await wrapper.find('#tracking-delete-plan').trigger('click')
+
+    await wrapper.find('#tracking-delete-plan-cancel').trigger('click')
+    expect(wrapper.emitted('plan-delete-requested')).toBeUndefined()
+    expect(wrapper.find('#tracking-delete-plan').exists()).toBe(true)
+
+    await wrapper.find('#tracking-delete-plan').trigger('click')
+    await wrapper.find('#tracking-delete-plan-external').setValue(true)
+    await wrapper.find('#tracking-delete-plan-confirm').trigger('click')
+
+    const payload = wrapper.emitted('plan-delete-requested')?.at(-1)?.[0] as {
+      item: { tracking_id: string }
+      deleteExternal: boolean
+    }
+    expect(payload.item.tracking_id).toBe('tracking-1')
+    expect(payload.deleteExternal).toBe(true)
+  })
+
+  it('hides the external option for a plan with no controlled subscription', async () => {
+    apiGet.mockResolvedValue(detail({ status: 'ACTIVE', available_actions: [] }) as never)
+    const wrapper = await mountInspector()
+    await wrapper.find('#tracking-delete-plan').trigger('click')
+
+    expect(wrapper.find('#tracking-delete-plan-external').exists()).toBe(false)
+    await wrapper.find('#tracking-delete-plan-confirm').trigger('click')
+    const payload = wrapper.emitted('plan-delete-requested')?.at(-1)?.[0] as { deleteExternal: boolean }
+    expect(payload.deleteExternal).toBe(false)
+  })
+})

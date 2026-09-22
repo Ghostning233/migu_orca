@@ -36,6 +36,8 @@ import {
 } from '@/features/requests/useSavedPlanEditor'
 import type { RequestDetailResult } from '@/features/requests/requestDetail'
 import type { PreviewPatch } from '@/features/workbench/candidateSearch'
+import type { TrackingPlanDeleteSession } from './trackingProjection'
+import CheckboxRow from '@/components/forms/CheckboxRow.vue'
 import TrackingExternalDelete from './TrackingExternalDelete.vue'
 import TrackingManagementActions from './TrackingManagementActions.vue'
 import TrackingModifyForm from './TrackingModifyForm.vue'
@@ -64,6 +66,8 @@ const props = defineProps<{
   managementSession?: TrackingManagementSession | null
   /** The single page intent is spent elsewhere (another item's write/recovery). */
   writeBusy?: boolean
+  /** Page-owned plan-delete result for this item (issue #92). */
+  planDeleteSession?: TrackingPlanDeleteSession | null
   /**
    * Fixed page-level reason a locked intent refused a different request. It is
    * shown on the selected record only and never replaces a result panel.
@@ -78,6 +82,8 @@ const emit = defineEmits<{
   (e: 'recovery-requested', payload: { action: TrackingRecoveryActionCode; item: TrackingItem }): void
   // A management request carries the scope the user chose and the strict patch
   // its own form built; the page re-validates both before anything is sent.
+  /** Issue #92: delete this plan, optionally with its controlled external object. */
+  (e: 'plan-delete-requested', payload: { item: TrackingItem; deleteExternal: boolean }): void
   (e: 'management-requested', payload: {
     action: TrackingAction
     item: TrackingItem
@@ -358,6 +364,54 @@ function applyPlanToExternal(patch: PreviewPatch): void {
   })
 }
 
+// -- unified plan delete (issue #92) -----------------------------------------
+// One business action removes the local plan and its tracking record; the
+// controlled external subscription is removed first only when the user ticked
+// the option, and its default is always off.
+const UNDELETABLE_PLAN_STATUSES = new Set([
+  'SUBMITTING', 'REVALIDATING', 'VERIFYING_EXTERNAL', 'RECOVERY_REQUIRED',
+])
+const deletePlanOpen = ref(false)
+const deleteExternalChecked = ref(false)
+
+const canDeletePlan = computed(() => Boolean(
+  detail.value
+  && !UNDELETABLE_PLAN_STATUSES.has(detail.value.status)
+  && !detail.value.current_operation
+))
+/** Only a controlled mapping makes the external option applicable at all. */
+const deletePlanHasExternal = computed(() => Boolean(detail.value?.external_mapping))
+const thisPlanDelete = computed(() => (
+  props.planDeleteSession && props.planDeleteSession.trackingId === props.trackingId
+    ? props.planDeleteSession
+    : null
+))
+
+const deletePlanConsequence = computed(() => (
+  deleteExternalChecked.value
+    ? '将先删除 Auto Bangumi 中的受控外部订阅，明确成功后再删除本地方案与追番记录；该外部对象不会被保留，也不会删除已下载媒体。'
+    : '本地方案与追番记录将被删除；Auto Bangumi 中的受控外部订阅继续运行，但 MiGuOrca 不再管理它。已下载媒体始终保留。'
+))
+
+function openDeletePlan(): void {
+  deletePlanOpen.value = true
+  deleteExternalChecked.value = false
+}
+
+function cancelDeletePlan(): void {
+  // Cancelling asks for nothing: no request leaves the page.
+  deletePlanOpen.value = false
+  deleteExternalChecked.value = false
+}
+
+function confirmDeletePlan(): void {
+  if (!detail.value || !canDeletePlan.value) return
+  emit('plan-delete-requested', {
+    item: detail.value,
+    deleteExternal: deletePlanHasExternal.value && deleteExternalChecked.value,
+  })
+}
+
 function requestManagement(payload: {
   action: TrackingAction
   item: TrackingItem
@@ -497,6 +551,53 @@ defineExpose({ reload: () => fetchDetail(true) })
         <p v-if="thisManagementAction" id="tracking-apply-result" class="field-help" role="status">
           {{ thisManagementAction.message }}
         </p>
+      </section>
+
+      <section
+        v-if="canDeletePlan"
+        id="tracking-delete-plan-section"
+        class="tracking-inspector-section tracking-delete-plan-section"
+        aria-labelledby="tracking-delete-plan-heading"
+      >
+        <h4 id="tracking-delete-plan-heading">删除追番方案</h4>
+        <p class="field-help">删除本地方案与追番记录；已下载的媒体始终保留。</p>
+        <BaseButton
+          v-if="!deletePlanOpen"
+          id="tracking-delete-plan"
+          variant="danger"
+          :disabled="actionBusy"
+          @click="openDeletePlan"
+        >删除追番方案</BaseButton>
+        <template v-else>
+          <CheckboxRow
+            v-if="deletePlanHasExternal"
+            id="tracking-delete-plan-external"
+            v-model:checked="deleteExternalChecked"
+            label="同时删除 Auto Bangumi 中的受控外部订阅"
+          />
+          <p class="field-help">{{ deletePlanConsequence }}</p>
+          <div class="tracking-delete-plan-actions">
+            <BaseButton
+              id="tracking-delete-plan-confirm"
+              variant="danger"
+              :loading="Boolean(thisPlanDelete && thisPlanDelete.state === 'IN_FLIGHT')"
+              :disabled="actionBusy"
+              @click="confirmDeletePlan"
+            >删除追番方案</BaseButton>
+            <BaseButton
+              id="tracking-delete-plan-cancel"
+              variant="secondary"
+              :disabled="actionBusy"
+              @click="cancelDeletePlan"
+            >取消</BaseButton>
+          </div>
+        </template>
+        <p
+          v-if="thisPlanDelete && thisPlanDelete.state !== 'IN_FLIGHT'"
+          id="tracking-delete-plan-result"
+          class="field-help"
+          role="status"
+        >{{ thisPlanDelete.message }}</p>
       </section>
 
       <section

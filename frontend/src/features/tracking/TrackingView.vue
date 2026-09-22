@@ -34,6 +34,8 @@ import {
   isRecoveryActionCode,
   isTrackingManagementScope,
   isWriteActionCode,
+  createPlanDeleteSession,
+  makeOpaqueKey,
   managementSessionKeepsIntent,
   probeStatusLabel,
   projectCapabilitySummary,
@@ -56,6 +58,7 @@ import {
   type TrackingListSummary,
   type TrackingManagementScope,
   type TrackingManagementSession,
+  type TrackingPlanDeleteSession,
   type TrackingRecoverResult,
   type TrackingRecoveryActionCode,
   type TrackingRecoverySession,
@@ -104,6 +107,9 @@ type CapabilityResult = NonNullable<
   operations['probeSavedAutoBangumiCapabilities']['responses']['200']['content']['application/json']['result']
 >
 type SavedConnection = NonNullable<operations['getAutoBangumiConnection']['responses']['200']['content']['application/json']['result']>
+type PlanDeleteResult = NonNullable<
+  operations['deleteTrackingPlan']['responses']['200']['content']['application/json']['result']
+>
 type BatchResult = NonNullable<
   operations['submitTrackingBatch']['responses']['200']['content']['application/json']['result']
 >
@@ -617,6 +623,65 @@ async function recheckAfterAction(trackingId: string, refreshList = false): Prom
 // the page owns the single confirmation and the request, every entry keeps its
 // own revision and opaque key, and filtering never clears the selection.
 const TRACKING_BATCH_SUBMIT_ENDPOINT = '/api/v1/tracking/batch-submit'
+// Unified plan delete (issue #92): the page owns the single request and result.
+const planDeleteSession = ref<TrackingPlanDeleteSession | null>(null)
+let planDeleteSequence = 0
+
+async function runPlanDelete(payload: {
+  item: TrackingItem
+  deleteExternal: boolean
+}): Promise<void> {
+  const config = savedRef.value
+  if (!config?.connection_ref) return
+  const trackingId = payload.item.tracking_id
+  const sequence = ++planDeleteSequence
+  planDeleteSession.value = createPlanDeleteSession(trackingId, 'IN_FLIGHT')
+  try {
+    const storageDir = storageQuery().storage_dir
+    const result = await api.post<PlanDeleteResult>(
+      '/api/v1/tracking/items/{tracking_id}/delete-plan',
+      {
+        path: { tracking_id: trackingId },
+        body: {
+          confirm: true,
+          delete_external: payload.deleteExternal,
+          idempotency_key: makeOpaqueKey(),
+          connection_ref: config.connection_ref,
+          configuration_revision: config.configuration_revision,
+          ...(storageDir ? { storage_dir: storageDir } : {}),
+        },
+      },
+    )
+    if (sequence !== planDeleteSequence) return
+    const state = result?.outcome === 'DELETED'
+      ? 'DELETED'
+      : result?.outcome === 'EXTERNAL_FAILED' ? 'EXTERNAL_FAILED' : 'EXTERNAL_UNKNOWN'
+    planDeleteSession.value = createPlanDeleteSession(trackingId, state)
+    if (state === 'DELETED') {
+      notification.show(
+        'success',
+        '追番方案已删除',
+        payload.deleteExternal
+          ? '已同时删除受控外部订阅；已下载媒体保留。'
+          : 'Auto Bangumi 中的订阅继续运行，MiGuOrca 不再管理它。',
+      )
+      if (selectedTrackingId.value === trackingId) selectedTrackingId.value = ''
+      await loadList(true)
+      return
+    }
+    await recheckAfterAction(trackingId, true)
+  } catch (error) {
+    if (sequence !== planDeleteSequence) return
+    const apiError = toApiError(error)
+    if (apiError.cancelled && !apiError.httpError) return
+    planDeleteSession.value = createPlanDeleteSession(
+      trackingId,
+      apiError.status === 409 ? 'EXTERNAL_FAILED' : 'EXTERNAL_UNKNOWN',
+    )
+    await recheckAfterAction(trackingId, true)
+  }
+}
+
 const batchMode = ref(false)
 const batchSelection = ref<TrackingBatchSelection>(EMPTY_BATCH_SELECTION)
 const batchPending = ref(false)
@@ -1288,6 +1353,8 @@ onBeforeUnmount(() => {
           :management-session="managementSession"
           :write-busy="inspectorIntentBusy"
           :intent-notice="selectedIntentNotice"
+          :plan-delete-session="planDeleteSession"
+          @plan-delete-requested="runPlanDelete"
           @tracking-updated="applyReturnedTracking"
           @write-requested="runTrackingWrite"
           @recovery-requested="runTrackingRecovery"
