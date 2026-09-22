@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from playwright.sync_api import Page, expect
 
-from tests.browser.conftest import create_saved_request, set_storage_preferences
+from tests.browser.conftest import set_storage_preferences
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
