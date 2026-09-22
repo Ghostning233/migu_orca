@@ -857,3 +857,32 @@ describe('TrackingInspector plan reuse (issue #93)', () => {
       expect(wrapper.find('#tracking-reuse-plan').exists()).toBe(false)
     })
 })
+
+describe('TrackingInspector unresolved-intent gate (issue #91 AC 6)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  it('blocks every conflicting action while this item\'s external result is unresolved', async () => {
+    apiGet.mockResolvedValue(detail({
+      status: 'ACTIVE',
+      status_label: '追番中',
+      available_actions: [applyModifyAction],
+      external_mapping: { match_reason: '标题', enabled: true, external_deleted: false },
+    }) as never)
+
+    for (const session of [
+      { trackingId: 'tracking-1', state: 'UNKNOWN', action: 'SUBMIT', message: '', issues: [], failureCategory: null },
+      { trackingId: 'tracking-1', state: 'VERIFYING_EXTERNAL', action: 'SUBMIT', message: '', issues: [], failureCategory: null },
+      { trackingId: 'tracking-1', state: 'RECOVERY_REQUIRED', action: 'SUBMIT', message: '', issues: [], failureCategory: null },
+    ]) {
+      const wrapper = await mountInspector('tracking-1', { writeSession: session })
+      expect(wrapper.find('#tracking-apply-plan').attributes('disabled')).toBeDefined()
+      expect(wrapper.find('#tracking-delete-plan').attributes('disabled')).toBeDefined()
+    }
+
+    // A definite result releases the gate again.
+    const settled = await mountInspector('tracking-1', {
+      writeSession: { trackingId: 'tracking-1', state: 'ACTIVE', action: 'SUBMIT', message: '', issues: [], failureCategory: null },
+    })
+    expect(settled.find('#tracking-apply-plan').attributes('disabled')).toBeUndefined()
+  })
+})

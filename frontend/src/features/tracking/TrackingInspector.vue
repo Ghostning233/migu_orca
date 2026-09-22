@@ -11,7 +11,10 @@ import {
   canVerifyExternally,
   executableTrackingActions,
   MANAGEMENT_NEEDS_MANUAL_NOTICE,
+  managementSessionKeepsIntent,
   projectTrackingActionScopes,
+  recoverySessionKeepsLock,
+  writeSessionKeepsIntent,
   RECOVERY_NEEDS_MANUAL_NOTICE,
   type CapabilityResult,
   type TrackingAction,
@@ -256,7 +259,24 @@ const itemActionInFlight = computed(() => (
  * Management actions are server-computed, so a record in a recovery status
  * never offers any — this lock covers the actions the page can actually send.
  */
-const actionBusy = computed(() => props.writeBusy === true || itemActionInFlight.value)
+const itemIntentUnresolved = computed(() => {
+  const trackingId = props.trackingId
+  const write = props.writeSession?.trackingId === trackingId
+    && writeSessionKeepsIntent(props.writeSession.state)
+  const recovery = props.recoverySession?.trackingId === trackingId
+    && recoverySessionKeepsLock(props.recoverySession.state)
+  const management = props.managementSession?.trackingId === trackingId
+    && managementSessionKeepsIntent(props.managementSession)
+  return Boolean(write || recovery || management)
+})
+/**
+ * In-flight *or* unresolved: an external result whose outcome is not yet
+ * confirmed keeps every conflicting action blocked until an explicit recovery
+ * converges it (issue #91 AC 6), instead of racing the pending write.
+ */
+const actionBusy = computed(() => (
+  props.writeBusy === true || itemActionInFlight.value || itemIntentUnresolved.value
+))
 
 function requestRecovery(action: TrackingRecoveryActionCode): void {
   if (!detail.value || actionBusy.value) return
