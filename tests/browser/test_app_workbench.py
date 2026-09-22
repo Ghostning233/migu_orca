@@ -784,8 +784,8 @@ class TestAppWorkbenchCandidateSelectionAndDraft:
                                 "summary": {"request_id": "req-wb-341", "status": "ACCEPTED"},
                                 "handoff": {
                                     "request_id": "req-wb-341",
-                                    "status": "CONFIRMED",
-                                    "next_action": "TRACKING",
+                                    "status": "ACCEPTED",
+                                    "next_action": "OPEN_TRACKING",
                                     "tracking_id": "tracking-wb-341",
                                     "tracking_status": "PENDING_SUBMIT",
                                     "tracking_ready": True,
@@ -1055,8 +1055,8 @@ class TestAppWorkbenchCandidateSelectionAndDraft:
                         "summary": {"request_id": "req-wb-save", "status": "ACCEPTED"},
                         "handoff": {
                             "request_id": "req-wb-save",
-                            "status": "CONFIRMED",
-                            "next_action": "TRACKING",
+                            "status": "ACCEPTED",
+                            "next_action": "OPEN_TRACKING",
                             "tracking_id": "tracking-wb-save",
                             "tracking_status": "PENDING_SUBMIT",
                             "tracking_ready": True,

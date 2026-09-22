@@ -103,6 +103,7 @@
 | PUT | `/api/v1/settings/autobangumi` | PRIMARY | 部署端 Auto Bangumi 配置保存 | Deployment config repository |
 | DELETE | `/api/v1/settings/autobangumi` | PRIMARY | 部署端 Auto Bangumi 配置清除 | Deployment config repository |
 | POST | `/api/v1/settings/autobangumi/probe` | PRIMARY | 使用已保存连接执行显式只读能力探测；结果仅绑定当前 ref/revision | Capability probe cache |
+| POST | `/api/v1/settings/autobangumi/test` | PRIMARY | 当前连接草稿的瞬时只读探测 | Request-scoped capability probe |
 | GET | `/api/v1/preferences` | PRIMARY | 偏好读取 | Preference store |
 | POST | `/api/v1/preferences` | PRIMARY | 偏好保存 | Preference store |
 | GET | `/api/v1/corrections` | PRIMARY | 纠正规则读取 | Correction store |

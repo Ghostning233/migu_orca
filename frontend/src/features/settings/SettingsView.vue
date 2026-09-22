@@ -20,9 +20,9 @@
 // written to store, URL, localStorage/sessionStorage, logs or traces. The
 // AB submit context (request_id) is read from the URL query but the
 // credentials themselves never go into the URL.
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
-import { api } from '@/api/client'
+import { api, isApiError, toApiError } from '@/api/client'
 import type { operations } from '@/api/generated/api'
 import { useNotificationStore } from '@/app/stores/notification'
 import { refreshConnectionStatus } from '@/app/stores/connectionStatus'
@@ -245,7 +245,11 @@ const ab = useSensitiveFields({
   token: { label: 'API Token' },
 })
 const abAuthMode = ref<'password' | 'api_token'>('password')
-const abFallbackEnabled = ref(false)
+const abProtocol = ref<'http' | 'https'>('http')
+const abHost = ref('')
+const abPort = ref('')
+const abLocked = ref(false)
+const verifiedDraft = ref<string | null>(null)
 const abLoading = ref(false)
 const abStatus = ref<{ kind: 'success' | 'error' | 'info' | 'empty'; message: string }>({
   kind: 'empty',
@@ -253,11 +257,14 @@ const abStatus = ref<{ kind: 'success' | 'error' | 'info' | 'empty'; message: st
 })
 type ConnectionSummary = NonNullable<operations['getAutoBangumiConnection']['responses']['200']['content']['application/json']['result']>
 type SaveConnectionBody = NonNullable<operations['saveAutoBangumiConnection']['requestBody']['content']['application/json']>
-type ProbeResult = NonNullable<operations['probeSavedAutoBangumiCapabilities']['responses']['200']['content']['application/json']['result']>
+type TestConnectionBody = NonNullable<operations['testAutoBangumiConnection']['requestBody']['content']['application/json']>
+type TestConnectionResult = NonNullable<operations['testAutoBangumiConnection']['responses']['200']['content']['application/json']['result']>
 const savedConnection = ref<ConnectionSummary | null>(null)
+const draftGeneration = ref(0)
+const verifiedGeneration = ref<number | null>(null)
 
 const abBaseUrl = computed({
-  get: () => ab.get('baseUrl'),
+  get: () => `${abProtocol.value}://${abHost.value}${abPort.value ? `:${abPort.value}` : ''}`,
   set: (value: string) => ab.set('baseUrl', value),
 })
 const abUsername = computed({
@@ -273,12 +280,11 @@ const abToken = computed({
   set: (value: string) => ab.set('token', value),
 })
 
-function buildAbConfig(): Record<string, string | boolean> {
-  const serviceRoot = validateAutoBangumiServiceRoot(ab.get('baseUrl'))
+function buildAbConfig(): Record<string, string> {
+  const serviceRoot = validateAutoBangumiServiceRoot(abBaseUrl.value)
   const base: Record<string, string | boolean> = {
     auth_mode: abAuthMode.value,
-    base_url: serviceRoot.value ?? ab.get('baseUrl').trim(),
-    fallback_enabled: abFallbackEnabled.value,
+    base_url: serviceRoot.value ?? abBaseUrl.value.trim(),
   }
   if (abAuthMode.value === 'api_token') {
     base.token = ab.get('token')
@@ -286,11 +292,14 @@ function buildAbConfig(): Record<string, string | boolean> {
     base.username = ab.get('username')
     base.password = ab.get('password')
   }
-  return base
+  return base as Record<string, string>
 }
 
 function abValidate(): string | null {
-  const serviceRoot = validateAutoBangumiServiceRoot(ab.get('baseUrl'))
+  if (!abHost.value.trim()) return '请填写主机或 IP。'
+  if (abHost.value.includes(':') || /[/?#@\\\s]/.test(abHost.value)) return '主机或 IP 不能包含端口或路径。'
+  if (abPort.value && (!/^\d+$/.test(abPort.value) || Number(abPort.value) < 1 || Number(abPort.value) > 65535)) return '端口必须是 1–65535。'
+  const serviceRoot = validateAutoBangumiServiceRoot(abBaseUrl.value)
   if (!serviceRoot.value) return serviceRoot.message ?? '请填写合法的 Auto Bangumi 服务根地址。'
   if (abAuthMode.value === 'api_token') {
     if (!ab.get('token')) return '请填写 API Token。'
@@ -304,6 +313,21 @@ function abValidate(): string | null {
 function switchAbAuthMode(): void {
   ab.reset()
 }
+function invalidateAbDraft(): void {
+  draftGeneration.value += 1
+  verifiedDraft.value = null
+  verifiedGeneration.value = null
+}
+
+watch(
+  () => [abProtocol.value, abHost.value, abPort.value, abAuthMode.value, abUsername.value, abPassword.value, abToken.value],
+  () => {
+    draftGeneration.value += 1
+    verifiedDraft.value = null
+    verifiedGeneration.value = null
+  },
+  { flush: 'sync' },
+)
 
 async function testAbConnection(): Promise<void> {
   const validation = abValidate()
@@ -314,12 +338,18 @@ async function testAbConnection(): Promise<void> {
   abLoading.value = true
   abStatus.value = { kind: 'info', message: '正在测试 Auto Bangumi 连接...' }
   try {
-    const body: SaveConnectionBody = { confirm: true, expected_configuration_revision: savedConnection.value?.configuration_revision ?? 0, config: buildAbConfig() as SaveConnectionBody['config'] }
-    const result = await api.put<ConnectionSummary>('/api/v1/settings/autobangumi', { body })
-    savedConnection.value = result
-    refreshConnectionStatus()
-    abStatus.value = { kind: 'success', message: 'Auto Bangumi 连接已保存。请点击“测试已保存连接”进行显式探测。' }
-    ab.clearAll()
+    const config = buildAbConfig() as TestConnectionBody['config']
+    const requestGeneration = draftGeneration.value
+    const requestSnapshot = JSON.stringify(config)
+    const result = await api.post<TestConnectionResult>('/api/v1/settings/autobangumi/test', { body: { config } })
+    if (!result.success) throw new Error('probe failed')
+    if (requestGeneration !== draftGeneration.value || requestSnapshot !== JSON.stringify(buildAbConfig())) {
+      abStatus.value = { kind: 'info', message: '连接草稿已变化，测试结果已失效；请重新测试。' }
+      return
+    }
+    verifiedDraft.value = JSON.stringify(config)
+    verifiedGeneration.value = draftGeneration.value
+    abStatus.value = { kind: 'success', message: '连接测试成功。当前草稿已验证，可以保存。' }
   } catch (error) {
     if (typeof error === 'object' && error !== null && 'status' in error && error.status === 409) {
       await loadSavedConnection()
@@ -336,8 +366,36 @@ async function testAbConnection(): Promise<void> {
     abLoading.value = false
   }
 }
-async function loadSavedConnection(): Promise<void> { try { savedConnection.value = await api.get<ConnectionSummary>('/api/v1/settings/autobangumi') } catch { savedConnection.value = null } }
-async function probeSavedConnection(): Promise<void> { if (!savedConnection.value?.connection_ref) return; abLoading.value = true; try { const result = await api.post<ProbeResult>('/api/v1/settings/autobangumi/probe', { body: { connection_ref: savedConnection.value.connection_ref, configuration_revision: savedConnection.value.configuration_revision } }); abStatus.value = { kind: 'success', message: `连接探测结果：${result.probe_status}` }; refreshConnectionStatus() } catch { abStatus.value = { kind: 'error', message: '连接探测失败；已保存配置未删除。' } } finally { abLoading.value = false } }
+async function saveAbConnection(): Promise<void> {
+  const validation = abValidate()
+  const config = buildAbConfig()
+  if (validation) { abStatus.value = { kind: 'error', message: validation }; return }
+  if (verifiedGeneration.value !== draftGeneration.value || verifiedDraft.value !== JSON.stringify(config)) { abStatus.value = { kind: 'error', message: '请先测试当前连接草稿；修改任一字段后需重新测试。' }; return }
+  abLoading.value = true
+  try {
+    const body: SaveConnectionBody = { confirm: true, expected_configuration_revision: savedConnection.value?.configuration_revision ?? 0, config: config as SaveConnectionBody['config'] }
+    savedConnection.value = await api.put<ConnectionSummary>('/api/v1/settings/autobangumi', { body })
+    abLocked.value = true
+    verifiedDraft.value = null
+    verifiedGeneration.value = null
+    ab.clearAll()
+    abHost.value = ''
+    abPort.value = ''
+    refreshConnectionStatus()
+    abStatus.value = { kind: 'success', message: 'Auto Bangumi 连接已保存。' }
+  } catch (error) {
+    const safeError = toApiError(error)
+    if (isApiError(error) && safeError.status === 409) {
+      await loadSavedConnection()
+      abStatus.value = { kind: 'error', message: '配置已变化，已重新读取摘要；请重新确认后再保存。' }
+      return
+    }
+    abStatus.value = { kind: 'error', message: 'Auto Bangumi 连接保存失败，请重试。' }
+    notification.error('Auto Bangumi 连接保存失败', '请检查配置后重试。')
+  } finally { abLoading.value = false }
+}
+function editAbConnection(): void { abLocked.value = false; ab.clearAll(); verifiedDraft.value = null; verifiedGeneration.value = null; abStatus.value = { kind: 'info', message: '请重新填写连接信息并测试。' } }
+async function loadSavedConnection(): Promise<void> { try { savedConnection.value = await api.get<ConnectionSummary>('/api/v1/settings/autobangumi'); abLocked.value = Boolean(savedConnection.value?.configured) } catch { savedConnection.value = null } }
 async function deleteSavedConnection(): Promise<void> { const ok = await confirmDialog.value?.confirm({ title: '清除 Auto Bangumi 连接', message: '确认清除已保存连接？不会影响本地方案或媒体。', confirmLabel: '清除', danger: true }); if (!ok || !savedConnection.value) return; try { savedConnection.value = await api.delete<ConnectionSummary>('/api/v1/settings/autobangumi', { body: { confirm: true, expected_configuration_revision: savedConnection.value.configuration_revision } }); abStatus.value = { kind: 'success', message: '已清除 Auto Bangumi 连接。' }; refreshConnectionStatus() } catch { abStatus.value = { kind: 'error', message: '清除失败，请重新读取后重试。' } } }
 
 const confirmDialog = ref<InstanceType<typeof ConfirmDialog> | null>(null)
@@ -524,8 +582,8 @@ onMounted(() => {
         <p class="field-help">已保存连接：{{ savedConnection?.credential_present ? '已配置' : '未配置' }}；配置版本 {{ savedConnection?.configuration_revision ?? 0 }}。</p>
       </div>
 
-      <form id="settings-ab-save-form" class="settings-form" @submit.prevent="testAbConnection">
-        <p class="field-help">保存与探测分离；秘密仅提交到服务端保存配置接口，永不回显。</p>
+      <form id="settings-ab-save-form" class="settings-form" @submit.prevent="saveAbConnection">
+        <p class="field-help">连接测试只做当前草稿的瞬时只读探测，不保存配置；保存成功后表单锁定且不回显秘密。</p>
 
         <FormField label="认证方式" inputId="settings-ab-auth-mode">
           <BaseSelect
@@ -536,21 +594,31 @@ onMounted(() => {
               { value: 'password', label: '账号密码' },
               { value: 'api_token', label: 'API Token' },
             ]"
+            :disabled="abLocked"
+            @update:model-value="invalidateAbDraft"
+            @input="invalidateAbDraft"
             @change="switchAbAuthMode"
           />
         </FormField>
 
-        <FormField label="服务地址" inputId="settings-ab-endpoint">
+        <FormField label="协议" inputId="settings-ab-protocol">
+          <BaseSelect id="settings-ab-protocol" v-model="abProtocol" label="协议" :disabled="abLocked" :options="[{ value: 'http', label: 'HTTP' }, { value: 'https', label: 'HTTPS' }]" @update:model-value="invalidateAbDraft" />
+        </FormField>
+        <FormField label="主机或 IP" inputId="settings-ab-endpoint">
           <BaseInput
             id="settings-ab-endpoint"
-            v-model="abBaseUrl"
-            name="ab_base_url"
+            v-model="abHost"
+            name="ab_host"
             type="text"
-            inputmode="url"
             autocomplete="off"
-            placeholder="例如：192.168.1.20:7890"
+            :disabled="abLocked"
+            @update:model-value="invalidateAbDraft"
+            placeholder="例如：192.168.1.20"
           />
-          <p class="field-help">{{ AUTO_BANGUMI_SERVICE_ROOT_HELP }}</p>
+          <p class="field-help">{{ AUTO_BANGUMI_SERVICE_ROOT_HELP }}主机字段不得包含端口。</p>
+        </FormField>
+        <FormField label="端口（可选）" inputId="settings-ab-port">
+          <BaseInput id="settings-ab-port" v-model="abPort" name="ab_port" type="text" inputmode="numeric" autocomplete="off" placeholder="HTTP 80 / HTTPS 443" :disabled="abLocked" @update:model-value="invalidateAbDraft" @input="invalidateAbDraft" />
         </FormField>
 
         <template v-if="abAuthMode === 'password'">
@@ -561,6 +629,9 @@ onMounted(() => {
               name="ab_username"
               type="text"
               autocomplete="username"
+              :disabled="abLocked"
+              @update:model-value="invalidateAbDraft"
+              @input="invalidateAbDraft"
             />
           </FormField>
           <FormField label="密码" inputId="settings-ab-password">
@@ -570,6 +641,9 @@ onMounted(() => {
               name="ab_password"
               type="password"
               autocomplete="current-password"
+              :disabled="abLocked"
+              @update:model-value="invalidateAbDraft"
+              @input="invalidateAbDraft"
             />
           </FormField>
         </template>
@@ -582,24 +656,23 @@ onMounted(() => {
               type="password"
               autocomplete="off"
               placeholder="Auto Bangumi Token"
+              :disabled="abLocked"
+              @update:model-value="invalidateAbDraft"
+              @input="invalidateAbDraft"
             />
           </FormField>
         </template>
 
-        <CheckboxRow
-          id="settings-ab-fallback-enabled"
-          v-model:checked="abFallbackEnabled"
-          label="提交时启用备用兼容选项"
-        />
         <p class="field-help">
-          默认使用账号密码；API Token 模式仅兼容只读连接探测。提交前需要确认；成功后清空认证信息。
+          默认使用账号密码；API Token 模式仅兼容只读连接探测。
         </p>
 
         <StatusAlert :kind="abStatus.kind" :message="abStatus.message" />
 
         <div class="settings-actions">
-          <BaseButton id="settings-ab-save" type="submit" variant="primary" :loading="abLoading">保存连接</BaseButton>
-          <BaseButton id="settings-ab-probe" type="button" :disabled="abLoading || !savedConnection?.connection_ref" @click="probeSavedConnection">测试已保存连接</BaseButton>
+          <BaseButton v-if="!abLocked" id="settings-ab-test" type="button" variant="secondary" :loading="abLoading" @click="testAbConnection">测试连接</BaseButton>
+          <BaseButton v-if="!abLocked" id="settings-ab-save" type="submit" variant="primary" :disabled="abLoading || !verifiedDraft" :loading="abLoading">保存连接</BaseButton>
+          <BaseButton v-else id="settings-ab-edit" type="button" @click="editAbConnection">修改连接</BaseButton>
           <BaseButton id="settings-ab-delete" type="button" variant="danger" :disabled="abLoading || !savedConnection?.credential_present" @click="deleteSavedConnection">清除连接</BaseButton>
         </div>
       </form>

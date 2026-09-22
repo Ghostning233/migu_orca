@@ -21,6 +21,7 @@ const EXPECTED_OPERATION_IDS = [
   'saveAutoBangumiConnection',
   'deleteAutoBangumiConnection',
   'probeSavedAutoBangumiCapabilities',
+  'testAutoBangumiConnection',
   'listRequests',
   'getRequestDetail',
   'getRequestSafeInfo',
@@ -61,6 +62,7 @@ describe('generated API client (US-198)', () => {
       | 'saveAutoBangumiConnection'
       | 'deleteAutoBangumiConnection'
       | 'probeSavedAutoBangumiCapabilities'
+      | 'testAutoBangumiConnection'
       | 'listRequests'
       | 'getRequestDetail'
       | 'getRequestSafeInfo'
@@ -98,6 +100,7 @@ describe('generated API client (US-198)', () => {
     expectTypeOf<PathKeys>().toMatchTypeOf<
       | '/api/v1/settings/autobangumi'
       | '/api/v1/settings/autobangumi/probe'
+      | '/api/v1/settings/autobangumi/test'
       | '/api/v1/batches/parse'
       | '/api/v1/batches/{batch_id}/save-confirm'
       | '/api/v1/corrections'

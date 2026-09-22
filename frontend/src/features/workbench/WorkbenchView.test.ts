@@ -765,7 +765,7 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
         outcome: 'CONFIRMED',
         request: { request_id: 'req-confirmed' },
         handoff: {
-          request_id: 'req-confirmed', status: 'CONFIRMED', next_action: 'TRACKING',
+          request_id: 'req-confirmed', status: 'ACCEPTED', next_action: 'OPEN_TRACKING',
           tracking_id: 'tracking-confirmed', tracking_status: 'PENDING_SUBMIT',
           tracking_ready: true, safe_message: null,
         },
@@ -791,6 +791,31 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     expect(router.currentRoute.value.name).toBe('tracking')
     expect(router.currentRoute.value.query).toEqual({ tracking_id: 'tracking-confirmed' })
     expect(apiPost.mock.calls.filter(([path]) => path === '/api/v1/requests/save-confirm')).toHaveLength(1)
+  })
+
+  it('rejects the retired CONFIRMED/TRACKING handoff enums with safe notification and alert', async () => {
+    apiPost
+      .mockResolvedValueOnce(candidateResult())
+      .mockResolvedValueOnce(createDraftResult())
+      .mockResolvedValueOnce({
+        outcome: 'CONFIRMED', request: { request_id: 'req-old' },
+        handoff: {
+          request_id: 'req-old', status: 'CONFIRMED', next_action: 'TRACKING',
+          tracking_id: 'tracking-old', tracking_status: 'PENDING_SUBMIT', tracking_ready: true, safe_message: null,
+        },
+      } as never)
+    const { wrapper, router } = await mountWorkbench()
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.candidate-select').trigger('click')
+    await flushPromises()
+    await wrapper.find('#single-review-save-button').trigger('click')
+    await flushPromises()
+    const { useNotificationStore } = await import('@/app/stores/notification')
+    expect(router.currentRoute.value.name).not.toBe('tracking')
+    expect(useNotificationStore().current?.title).toBe('保存并确认失败')
+    expect(wrapper.find('#single-review-save-error.status-alert').exists()).toBe(true)
   })
 
   it('keeps the review panel open after entering the save-confirm host', async () => {
@@ -961,7 +986,7 @@ describe('WorkbenchView draft-modify save-confirm reliability (US-341)', () => {
       outcome: 'CONFIRMED',
       request: { request_id: 'req-confirmed' },
       handoff: {
-        request_id: 'req-confirmed', status: 'CONFIRMED', next_action: 'TRACKING',
+        request_id: 'req-confirmed', status: 'ACCEPTED', next_action: 'OPEN_TRACKING',
         tracking_id: 'tracking-confirmed', tracking_status: 'PENDING_SUBMIT',
         tracking_ready: true, safe_message: null,
       },

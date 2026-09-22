@@ -31,6 +31,9 @@ ENDPOINT_LIFECYCLE: Final[dict[tuple[str, str], EndpointLifecycle]] = {
         "使用已保存连接执行显式只读能力探测；结果仅绑定当前 ref/revision",
         "Capability probe cache",
     ),
+    ("POST", "/api/v1/settings/autobangumi/test"): _entry(
+        _PRIMARY, "当前连接草稿的瞬时只读探测", "Request-scoped capability probe"
+    ),
     ("GET", "/api/v1/preferences"): _entry(_PRIMARY, "偏好读取", "Preference store"),
     ("POST", "/api/v1/preferences"): _entry(_PRIMARY, "偏好保存", "Preference store"),
     ("GET", "/api/v1/corrections"): _entry(_PRIMARY, "纠正规则读取", "Correction store"),

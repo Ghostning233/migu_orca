@@ -39,6 +39,7 @@ from apps.migu_orca_web.api_contract import (
     ApiErrorEnvelope,
     AutoBangumiCapabilitiesDTO,
     AutoBangumiConnectionSummaryDTO,
+    AutoBangumiConnectionTestResultDTO,
     BatchParseResultDTO,
     BatchSaveConfirmResultDTO,
     CorrectionsResultDTO,
@@ -447,6 +448,17 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             "409": {"configuration_revision_conflict": "Auto Bangumi 配置已变化，请重新读取后重试", "connection_ref_conflict": "Auto Bangumi 配置引用已变化"},
             "500": {"storage_error": "Auto Bangumi 配置存储不可用", "storage_json_error": "Auto Bangumi 配置内容无效"},
         },
+    },
+    "POST /api/v1/settings/autobangumi/test": {
+        "operationId": "testAutoBangumiConnection",
+        "summary": "瞬时测试 Auto Bangumi 连接",
+        "description": "仅使用当前连接草稿执行只读探测，不保存配置或原始响应。",
+        "requestBody": {
+            "type": "object", "additionalProperties": False,
+            "required": ["config"], "properties": {"config": _AUTOBANGUMI_CONNECTION_CONFIG},
+        },
+        "success": AutoBangumiConnectionTestResultDTO,
+        "errors": {"400": {"validation_error": "请求参数校验失败", "config_error": "Auto Bangumi 配置无效"}},
     },
     "POST /api/v1/tracking/items/<path:tracking_id>/modify": {
         **_management_endpoint("modifyTrackingItem", "修改外部追番方案", required_extra=["patch"]),

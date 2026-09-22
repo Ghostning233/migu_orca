@@ -234,14 +234,12 @@ def test_profile_change_while_app_is_mounted_invalidates_held_old_list(page: Pag
     expect(page.locator(".pending-badge")).to_have_text("1")
 
 
-def test_settings_save_delete_probe_refreshes_global_state(page: Page, live_server_url: str) -> None:
+def test_settings_test_save_delete_refreshes_global_state(page: Page, live_server_url: str) -> None:
     state = {"configured": False, "status": "UNCONFIGURED", "ref": None, "revision": 0}
-    probes = 0
     console_messages: list[str] = []
     page.on("console", lambda message: console_messages.append(message.text))
 
     def handle(route, request):
-        nonlocal probes
         if request.url.endswith("/settings/autobangumi") and request.method == "GET":
             route.fulfill(status=200, content_type="application/json", body=_envelope({
                 "configured": state["configured"], "credential_present": state["configured"],
@@ -263,12 +261,9 @@ def test_settings_save_delete_probe_refreshes_global_state(page: Page, live_serv
                 "configuration_revision": 2, "connection_status": "UNCONFIGURED",
                 "raw_endpoint": "https://secret.invalid", "raw_token": "token-canary",
             }))
-        elif request.url.endswith("/settings/autobangumi/probe"):
-            probes += 1
-            state["status"] = "VERIFIED"
+        elif request.url.endswith("/settings/autobangumi/test"):
             route.fulfill(status=200, content_type="application/json", body=_envelope({
-                "probe_status": "VERIFIED", "raw_endpoint": "https://secret.invalid",
-                "raw_token": "token-canary",
+                "success": True, "summary": {"reachable": True}, "error": None,
             }))
         elif "/tracking/items" in request.url:
             route.fulfill(status=200, content_type="application/json", body=_envelope({"items": []}))
@@ -278,18 +273,16 @@ def test_settings_save_delete_probe_refreshes_global_state(page: Page, live_serv
     page.route("**/api/v1/settings/autobangumi**", handle)
     page.route("**/api/v1/tracking/items**", handle)
     page.goto(f"{live_server_url}/app/settings")
-    page.locator("#settings-ab-endpoint").fill("http://safe.invalid")
+    page.locator("#settings-ab-endpoint").fill("safe.invalid")
     page.locator("#settings-ab-username").fill("user")
     page.locator("#settings-ab-password").fill("safe-password")
+    page.locator("#settings-ab-test").click()
     page.locator("#settings-ab-save").click()
     expect(page.locator(".workspace-status")).to_contain_text("已配置")
-    page.locator("#settings-ab-probe").click()
-    expect(page.locator(".workspace-status")).to_contain_text("连接可用")
     expect(page.locator("#settings-ab-delete")).to_be_enabled()
     page.locator("#settings-ab-delete").click()
     page.locator(".confirm-dialog .danger-button").click()
     expect(page.locator(".workspace-status")).to_contain_text("未配置")
-    assert probes == 1
     evidence = page.evaluate("""() => ({
       href: location.href,
       history: history.length + ':' + (history.state ? JSON.stringify(history.state) : ''),

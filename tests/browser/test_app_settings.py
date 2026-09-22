@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -234,6 +235,45 @@ class TestAppSettingsQbittorrentPanel:
 class TestAppSettingsAutoBangumiPanel:
     """AC: AB 连接测试 + request_id 对应的提交上下文，凭据只在内存."""
 
+    def test_current_draft_test_then_save_locks_and_edit_invalidates(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """The three settings actions use a request-scoped fake transport."""
+        summary = {
+            "configured": False, "configuration_revision": 0,
+            "connection_ref": None, "auth_mode": None,
+            "credential_present": False, "connection_status": "UNCONFIGURED",
+            "checked_at": None, "capabilities": None,
+        }
+
+        def route_api(route) -> None:  # type: ignore[no-untyped-def]
+            path = route.request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+            if path.endswith("/settings/autobangumi/test"):
+                route.fulfill(status=200, content_type="application/json", body='{"ok":true,"result":{"success":true,"summary":{"reachable":true},"error":null}}')
+            elif route.request.method == "PUT":
+                route.fulfill(status=200, content_type="application/json", body='{"ok":true,"result":{"configured":true,"configuration_revision":1,"connection_ref":null,"auth_mode":"password","credential_present":true,"connection_status":"CONFIGURED","checked_at":null,"capabilities":null}}')
+            elif path == "/settings/autobangumi":
+                route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "result": summary}))
+            else:
+                route.continue_()
+
+        page.route("**/api/v1/**", route_api)
+        _goto_settings(page, live_server_url)
+        page.locator("#settings-ab-endpoint").fill("ab.example.invalid")
+        page.locator("#settings-ab-username").fill("user")
+        page.locator("#settings-ab-password").fill("password")
+        expect(page.locator("#settings-ab-save")).to_be_disabled()
+        page.locator("#settings-ab-test").click()
+        expect(page.locator("#settings-ab-save-form .status-alert")).to_contain_text("连接测试成功")
+        expect(page.locator("#settings-ab-save")).to_be_enabled()
+        page.locator("#settings-ab-endpoint").fill("other.example.invalid")
+        page.locator("#settings-ab-endpoint").fill("ab.example.invalid")
+        expect(page.locator("#settings-ab-save")).to_be_disabled()
+        page.locator("#settings-ab-test").click()
+        page.locator("#settings-ab-save").click()
+        expect(page.locator("#settings-ab-edit")).to_be_visible()
+        expect(page.locator("#settings-ab-password")).to_have_value("")
+
 
 
 
@@ -241,7 +281,8 @@ class TestAppSettingsAutoBangumiPanel:
         self, page: Page, live_server_url: str
     ) -> None:
         _goto_settings(page, live_server_url)
-        page.locator("#settings-ab-endpoint").fill("http://ab.example.invalid")
+        page.locator("#settings-ab-endpoint").fill("ab.example.invalid")
+        page.locator("#settings-ab-port").fill("8080")
         page.locator("#settings-ab-username").fill("user")
         page.locator("#settings-ab-password").fill("pw")
 
@@ -249,13 +290,13 @@ class TestAppSettingsAutoBangumiPanel:
         expect(page.locator("#settings-ab-token")).to_be_visible()
         expect(page.locator("#settings-ab-username")).to_be_hidden()
         # Old password-mode credentials were cleared by the mode switch.
-        expect(page.locator("#settings-ab-endpoint")).to_have_value("")
+        expect(page.locator("#settings-ab-endpoint")).to_have_value("ab.example.invalid")
 
         page.locator("#settings-ab-token").fill("browser-secret-token")
         page.locator("#settings-ab-auth-mode").select_option("password")
         expect(page.locator("#settings-ab-username")).to_be_visible()
         expect(page.locator("#settings-ab-token")).to_be_hidden()
-        expect(page.locator("#settings-ab-endpoint")).to_have_value("")
+        expect(page.locator("#settings-ab-endpoint")).to_have_value("ab.example.invalid")
 
 
 class TestAppSettingsResponsiveAndAccessibility:

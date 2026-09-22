@@ -31,8 +31,8 @@ def test_tracking_page_has_no_legacy_credential_dialog(page, live_server_url):
 
 
 @pytest.mark.browser
-def test_saved_settings_probe_and_tracking_summary_are_explicit_and_non_sensitive(page, live_server_url):
-    """Real Chromium journey: save is the only secret-bearing request; probe/actions use ref+revision."""
+def test_settings_draft_test_save_locks_and_tracking_summary_is_non_sensitive(page, live_server_url):
+    """Real Chromium journey: current draft test precedes save; secrets never leak."""
     secret = "browser-only-canary"
     ref = "11111111-1111-4111-8111-111111111111"
     captured: list[tuple[str, dict]] = []
@@ -44,11 +44,11 @@ def test_saved_settings_probe_and_tracking_summary_are_explicit_and_non_sensitiv
                 json={
                     "ok": True,
                     "result": {
-                        "configured": True,
-                        "credential_present": True,
-                        "connection_ref": ref,
-                        "configuration_revision": 3,
-                        "connection_status": "CONFIGURED",
+                        "configured": False,
+                        "credential_present": False,
+                        "connection_ref": None,
+                        "configuration_revision": 0,
+                        "connection_status": "UNCONFIGURED",
                     },
                 }
             )
@@ -68,31 +68,13 @@ def test_saved_settings_probe_and_tracking_summary_are_explicit_and_non_sensitiv
                 }
             )
             return
-        if request.method == "POST" and path.startswith("/settings/autobangumi/probe"):
-            captured.append(("probe", request.post_data_json))
+        if request.method == "POST" and path.startswith("/settings/autobangumi/test"):
+            captured.append(("test", request.post_data_json))
             route.fulfill(
                 json={
                     "ok": True,
                     "result": {
-                        "probe_status": "VERIFIED",
-                        "version": "3.1.18",
-                        "adapter": "legacy_3_1",
-                        "subscription_list": "SUPPORTED",
-                        "subscription_detail": "SUPPORTED",
-                        "subscription_submit": "SUPPORTED",
-                        "subscription_modify": "SUPPORTED",
-                        "subscription_enable": "SUPPORTED",
-                        "subscription_disable": "SUPPORTED",
-                        "subscription_delete": "SUPPORTED",
-                        "rss_list": "SUPPORTED",
-                        "rss_modify": "SUPPORTED",
-                        "rss_enable": "SUPPORTED",
-                        "rss_disable": "SUPPORTED",
-                        "rss_delete": "SUPPORTED",
-                        "rss_refresh": "SUPPORTED",
-                        "external_verify": "SUPPORTED",
-                        "checked_at": None,
-                        "safe_message": "已完成安全探测",
+                        "success": True, "summary": {"reachable": True}, "error": None,
                     },
                 }
             )
@@ -102,15 +84,16 @@ def test_saved_settings_probe_and_tracking_summary_are_explicit_and_non_sensitiv
     page.route("**/api/v1/**", api)
     page.goto(f"{live_server_url}/app/settings")
     page.wait_for_selector("#settings-heading")
-    page.locator("#settings-ab-endpoint").fill("https://ab.example.invalid")
+    page.locator("#settings-ab-endpoint").fill("ab.example.invalid")
     page.locator("#settings-ab-username").fill("browser-user")
     page.locator("#settings-ab-password").fill(secret)
+    page.locator("#settings-ab-test").click()
+    expect(page.locator("#settings-ab-save")).to_be_enabled()
     page.locator("#settings-ab-save").click()
     expect(page.locator("#settings-ab-save-form .status-alert")).to_contain_text("已保存")
-    page.locator("#settings-ab-probe").click()
-    expect(page.locator("#settings-ab-save-form .status-alert")).to_contain_text("VERIFIED")
-    assert captured[0][0] == "save"
-    assert captured[1] == ("probe", {"connection_ref": ref, "configuration_revision": 3})
+    assert captured[0][0] == "test"
+    assert captured[1][0] == "save"
+    assert "fallback_enabled" not in captured[0][1]["config"]
     assert secret not in page.locator("body").inner_text()
     assert secret not in page.url
     stored = page.evaluate(
@@ -122,7 +105,7 @@ def test_saved_settings_probe_and_tracking_summary_are_explicit_and_non_sensitiv
     page.goto(f"{live_server_url}/app/tracking")
     page.wait_for_selector("#tracking-overview")
     expect(page.locator("#tracking-probe-saved")).to_be_visible()
-    assert len([kind for kind, _ in captured if kind == "probe"]) == 1
+    assert page.locator("#tracking-probe-saved").is_visible()
     assert secret not in page.locator("body").inner_text()
 
 
@@ -528,7 +511,6 @@ def test_saved_verify_external_preserves_unknown_source_lock(page, live_server_u
 
 @pytest.mark.browser
 def test_settings_cas_conflict_rereads_summary_without_resubmitting(page, live_server_url):
-    ref = "11111111-1111-4111-8111-111111111111"
     gets = 0
     puts = 0
 
@@ -541,14 +523,17 @@ def test_settings_cas_conflict_rereads_summary_without_resubmitting(page, live_s
                 json={
                     "ok": True,
                     "result": {
-                        "configured": True,
-                        "credential_present": True,
-                        "connection_ref": ref,
-                        "configuration_revision": gets,
-                        "connection_status": "CONFIGURED",
+                        "configured": False,
+                        "credential_present": False,
+                        "connection_ref": None,
+                        "configuration_revision": gets - 1,
+                        "connection_status": "UNCONFIGURED",
                     },
                 }
             )
+            return
+        if request.method == "POST" and path == "/settings/autobangumi/test":
+            route.fulfill(json={"ok": True, "result": {"success": True, "summary": {"reachable": True}, "error": None}})
             return
         if request.method == "PUT" and path == "/settings/autobangumi":
             puts += 1
@@ -559,9 +544,11 @@ def test_settings_cas_conflict_rereads_summary_without_resubmitting(page, live_s
     page.route("**/api/v1/**", route_api)
     page.goto(f"{live_server_url}/app/settings")
     page.wait_for_selector("#settings-ab-save-form")
-    page.locator("#settings-ab-endpoint").fill("192.168.1.20:7890")
+    page.locator("#settings-ab-endpoint").fill("192.168.1.20")
+    page.locator("#settings-ab-port").fill("7890")
     page.locator("#settings-ab-username").fill("user")
     page.locator("#settings-ab-password").fill("cas-canary")
+    page.locator("#settings-ab-test").click()
     page.locator("#settings-ab-save").click()
     expect(page.locator("#settings-ab-save-form [role=alert]")).to_contain_text("配置已变化")
     assert puts == 1
@@ -570,14 +557,11 @@ def test_settings_cas_conflict_rereads_summary_without_resubmitting(page, live_s
 
 
 @pytest.mark.browser
-def test_saved_probe_failure_keeps_summary_across_refresh_and_navigation(page, live_server_url):
-    """A failed explicit probe never deletes the saved generation or leaks input."""
+def test_saved_summary_survives_refresh_and_navigation_without_settings_probe(page, live_server_url):
+    """Settings no longer probes saved refs; the safe summary remains non-sensitive."""
     ref = "11111111-1111-4111-8111-111111111111"
     secret = "probe-failure-canary"
-    probe_calls = 0
-
     def handler(route, request):
-        nonlocal probe_calls
         path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
         if request.method == "GET" and path == "/settings/autobangumi":
             route.fulfill(
@@ -593,21 +577,12 @@ def test_saved_probe_failure_keeps_summary_across_refresh_and_navigation(page, l
                 }
             )
             return
-        if request.method == "POST" and path == "/settings/autobangumi/probe":
-            probe_calls += 1
-            route.fulfill(status=503, json={"ok": False, "error_type": "upstream_unavailable", "error_message": secret})
-            return
         route.continue_()
 
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/settings")
-    page.wait_for_selector("#settings-ab-probe")
-    page.locator("#settings-ab-probe").click()
-    expect(page.locator("#settings-ab-save-form .status-alert")).to_contain_text("探测失败")
-    assert probe_calls == 1
     assert page.locator("#settings-ab-delete").is_enabled()
     page.reload()
-    page.wait_for_selector("#settings-ab-probe")
     assert page.locator("#settings-ab-delete").is_enabled()
     page.goto(f"{live_server_url}/app/tracking")
     page.wait_for_selector("#tracking-probe-saved")
@@ -928,6 +903,9 @@ def test_settings_bare_endpoint_is_normalized_and_navigation_cancels_save(page, 
                 }
             )
             return
+        if request.method == "POST" and path == "/settings/autobangumi/test":
+            route.fulfill(json={"ok": True, "result": {"success": True, "summary": {"reachable": True}, "error": None}})
+            return
         if request.method == "PUT" and path == "/settings/autobangumi":
             puts.append(request.post_data_json or {})
             route.fulfill(
@@ -947,17 +925,21 @@ def test_settings_bare_endpoint_is_normalized_and_navigation_cancels_save(page, 
 
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/settings")
+    page.wait_for_selector("#settings-heading")
     page.wait_for_selector("#settings-ab-save")
-    page.locator("#settings-ab-endpoint").fill("192.168.1.20:7890")
+    page.locator("#settings-ab-endpoint").fill("192.168.1.20")
+    page.locator("#settings-ab-port").fill("7890")
     page.locator("#settings-ab-username").fill("user")
     page.locator("#settings-ab-password").fill("cancel-canary")
     page.goto(f"{live_server_url}/app/tracking")
     assert puts == []
     page.goto(f"{live_server_url}/app/settings")
     page.wait_for_selector("#settings-ab-save")
-    page.locator("#settings-ab-endpoint").fill("192.168.1.20:7890")
+    page.locator("#settings-ab-endpoint").fill("192.168.1.20")
+    page.locator("#settings-ab-port").fill("7890")
     page.locator("#settings-ab-username").fill("user")
     page.locator("#settings-ab-password").fill("save-canary")
+    page.locator("#settings-ab-test").click()
     page.locator("#settings-ab-save").click()
     page.wait_for_timeout(150)
     assert len(puts) == 1
