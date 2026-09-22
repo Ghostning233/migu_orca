@@ -22,6 +22,7 @@ from storage_engine.controllers.storage_config import load_storage_config
 from storage_engine.controllers.tracking_repository import (
     TrackingListResult,
     compare_and_swap_tracking_record,
+    delete_tracking_record,
     ensure_tracking_record,
     list_tracking_records,
     load_tracking_record,
@@ -425,3 +426,22 @@ def test_ensure_and_cas_enforce_request_consistency(tmp_path: Path) -> None:
     assert error.value.error_type == "storage_json_error"
     assert "does not match request_id-derived id" in error.value.details["reason"]
     assert other.tracking_id != tracking_id_for_request(REQUEST_ID)
+
+
+def test_delete_tracking_record_removes_only_that_record(tmp_path: Path) -> None:
+    """Issue #92: a plan delete removes exactly one record file, nothing else."""
+    config = _config(tmp_path)
+    first, _ = ensure_tracking_record(config, _record())
+    second, _ = ensure_tracking_record(config, _record(request_id=SECOND_REQUEST_ID, title="咒术回战"))
+
+    assert delete_tracking_record(config, first.tracking_id) == {
+        "tracking_id": first.tracking_id,
+        "deleted": True,
+    }
+
+    remaining = list_tracking_records(config).records
+    assert [record.tracking_id for record in remaining] == [second.tracking_id]
+
+    # A second delete is an explicit not-found, never a silent success.
+    with pytest.raises(Stage1Error, match="未找到"):
+        delete_tracking_record(config, first.tracking_id)

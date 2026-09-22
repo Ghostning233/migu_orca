@@ -38,6 +38,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
+from typing import Any
 
 from shared.errors import Stage1Error
 from storage_engine.controllers.storage_config import (
@@ -94,7 +95,8 @@ def ensure_tracking_record(
             raise Stage1Error(
                 "invalid_tracking_record",
                 "外部同步记录不得包含 request_id",
-                "ensure_tracking_record",
+                "delete_tracking_record",
+    "ensure_tracking_record",
                 {"field": "request_id"},
             )
         clean_id = _validated_tracking_id(record.tracking_id, "ensure_tracking_record")
@@ -154,6 +156,37 @@ def load_tracking_record(
     """Load one tracking record, raising ``tracking_not_found`` when absent."""
     clean_id = _validated_tracking_id(tracking_id, "load_tracking_record")
     return _load_tracking_record(config, clean_id, "load_tracking_record")
+
+
+def delete_tracking_record(
+    config: StorageConfig,
+    tracking_id: str,
+) -> dict[str, Any]:
+    """Delete one tracking record file (issue #92).
+
+    A missing record is an explicit ``tracking_not_found`` instead of a silent
+    success, so a plan delete can never half-apply and report success. Only the
+    record file is removed: no media, cache or external object is touched.
+    """
+    clean_id = _validated_tracking_id(tracking_id, "delete_tracking_record")
+    path = _tracking_path(config, clean_id, "delete_tracking_record")
+    if not path.exists():
+        raise Stage1Error(
+            "tracking_not_found",
+            "未找到该追番记录",
+            "delete_tracking_record",
+            {"tracking_id": clean_id},
+        )
+    try:
+        path.unlink()
+    except OSError as exc:
+        raise Stage1Error(
+            "storage_error",
+            "删除追番记录失败",
+            "delete_tracking_record",
+            {"tracking_id": clean_id, "directory": config.tracking_dir.name},
+        ) from exc
+    return {"tracking_id": clean_id, "deleted": True}
 
 
 def compare_and_swap_tracking_record(
@@ -419,6 +452,7 @@ def _is_relative_to(path: Path, parent: Path) -> bool:
 __all__ = [
     "TrackingListResult",
     "compare_and_swap_tracking_record",
+    "delete_tracking_record",
     "ensure_tracking_record",
     "list_tracking_records",
     "load_tracking_record",
