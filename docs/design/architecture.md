@@ -113,7 +113,7 @@ Web 业务操作统一通过 `/api/v1/*` JSON API 完成，页面是 Stage 27 �
   operation v2、严格目标/patch 解析、3.1.18 action-specific adapter、写后回查和 VERIFY_EXTERNAL 恢复。
   管理 route 只接收 tracking ID、固定 scope 与严格白名单字段；operation 仅保存 SHA-256 摘要。番剧
   destructive route 由 adapter 固定 `file=false`，RSS 只执行映射集合内的单项调用。
-  Stage 32 B-D 完成兼容迁移、泄漏矩阵、回退和前端 handoff；正式追番管理页面在 Stage 38 交付。
+  Stage 32 B-D 完成兼容迁移、泄漏矩阵、回退和前端 handoff；正式我的追番页面在 Stage 38 交付。
 
 - 当前导航/页面落点由 `frontend/src/app/router/catalog.ts` 和 `index.ts` 统一定义：
   `/app/add` → WorkbenchView，`/app/plans` → RequestsView，`/app/tracking` → TrackingView，
