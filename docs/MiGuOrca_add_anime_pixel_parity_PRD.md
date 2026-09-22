@@ -1,16 +1,16 @@
-# 添加番剧页面像素级复刻：总体 PRD
+# 添加番剧页面像素级复刻：历史总体 PRD
 
 ## 1. 状态、背景与范围
 
 | 项目 | 内容 |
 | --- | --- |
-| 状态 | 总体规划经二次审核；Stage 46 执行材料已准备，尚未开发 |
+| 状态 | 历史规划；Stage 46、47 已完成，后续工作改由 GitHub Issues 规划 |
 | 日期 | 2026-09-20 |
 | 设计图来源 | `docs/design/assets/frontend-ux/review-2026-09-17/` 的六张 PNG |
 | 标准桌面基线 | `1440 × 900` CSS 像素；源 PNG 为 `1586 × 992` 位图，不能直接等同 CSS viewport |
 | 前置基线 | Stage 45 已经 PR #74 合并；Stage 46 基于 merge `75e144194644b920c446080c7becaca4a14f3704` 准备 |
 | 代码落点 | `frontend/src/App.vue`、`styles/`、`features/workbench/` 及其 Vitest/Chromium 用例 |
-| 当前执行入口 | [Stage 46 执行 PRD](MiGuOrca_stage46_pixel_foundation_PRD.md)、[Ralph JSON](../scripts/ralph/prd.json)、[progress](../scripts/ralph/progress.txt) |
+| 历史执行记录 | [Stage 46 执行 PRD](MiGuOrca_stage46_pixel_foundation_PRD.md)；Ralph 快照在 `scripts/ralph/archive/` |
 
 本任务将“添加番剧”页的六个指定状态复刻到固定参考画布：单番搜索、单番候选加载、单番草案审核、批量搜索加载、批量候选加载、批量草案审核。此前 Stage 40～45 的目标是方向、信息层级与业务体验；其 PRD 明确不做逐像素验收。本 PRD 是后续独立视觉工作，不能以历史视觉完成记录取代本次验收。
 

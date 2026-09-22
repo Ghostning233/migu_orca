@@ -3,16 +3,29 @@
 本文件是全仓库的常驻开发入口，只保留稳定边界和必要背景。全程使用中文交流。
 更深目录的 `AGENTS.md` 补充该目录约束；用户本次指令决定任务范围与权限。
 
+## Agent skills
+
+### Issue tracker
+
+本仓库使用 GitHub Issues 跟踪需求、规格与开发任务。详见 `docs/agents/issue-tracker.md`。
+
+### Triage labels
+
+使用 Matt Pocock Skills 的五种默认 triage 标签。详见 `docs/agents/triage-labels.md`。
+
+### Domain docs
+
+本仓库采用 single-context 领域文档布局。详见 `docs/agents/domain.md`。
+
 ## 开始前与按需阅读
 
 - 先检查 `git status --short --branch`、最近提交及目标 diff，保留用户和其他 Agent 的修改。
-- Stage 工作再读 `scripts/ralph/prd.json`、progress 的模式摘要/最近记录，以及对应执行 PRD；
-  不按交接文案猜当前分支、story 完成状态或是否已合并。
+- 开发工作先读当前 GitHub Issue（规格、依赖、验收）及其评论；不按交接文案猜当前分支、完成状态或是否已合并。
 - 前端任务读 `frontend/AGENTS.md`；Web API 任务读 `src/apps/migu_orca_web/AGENTS.md`。
 - 需要流程细节时读 [开发与审核流程](docs/development/workflow.md)；需要分层细节时读
   [架构](docs/design/architecture.md)，产品/视觉任务从 [文档索引](docs/README.md) 找目标规格。
-- README 面向使用者，不是开发规范。不要每轮读遍所有 PRD、历史手册、归档日志或生成文件。
-  代码和测试用于核实实际行为；当前 PRD 决定本次应实现什么，差异需报告，不能用现状抹掉需求。
+- README 提供易读的开发流程总览；本文件和开发流程文档才是可执行规范。不要每轮读遍历史手册、归档日志或生成文件。
+  代码和测试用于核实实际行为；当前 GitHub Issue 决定本次应实现什么，差异需报告，不能用现状抹掉需求。
 
 ## 项目背景与改动落点
 
@@ -76,8 +89,9 @@ HTTP/认证细节留在 adapter，持久化留在 repository，纯规则不混�
   并分别用一句话概括给开发、测试、审核、修复 Agent 的提示词。详细规则见
   [开发与审核流程](docs/development/workflow.md)。工作包的开发、审核、修复与复审闭环前不得
   更换/关闭其开发或修复 Agent；仅闭环后才为下一工作包新建 Agent。
-- Stage 39 后续保留 Ralph 的 PRD、逐 story 验收/提交与 progress，不再用 `ralph.sh` 逐 story
-  启动新进程，也不固定三个 story 一批；按 PRD 定义的原子工作包完成后统一独立审核。
+- 新需求遵循 Matt 工作流：先用 `grilling` 讨论方向，必要时用 `domain-modeling` 固化术语/不可逆决策，
+  再以 GitHub Issue 承载规格、纵向 ticket、依赖和验收。实现前确认该 Issue 已具备 `ready-for-agent` 标签；
+  不再创建 Ralph Stage、`passes` 或 progress。
 - 中文 PR 推送/合并由长期 C Agent 负责，跨工作包/Stage 尽量复用；累计约 20 次 PR 提交后才轮换。
   C 仅处理已审核 HEAD，且每次仍须用户明确发布授权；跨主会话复用与 Luna/Fable 调用细节见
   [子 Agent 编排](docs/development/subagent-orchestration.md)。
@@ -92,23 +106,23 @@ HTTP/认证细节留在 adapter，持久化留在 repository，纯规则不混�
 
 ## 验证、审核与成本控制
 
-- 普通 story/修复只跑受影响用例；UI 用项目 `dev-browser` skill，在真实 Chromium 做定向验证。
-  完整后端/前端/Chromium 门禁通常仅在 Stage 收尾执行一轮，CI 对新提交独立验证。
+- 普通 ticket/修复只跑受影响用例；UI 用项目 `dev-browser` skill，在真实 Chromium 做定向验证。
+  完整后端/前端/Chromium 门禁通常在功能收尾执行一轮，CI 对新提交独立验证。
 - 失败先跑最小失败用例；无代码/配置变化不重复同一全量检查；文档整理只做文档检查。
   `compileall` 只证明语法，不替代 Ruff 或测试；skip/Agent 自述不算验证通过。
 - 测试前隔离运行数据，确认 `.migu_orca/storage` 不污染浏览器/黄金路径；先核对内容并
   移到唯一备份目录，不删除未知数据，不覆盖已有备份。临时服务由启动者管理和收尾。
-- 按 PRD acceptance criteria 独立审核：优先业务、安全、状态一致性、并发/幂等、契约漂移、
+- 按 Issue acceptance criteria 独立审核：优先业务、安全、状态一致性、并发/幂等、契约漂移、
   敏感泄漏与测试真实性。报告按严重度给文件/行号；无阻断也说明剩余风险。
 - 审核应一次性形成完整问题清单；先由测试 Agent 固化最小红测，再交同一个修复 Agent 集中收口。
   复审仍有阻断时继续复用该 Agent 和剩余清单，不重启整套流程、不因预算阈值遗留半成品。
 - API/契约迁移同时核对源 schema/route/OpenAPI 生成源、生成产物与全部调用者；不得以生成后
   字符串过滤、字段改名、兼容别名或仅类型通过来掩盖旧秘密/旧请求语义。源—产物—调用三层
   都清零后，才可认定契约迁移完成。
-- Ralph 的 COMPLETE 文本、`passes=true`、progress 都需核对代码和证据；不能当作审核结论。
-  达到迭代上限即停；修复重复无进展时报告，不无界循环或靠全量重跑碰运气。
-- progress 记录可复用结论、实际验证命令/结果和遗留风险；阶段历史放 PRD/归档，
-  不往 README/AGENTS 累加逐 story 日志，不伪造线程链接或测试结果。
+- Issue 标签、评论或关闭状态都需核对代码和证据；不能当作审核结论。
+  修复重复无进展时报告，不无界循环或靠全量重跑碰运气。
+- 可复用结论、实际验证命令/结果和遗留风险记录在 Issue；历史 Ralph 阶段只在归档中追溯，
+  不往 README/AGENTS 累加逐 ticket 日志，不伪造线程链接或测试结果。
 - 本会话经验：先区分浏览器总超时与上游单次超时、网络/HTTP/解析/内部故障；
   HTTP 200 仍可能带 FAILED/部分成功业务结果。长任务使用端点级有界预算与防重锁，
   不提高全局等待时间。页面文案/行为变更同步检查对应 Vitest 和浏览器断言。

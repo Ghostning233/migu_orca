@@ -9,7 +9,7 @@
 | 代码基线 | `334c8e69dbcc7c27be8ab482f8ccb142081db0b7`（Stage 42 与文档 PR #71 已合并） |
 | 来源 | 用户本轮产品要求、现行代码/契约/测试、[六图方向](design/frontend-ux-review-mockups-2026-09-17.md)、[外部分析输入](design/frontend-ux-external-analysis-2026-09-18.md) |
 | 执行 PRD | [Stage 43](MiGuOrca_stage43_add_anime_entry_visual_PRD.md)、[Stage 44](MiGuOrca_stage44_shared_draft_review_PRD.md)、[Stage 45](MiGuOrca_stage45_batch_confirmation_PRD.md) |
-| 后续现行入口 | [Stage 46～48 像素级复刻总体 PRD](MiGuOrca_add_anime_pixel_parity_PRD.md) |
+| 后续工作入口 | GitHub Issues；[Stage 46～48 像素级复刻总体 PRD](MiGuOrca_add_anime_pixel_parity_PRD.md)仅供历史追溯 |
 
 本文件将会话 PRD 草案落盘并明确执行边界，不是完成证明或自动开发/发布授权。
 落盘前已核对干净工作区、最近提交和目标 diff；旧分支 HEAD `829c844` 与基线文件内容一致。

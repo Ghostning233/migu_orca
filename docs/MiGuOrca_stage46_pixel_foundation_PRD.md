@@ -4,16 +4,15 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 状态 | 执行材料已准备，尚未开发 |
+| 状态 | 历史执行 PRD；US-358～US-362 已完成并由 PR #75 合并 |
 | 日期/基线 | 2026-09-20；Stage 45 PR #74 merge `75e144194644b920c446080c7becaca4a14f3704` |
 | 分支 | `ralph/stage46-pixel-foundation`；开始开发前重新核对实时 HEAD、工作区与目标 diff |
 | 总体依据 | [添加番剧页面像素级复刻总体 PRD](MiGuOrca_add_anime_pixel_parity_PRD.md) |
 | 设计依据 | [六张效果图说明](design/frontend-ux-review-mockups-2026-09-17.md)、[Design Token V1](design/frontend-ux-design-tokens-v1.md) |
-| Ralph | `scripts/ralph/prd.json`；US-358～US-362 初始均为 `passes=false`、空 notes |
+| Ralph | 历史快照位于 `scripts/ralph/archive/2026-09-21-stage46-pixel-foundation/`；不作为现行入口 |
 
-本阶段建立后续单番/批量页面复刻所需的可信测量基线，并只实现六图共享的应用壳层与基础控件。
-本次材料准备授权包括执行 PRD、Ralph 状态、文档索引、分支整理和本地提交；不等于启动开发，
-也不授权 push、PR、合并、外部系统访问或清理历史分支。
+本阶段建立了后续单番/批量页面复刻所需的可信测量基线，并只实现六图共享的应用壳层与基础控件。
+下文记录当时的范围和约束，仅供追溯；不得据此启动开发、团队或发布。
 
 ## 2. 目标、范围与规格优先级
 

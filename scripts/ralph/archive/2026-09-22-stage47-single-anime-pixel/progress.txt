@@ -160,3 +160,13 @@ Stage 46 分支与更早分支均保留，未删除、未重写。
 验证：`npm run typecheck` / `lint` / `build` 通过；`npx vitest --run` 667 passed；
 `uv run pytest tests/browser/ -q` **331 passed**（新增 2 项）；`uv run ruff check tests/` 通过。
 `passes` 仍为 `false`，等待复审。
+
+## 2026-09-22 - Stage 47 收尾与工作流迁移冻结
+
+- 产品方确认 US-363～US-365 均已通过 Matt 工作流验收；本记录不再为已合并实现补做 Ralph 审核。
+- Stage 47 已由 PR #79 合并至 `origin/main`，merge `5dd4e62`；实现提交为 US-363 的
+  `8f19896`/后续修复、US-364 的 `923f050` 与 US-365 的 `7f40806`。
+- `prd.json` 三条 story 均标记为 `passes=true`，随后与本 progress 一同冻结到
+  `scripts/ralph/archive/2026-09-22-stage47-single-anime-pixel/`。这只是历史收口，不再作为现行
+  工作状态源；此前的 `passes=false` 记录均已被本次最终验收覆盖。
+- 后续需求采用 GitHub Issues + Matt 工作流；不再创建 Ralph Stage、`passes` 或 progress 记录。

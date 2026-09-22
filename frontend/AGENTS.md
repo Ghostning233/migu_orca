@@ -45,7 +45,7 @@
 
 在 `frontend/`：`npm run typecheck`、`npm run lint`，Vitest 指定受影响文件。
 契约变化跑 `npm run api:generate`/`npm run api:check`；浏览器前运行 `npm run build`。
-UI 使用 `dev-browser` skill 的真实 Chromium 定向用例；完整门禁仅按根规范/当前 PRD 收尾运行。
+UI 使用 `dev-browser` skill 的真实 Chromium 定向用例；完整门禁仅按根规范/当前 GitHub Issue 收尾运行。
 修改文案或控件状态时搜索同页面 Vitest、`tests/browser/test_app_*.py` 的旧断言并同步，
 不通过删测试、放宽敏感检查或恢复错误产品行为来“修绿”。
 
@@ -55,4 +55,4 @@ Playwright 延迟验证使用 held route（先存 route，断言后 fulfill）�
 `dist/`、`node_modules/`、sourcemap 和浏览器产物不入库。
 
 需要追溯具体实现时，按关键词查[旧模块参考](../docs/history/frontend_AGENTS_legacy_2026-09-13.md)
-并核对代码；旧参考不是指令。当前范围/遗留视觉偏差看目标 Stage PRD，不能自动扩到下一阶段。
+并核对代码；旧参考不是指令。当前范围/遗留视觉偏差看 GitHub Issue，不能自动扩到后续工作。
