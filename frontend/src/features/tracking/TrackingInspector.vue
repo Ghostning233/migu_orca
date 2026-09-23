@@ -396,10 +396,20 @@ const UNDELETABLE_PLAN_STATUSES = new Set([
 const deletePlanOpen = ref(false)
 const deleteExternalChecked = ref(false)
 
+// Issue #96: a settled operation is history, not a delete lock. Only an
+// in-flight or unresolved current operation (or a status mid-external-action)
+// still blocks; an unrecognized state fails closed.
+const SETTLED_OPERATION_STATES = new Set(['SUCCEEDED', 'FAILED'])
+const hasUnresolvedOperation = computed(() => {
+  const operation = detail.value?.current_operation
+  if (!operation) return false
+  return !SETTLED_OPERATION_STATES.has(String(operation.state))
+})
+
 const canDeletePlan = computed(() => Boolean(
   detail.value
   && !UNDELETABLE_PLAN_STATUSES.has(detail.value.status)
-  && !detail.value.current_operation
+  && !hasUnresolvedOperation.value
 ))
 /** Only a controlled mapping makes the external option applicable at all. */
 const deletePlanHasExternal = computed(() => Boolean(detail.value?.external_mapping))

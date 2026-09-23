@@ -638,7 +638,9 @@ async function runPlanDelete(payload: {
   deleteExternal: boolean
 }): Promise<void> {
   const config = savedRef.value
-  if (!config?.connection_ref) return
+  // Issue #96: a purely local delete needs no Auto Bangumi connection at all;
+  // only the optional external delete requires the saved connection.
+  if (payload.deleteExternal && !config?.connection_ref) return
   const trackingId = payload.item.tracking_id
   const sequence = ++planDeleteSequence
   planDeleteSession.value = createPlanDeleteSession(trackingId, 'IN_FLIGHT')
@@ -652,8 +654,12 @@ async function runPlanDelete(payload: {
           confirm: true,
           delete_external: payload.deleteExternal,
           idempotency_key: makeOpaqueKey(),
-          connection_ref: config.connection_ref,
-          configuration_revision: config.configuration_revision,
+          ...(payload.deleteExternal && config
+            ? {
+                connection_ref: config.connection_ref,
+                configuration_revision: config.configuration_revision,
+              }
+            : {}),
           ...(storageDir ? { storage_dir: storageDir } : {}),
         },
       },

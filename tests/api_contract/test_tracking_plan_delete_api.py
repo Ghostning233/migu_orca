@@ -26,6 +26,10 @@ from storage_engine.controllers.autobangumi_config_repository import (
     AutoBangumiConfigRepository,
     build_stored_autobangumi_config,
 )
+from storage_engine.controllers.operation_repository import (
+    bind_tracking_operation,
+    compare_and_swap_tracking_operation,
+)
 from storage_engine.controllers.request_repository import (
     load_request_snapshot,
     save_request_snapshot,
@@ -35,6 +39,15 @@ from storage_engine.controllers.tracking_repository import (
     compare_and_swap_tracking_record,
     list_tracking_records,
     load_tracking_record,
+)
+from tracking_engine.models.operation import (
+    TRACKING_OPERATION_STATE_FAILED,
+    TRACKING_OPERATION_STATE_IN_PROGRESS,
+    TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN,
+    TRACKING_OPERATION_STATE_PREPARED,
+    TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
+    TRACKING_OPERATION_STATE_SUCCEEDED,
+    transition_tracking_operation,
 )
 from tracking_engine.models.tracking import (
     TRACKING_ORIGIN_SAVE_CONFIRM,
@@ -241,3 +254,134 @@ def test_delete_plan_never_sends_a_media_flag(
     # downloaded media.
     assert response.status_code == 400
     assert response.get_json()["error_type"] == "data_validation_errors"
+
+def _with_operation(
+    tmp_path: Path,
+    record: TrackingRecord,
+    *,
+    state: str,
+    status: str | None = None,
+) -> TrackingRecord:
+    """Attach one operation (in the given state) as the record's current one."""
+    config = _config(tmp_path)
+    operation, _created = bind_tracking_operation(
+        config,
+        tracking_id=record.tracking_id,
+        operation="SUBMIT",
+        idempotency_key="plan-delete-op-key",
+        expected_revision=record.revision,
+        request_fingerprint="plan-delete-fingerprint",
+    )
+    # Walk the legal state machine: PREPARED -> IN_PROGRESS -> any terminal.
+    path = {
+        TRACKING_OPERATION_STATE_PREPARED: [],
+        TRACKING_OPERATION_STATE_FAILED: [TRACKING_OPERATION_STATE_FAILED],
+        TRACKING_OPERATION_STATE_IN_PROGRESS: [TRACKING_OPERATION_STATE_IN_PROGRESS],
+    }.get(state, [TRACKING_OPERATION_STATE_IN_PROGRESS, state])
+    for step in path:
+        current = operation.state
+        operation = compare_and_swap_tracking_operation(
+            config,
+            operation.operation_id,
+            expected_state=current,
+            record=transition_tracking_operation(
+                operation, state=step, now="2026-09-08T00:00:01+00:00"
+            ),
+        )
+    updated = replace(
+        record,
+        status=status or record.status,
+        current_operation_id=operation.operation_id,
+        revision=record.revision + 1,
+        updated_at="2026-09-08T00:00:02+00:00",
+    )
+    return compare_and_swap_tracking_record(config, record.tracking_id, record.revision, updated)
+
+
+@pytest.mark.parametrize(
+    "state",
+    [TRACKING_OPERATION_STATE_SUCCEEDED, TRACKING_OPERATION_STATE_FAILED],
+)
+def test_delete_plan_allows_a_settled_operation(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch, state: str
+) -> None:
+    """Issue #96: a finished operation is history, not a delete lock."""
+    record, request = _seed(tmp_path, mapped=False)
+    record = _with_operation(tmp_path, record, state=state)
+    calls = _stub_management(monkeypatch, "SUCCEEDED")
+
+    response = _post(client, record, delete_external=False)
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["result"]["outcome"] == "DELETED"
+    assert calls == []
+    assert list_tracking_records(_config(tmp_path)).records == []
+    with pytest.raises(Stage1Error):
+        load_request_snapshot(_config(tmp_path), request["request_id"])
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        TRACKING_OPERATION_STATE_PREPARED,
+        TRACKING_OPERATION_STATE_IN_PROGRESS,
+        TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN,
+        TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
+    ],
+)
+def test_delete_plan_still_blocks_an_unresolved_operation(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch, state: str
+) -> None:
+    record, _request = _seed(tmp_path, mapped=False)
+    record = _with_operation(tmp_path, record, state=state)
+    calls = _stub_management(monkeypatch, "SUCCEEDED")
+
+    response = _post(client, record, delete_external=False)
+
+    assert response.status_code == 409
+    assert response.get_json()["error_type"] == "tracking_state_conflict"
+    assert calls == []
+    assert [
+        item.tracking_id for item in list_tracking_records(_config(tmp_path)).records
+    ] == [record.tracking_id]
+
+
+def test_delete_plan_fails_closed_when_the_current_operation_is_unreadable(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record, _request = _seed(tmp_path, mapped=False)
+    record = _with_operation(tmp_path, record, state=TRACKING_OPERATION_STATE_FAILED)
+    config = _config(tmp_path)
+    operation_file = next(config.tracking_operations_dir.glob("*.json"))
+    operation_file.write_text("{ not json", encoding="utf-8")
+    calls = _stub_management(monkeypatch, "SUCCEEDED")
+
+    response = _post(client, record, delete_external=False)
+
+    assert response.status_code == 409
+    assert response.get_json()["error_type"] == "tracking_state_conflict"
+    assert calls == []
+    assert [
+        item.tracking_id for item in list_tracking_records(config).records
+    ] == [record.tracking_id]
+
+
+def test_delete_plan_without_a_controlled_subscription_needs_no_connection(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #96: a purely local delete must not require any AB connection."""
+    record, _request = _seed(tmp_path, mapped=False)
+    calls = _stub_management(monkeypatch, "SUCCEEDED")
+
+    body = _body(record, delete_external=False)
+    body.pop("connection_ref")
+    body.pop("configuration_revision")
+    response = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/delete-plan", json=body
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["result"]["outcome"] == "DELETED"
+    assert calls == []
+    assert list_tracking_records(_config(tmp_path)).records == []

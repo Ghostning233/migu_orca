@@ -26,11 +26,16 @@ from apps.migu_orca_web.schemas import (
 )
 from apps.migu_orca_web.tracking_saved_management_service import run_saved_tracking_management
 from shared.errors import Stage1Error
+from storage_engine.controllers.operation_repository import load_tracking_operation
 from storage_engine.controllers.request_repository import delete_request_snapshot
 from storage_engine.controllers.storage_config import StorageConfig
 from storage_engine.controllers.tracking_repository import (
     delete_tracking_record,
     load_tracking_record,
+)
+from tracking_engine.models.operation import (
+    TRACKING_OPERATION_STATE_FAILED,
+    TRACKING_OPERATION_STATE_SUCCEEDED,
 )
 from tracking_engine.models.tracking import (
     TRACKING_STATUS_RECOVERY_REQUIRED,
@@ -49,6 +54,12 @@ _UNDELETABLE_STATUSES = frozenset(
         TRACKING_STATUS_VERIFYING_EXTERNAL,
         TRACKING_STATUS_RECOVERY_REQUIRED,
     }
+)
+
+#: Operation states that are finished history: they are shown as 操作记录 but
+#: never lock an allowed local action (issue #96).
+_SETTLED_OPERATION_STATES = frozenset(
+    {TRACKING_OPERATION_STATE_SUCCEEDED, TRACKING_OPERATION_STATE_FAILED}
 )
 
 _MANAGEMENT_SUCCEEDED = "SUCCEEDED"
@@ -93,8 +104,29 @@ def run_saved_tracking_plan_delete(
 
 
 def _guard_deletable(config: StorageConfig, record: TrackingRecord) -> None:
-    """Refuse a delete while an external action is in flight or unresolved."""
-    if record.status in _UNDELETABLE_STATUSES or record.current_operation_id:
+    """Refuse a delete only while an external action is in flight or unresolved.
+
+    A settled operation (SUCCEEDED/FAILED) stays visible as 操作记录 but is no
+    longer a delete lock; an unreadable current operation fails closed instead of
+    being treated as settled (issue #96).
+    """
+    if record.status in _UNDELETABLE_STATUSES:
+        raise Stage1Error(
+            "tracking_state_conflict",
+            "当前追番正在进行外部操作或存在未决结果，请先恢复后再删除",
+            "run_saved_tracking_plan_delete",
+        )
+    if not record.current_operation_id:
+        return
+    try:
+        operation = load_tracking_operation(config, record.current_operation_id)
+    except Stage1Error as exc:
+        raise Stage1Error(
+            "tracking_state_conflict",
+            "当前外部操作状态无法读取，请先恢复后再删除",
+            "run_saved_tracking_plan_delete",
+        ) from exc
+    if operation.state not in _SETTLED_OPERATION_STATES:
         raise Stage1Error(
             "tracking_state_conflict",
             "当前追番正在进行外部操作或存在未决结果，请先恢复后再删除",
@@ -116,7 +148,7 @@ def _delete_external(
         idempotency_key=payload.idempotency_key,
         confirm=True,
         # The management contract takes the canonical string form.
-        connection_ref=str(payload.connection_ref),
+        connection_ref=str(payload.connection_ref) if payload.connection_ref else None,
         configuration_revision=payload.configuration_revision,
         storage_dir=payload.storage_dir,
     )

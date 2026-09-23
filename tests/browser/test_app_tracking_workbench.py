@@ -651,3 +651,77 @@ class TestPlanReuse:
         # The suggestion is in memory only: the URL carries no plan data.
         for forbidden in ("rss", "token", "password", "mikan-1234"):
             assert forbidden not in page.url
+
+    def test_settled_failed_record_can_delete_without_a_connection(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        """Issue #96: a finished operation is history, not a delete lock."""
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        item = {
+            **_item("tracking-a", "葬送的芙莉莲"),
+            "request_id": "request-plan",
+            "status": "SUBMIT_FAILED",
+            "status_label": "提交失败",
+            "status_group": "ATTENTION",
+            "available_actions": [],
+        }
+        deletes: list[dict[str, Any]] = []
+        state = {"deleted": False}
+
+        def handler(route: Any, request: Any) -> None:
+            path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+            if request.method == "GET" and path == "/settings/autobangumi":
+                # No Auto Bangumi connection is configured at all.
+                route.fulfill(json={"ok": True, "result": {
+                    "configured": False, "credential_present": False,
+                    "connection_ref": None, "configuration_revision": 0,
+                    "connection_status": "UNCONFIGURED",
+                }})
+                return
+            if request.method == "GET" and path == "/tracking/items":
+                items = [] if state["deleted"] else [item]
+                route.fulfill(json={"ok": True, "result": {
+                    "items": items, "summary": _summary(len(items), needs_attention=len(items)), "warnings": [],
+                }})
+                return
+            if request.method == "GET" and path == "/tracking/items/tracking-a":
+                route.fulfill(json={"ok": True, "result": {
+                    **item, "origin": "single", "batch_id": None, "created_at": "2026-09-01T00:00:00Z",
+                    "last_synced_at": None, "safe_info": None, "revalidation_issues": [],
+                    "external_mapping": None, "audit_events": [], "warnings": [],
+                    "current_operation": {
+                        "operation_id": "op-settled", "operation": "SUBMIT", "state": "FAILED", "attempt": 1,
+                    },
+                }})
+                return
+            if request.method == "POST" and path == "/tracking/items/tracking-a/delete-plan":
+                body = request.post_data_json or {}
+                deletes.append(body)
+                state["deleted"] = True
+                route.fulfill(json={"ok": True, "result": {
+                    "tracking_id": "tracking-a", "outcome": "DELETED", "external_deleted": False,
+                }})
+                return
+            route.continue_()
+
+        page.route("**/api/v1/**", handler)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-delete-plan")
+
+        page.locator("#tracking-delete-plan").click()
+        page.locator("#tracking-delete-plan-cancel").click()
+        page.wait_for_timeout(200)
+        assert deletes == []
+
+        page.locator("#tracking-delete-plan").click()
+        page.locator("#tracking-delete-plan-confirm").click()
+        page.wait_for_timeout(400)
+
+        assert len(deletes) == 1
+        body = deletes[0]
+        assert body["delete_external"] is False
+        # A purely local delete carries no connection material at all.
+        assert "connection_ref" not in body
+        assert "configuration_revision" not in body
+        expect(page.locator(".tracking-list-item")).to_have_count(0)
