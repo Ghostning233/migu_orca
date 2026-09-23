@@ -910,9 +910,15 @@ class TrackingItemDTO(_StrictBase):
         "PENDING_SUBMIT", "REVALIDATING", "NEEDS_RECONFIRM", "SUBMITTING",
         "VERIFYING_EXTERNAL", "ACTIVE", "SUBMIT_FAILED", "RECOVERY_REQUIRED",
         "UNKNOWN", "DISABLED", "EXTERNAL_DELETED", "EXTERNAL_ONLY",
+        # Issue #98/#99: a one-time "download existing resources" acceptance.
+        "ADDED_TO_DOWNLOAD",
     ]
     status_label: str
     status_group: Literal["PENDING", "PROCESSING", "ACTIVE", "ATTENTION", "INACTIVE"]
+    #: Issue #99 AC 6/7: the operation-level submission mode of the last attempt.
+    #: ``None`` means "do not show a mode" — 待提交/需修改 never fabricate one, and
+    #: an unknown or unreadable value fails closed to ``None``.
+    submission_mode: Literal["CONTINUE_TRACKING", "DOWNLOAD_EXISTING"] | None = None
     available_actions: list[TrackingAvailableActionDTO] = Field(default_factory=list)
     valid_resource_count: int = 0
     updated_episode: None = None
@@ -969,9 +975,15 @@ class TrackingDetailResultDTO(_StrictBase):
         "PENDING_SUBMIT", "REVALIDATING", "NEEDS_RECONFIRM", "SUBMITTING",
         "VERIFYING_EXTERNAL", "ACTIVE", "SUBMIT_FAILED", "RECOVERY_REQUIRED",
         "UNKNOWN", "DISABLED", "EXTERNAL_DELETED", "EXTERNAL_ONLY",
+        # Issue #98/#99: a one-time "download existing resources" acceptance.
+        "ADDED_TO_DOWNLOAD",
     ]
     status_label: str
     status_group: Literal["PENDING", "PROCESSING", "ACTIVE", "ATTENTION", "INACTIVE"]
+    #: Issue #99 AC 6/7: the operation-level submission mode of the last attempt.
+    #: ``None`` means "do not show a mode" — 待提交/需修改 never fabricate one, and
+    #: an unknown or unreadable value fails closed to ``None``.
+    submission_mode: Literal["CONTINUE_TRACKING", "DOWNLOAD_EXISTING"] | None = None
     available_actions: list[TrackingAvailableActionDTO] = Field(default_factory=list)
     valid_resource_count: int = 0
     updated_episode: None = None

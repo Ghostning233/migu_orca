@@ -47,6 +47,7 @@ from storage_engine.controllers.tracking_repository import (
     list_tracking_records,
     load_tracking_record,
 )
+from tracking_engine.models.operation import TRACKING_SUBMISSION_MODES_SET
 from tracking_engine.models.tracking import (
     TRACKING_STATUS_ADDED_TO_DOWNLOAD,
     TRACKING_STATUS_GROUP_ACTIVE,
@@ -109,7 +110,12 @@ def list_tracking_items(
     for record in visible:
         request = requests_by_id.get(record.request_id) if record.request_id else None
         valid_count = _request_valid_resource_count(request)
-        items.append(tracking_summary_fields(record, valid_resource_count=valid_count))
+        items.append(
+            {
+                **tracking_summary_fields(record, valid_resource_count=valid_count),
+                "submission_mode": _submission_mode_for(config, record),
+            }
+        )
 
     return {"items": items, "summary": summary, "warnings": warnings}
 
@@ -166,6 +172,7 @@ def build_tracking_detail(
     base = tracking_summary_fields(record, valid_resource_count=valid_count)
     return {
         **base,
+        "submission_mode": _submission_mode_for(config, record),
         "origin": record.origin,
         "batch_id": record.batch_id,
         "created_at": record.created_at,
@@ -198,6 +205,23 @@ def _requests_by_id(result: Any) -> dict[str, dict[str, Any]]:
 def _is_merged_alias(record: TrackingRecord) -> bool:
     recovery = record.recovery if isinstance(record.recovery, dict) else {}
     return isinstance(recovery.get("merged_into_tracking_id"), str)
+
+
+def _submission_mode_for(config: StorageConfig, record: TrackingRecord) -> str | None:
+    """The submission mode to display for one record (issue #99 AC 6/7).
+
+    Only a record whose operation actually exists may show a mode, so a fresh
+    待提交/需修改 plan never fabricates one. An unreadable operation or an
+    unknown value fails closed to ``None`` (never guessed from the status).
+    """
+    operation_id = record.current_operation_id
+    if not operation_id:
+        return None
+    operation = _tolerant_load_operation(config, operation_id)
+    if operation is None:
+        return None
+    mode = operation.submission_mode
+    return mode if mode in TRACKING_SUBMISSION_MODES_SET else None
 
 
 def _summary_counts(records: list[TrackingRecord], unreadable: int) -> dict[str, int]:

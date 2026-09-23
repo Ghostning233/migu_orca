@@ -212,6 +212,18 @@ export function projectTrackingOverview(
   }
 }
 
+/**
+ * Issue #99 AC 6/7: the visible label for an operation-level submission mode.
+ *
+ * 待提交/需修改 carry no mode (the server sends ``null``), and any unknown or
+ * unreadable value fails closed to ``null`` so the page never fabricates one.
+ */
+export function formatSubmissionMode(value: unknown): string | null {
+  if (value === 'CONTINUE_TRACKING') return '持续追番'
+  if (value === 'DOWNLOAD_EXISTING') return '下载现有资源'
+  return null
+}
+
 function _safeCount(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0
 }

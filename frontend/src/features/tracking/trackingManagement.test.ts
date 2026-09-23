@@ -53,7 +53,7 @@ function item(overrides: Partial<TrackingItem> = {}): TrackingItem {
   return {
     tracking_id: 'tracking-1', request_id: 'request-1', title: '葬送的芙莉莲', season: 1,
     subtitle_group: '喵萌奶茶屋', poster_path: null, status: 'ACTIVE', status_label: '追番中',
-    status_group: 'ACTIVE', available_actions: [action()], valid_resource_count: 2,
+    status_group: 'ACTIVE', submission_mode: null, available_actions: [action()], valid_resource_count: 2,
     updated_episode: null, updated_episode_status: 'NOT_IMPLEMENTED', total_episodes: null,
     revision: 4, updated_at: '2026-09-13T00:00:00Z', ...overrides,
   }

@@ -29,6 +29,7 @@ import {
   createWriteConflictSession,
   createWriteSession,
   filterTrackingItems,
+  formatSubmissionMode,
   formatTrackingUpdatedAt,
   isDefiniteWriteRejection,
   isRecoveryActionCode,
@@ -1420,6 +1421,10 @@ onBeforeUnmount(() => {
             </span>
             <span class="tracking-list-meta">
               <span>{{ item.status_label }}</span>
+              <span
+                v-if="formatSubmissionMode(item.submission_mode)"
+                class="tracking-list-mode"
+              >{{ formatSubmissionMode(item.submission_mode) }}</span>
               <small>{{ formatTrackingUpdatedAt(item.updated_at) }}</small>
             </span>
           </button>

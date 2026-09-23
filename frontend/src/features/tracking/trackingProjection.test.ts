@@ -54,6 +54,7 @@ import {
   type TrackingRecoverResult,
   type TrackingRecoveryActionCode,
   type TrackingRecoveryConfirmation,
+  formatSubmissionMode,
 } from './trackingProjection'
 
 type ItemAction = NonNullable<TrackingItem['available_actions']>[number]
@@ -62,7 +63,8 @@ function item(overrides: Partial<TrackingItem> = {}): TrackingItem {
   return {
     tracking_id: 'tracking-1', request_id: 'request-1', title: '葬送的芙莉莲', season: 1,
     subtitle_group: '喵萌奶茶屋', poster_path: null, status: 'ACTIVE', status_label: '追番中',
-    status_group: 'ACTIVE', available_actions: [], valid_resource_count: 2,
+    status_group: 'ACTIVE', submission_mode: null,
+    available_actions: [], valid_resource_count: 2,
     updated_episode: null, updated_episode_status: 'NOT_IMPLEMENTED', total_episodes: null,
     revision: 3, updated_at: '2026-09-13T00:00:00Z', ...overrides,
   }
@@ -666,5 +668,16 @@ describe('tracking management projection (US-313)', () => {
     expect(conflict.message).toContain('没有对应的外部对象')
     expect(managementSessionKeepsIntent(conflict)).toBe(false)
     expect(conflict.state).toBe('CONFLICT')
+  })
+})
+
+describe('submission mode display (issue #99 AC 6/7)', () => {
+  it('labels a real operation-level mode and fails closed for everything else', () => {
+    expect(formatSubmissionMode('CONTINUE_TRACKING')).toBe('持续追番')
+    expect(formatSubmissionMode('DOWNLOAD_EXISTING')).toBe('下载现有资源')
+    // 待提交/需修改 send null, and any unknown value must never be shown.
+    for (const value of [null, undefined, '', 'UNKNOWN', 'SUBMIT', 42, {}]) {
+      expect(formatSubmissionMode(value)).toBeNull()
+    }
   })
 })

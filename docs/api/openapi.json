@@ -8396,7 +8396,8 @@
                                               "UNKNOWN",
                                               "DISABLED",
                                               "EXTERNAL_DELETED",
-                                              "EXTERNAL_ONLY"
+                                              "EXTERNAL_ONLY",
+                                              "ADDED_TO_DOWNLOAD"
                                             ],
                                             "title": "Status",
                                             "type": "string"
@@ -8415,6 +8416,22 @@
                                             ],
                                             "title": "Status Group",
                                             "type": "string"
+                                          },
+                                          "submission_mode": {
+                                            "anyOf": [
+                                              {
+                                                "enum": [
+                                                  "CONTINUE_TRACKING",
+                                                  "DOWNLOAD_EXISTING"
+                                                ],
+                                                "type": "string"
+                                              },
+                                              {
+                                                "type": "null"
+                                              }
+                                            ],
+                                            "default": null,
+                                            "title": "Submission Mode"
                                           },
                                           "available_actions": {
                                             "items": {
@@ -8933,7 +8950,8 @@
                                   "UNKNOWN",
                                   "DISABLED",
                                   "EXTERNAL_DELETED",
-                                  "EXTERNAL_ONLY"
+                                  "EXTERNAL_ONLY",
+                                  "ADDED_TO_DOWNLOAD"
                                 ],
                                 "title": "Status",
                                 "type": "string"
@@ -8952,6 +8970,22 @@
                                 ],
                                 "title": "Status Group",
                                 "type": "string"
+                              },
+                              "submission_mode": {
+                                "anyOf": [
+                                  {
+                                    "enum": [
+                                      "CONTINUE_TRACKING",
+                                      "DOWNLOAD_EXISTING"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "default": null,
+                                "title": "Submission Mode"
                               },
                               "available_actions": {
                                 "items": {
@@ -9154,6 +9188,7 @@
                         "status": "示例",
                         "status_label": "示例",
                         "status_group": "示例",
+                        "submission_mode": null,
                         "available_actions": [
                           {
                             "code": "示例",
@@ -9951,7 +9986,8 @@
                                   "UNKNOWN",
                                   "DISABLED",
                                   "EXTERNAL_DELETED",
-                                  "EXTERNAL_ONLY"
+                                  "EXTERNAL_ONLY",
+                                  "ADDED_TO_DOWNLOAD"
                                 ],
                                 "title": "Status",
                                 "type": "string"
@@ -9970,6 +10006,22 @@
                                 ],
                                 "title": "Status Group",
                                 "type": "string"
+                              },
+                              "submission_mode": {
+                                "anyOf": [
+                                  {
+                                    "enum": [
+                                      "CONTINUE_TRACKING",
+                                      "DOWNLOAD_EXISTING"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "default": null,
+                                "title": "Submission Mode"
                               },
                               "available_actions": {
                                 "items": {
@@ -10150,6 +10202,7 @@
                         "status": "示例",
                         "status_label": "示例",
                         "status_group": "示例",
+                        "submission_mode": null,
                         "available_actions": [
                           {
                             "code": "示例",
@@ -17026,7 +17079,8 @@
                             "UNKNOWN",
                             "DISABLED",
                             "EXTERNAL_DELETED",
-                            "EXTERNAL_ONLY"
+                            "EXTERNAL_ONLY",
+                            "ADDED_TO_DOWNLOAD"
                           ],
                           "title": "Status",
                           "type": "string"
@@ -17045,6 +17099,22 @@
                           ],
                           "title": "Status Group",
                           "type": "string"
+                        },
+                        "submission_mode": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "CONTINUE_TRACKING",
+                                "DOWNLOAD_EXISTING"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Submission Mode"
                         },
                         "available_actions": {
                           "items": {
@@ -18030,6 +18100,7 @@
                     "status": "示例",
                     "status_label": "示例",
                     "status_group": "示例",
+                    "submission_mode": null,
                     "available_actions": [
                       {
                         "code": "示例",
@@ -18418,7 +18489,8 @@
                                 "UNKNOWN",
                                 "DISABLED",
                                 "EXTERNAL_DELETED",
-                                "EXTERNAL_ONLY"
+                                "EXTERNAL_ONLY",
+                                "ADDED_TO_DOWNLOAD"
                               ],
                               "title": "Status",
                               "type": "string"
@@ -18437,6 +18509,22 @@
                               ],
                               "title": "Status Group",
                               "type": "string"
+                            },
+                            "submission_mode": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "CONTINUE_TRACKING",
+                                    "DOWNLOAD_EXISTING"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Submission Mode"
                             },
                             "available_actions": {
                               "items": {
@@ -18685,6 +18773,7 @@
                       "status": "示例",
                       "status_label": "示例",
                       "status_group": "示例",
+                      "submission_mode": null,
                       "available_actions": [
                         {
                           "code": "示例",
@@ -19442,7 +19531,8 @@
                                 "UNKNOWN",
                                 "DISABLED",
                                 "EXTERNAL_DELETED",
-                                "EXTERNAL_ONLY"
+                                "EXTERNAL_ONLY",
+                                "ADDED_TO_DOWNLOAD"
                               ],
                               "title": "Status",
                               "type": "string"
@@ -19461,6 +19551,22 @@
                               ],
                               "title": "Status Group",
                               "type": "string"
+                            },
+                            "submission_mode": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "CONTINUE_TRACKING",
+                                    "DOWNLOAD_EXISTING"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Submission Mode"
                             },
                             "available_actions": {
                               "items": {
@@ -19709,6 +19815,7 @@
                       "status": "示例",
                       "status_label": "示例",
                       "status_group": "示例",
+                      "submission_mode": null,
                       "available_actions": [
                         {
                           "code": "示例",
@@ -21869,7 +21976,8 @@
                                 "UNKNOWN",
                                 "DISABLED",
                                 "EXTERNAL_DELETED",
-                                "EXTERNAL_ONLY"
+                                "EXTERNAL_ONLY",
+                                "ADDED_TO_DOWNLOAD"
                               ],
                               "title": "Status",
                               "type": "string"
@@ -21888,6 +21996,22 @@
                               ],
                               "title": "Status Group",
                               "type": "string"
+                            },
+                            "submission_mode": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "CONTINUE_TRACKING",
+                                    "DOWNLOAD_EXISTING"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Submission Mode"
                             },
                             "available_actions": {
                               "items": {
@@ -22042,6 +22166,7 @@
                       "status": "示例",
                       "status_label": "示例",
                       "status_group": "示例",
+                      "submission_mode": null,
                       "available_actions": [
                         {
                           "code": "示例",
@@ -22499,7 +22624,8 @@
                                 "UNKNOWN",
                                 "DISABLED",
                                 "EXTERNAL_DELETED",
-                                "EXTERNAL_ONLY"
+                                "EXTERNAL_ONLY",
+                                "ADDED_TO_DOWNLOAD"
                               ],
                               "title": "Status",
                               "type": "string"
@@ -22518,6 +22644,22 @@
                               ],
                               "title": "Status Group",
                               "type": "string"
+                            },
+                            "submission_mode": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "CONTINUE_TRACKING",
+                                    "DOWNLOAD_EXISTING"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Submission Mode"
                             },
                             "available_actions": {
                               "items": {
@@ -22766,6 +22908,7 @@
                       "status": "示例",
                       "status_label": "示例",
                       "status_group": "示例",
+                      "submission_mode": null,
                       "available_actions": [
                         {
                           "code": "示例",
@@ -23253,7 +23396,8 @@
                                 "UNKNOWN",
                                 "DISABLED",
                                 "EXTERNAL_DELETED",
-                                "EXTERNAL_ONLY"
+                                "EXTERNAL_ONLY",
+                                "ADDED_TO_DOWNLOAD"
                               ],
                               "title": "Status",
                               "type": "string"
@@ -23272,6 +23416,22 @@
                               ],
                               "title": "Status Group",
                               "type": "string"
+                            },
+                            "submission_mode": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "CONTINUE_TRACKING",
+                                    "DOWNLOAD_EXISTING"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Submission Mode"
                             },
                             "available_actions": {
                               "items": {
@@ -23432,6 +23592,7 @@
                       "status": "示例",
                       "status_label": "示例",
                       "status_group": "示例",
+                      "submission_mode": null,
                       "available_actions": [
                         {
                           "code": "示例",
@@ -23937,7 +24098,8 @@
                                 "UNKNOWN",
                                 "DISABLED",
                                 "EXTERNAL_DELETED",
-                                "EXTERNAL_ONLY"
+                                "EXTERNAL_ONLY",
+                                "ADDED_TO_DOWNLOAD"
                               ],
                               "title": "Status",
                               "type": "string"
@@ -23956,6 +24118,22 @@
                               ],
                               "title": "Status Group",
                               "type": "string"
+                            },
+                            "submission_mode": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "CONTINUE_TRACKING",
+                                    "DOWNLOAD_EXISTING"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Submission Mode"
                             },
                             "available_actions": {
                               "items": {
@@ -24116,6 +24294,7 @@
                       "status": "示例",
                       "status_label": "示例",
                       "status_group": "示例",
+                      "submission_mode": null,
                       "available_actions": [
                         {
                           "code": "示例",
@@ -24540,7 +24719,8 @@
                                 "UNKNOWN",
                                 "DISABLED",
                                 "EXTERNAL_DELETED",
-                                "EXTERNAL_ONLY"
+                                "EXTERNAL_ONLY",
+                                "ADDED_TO_DOWNLOAD"
                               ],
                               "title": "Status",
                               "type": "string"
@@ -24559,6 +24739,22 @@
                               ],
                               "title": "Status Group",
                               "type": "string"
+                            },
+                            "submission_mode": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "CONTINUE_TRACKING",
+                                    "DOWNLOAD_EXISTING"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Submission Mode"
                             },
                             "available_actions": {
                               "items": {
@@ -24807,6 +25003,7 @@
                       "status": "示例",
                       "status_label": "示例",
                       "status_group": "示例",
+                      "submission_mode": null,
                       "available_actions": [
                         {
                           "code": "示例",
@@ -25300,7 +25497,8 @@
                                 "UNKNOWN",
                                 "DISABLED",
                                 "EXTERNAL_DELETED",
-                                "EXTERNAL_ONLY"
+                                "EXTERNAL_ONLY",
+                                "ADDED_TO_DOWNLOAD"
                               ],
                               "title": "Status",
                               "type": "string"
@@ -25319,6 +25517,22 @@
                               ],
                               "title": "Status Group",
                               "type": "string"
+                            },
+                            "submission_mode": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "CONTINUE_TRACKING",
+                                    "DOWNLOAD_EXISTING"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Submission Mode"
                             },
                             "available_actions": {
                               "items": {
@@ -25479,6 +25693,7 @@
                       "status": "示例",
                       "status_label": "示例",
                       "status_group": "示例",
+                      "submission_mode": null,
                       "available_actions": [
                         {
                           "code": "示例",

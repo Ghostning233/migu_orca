@@ -726,3 +726,64 @@ class TestPlanReuse:
         assert "connection_ref" not in body
         assert "configuration_revision" not in body
         expect(page.locator(".tracking-list-item")).to_have_count(0)
+
+class TestSubmissionModeLabels:
+    """Issue #99 AC 6/7: only a real attempt shows its mode, fail closed."""
+
+    def test_list_shows_the_mode_only_where_one_exists(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        pending = {
+            **_item("tracking-pending", "待提交番剧"),
+            "status": "PENDING_SUBMIT", "status_label": "待提交", "status_group": "PENDING",
+            "available_actions": [],
+            # 待提交 never fabricates a mode.
+            "submission_mode": None,
+        }
+        active = {
+            **_item("tracking-active", "追番中番剧"),
+            "status": "ACTIVE", "status_label": "追番中", "status_group": "ACTIVE",
+            "available_actions": [],
+            "submission_mode": "CONTINUE_TRACKING",
+        }
+
+        def handler(route: Any, request: Any) -> None:
+            path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+            if request.method == "GET" and path == "/settings/autobangumi":
+                route.fulfill(json={"ok": True, "result": {
+                    "configured": False, "credential_present": False,
+                    "connection_ref": None, "configuration_revision": 0,
+                    "connection_status": "UNCONFIGURED",
+                }})
+                return
+            if request.method == "GET" and path == "/tracking/items":
+                route.fulfill(json={"ok": True, "result": {
+                    "items": [pending, active],
+                    "summary": _summary(2, pending=1, active=1),
+                    "warnings": [],
+                }})
+                return
+            if request.method == "GET" and path.startswith("/tracking/items/"):
+                tracking_id = path.rsplit("/", 1)[-1]
+                item = pending if tracking_id == "tracking-pending" else active
+                route.fulfill(json={"ok": True, "result": {
+                    **item, "origin": "single", "batch_id": None,
+                    "created_at": "2026-09-01T00:00:00Z", "last_synced_at": None,
+                    "safe_info": None, "current_operation": None, "revalidation_issues": [],
+                    "external_mapping": None, "audit_events": [], "warnings": [],
+                }})
+                return
+            route.continue_()
+
+        page.route("**/api/v1/**", handler)
+        page.goto(f"{live_server_url}/app/tracking")
+        page.wait_for_selector(".tracking-list-item")
+
+        labels = page.locator(".tracking-list-mode")
+        assert labels.count() == 1
+        assert labels.first.inner_text().strip() == "持续追番"
+        # The 待提交 row carries no fabricated mode.
+        pending_row = page.locator('[data-tracking-id="tracking-pending"]')
+        assert pending_row.locator(".tracking-list-mode").count() == 0
