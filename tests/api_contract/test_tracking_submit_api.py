@@ -752,3 +752,97 @@ def test_submit_rejects_an_unknown_submission_mode(
 
     assert response.status_code == 400
     assert response.get_json()["error_type"] == "data_validation_errors"
+
+# -- issue #98: one-time "download existing resources" ------------------------
+
+
+def _patch_collect(monkeypatch: pytest.MonkeyPatch, result: Any) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+
+    def collect_one(request: dict[str, Any], _config: Any) -> dict[str, Any]:
+        calls.append(request)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.tracking_submission_service.compose_tracking_collect_one",
+        lambda: collect_one,
+    )
+    return calls
+
+
+def test_download_existing_accepts_200_as_added_to_download(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC 7: 200 means 已加入下载, with no external subscription and no read-back."""
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    calls = _patch_collect(monkeypatch, {"success": True, "ab_response": {"status": "ok"}})
+    readbacks: list[int] = []
+    monkeypatch.setattr(
+        "apps.migu_orca_web.tracking_submission_service.compose_tracking_readback_external",
+        lambda _config: (lambda: readbacks.append(1)),
+    )
+
+    response = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/submit",
+        json=_submit_body(record, submission_mode="DOWNLOAD_EXISTING"),
+    )
+
+    assert response.status_code == 200
+    result = response.get_json()["result"]
+    assert result["tracking"]["status"] == "ADDED_TO_DOWNLOAD"
+    stored = load_tracking_record(_config(tmp_path), record.tracking_id)
+    # A one-time request never claims a controlled external subscription.
+    assert stored.external_mapping is None
+    assert len(calls) == 1
+    assert readbacks == [], "a one-time request must not read anything back"
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        {"success": False, "error": {"error_type": "ab_submit_failed"}},
+        Stage1Error("ab_timeout", "Auto Bangumi 提交超时", "create_ab_subscription"),
+        Stage1Error("ab_connection_failed", "无法连接 Auto Bangumi", "create_ab_subscription"),
+    ],
+)
+def test_download_existing_maps_every_other_outcome_to_submit_failed(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch, result: Any
+) -> None:
+    """AC 7/8: non-200, timeout and connection failure are one retryable failure."""
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    _patch_collect(monkeypatch, result)
+
+    response = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/submit",
+        json=_submit_body(record, submission_mode="DOWNLOAD_EXISTING"),
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()["result"]
+    assert payload["tracking"]["status"] == TRACKING_STATUS_SUBMIT_FAILED
+    stored = load_tracking_record(_config(tmp_path), record.tracking_id)
+    assert stored.external_mapping is None
+    assert stored.last_error is not None
+    # The wording never promises a safe retry (ADR-0001).
+    assert "可重新提交" in str(payload["tracking"].get("last_error") or stored.last_error)
+
+
+def test_download_existing_fails_closed_without_a_verified_endpoint(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The unverified default seam converges on 提交失败 instead of a 400."""
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    _patch_ab_factory(monkeypatch, FakeAutoBangumiClient())
+
+    response = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/submit",
+        json=_submit_body(record, submission_mode="DOWNLOAD_EXISTING"),
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["result"]["tracking"]["status"] == TRACKING_STATUS_SUBMIT_FAILED

@@ -39,6 +39,7 @@ from tracking_engine.models.operation import (
 )
 from tracking_engine.models.tracking import (
     TRACKING_STATUS_ACTIVE,
+    TRACKING_STATUS_ADDED_TO_DOWNLOAD,
     TRACKING_STATUS_NEEDS_RECONFIRM,
     TRACKING_STATUS_PENDING_SUBMIT,
     TRACKING_STATUS_RECOVERY_REQUIRED,
@@ -135,13 +136,31 @@ OPERATION_OUTCOME_TRACKING_STATUS: dict[str, str] = {
 SUBMIT_STARTED_MESSAGE = "正在提交到 Auto Bangumi"
 SUBMIT_ADOPTED_MESSAGE = "已确认最新方案并继续提交"
 SUBMIT_SUCCEEDED_MESSAGE = "已成功提交到 Auto Bangumi"
-SUBMIT_FAILED_MESSAGE = "Auto Bangumi 提交失败，可安全重试"
+#: Issue #98 AC 8: a failed one-time request is retryable by an explicit user
+#: action, but Auto Bangumi 3.1.18 cannot prove a safe retry, so the wording
+#: never promises one (ADR-0001).
+SUBMIT_FAILED_MESSAGE = "提交失败，可重新提交"
+#: A one-time "download existing resources" request Auto Bangumi accepted.
+ADDED_TO_DOWNLOAD_MESSAGE = "已加入下载"
 #: A write whose body was not a success, but whose exact read-back proved the
 #: controlled subscription exists: the record is 追番中 with this fixed, safe
 #: note about the current resources (issue #97).
 SUBMIT_SUCCEEDED_RESOURCE_WARNING_MESSAGE = "订阅已建立，但 Auto Bangumi 的写响应未确认；已按精确回查确认为追番中，请留当前资源处理情况"
 SUBMIT_OUTCOME_UNKNOWN_MESSAGE = "Auto Bangumi 结果未知，请先恢复核验"
 SUBMIT_PERSIST_FAILED_MESSAGE = "提交结果保存失败，请先恢复核验"
+
+
+def classify_existing_resource_result(result: Any) -> str:
+    """Classify one one-time "download existing resources" write (issue #98).
+
+    Auto Bangumi 3.1.18 returns no per-torrent result and no idempotency handle,
+    so HTTP 200 is 已加入下载 and every other response, timeout or connection
+    failure is the same retryable 提交失败. Nothing is read back: this mode never
+    creates a controlled external subscription.
+    """
+    if isinstance(result, dict) and result.get("success") is True:
+        return TRACKING_STATUS_ADDED_TO_DOWNLOAD
+    return TRACKING_STATUS_SUBMIT_FAILED
 
 
 def classify_external_submit_result(result: Any) -> str:
@@ -251,6 +270,8 @@ __all__ = [
     "SUBMIT_SUCCEEDED_RESOURCE_WARNING_MESSAGE",
     "SUBMIT_SUCCEEDED_MESSAGE",
     "ConfirmedSubscriptionOutcome",
+    "ADDED_TO_DOWNLOAD_MESSAGE",
+    "classify_existing_resource_result",
     "classify_external_submit_result",
     "confirm_subscription_outcome",
     "external_submit_error_type",
