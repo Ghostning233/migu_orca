@@ -26,8 +26,8 @@ function row(actions: unknown[] = [], posterPath: string | null = null) {
     updated_at: '2026-09-14T00:00:00Z' }
 }
 const defaultSummary = {
-  total: 1, pending: 1, processing: 0, active: 0, inactive: 0,
-  needs_attention: 0, unreadable: 0,
+  total: 1, pending: 1, processing: 0, active: 0, added_to_download: 0,
+  inactive: 0, needs_attention: 0, unreadable: 0,
 }
 async function mountSaved(
   actions: unknown[] = [],
@@ -125,15 +125,16 @@ describe('TrackingView saved connection flow', () => {
 
   it('presents the unified workbench with server overview counts', async () => {
     const { wrapper } = await mountSaved([], null, {
-      total: 9, pending: 4, processing: 2, active: 2, inactive: 1,
-      needs_attention: 1, unreadable: 1,
+      total: 9, pending: 4, processing: 2, active: 2, added_to_download: 1,
+      inactive: 1, needs_attention: 1, unreadable: 1,
     })
 
     expect(wrapper.text()).toContain('我的追番')
     expect(wrapper.text()).toContain('管理待提交任务和正在运行的追番')
     const cards = wrapper.findAll('.tracking-status-card')
+    // Issue #99: five fixed categories; 已加入下载 is counted on its own.
     expect(cards.map((card) => card.text())).toEqual([
-      '待提交4', '追番中2', '已停用1', '需处理1',
+      '待提交4', '追番中2', '已停用1', '已加入下载1', '需处理1',
     ])
     expect(wrapper.find('.tracking-status-total').text()).toBe('共 9 条追番记录')
   })

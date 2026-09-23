@@ -5155,6 +5155,7 @@ export interface operations {
                      *           "pending": 1,
                      *           "processing": 1,
                      *           "active": 1,
+                     *           "added_to_download": 0,
                      *           "inactive": 1,
                      *           "needs_attention": 1,
                      *           "unreadable": 1
@@ -5276,6 +5277,11 @@ export interface operations {
                                 processing: number;
                                 /** Active */
                                 active: number;
+                                /**
+                                 * Added To Download
+                                 * @default 0
+                                 */
+                                added_to_download: number;
                                 /** Inactive */
                                 inactive: number;
                                 /** Needs Attention */

@@ -90,18 +90,22 @@ function action(overrides: Partial<ItemAction> = {}): ItemAction {
 describe('tracking projection (US-304)', () => {
   it('projects the overview from the server summary, never from loaded rows', () => {
     const result = projectTrackingOverview({
-      total: 7, pending: 2, processing: 1, active: 3, inactive: 1,
-      needs_attention: 0, unreadable: 1,
+      total: 7, pending: 2, processing: 1, active: 3, added_to_download: 1,
+      inactive: 1, needs_attention: 0, unreadable: 1,
     })
     expect(result.total).toBe(7)
-    expect(result.byGroup).toEqual({ PENDING: 2, ACTIVE: 3, INACTIVE: 1, ATTENTION: 0 })
+    // Issue #99: 已加入下载 is the fifth fixed overview category, counted
+    // separately from 追番中 by the server.
+    expect(result.byGroup).toEqual({
+      PENDING: 2, ACTIVE: 3, INACTIVE: 1, ADDED_TO_DOWNLOAD: 1, ATTENTION: 0,
+    })
     expect(result.unreadable).toBe(1)
   })
 
   it('fails closed to zero for a missing or malformed summary', () => {
     expect(projectTrackingOverview(null)).toEqual({
       total: 0,
-      byGroup: { PENDING: 0, ACTIVE: 0, INACTIVE: 0, ATTENTION: 0 },
+      byGroup: { PENDING: 0, ACTIVE: 0, INACTIVE: 0, ADDED_TO_DOWNLOAD: 0, ATTENTION: 0 },
       unreadable: 0,
     })
     const malformed = projectTrackingOverview({
@@ -109,7 +113,9 @@ describe('tracking projection (US-304)', () => {
       processing: 0, unreadable: undefined,
     } as never)
     expect(malformed.total).toBe(0)
-    expect(malformed.byGroup).toEqual({ PENDING: 0, ACTIVE: 0, INACTIVE: 0, ATTENTION: 2 })
+    expect(malformed.byGroup).toEqual({
+      PENDING: 0, ACTIVE: 0, INACTIVE: 0, ADDED_TO_DOWNLOAD: 0, ATTENTION: 2,
+    })
     expect(malformed.unreadable).toBe(0)
   })
 

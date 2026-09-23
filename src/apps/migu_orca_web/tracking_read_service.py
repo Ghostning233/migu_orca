@@ -48,6 +48,7 @@ from storage_engine.controllers.tracking_repository import (
     load_tracking_record,
 )
 from tracking_engine.models.tracking import (
+    TRACKING_STATUS_ADDED_TO_DOWNLOAD,
     TRACKING_STATUS_GROUP_ACTIVE,
     TRACKING_STATUS_GROUP_ATTENTION,
     TRACKING_STATUS_GROUP_INACTIVE,
@@ -205,6 +206,8 @@ def _summary_counts(records: list[TrackingRecord], unreadable: int) -> dict[str,
         "pending": 0,
         "processing": 0,
         "active": 0,
+        # Issue #99: one-time acceptances are their own overview category.
+        "added_to_download": 0,
         "inactive": 0,
         "needs_attention": 0,
         "unreadable": unreadable,
@@ -216,7 +219,10 @@ def _summary_counts(records: list[TrackingRecord], unreadable: int) -> dict[str,
         elif group == TRACKING_STATUS_GROUP_PROCESSING:
             counts["processing"] += 1
         elif group == TRACKING_STATUS_GROUP_ACTIVE:
-            counts["active"] += 1
+            if record.status == TRACKING_STATUS_ADDED_TO_DOWNLOAD:
+                counts["added_to_download"] += 1
+            else:
+                counts["active"] += 1
         elif group == TRACKING_STATUS_GROUP_INACTIVE:
             counts["inactive"] += 1
         elif group == TRACKING_STATUS_GROUP_ATTENTION:

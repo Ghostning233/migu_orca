@@ -46,6 +46,7 @@ import {
   recoverySessionKeepsLock,
   sortTrackingItems,
   TRACKING_OVERVIEW_GROUPS,
+  type TrackingOverviewGroup,
   TRACKING_RECOVER_ENDPOINT,
   TRACKING_STATUS_GROUPS,
   WRITE_ACTION_CONFIRMATIONS,
@@ -229,6 +230,20 @@ async function probeSavedConnection(): Promise<void> {
 const statusLabels: Record<TrackingStatusGroup, string> = {
   PENDING: '待提交', PROCESSING: '处理中', ACTIVE: '追番中',
   ATTENTION: '需处理', INACTIVE: '已停用',
+}
+/**
+ * Clicking an overview card filters the list by that server status group.
+ * 已加入下载 has no group of its own, so its card only reports the count.
+ */
+function selectOverviewGroup(group: TrackingOverviewGroup): void {
+  if (group === 'ADDED_TO_DOWNLOAD') return
+  statusFilter.value = statusFilter.value === group ? '' : group
+}
+
+/** Issue #99: the five fixed overview categories, including 已加入下载. */
+const overviewLabels: Record<TrackingOverviewGroup, string> = {
+  ...statusLabels,
+  ADDED_TO_DOWNLOAD: '已加入下载',
 }
 // Issue #85: the overview is the server's authoritative count projection, not a
 // recount of whichever rows this page happens to hold or filter.
@@ -1340,10 +1355,18 @@ onBeforeUnmount(() => {
     <section class="tracking-status-overview" aria-labelledby="tracking-status-heading">
       <h2 id="tracking-status-heading">状态总览</h2>
       <div class="tracking-status-cards">
-        <button v-for="group in TRACKING_OVERVIEW_GROUPS" :key="group" type="button" class="tracking-status-card"
-          :class="{ 'is-selected': statusFilter === group }" :aria-pressed="statusFilter === group"
-          @click="statusFilter = statusFilter === group ? '' : group">
-          <span>{{ statusLabels[group] }}</span><strong>{{ overview.byGroup[group] }}</strong>
+        <button
+          v-for="group in TRACKING_OVERVIEW_GROUPS"
+          :key="group"
+          type="button"
+          class="tracking-status-card"
+          :id="`tracking-overview-${group.toLowerCase()}`"
+          :class="{ 'is-selected': statusFilter === group }"
+          :aria-pressed="statusFilter === group"
+          :disabled="group === 'ADDED_TO_DOWNLOAD'"
+          @click="selectOverviewGroup(group)"
+        >
+          <span>{{ overviewLabels[group] }}</span><strong>{{ overview.byGroup[group] }}</strong>
         </button>
       </div>
       <p class="tracking-status-total" role="status">共 {{ overview.total }} 条追番记录</p>

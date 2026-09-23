@@ -76,9 +76,14 @@ export type TrackingStatusGroup = (typeof TRACKING_STATUS_GROUPS)[number]
  * deliberately has no category of its own — those rows stay visible in the list
  * and inside the server total.
  */
+/**
+ * Issue #99: the overview is fixed at five categories. 已加入下载 is not a status
+ * group of its own — it is counted separately from 追番中 — so this list is its
+ * own union rather than the server's status groups.
+ */
 export const TRACKING_OVERVIEW_GROUPS = [
-  'PENDING', 'ACTIVE', 'INACTIVE', 'ATTENTION',
-] as const satisfies readonly TrackingStatusGroup[]
+  'PENDING', 'ACTIVE', 'INACTIVE', 'ADDED_TO_DOWNLOAD', 'ATTENTION',
+] as const
 
 export type TrackingOverviewGroup = (typeof TRACKING_OVERVIEW_GROUPS)[number]
 
@@ -94,6 +99,8 @@ export interface TrackingListSummary {
   pending: number
   processing: number
   active: number
+  /** Issue #99: one-time acceptances, counted separately from 追番中. */
+  added_to_download: number
   inactive: number
   needs_attention: number
   unreadable: number
@@ -198,6 +205,7 @@ export function projectTrackingOverview(
       PENDING: _safeCount(summary?.pending),
       ACTIVE: _safeCount(summary?.active),
       INACTIVE: _safeCount(summary?.inactive),
+      ADDED_TO_DOWNLOAD: _safeCount(summary?.added_to_download),
       ATTENTION: _safeCount(summary?.needs_attention),
     },
     unreadable: _safeCount(summary?.unreadable),

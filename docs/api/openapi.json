@@ -9093,6 +9093,11 @@
                               "title": "Active",
                               "type": "integer"
                             },
+                            "added_to_download": {
+                              "default": 0,
+                              "title": "Added To Download",
+                              "type": "integer"
+                            },
                             "inactive": {
                               "title": "Inactive",
                               "type": "integer"
@@ -9171,6 +9176,7 @@
                       "pending": 1,
                       "processing": 1,
                       "active": 1,
+                      "added_to_download": 0,
                       "inactive": 1,
                       "needs_attention": 1,
                       "unreadable": 1

@@ -116,6 +116,7 @@ def _mock_workbench(page: Page, items: list[dict[str, Any]]) -> None:
                             "active": 2,
                             "inactive": 1,
                             "needs_attention": 1,
+                            "added_to_download": 1,
                             "unreadable": 1,
                         },
                         "warnings": [],
@@ -163,12 +164,12 @@ class TestTrackingWorkbench:
         assert "我的追番" in header.inner_text()
         assert "管理待提交任务和正在运行的追番" in header.inner_text()
 
-        # Four fixed categories with the server's authoritative counts; the
-        # summary claims 9 records although only two rows are loaded.
+        # Issue #99: five fixed categories with the server's authoritative
+        # counts; the summary claims 9 records although only two rows are loaded.
         cards = page.locator(".tracking-status-card")
-        assert cards.count() == 4
+        assert cards.count() == 5
         assert ["".join(text.split()) for text in cards.all_inner_texts()] == [
-            "待提交4", "追番中2", "已停用1", "需处理1",
+            "待提交4", "追番中2", "已停用1", "已加入下载1", "需处理1",
         ]
         assert "共 9 条追番记录" in page.locator(".tracking-status-total").inner_text()
 

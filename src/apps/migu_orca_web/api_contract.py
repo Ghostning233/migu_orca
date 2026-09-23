@@ -933,6 +933,9 @@ class TrackingItemListSummaryDTO(_StrictBase):
     pending: int
     processing: int
     active: int
+    #: Issue #99: records whose one-time "download existing resources" request
+    #: Auto Bangumi accepted. They are local history, not external subscriptions.
+    added_to_download: int = 0
     inactive: int
     needs_attention: int
     unreadable: int

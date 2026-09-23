@@ -26,5 +26,6 @@ def _summary(total=1, **counts):
     """Complete tracking-list summary with the authoritative inactive count."""
     return {
         "total": total, "pending": 0, "processing": 0, "active": 0,
-        "inactive": 0, "needs_attention": 0, "unreadable": 0, **counts,
+        "inactive": 0, "needs_attention": 0, "added_to_download": 0,
+        "unreadable": 0, **counts,
     }
