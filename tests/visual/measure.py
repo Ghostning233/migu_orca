@@ -21,7 +21,7 @@ from PIL import Image
 from tests.visual.compare import CANVAS_SIZE, normalize_reference, read_image
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-REFERENCE_DIR = REPO_ROOT / "docs/design/assets/frontend-ux/review-2026-09-17"
+REFERENCE_DIR = REPO_ROOT / "docs/design/assets/frontend-ux/archive/review-2026-09-17"
 DESIGN_FILES: tuple[str, ...] = (
     "01-single-search.png",
     "02-single-candidates-loading.png",
@@ -140,7 +140,7 @@ def _sample_underline_color(pixels: object, underline: Band | None) -> list[int]
 def measure_all() -> dict[str, object]:
     report: dict[str, object] = {
         "canvas": {"width": CANVAS_SIZE[0], "height": CANVAS_SIZE[1]},
-        "source": "docs/design/assets/frontend-ux/review-2026-09-17 (1586x992 PNG, LANCZOS -> 1440x900)",
+        "source": "docs/design/assets/frontend-ux/archive/review-2026-09-17 (1586x992 PNG, LANCZOS -> 1440x900)",
         "files": {},
     }
     for name in DESIGN_FILES:

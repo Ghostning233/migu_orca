@@ -28,7 +28,7 @@ from tests.browser.visual_manifest import (
 from tests.visual.compare import CANVAS_SIZE, CompareStats, MaskRect, compare_images, read_image
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DESIGN_DIR = REPO_ROOT / "docs/design/assets/frontend-ux/review-2026-09-17"
+DESIGN_DIR = REPO_ROOT / "docs/design/assets/frontend-ux/archive/review-2026-09-17"
 
 DESIGN_FILES: dict[int, str] = {
     1: "01-single-search.png",

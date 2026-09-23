@@ -30,7 +30,7 @@ from tests.visual.compare import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DESIGN_DIR = REPO_ROOT / "docs/design/assets/frontend-ux/review-2026-09-17"
+DESIGN_DIR = REPO_ROOT / "docs/design/assets/frontend-ux/archive/review-2026-09-17"
 DESIGN_NAMES = (
     "01-single-search.png",
     "02-single-candidates-loading.png",
