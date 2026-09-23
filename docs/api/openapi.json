@@ -23681,6 +23681,15 @@
                   "configuration_revision"
                 ],
                 "properties": {
+                  "submission_mode": {
+                    "type": "string",
+                    "enum": [
+                      "CONTINUE_TRACKING",
+                      "DOWNLOAD_EXISTING"
+                    ],
+                    "default": "CONTINUE_TRACKING",
+                    "description": "issue #98：本次操作的提交方式。持续追番建立受控外部订阅；下载现有资源只把当前资源交给 Auto Bangumi 加入下载。只作用于本次操作，不写入本地方案。"
+                  },
                   "expected_revision": {
                     "type": "integer",
                     "minimum": 1,
@@ -23707,6 +23716,7 @@
                 }
               },
               "example": {
+                "submission_mode": "CONTINUE_TRACKING",
                 "expected_revision": 1,
                 "idempotency_key": "示例",
                 "confirm": true
@@ -25717,6 +25727,15 @@
                   "configuration_revision"
                 ],
                 "properties": {
+                  "submission_mode": {
+                    "type": "string",
+                    "enum": [
+                      "CONTINUE_TRACKING",
+                      "DOWNLOAD_EXISTING"
+                    ],
+                    "default": "CONTINUE_TRACKING",
+                    "description": "issue #98：本次操作的提交方式。持续追番建立受控外部订阅；下载现有资源只把当前资源交给 Auto Bangumi 加入下载。只作用于本次操作，不写入本地方案。"
+                  },
                   "expected_revision": {
                     "type": "integer",
                     "minimum": 1,
@@ -25751,6 +25770,7 @@
                 }
               },
               "example": {
+                "submission_mode": "CONTINUE_TRACKING",
                 "expected_revision": 1,
                 "idempotency_key": "示例",
                 "confirm": true,

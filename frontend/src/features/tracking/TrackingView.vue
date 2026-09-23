@@ -84,6 +84,7 @@ import {
   type TrackingManagementResult,
 } from './trackingManagement'
 import TrackingInspector from './TrackingInspector.vue'
+import TrackingSubmissionModeDialog, { type SubmissionMode } from './TrackingSubmissionModeDialog.vue'
 import TrackingPoster from './TrackingPoster.vue'
 import {
   EMPTY_BATCH_SELECTION,
@@ -624,6 +625,45 @@ async function recheckAfterAction(trackingId: string, refreshList = false): Prom
 // own revision and opaque key, and filtering never clears the selection.
 const TRACKING_BATCH_SUBMIT_ENDPOINT = '/api/v1/tracking/batch-submit'
 // Unified plan delete (issue #92): the page owns the single request and result.
+// Issue #98: the entry button opens a mode choice; only the choice writes.
+const submitModeOpen = ref(false)
+const submitModePending = ref<{ action: TrackingAction; item: TrackingItem } | null>(null)
+const submissionMode = ref<SubmissionMode | null>(null)
+
+const SUBMISSION_CHOICE_ACTIONS = new Set(['SUBMIT', 'RETRY'])
+
+function isSubmissionChoiceAction(code: string): boolean {
+  return SUBMISSION_CHOICE_ACTIONS.has(code)
+}
+
+function chooseSubmissionMode(mode: SubmissionMode): void {
+  const pending = submitModePending.value
+  // One choice, one request: a second click can neither pick another mode nor
+  // start a concurrent submission, because the dialog is gone immediately.
+  if (!pending || submissionMode.value) return
+  submissionMode.value = mode
+  submitModeOpen.value = false
+  void runTrackingWrite(pending)
+}
+
+function closeSubmissionModeChoice(): void {
+  submitModeOpen.value = false
+  submitModePending.value = null
+  submissionMode.value = null
+}
+
+function cancelSubmissionMode(): void {
+  // Cancelling sends nothing at all.
+  closeSubmissionModeChoice()
+}
+
+// The dialog stays open (all actions disabled, the chosen one loading) until the
+// page-level write settles, then closes on every path.
+watch(writeLoading, (loading) => {
+  if (loading) return
+  closeSubmissionModeChoice()
+})
+
 const planDeleteSession = ref<TrackingPlanDeleteSession | null>(null)
 let planDeleteSequence = 0
 
@@ -878,17 +918,27 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
     blockIntent(trackingId)
     return
   }
+  // Issue #98 AC 2: the entry only opens the mode choice.
+  if (isSubmissionChoiceAction(requested) && submissionMode.value === null) {
+    submitModePending.value = payload
+    submitModeOpen.value = true
+    return
+  }
   const action: TrackingWriteActionCode = requested
 
   // The user is now replaying the one locked request (or starting a fresh one
   // once nothing is pending): the refusal notice has served its purpose.
   blockedIntentNotice.value = null
   writePending.value = true
-  let confirmed = false
+  // Choosing the submission mode is the impact confirmation for SUBMIT/RETRY;
+  // every other write action keeps the shared confirm dialog.
+  let confirmed = submissionMode.value !== null
   try {
-    confirmed = (await confirmDialog.value?.confirm({
-      ...WRITE_ACTION_CONFIRMATIONS[action], cancelLabel: '取消',
-    })) ?? false
+    if (!confirmed) {
+      confirmed = (await confirmDialog.value?.confirm({
+        ...WRITE_ACTION_CONFIRMATIONS[action], cancelLabel: '取消',
+      })) ?? false
+    }
   } finally {
     writePending.value = false
   }
@@ -922,6 +972,7 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
       expected_revision: intent.expectedRevision,
       idempotency_key: intent.idempotencyKey,
       confirm: true,
+      ...(submissionMode.value ? { submission_mode: submissionMode.value } : {}),
       connection_ref: requestConfig.connection_ref!,
       configuration_revision: requestConfig.configuration_revision,
       ...(storageDir ? { storage_dir: storageDir } : {}),
@@ -931,6 +982,7 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
     })
     if (sequence !== writeSequence) return
     // The returned tracking converges the list row without a second list read.
+    closeSubmissionModeChoice()
     applyReturnedTracking(result.tracking)
     const session = projectWriteOutcome(trackingId, action, result)
     writeSession.value = session
@@ -1413,6 +1465,13 @@ onBeforeUnmount(() => {
     <p v-if="syncMessage" id="tracking-sync-status" class="tracking-sync-status" role="status">{{ syncMessage }}</p>
     <p v-if="syncSummary" class="tracking-sync-summary" role="status">本次安全同步摘要：检查 {{ syncSummary.checked }}，新增 {{ syncSummary.created }}，更新 {{ syncSummary.updated }}，未变化 {{ syncSummary.unchanged }}。</p>
     <ConfirmDialog ref="confirmDialog" />
+    <TrackingSubmissionModeDialog
+      :open="submitModeOpen"
+      :pending-mode="submissionMode"
+      :busy="writeLoading || writePending || recoveryLoading || managementLoading"
+      @choose="chooseSubmissionMode"
+      @cancel="cancelSubmissionMode"
+    />
   </section>
 </template>
 

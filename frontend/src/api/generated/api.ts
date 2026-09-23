@@ -11790,12 +11790,19 @@ export interface operations {
             content: {
                 /**
                  * @example {
+                 *       "submission_mode": "CONTINUE_TRACKING",
                  *       "expected_revision": 1,
                  *       "idempotency_key": "示例",
                  *       "confirm": true
                  *     }
                  */
                 "application/json": {
+                    /**
+                     * @description issue #98：本次操作的提交方式。持续追番建立受控外部订阅；下载现有资源只把当前资源交给 Auto Bangumi 加入下载。只作用于本次操作，不写入本地方案。
+                     * @default CONTINUE_TRACKING
+                     * @enum {string}
+                     */
+                    submission_mode?: "CONTINUE_TRACKING" | "DOWNLOAD_EXISTING";
                     /** @description 客户端最后观察到的追番记录 revision（revision-aware 重试）。 */
                     expected_revision: number;
                     /** @description opaque 客户端重试操作 id；一次点击一个新 operation，同键网络重放复用原 operation。只进请求体与页面内存。 */
@@ -12918,6 +12925,7 @@ export interface operations {
             content: {
                 /**
                  * @example {
+                 *       "submission_mode": "CONTINUE_TRACKING",
                  *       "expected_revision": 1,
                  *       "idempotency_key": "示例",
                  *       "confirm": true,
@@ -12926,6 +12934,12 @@ export interface operations {
                  *     }
                  */
                 "application/json": {
+                    /**
+                     * @description issue #98：本次操作的提交方式。持续追番建立受控外部订阅；下载现有资源只把当前资源交给 Auto Bangumi 加入下载。只作用于本次操作，不写入本地方案。
+                     * @default CONTINUE_TRACKING
+                     * @enum {string}
+                     */
+                    submission_mode?: "CONTINUE_TRACKING" | "DOWNLOAD_EXISTING";
                     /** @description 客户端最后观察到的追番记录 revision（revision-aware 提交）。 */
                     expected_revision: number;
                     /** @description opaque 客户端提交操作 id；同键网络重放收敛到同一次外部调用。只进请求体与页面内存。 */

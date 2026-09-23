@@ -148,8 +148,9 @@ def _open(page: Page, live_server_url: str, storage_dir: Path) -> None:
 
 
 def _confirm(page: Page) -> None:
-    page.wait_for_selector(".confirm-dialog", timeout=10_000)
-    page.locator(".confirm-dialog .primary-button").click()
+    """Issue #98: the submit confirmation is now the submission-mode choice."""
+    page.wait_for_selector("#tracking-mode-continue", timeout=10_000)
+    page.locator("#tracking-mode-continue").click()
 
 
 class TestSubmitFeedback:
@@ -251,8 +252,8 @@ class TestExactReadbackFeedback:
         page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
         page.wait_for_selector("#tracking-submit")
         page.locator("#tracking-submit").click()
-        page.wait_for_selector(".confirm-dialog", timeout=10_000)
-        page.locator(".confirm-dialog .primary-button").click()
+        page.wait_for_selector("#tracking-mode-continue", timeout=10_000)
+        page.locator("#tracking-mode-continue").click()
 
         # The exact, actionable wording is what the user reads; no success notice.
         expect(page.locator("#app-main")).to_contain_text(
@@ -294,8 +295,8 @@ class TestExactReadbackFeedback:
         page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
         page.wait_for_selector("#tracking-submit")
         page.locator("#tracking-submit").click()
-        page.wait_for_selector(".confirm-dialog", timeout=10_000)
-        page.locator(".confirm-dialog .primary-button").click()
+        page.wait_for_selector("#tracking-mode-continue", timeout=10_000)
+        page.locator("#tracking-mode-continue").click()
 
         page.wait_for_selector("#tracking-overview", timeout=10_000)
         page.evaluate(
@@ -304,3 +305,69 @@ class TestExactReadbackFeedback:
         )
         expect(page.locator("#app-main")).to_contain_text("追番中")
         expect(page.locator("#app-main")).to_contain_text(warning)
+
+class TestSubmissionModeChoice:
+    """Issue #98: one stable entry button, then an explicit mode choice."""
+
+    def test_entry_opens_the_choice_without_a_request_and_cancel_sends_nothing(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        posts = _install(page, _pending_item(), {"tracking": _pending_item()})
+
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-submit")
+        # AC 2: the entry label is stable whatever the submission will become.
+        expect(page.locator("#tracking-submit")).to_have_text("提交方案")
+
+        page.locator("#tracking-submit").click()
+        page.wait_for_selector("#tracking-mode-cancel", timeout=10_000)
+        assert posts == [], "opening the dialog must not send anything"
+        expect(page.locator(".tracking-mode-dialog .confirm-dialog-title")).to_have_text("选择提交方式")
+        assert page.locator(".tracking-mode-dialog .confirm-dialog-actions button").all_inner_texts() == [
+            "取消", "下载现有资源", "持续追番",
+        ]
+
+        page.locator("#tracking-mode-cancel").click()
+        page.wait_for_timeout(200)
+        assert posts == [], "cancelling the choice must send nothing"
+        expect(page.locator("#tracking-submit")).to_have_text("提交方案")
+
+    @pytest.mark.parametrize(
+        ("button", "mode"),
+        [("#tracking-mode-download", "DOWNLOAD_EXISTING"), ("#tracking-mode-continue", "CONTINUE_TRACKING")],
+    )
+    def test_choosing_a_mode_submits_once_with_that_mode(
+        self, page: Page, live_server_url: str, storage_dir: Path, button: str, mode: str
+    ) -> None:
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        item = _pending_item()
+        posts = _install(
+            page,
+            item,
+            {
+                "tracking": {
+                    **item,
+                    "status": "ACTIVE",
+                    "status_label": "追番中",
+                    "status_group": "ACTIVE",
+                }
+            },
+        )
+
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-submit")
+        page.locator("#tracking-submit").click()
+        page.wait_for_selector(button, timeout=10_000)
+        # The mode choice replaces the second impact dialog for submit-family actions.
+        page.locator(button).click()
+        page.wait_for_timeout(400)
+
+        assert len(posts) == 1, "one choice must produce exactly one external request"
+        body = posts[0]
+        assert body["submission_mode"] == mode
+        assert body["confirm"] is True
+        # The dialog converged away once the write settled.
+        assert page.locator(".tracking-mode-dialog").count() == 0

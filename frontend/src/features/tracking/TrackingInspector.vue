@@ -718,7 +718,7 @@ defineExpose({ reload: () => fetchDetail(true) })
             :loading="writeInFlight"
             :disabled="actionBusy"
             @click="requestWrite(submitAction)"
-          >{{ submitAction.label }}</BaseButton>
+          >提交方案</BaseButton>
         </template>
         <template v-else-if="retryAction">
           <p class="field-help">该记录上次提交明确失败。重试会使用已保存的 Auto Bangumi 连接，重新在 Auto Bangumi 创建外部订阅并可能触发下载；每次重试都需要单独确认。</p>
