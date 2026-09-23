@@ -1443,6 +1443,8 @@ __all__ = [
 #: outcome, and one request refused before any external call (issue #87).
 _BATCH_OUTCOME_BUCKETS = {
     TRACKING_STATUS_ACTIVE: "succeeded",
+    # Issue #98/#100: a one-time acceptance is as successful as 追番中.
+    TRACKING_STATUS_ADDED_TO_DOWNLOAD: "succeeded",
     TRACKING_STATUS_SUBMIT_FAILED: "failed",
     TRACKING_STATUS_NEEDS_RECONFIRM: "failed",
     TRACKING_STATUS_VERIFYING_EXTERNAL: "unknown",
@@ -1484,6 +1486,7 @@ def run_saved_tracking_batch_submit(
             # The single-entry contract takes the canonical string form.
             connection_ref=str(payload.connection_ref),
             configuration_revision=payload.configuration_revision,
+            submission_mode=payload.submission_mode,
             storage_dir=payload.storage_dir,
         )
         try:

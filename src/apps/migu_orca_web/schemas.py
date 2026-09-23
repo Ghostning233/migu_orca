@@ -489,6 +489,10 @@ class SavedTrackingBatchSubmitInput(BaseModel):
         min_length=1, max_length=MAX_TRACKING_BATCH_SUBMIT_ITEMS
     )
     confirm: StrictBool
+    #: Issue #100: exactly one operation-level mode applies to the whole batch.
+    #: Mixed or per-entry modes are impossible by construction: the item model
+    #: forbids unknown fields, so a per-entry `submission_mode` is a 400.
+    submission_mode: Literal["CONTINUE_TRACKING", "DOWNLOAD_EXISTING"] = "CONTINUE_TRACKING"
     connection_ref: UUID
     configuration_revision: StrictInt = Field(ge=0)
     storage_dir: str | None = None

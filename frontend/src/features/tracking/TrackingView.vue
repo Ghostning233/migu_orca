@@ -751,6 +751,7 @@ async function runPlanDelete(payload: {
 }
 
 const batchMode = ref(false)
+const batchSubmissionMode = ref<SubmissionMode | null>(null)
 const batchSelection = ref<TrackingBatchSelection>(EMPTY_BATCH_SELECTION)
 const batchPending = ref(false)
 const batchLoading = ref(false)
@@ -801,25 +802,38 @@ function titleFor(trackingId: string): string {
  * per-entry result converges the success list and leaves every failed or
  * unresolved row selected for the user's next explicit action.
  */
-async function runBatchSubmit(): Promise<void> {
+const batchModeOpen = ref(false)
+
+/** Issue #100 AC 1: the entry opens one mode choice for the whole batch. */
+function runBatchSubmit(): void {
+  if (batchPending.value || batchLoading.value) return
+  if (!savedRef.value?.connection_ref) return
+  if (!batchSummary.value.selected) return
+  batchModeOpen.value = true
+}
+
+function chooseBatchSubmissionMode(mode: SubmissionMode): void {
+  const config = savedRef.value
+  if (!config?.connection_ref || batchSubmissionMode.value) return
+  batchSubmissionMode.value = mode
+  batchModeOpen.value = false
+  void performBatchSubmit()
+}
+
+function cancelBatchSubmissionMode(): void {
+  batchModeOpen.value = false
+}
+
+async function performBatchSubmit(): Promise<void> {
   if (batchPending.value || batchLoading.value) return
   const config = savedRef.value
   if (!config?.connection_ref) return
   if (!batchSummary.value.selected) return
-  batchPending.value = true
-  let confirmed = false
-  try {
-    confirmed = (await confirmDialog.value?.confirm({
-      title: `提交所选 ${batchSummary.value.selected} 条`,
-      message: `将在 Auto Bangumi 为所选 ${batchSummary.value.selected} 条追番分别创建外部订阅，并可能触发下载。每条独立成功或失败，单条失败不会回滚已成功的条目；是否继续？`,
-      confirmLabel: '确认批量提交',
-      cancelLabel: '取消',
-    })) ?? false
-  } finally {
-    batchPending.value = false
-  }
-  if (!confirmed) return
 
+  // One choice, one batch: the mode is spent here so a later batch cannot
+  // silently reuse it.
+  const submissionMode = batchSubmissionMode.value ?? undefined
+  batchSubmissionMode.value = null
   const body = buildBatchSubmitBody(
     batchSelection.value,
     items.value,
@@ -828,6 +842,7 @@ async function runBatchSubmit(): Promise<void> {
       configuration_revision: config.configuration_revision,
     },
     storageQuery().storage_dir,
+    submissionMode,
   )
   if (!body) return
 
@@ -1395,7 +1410,7 @@ onBeforeUnmount(() => {
           <BaseButton id="tracking-batch-select-all" variant="secondary" @click="selectAllCurrent">全选当前结果</BaseButton>
           <BaseButton id="tracking-batch-clear" variant="secondary" :disabled="!batchSummary.selected" @click="clearSelection">清除选择</BaseButton>
           <BaseButton id="tracking-batch-submit" :loading="batchLoading" :disabled="batchLoading || batchPending || !batchSummary.selected" @click="runBatchSubmit">
-            提交所选 {{ batchSummary.selected }} 条
+            提交选中方案
           </BaseButton>
         </div>
         <p v-if="batchMode && batchSkippedNotice" id="tracking-batch-skipped" class="tracking-batch-skipped" role="status">{{ batchSkippedNotice }}</p>
@@ -1493,6 +1508,13 @@ onBeforeUnmount(() => {
     <p v-if="syncMessage" id="tracking-sync-status" class="tracking-sync-status" role="status">{{ syncMessage }}</p>
     <p v-if="syncSummary" class="tracking-sync-summary" role="status">本次安全同步摘要：检查 {{ syncSummary.checked }}，新增 {{ syncSummary.created }}，更新 {{ syncSummary.updated }}，未变化 {{ syncSummary.unchanged }}。</p>
     <ConfirmDialog ref="confirmDialog" />
+    <TrackingSubmissionModeDialog
+      :open="batchModeOpen"
+      :batch-count="batchSummary.selected"
+      :busy="batchLoading || batchPending"
+      @choose="chooseBatchSubmissionMode"
+      @cancel="cancelBatchSubmissionMode"
+    />
     <TrackingSubmissionModeDialog
       :open="submitModeOpen"
       :pending-mode="submissionMode"

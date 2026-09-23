@@ -21,6 +21,8 @@ const props = defineProps<{
   pendingMode?: SubmissionMode | null
   /** A write/recovery elsewhere already owns the page's single intent. */
   busy?: boolean
+  /** Issue #100: how many selected plans this one choice applies to. */
+  batchCount?: number
 }>()
 
 const emit = defineEmits<{
@@ -75,6 +77,9 @@ onBeforeUnmount(() => deactivate())
         :aria-describedby="bodyId"
       >
         <h2 :id="titleId" class="confirm-dialog-title">选择提交方式</h2>
+        <p v-if="props.batchCount" id="tracking-mode-batch" class="field-help">
+          本次选择将统一应用于所选 {{ props.batchCount }} 条追番方案。
+        </p>
         <p :id="bodyId" class="confirm-dialog-message">
           下载现有资源：把当前符合追番方案的资源交给 Auto Bangumi 加入下载，不建立持续检查的 RSS 订阅，后续新资源不会自动下载。
           持续追番：在 Auto Bangumi 建立受控外部订阅，持续检查并下载后续资源。

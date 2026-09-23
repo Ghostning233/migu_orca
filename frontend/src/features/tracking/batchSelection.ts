@@ -120,6 +120,7 @@ export function buildBatchSubmitBody(
   items: readonly TrackingItem[],
   connection: { connection_ref: string; configuration_revision: number },
   storageDir?: string,
+  submissionMode?: 'CONTINUE_TRACKING' | 'DOWNLOAD_EXISTING',
 ): TrackingBatchSubmitBody | null {
   const byId = new Map(items.map((item) => [item.tracking_id, item]))
   const entries: TrackingBatchEntry[] = []
@@ -138,6 +139,8 @@ export function buildBatchSubmitBody(
   return {
     items: entries,
     confirm: true,
+    // Issue #100: exactly one mode applies to every selected plan.
+    ...(submissionMode ? { submission_mode: submissionMode } : {}),
     connection_ref: connection.connection_ref,
     configuration_revision: connection.configuration_revision,
     ...(storageDir ? { storage_dir: storageDir } : {}),

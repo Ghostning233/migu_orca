@@ -277,9 +277,11 @@ class TestBatchSubmit:
         expect(page.locator("#tracking-batch-count")).to_contain_text("已选 2 条")
 
         page.locator("#tracking-batch-submit").click()
-        page.wait_for_selector(".confirm-dialog")
-        expect(page.locator(".confirm-dialog-title")).to_contain_text("提交所选 2 条")
-        page.locator(".confirm-dialog .primary-button").click()
+        # Issue #100: one mode choice for the whole batch, with the count stated.
+        page.wait_for_selector("#tracking-mode-continue", timeout=10_000)
+        expect(page.locator(".tracking-mode-dialog .confirm-dialog-title")).to_contain_text("选择提交方式")
+        expect(page.locator(".tracking-mode-dialog")).to_contain_text("所选 2 条追番方案")
+        page.locator("#tracking-mode-continue").click()
 
         page.wait_for_selector("#tracking-batch-result")
         expect(page.locator("#tracking-batch-result")).to_contain_text("成功 1 条")
@@ -291,6 +293,7 @@ class TestBatchSubmit:
         assert all(entry["expected_revision"] >= 1 for entry in entries)
         assert len({entry["idempotency_key"] for entry in entries}) == 2
         assert bodies[0]["confirm"] is True
+        assert bodies[0]["submission_mode"] == "CONTINUE_TRACKING"
         assert bodies[0]["connection_ref"] == REF
         # No credential or endpoint ever leaves the page.
         assert "secret-password" not in json.dumps(bodies, ensure_ascii=False)
