@@ -5,6 +5,7 @@
 [Stage 43执行PRD](../MiGuOrca_stage43_add_anime_entry_visual_PRD.md)及
 [决策/后续编写交接](../development/add-anime-visual-prd-handoff-2026-09-18.md)为准。
 旧表状态和下文提示用于追溯，仍需代码核实，不自动覆盖现行需求。
+本记录中的设计图角色判断止于当时；2026-09-23 的[新版完整设计基线](frontend-ux-redesign-2026-09-23.md)已取代这些旧图，旧图均已归档。
 
 状态：用户已确认[新版六张效果图](frontend-ux-review-mockups-2026-09-17.md)作为后续开发方向；FE-01～FE-08 仍待按实际代码、契约和真实 Chromium 复现后制定执行验收。本文来自用户单番与批量添加的人工观察及当前分支代码静态核对；尚未修改实现，也不建立新 Stage。设计图不是逐像素验收规格；三张已被取代的旧图已按第 4 节移至 `docs/design/assets/frontend-ux/archive/`。后续工作包见[Terra 规划交接](../development/frontend-ux-followup-handoff-2026-09-17.md)。
 
@@ -39,9 +40,9 @@
 
 “已更新集数”目前没有可信数据，只保留清楚的“待开发”占位；总集数有公开数据时显示，否则为“未知”。默认区域不重复展示同一标题、字幕组、规则和资源计数。`Overview / Source / Filter / Seeds`、原始标题、技术 ID 与 RSS 状态不能代替用户任务语言。
 
-## 4. 设计图盘点
+## 4. 当时的设计图盘点（现均已归档）
 
-| 资产 | 当前角色 | 处理建议 |
+| 资产 | 当时角色 | 当时处理结果／建议 |
 | --- | --- | --- |
 | `add-anime-home-v1.png` | 旧单番/批量首页方向图，与当前实现有差异，已被新版首页方向取代 | 已移至 `docs/design/assets/frontend-ux/archive/`（2026-09-17）；保留历史，不再作为添加页首页的现行参考。 |
 | `batch-review-12-v2.png` | 批量双栏与固定操作栏的当前方向图 | 保留为布局参考；右侧详情需按本轮评审重画。 |
@@ -51,7 +52,7 @@
 | `batch-review-12-v1.png` | 被批量 V2 修正的旧过程图 | 已移至 `docs/design/assets/frontend-ux/archive/`（2026-09-17），保留历史但不与当前参考图混放。 |
 | `tracking-management-v1.png` | 被管理 V2 修正的旧过程图，列表复选框语义有偏差 | 已移至同一 `archive/`（2026-09-17），保留历史但不与当前参考图混放。 |
 
-当前 `frontend-ux-visual-direction-v1.md` 保留 Gate 3 历史与其他现行参考。上述三张已被替代的旧图已于 2026-09-17 完成全库引用盘点后移动至 `archive/` 并同步更新路径与说明；未删除历史资产，图片内容与 Git 历史未改动。文件名中的 V1 只表示版本，不等于过时：两张异常状态 V1 仍是当前参考。
+`frontend-ux-visual-direction-v1.md` 保留 Gate 3 历史。上述三张更早旧图已于 2026-09-17 归档；表中当时继续有效的四张图也于 2026-09-23 随新版完整设计基线归档。历史资产未删除，文件名中的 V1/V2 只表示当时版本。
 
 ## 5. 本轮新增的设计问题与讨论草案
 

@@ -1,6 +1,6 @@
-# 添加番剧新版效果图：已确认的开发方向
+# 添加番剧 2026-09-17 效果图（历史）
 
-状态：用户于 2026-09-17 确认六张图作为后续添加番剧页面的开发方向。它们确定信息层级、布局和主要状态表达；其中新版首页取代 `add-anime-home-v1.png` 作为添加页首页的现行方向，Gate 3 的配色、设计 Token、批量 V2 布局与其他页面参考继续有效。图片不是逐像素、逐字或接口能力的验收标准，不证明前端已实现，也不自动授予开发或发布权限。图中番剧名称与封面均为虚构示例。未运行浏览器验收。
+状态：用户于 2026-09-17 确认六张图作为当时添加番剧页面的开发方向；2026-09-23 的[新版完整设计基线](frontend-ux-redesign-2026-09-23.md)已取代本组六图，图片已归档。以下讨论与判断保留为历史记录，不再作为现行开发或验收依据。图片中的番剧名称与封面均为虚构示例；当轮未运行浏览器验收。
 
 本轮先由主 Agent 阅读项目规范、现有设计和实现，与本机 Claude CLI 的 `opus` 档位做两轮设计讨论，再由主 Agent 收敛方案并使用内置 `imagegen` 的 `ui-mockup` / 定向编辑模式生成图片。本机配置将 `opus` 的显示名标为 `kimi-k3`，请求模型标识为 `claude-opus-5`；代理背后的实际模型无法仅凭本地配置独立验证。K3 的主要提醒是：草案详情默认信息过载，两个“保存”操作须明显分层，批量“当前查看”与“勾选确认”不能混淆。
 
@@ -8,14 +8,14 @@
 
 | 图 | 此刻的任务 | 请重点看 |
 | --- | --- | --- |
-| [01 单番搜索首页](assets/frontend-ux/review-2026-09-17/01-single-search.png) | 输入一部番剧 | 首屏是否聚焦、模式切换和三步预告是否清楚；首次进入不出现空结果面板。 |
-| [02 单番候选加载](assets/frontend-ux/review-2026-09-17/02-single-candidates-loading.png) | 人工选择真实合集 | 被点击的候选旁就地加载；其他候选暂时不能重复选择；候选阶段没有有效资源数。 |
-| [03 单番草案审核](assets/frontend-ux/review-2026-09-17/03-single-draft-review.png) | 判断合集、筛选效果和能否确认 | 居中审核区的信息密度；“保存修改”是次操作，“保存并确认”是主操作；外部提交仍在我的追番。 |
-| [04 批量输入与搜索](assets/frontend-ux/review-2026-09-17/04-batch-search-loading.png) | 输入多部番剧并等待候选搜索 | 多行输入、1～36 部计数、输入保留和不定进度反馈。当前 API 未提供逐条实时进度，不画虚构百分比。 |
-| [05 批量候选加载](assets/frontend-ux/review-2026-09-17/05-batch-candidates-loading.png) | 从左栏选条目，在右栏选择真实合集 | 左卡右详情、当前查看与勾选的区分、仅当前条目的候选加载、其他条目仍可操作。 |
-| [06 批量草案审核](assets/frontend-ux/review-2026-09-17/06-batch-draft-review.png) | 审核两个待确认条目中的当前草案 | 与单番同一详情信息层级；批量“保存并确认”只在固定操作栏；总集数与已更新集数占位。 |
+| [01 单番搜索首页](assets/frontend-ux/archive/review-2026-09-17/01-single-search.png) | 输入一部番剧 | 首屏是否聚焦、模式切换和三步预告是否清楚；首次进入不出现空结果面板。 |
+| [02 单番候选加载](assets/frontend-ux/archive/review-2026-09-17/02-single-candidates-loading.png) | 人工选择真实合集 | 被点击的候选旁就地加载；其他候选暂时不能重复选择；候选阶段没有有效资源数。 |
+| [03 单番草案审核](assets/frontend-ux/archive/review-2026-09-17/03-single-draft-review.png) | 判断合集、筛选效果和能否确认 | 居中审核区的信息密度；“保存修改”是次操作，“保存并确认”是主操作；外部提交仍在我的追番。 |
+| [04 批量输入与搜索](assets/frontend-ux/archive/review-2026-09-17/04-batch-search-loading.png) | 输入多部番剧并等待候选搜索 | 多行输入、1～36 部计数、输入保留和不定进度反馈。当前 API 未提供逐条实时进度，不画虚构百分比。 |
+| [05 批量候选加载](assets/frontend-ux/archive/review-2026-09-17/05-batch-candidates-loading.png) | 从左栏选条目，在右栏选择真实合集 | 左卡右详情、当前查看与勾选的区分、仅当前条目的候选加载、其他条目仍可操作。 |
+| [06 批量草案审核](assets/frontend-ux/archive/review-2026-09-17/06-batch-draft-review.png) | 审核两个待确认条目中的当前草案 | 与单番同一详情信息层级；批量“保存并确认”只在固定操作栏；总集数与已更新集数占位。 |
 
-既有 [批量部分成功图](assets/frontend-ux/batch-partial-success-v1.png)继续作为异常状态参考，本轮不重复生成。`batch-review-12-v1.png` 与 `tracking-management-v1.png` 已被 V2 替代；`add-anime-home-v1.png` 已被新版首页方向取代。三张旧图已于 2026-09-17 移至 [archive/](assets/frontend-ux/archive/)，仅作历史记录；添加页首页的现行参考只有上表六图。
+当时的 [批量部分成功图](assets/frontend-ux/archive/batch-partial-success-v1.png)作为异常状态参考，本轮未重复生成。`batch-review-12-v1.png` 与 `tracking-management-v1.png` 当时已被 V2 替代；`add-anime-home-v1.png` 当时被本组首页图取代。三张更早旧图已于 2026-09-17 移至 [archive/](assets/frontend-ux/archive/)；本组六图也已于 2026-09-23 归档。
 
 ## 讨论后采用的设计取舍
 

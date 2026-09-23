@@ -5,7 +5,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 文档类型 | Gate 3 视觉方向与关键状态参考 |
-| 当前状态 | 已通过评审并冻结；不是逐像素实现稿 |
+| 当前状态 | Gate 3 历史基线；2026-09-23 新版设计已取代其页面图 |
 | 生成日期 | 2026-09-07 |
 | 生成方式 | Codex 内置 imagegen，`ui-mockup` 用例 |
 | 依据 | 已冻结的混合低保真骨架与组件级交互规格 |
@@ -15,10 +15,9 @@
 焦点与组件状态以[设计 Token V1](frontend-ux-design-tokens-v1.md)为准。图片中的生成细节不得
 越过上述文字规格成为新的业务需求。
 
-后续评审于 2026-09-17 确认了[添加番剧新版六张效果图](frontend-ux-review-mockups-2026-09-17.md)
-作为该页面的开发方向：单番首页 V1 不再作为添加页首页的现行参考，已于 2026-09-17 移至
-[归档目录](assets/frontend-ux/archive/) 仅作 Gate 3 历史记录；批量 V2 的双栏布局、其他页面与
-异常状态参考及设计 Token 继续有效。
+后续评审于 2026-09-17 确认过[添加番剧六张历史效果图](frontend-ux-review-mockups-2026-09-17.md)；
+2026-09-23 的[新版完整设计基线](frontend-ux-redesign-2026-09-23.md)现已取代所有本页页面图。
+本页及其图片仅保留 Gate 3 的设计演进记录；设计 Token 的现行适用性仍需按新基线核对。
 
 ## 2. 视觉方向
 
@@ -32,8 +31,7 @@
 
 ## 3. 单番首页
 
-现行方向：添加页首页以[新版六张效果图](frontend-ux-review-mockups-2026-09-17.md) 为准，
-首屏聚焦单一搜索任务的层级见其中的 `01-single-search.png`。本节仅保留 Gate 3 历史图。
+现行方向以[2026-09-23 新版设计](frontend-ux-redesign-2026-09-23.md)为准。本节仅保留 Gate 3 历史图。
 
 ![添加番剧单番首页 V1（已归档）](assets/frontend-ux/archive/add-anime-home-v1.png)
 
@@ -46,7 +44,7 @@
 
 ## 4. 典型 12 部批量审核
 
-![12 部批量审核 V2](assets/frontend-ux/batch-review-12-v2.png)
+![12 部批量审核 V2](assets/frontend-ux/archive/batch-review-12-v2.png)
 
 观察：
 
@@ -58,7 +56,7 @@
 
 ## 5. 我的追番
 
-![我的追番 V2](assets/frontend-ux/tracking-management-v2.png)
+![我的追番 V2](assets/frontend-ux/archive/tracking-management-v2.png)
 
 观察：
 
@@ -72,7 +70,7 @@
 
 ### 6.1 批量部分成功
 
-![批量保存并确认部分成功](assets/frontend-ux/batch-partial-success-v1.png)
+![批量保存并确认部分成功](assets/frontend-ux/archive/batch-partial-success-v1.png)
 
 - 成功与失败数量同时保留，不能用单一“成功/失败”消息覆盖整批结果。
 - 成功条目进入“待提交”；失败条目原位保留、解释原因并允许局部重试。
@@ -80,7 +78,7 @@
 
 ### 6.2 提交前复核失败
 
-![我的追番提交前复核失败](assets/frontend-ux/tracking-revalidation-failed-v1.png)
+![我的追番提交前复核失败](assets/frontend-ux/archive/tracking-revalidation-failed-v1.png)
 
 - 页面明确说明尚未创建 Auto Bangumi 外部订阅，避免用户误以为已经生效。
 - 失败原因位于当前条目和检查器附近，并提供“返回修改方案”的唯一恢复主操作。

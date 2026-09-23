@@ -12,7 +12,7 @@
 | Ralph stories | US-303～US-317 |
 | 实时基线 | `origin/main` 合并提交 `7bb2f24`（Stage 37 已合入） |
 | 前置 | Stage 29～32 tracking/Auto Bangumi 契约、Stage 33 壳层、Stage 35/36 handoff、Stage 37 方案链接 |
-| 视觉基线 | `docs/design/assets/frontend-ux/tracking-management-v2.png`、`tracking-revalidation-failed-v1.png` |
+| 视觉基线（历史归档） | `docs/design/assets/frontend-ux/archive/tracking-management-v2.png`、`docs/design/assets/frontend-ux/archive/tracking-revalidation-failed-v1.png` |
 
 ## 2. 背景与阶段判断
 
@@ -394,8 +394,8 @@ DELETE_EXTERNAL、旧入口兼容定位、三档桌面视口与 200% 缩放，�
 
 ### 11.3 视觉对照与已知偏差
 
-对照 `docs/design/assets/frontend-ux/tracking-management-v2.png`（正常态）与
-`tracking-revalidation-failed-v1.png`（复核失败态）：
+对照 `docs/design/assets/frontend-ux/archive/tracking-management-v2.png`（正常态）与
+`docs/design/assets/frontend-ux/archive/tracking-revalidation-failed-v1.png`（复核失败态）：
 
 - 已对齐：状态总览（待提交/追番中/已停用/失败，复核失败态首格为「需确认」）、约 58%～64% 列表 +
   右侧 sticky 检查器、单选列表（无 checkbox）、「番剧 / 状态 / 最近更新」列语义、检查器的
