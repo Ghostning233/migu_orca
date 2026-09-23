@@ -8194,7 +8194,7 @@
                                 "anyOf": [
                                   {
                                     "additionalProperties": false,
-                                    "description": "Result of ``POST /api/v1/tracking/items/{tracking_id}/submit`` (US-225).\n\nA persisted business result is HTTP 200: ``outcome`` is the record's final\nstatus (``ACTIVE``/``SUBMIT_FAILED``/``VERIFYING_EXTERNAL``/\n``RECOVERY_REQUIRED``/``NEEDS_RECONFIRM``).  ``checked_revision`` is the\nrevision the client confirmed; ``next_revision`` is the record's revision\nafter the outcome persisted.  ``operation_id`` is set when a submit\noperation was created/reused; ``issues`` carry the fixed §11.5 codes when\nthe submit was blocked before any external call.  ``tracking`` is the safe\nsummary of the persisted record so the client can update the list item\nwithout a second read.",
+                                    "description": "Result of ``POST /api/v1/tracking/items/{tracking_id}/submit`` (US-225).\n\nA persisted business result is HTTP 200: ``outcome`` is the record's final\nstatus (``ACTIVE``/``SUBMIT_FAILED``/``VERIFYING_EXTERNAL``/\n``RECOVERY_REQUIRED``/``NEEDS_RECONFIRM``/``ADDED_TO_DOWNLOAD``).  ``checked_revision`` is the\nrevision the client confirmed; ``next_revision`` is the record's revision\nafter the outcome persisted.  ``operation_id`` is set when a submit\noperation was created/reused; ``issues`` carry the fixed §11.5 codes when\nthe submit was blocked before any external call.  ``tracking`` is the safe\nsummary of the persisted record so the client can update the list item\nwithout a second read.",
                                     "properties": {
                                       "tracking_id": {
                                         "title": "Tracking Id",
@@ -8206,7 +8206,8 @@
                                           "SUBMIT_FAILED",
                                           "VERIFYING_EXTERNAL",
                                           "RECOVERY_REQUIRED",
-                                          "NEEDS_RECONFIRM"
+                                          "NEEDS_RECONFIRM",
+                                          "ADDED_TO_DOWNLOAD"
                                         ],
                                         "title": "Outcome",
                                         "type": "string"
@@ -23044,7 +23045,7 @@
                     },
                     "result": {
                       "additionalProperties": false,
-                      "description": "Result of ``POST /api/v1/tracking/items/{tracking_id}/submit`` (US-225).\n\nA persisted business result is HTTP 200: ``outcome`` is the record's final\nstatus (``ACTIVE``/``SUBMIT_FAILED``/``VERIFYING_EXTERNAL``/\n``RECOVERY_REQUIRED``/``NEEDS_RECONFIRM``).  ``checked_revision`` is the\nrevision the client confirmed; ``next_revision`` is the record's revision\nafter the outcome persisted.  ``operation_id`` is set when a submit\noperation was created/reused; ``issues`` carry the fixed §11.5 codes when\nthe submit was blocked before any external call.  ``tracking`` is the safe\nsummary of the persisted record so the client can update the list item\nwithout a second read.",
+                      "description": "Result of ``POST /api/v1/tracking/items/{tracking_id}/submit`` (US-225).\n\nA persisted business result is HTTP 200: ``outcome`` is the record's final\nstatus (``ACTIVE``/``SUBMIT_FAILED``/``VERIFYING_EXTERNAL``/\n``RECOVERY_REQUIRED``/``NEEDS_RECONFIRM``/``ADDED_TO_DOWNLOAD``).  ``checked_revision`` is the\nrevision the client confirmed; ``next_revision`` is the record's revision\nafter the outcome persisted.  ``operation_id`` is set when a submit\noperation was created/reused; ``issues`` carry the fixed §11.5 codes when\nthe submit was blocked before any external call.  ``tracking`` is the safe\nsummary of the persisted record so the client can update the list item\nwithout a second read.",
                       "properties": {
                         "tracking_id": {
                           "title": "Tracking Id",
@@ -23056,7 +23057,8 @@
                             "SUBMIT_FAILED",
                             "VERIFYING_EXTERNAL",
                             "RECOVERY_REQUIRED",
-                            "NEEDS_RECONFIRM"
+                            "NEEDS_RECONFIRM",
+                            "ADDED_TO_DOWNLOAD"
                           ],
                           "title": "Outcome",
                           "type": "string"
@@ -25090,7 +25092,7 @@
                     },
                     "result": {
                       "additionalProperties": false,
-                      "description": "Result of ``POST /api/v1/tracking/items/{tracking_id}/submit`` (US-225).\n\nA persisted business result is HTTP 200: ``outcome`` is the record's final\nstatus (``ACTIVE``/``SUBMIT_FAILED``/``VERIFYING_EXTERNAL``/\n``RECOVERY_REQUIRED``/``NEEDS_RECONFIRM``).  ``checked_revision`` is the\nrevision the client confirmed; ``next_revision`` is the record's revision\nafter the outcome persisted.  ``operation_id`` is set when a submit\noperation was created/reused; ``issues`` carry the fixed §11.5 codes when\nthe submit was blocked before any external call.  ``tracking`` is the safe\nsummary of the persisted record so the client can update the list item\nwithout a second read.",
+                      "description": "Result of ``POST /api/v1/tracking/items/{tracking_id}/submit`` (US-225).\n\nA persisted business result is HTTP 200: ``outcome`` is the record's final\nstatus (``ACTIVE``/``SUBMIT_FAILED``/``VERIFYING_EXTERNAL``/\n``RECOVERY_REQUIRED``/``NEEDS_RECONFIRM``/``ADDED_TO_DOWNLOAD``).  ``checked_revision`` is the\nrevision the client confirmed; ``next_revision`` is the record's revision\nafter the outcome persisted.  ``operation_id`` is set when a submit\noperation was created/reused; ``issues`` carry the fixed §11.5 codes when\nthe submit was blocked before any external call.  ``tracking`` is the safe\nsummary of the persisted record so the client can update the list item\nwithout a second read.",
                       "properties": {
                         "tracking_id": {
                           "title": "Tracking Id",
@@ -25102,7 +25104,8 @@
                             "SUBMIT_FAILED",
                             "VERIFYING_EXTERNAL",
                             "RECOVERY_REQUIRED",
-                            "NEEDS_RECONFIRM"
+                            "NEEDS_RECONFIRM",
+                            "ADDED_TO_DOWNLOAD"
                           ],
                           "title": "Outcome",
                           "type": "string"

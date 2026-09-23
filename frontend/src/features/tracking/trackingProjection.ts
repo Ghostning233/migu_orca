@@ -550,6 +550,9 @@ export function isWriteActionCode(value: TrackingActionCode): value is TrackingW
  */
 export const SUBMIT_OUTCOMES = [
   'ACTIVE', 'SUBMIT_FAILED', 'NEEDS_RECONFIRM', 'VERIFYING_EXTERNAL', 'RECOVERY_REQUIRED',
+  // Issue #98/#99: a one-time "download existing resources" request Auto
+  // Bangumi accepted. It is local history, not an external subscription.
+  'ADDED_TO_DOWNLOAD',
 ] as const satisfies readonly TrackingSubmitResult['outcome'][]
 
 export type TrackingSubmitOutcome = (typeof SUBMIT_OUTCOMES)[number]
@@ -673,6 +676,8 @@ const WRITE_CONFLICT_MESSAGES: Record<TrackingWriteConflictType, string> = {
 const WRITE_MESSAGES: Record<TrackingWriteState, string> = {
   IN_FLIGHT: '正在提交到 Auto Bangumi，请稍候…',
   ACTIVE: '提交成功：已在 Auto Bangumi 创建外部订阅。',
+  // Issue #98/#99: a one-time acceptance — no subscription, no media promise.
+  ADDED_TO_DOWNLOAD: '已加入下载：Auto Bangumi 已接受本次下载现有资源的请求，不代表资源已下载完成。',
   SUBMIT_FAILED: '提交明确失败，尚未创建外部订阅；可在确认后显式重试。',
   NEEDS_RECONFIRM: '本地方案已变化，本次尚未创建外部订阅；请返回修改方案后重新确认。',
   VERIFYING_EXTERNAL: '外部提交结果未知，正在只读回查；请勿重复提交。',

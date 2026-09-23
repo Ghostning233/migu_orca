@@ -65,7 +65,7 @@ def _detail(item: dict[str, Any]) -> dict[str, Any]:
         "batch_id": None,
         "created_at": "2026-09-01T00:00:00Z",
         "last_synced_at": None,
-        "safe_info": None,
+        "safe_info": item.get("safe_info"),
         "current_operation": None,
         "revalidation_issues": [],
         "external_mapping": None,
@@ -371,3 +371,62 @@ class TestSubmissionModeChoice:
         assert body["confirm"] is True
         # The dialog converged away once the write settled.
         assert page.locator(".tracking-mode-dialog").count() == 0
+
+class TestAddedToDownloadLifecycle:
+    """Issue #99: a one-time acceptance is local history, not a subscription."""
+
+    def test_one_time_acceptance_lands_on_added_to_download(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        item = {
+            **_pending_item(),
+            "safe_info": {
+                "request_id": "request-plan", "status": "ACCEPTED", "raw_title": "安全标题",
+                "title": "葬送的芙莉莲", "aliases": [], "season": 1, "season_raw": None,
+                "season_evidence": None, "subtitle_groups": [], "selected_subtitle_group": "喵萌",
+                "mikan_collection": {"bangumi_id": "mikan-1234", "title": "葬送的芙莉莲", "season": 1},
+                "filter_rule": {"must_contain": "", "must_not_contain": "", "use_regex": False, "case_sensitive": False},
+                "resources": {"selected_subtitle_group": "喵萌", "valid_resource_count": 1,
+                              "invalid_resource_count": 0, "complete_resource_count": 1,
+                              "valid_file_names": ["第一集.mkv"], "excluded_file_names": []},
+                "folder_name": "安全文件夹", "storage_profile": "profile", "total_episodes": None,
+                "updated_episode": None, "updated_episode_status": "NOT_IMPLEMENTED",
+                "history_summary": [], "ab_status": None,
+            },
+        }
+        posts = _install(
+            page,
+            item,
+            {
+                "outcome": "ADDED_TO_DOWNLOAD",
+                "failure_category": None,
+                "tracking": {
+                    **item,
+                    "status": "ADDED_TO_DOWNLOAD",
+                    "status_label": "已加入下载",
+                    "status_group": "ACTIVE",
+                    # No submit-family action remains: history stays readable.
+                    "available_actions": [],
+                }
+            },
+        )
+
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-submit")
+        page.locator("#tracking-submit").click()
+        page.wait_for_selector("#tracking-mode-download", timeout=10_000)
+        page.locator("#tracking-mode-download").click()
+        page.wait_for_timeout(400)
+
+        assert len(posts) == 1 and posts[0]["submission_mode"] == "DOWNLOAD_EXISTING"
+        # The acceptance is stated without promising completed media.
+        expect(page.locator("#app-main")).to_contain_text("已加入下载")
+        expect(page.locator("#app-main")).to_contain_text("不代表资源已下载完成")
+        # AC 26: no in-place resubmit or retry for the completed record.
+        assert page.locator("#tracking-submit").count() == 0
+        assert page.locator("#tracking-retry").count() == 0
+        # AC 23/25: the local history can still be deleted or reused.
+        expect(page.locator("#tracking-delete-plan")).to_be_visible()
+        expect(page.locator("#tracking-reuse-plan")).to_be_visible()

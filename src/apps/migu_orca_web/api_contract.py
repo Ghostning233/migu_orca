@@ -1024,7 +1024,7 @@ class TrackingSubmitResultDTO(_StrictBase):
 
     A persisted business result is HTTP 200: ``outcome`` is the record's final
     status (``ACTIVE``/``SUBMIT_FAILED``/``VERIFYING_EXTERNAL``/
-    ``RECOVERY_REQUIRED``/``NEEDS_RECONFIRM``).  ``checked_revision`` is the
+    ``RECOVERY_REQUIRED``/``NEEDS_RECONFIRM``/``ADDED_TO_DOWNLOAD``).  ``checked_revision`` is the
     revision the client confirmed; ``next_revision`` is the record's revision
     after the outcome persisted.  ``operation_id`` is set when a submit
     operation was created/reused; ``issues`` carry the fixed §11.5 codes when
@@ -1037,6 +1037,8 @@ class TrackingSubmitResultDTO(_StrictBase):
     outcome: Literal[
         "ACTIVE", "SUBMIT_FAILED", "VERIFYING_EXTERNAL",
         "RECOVERY_REQUIRED", "NEEDS_RECONFIRM",
+        # Issue #98: a one-time "download existing resources" acceptance.
+        "ADDED_TO_DOWNLOAD",
     ]
     checked_revision: int
     next_revision: int
