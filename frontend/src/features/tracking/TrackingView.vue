@@ -1024,6 +1024,9 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
     return
   }
   writeIntent = intent
+  // Captured before the request: the settle watch clears the ref, and the
+  // result copy still needs to know which mode this attempt used (issue #101).
+  const requestedMode = submissionMode.value
   if (!locked) writeConfigSnapshot = { ...requestConfig }
   const sequence = ++writeSequence
   const controller = new AbortController()
@@ -1049,7 +1052,7 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
     // The returned tracking converges the list row without a second list read.
     closeSubmissionModeChoice()
     applyReturnedTracking(result.tracking)
-    const session = projectWriteOutcome(trackingId, action, result)
+    const session = projectWriteOutcome(trackingId, action, result, requestedMode)
     writeSession.value = session
     if (!writeSessionKeepsIntent(session.state)) writeIntent = null
     await recheckAfterAction(trackingId)

@@ -881,6 +881,28 @@ def _run_collect_one(
     return runner(request, ab_config)
 
 
+def _submit_diagnostics(ab_result: Any) -> dict[str, Any]:
+    """The bounded, already-sanitized upstream diagnostics (issue #101 AC 3/4).
+
+    The adapter only ever puts a whitelisted ``http_status`` and bounded
+    ``message_zh``/``message_en`` in ``details``; anything else is dropped here
+    too, so a missing reason stays missing rather than being invented.
+    """
+    error = ab_result.get("error") if isinstance(ab_result, dict) else None
+    details = error.get("details") if isinstance(error, dict) else None
+    if not isinstance(details, dict):
+        return {}
+    diagnostics: dict[str, Any] = {}
+    status = details.get("http_status")
+    if isinstance(status, int) and not isinstance(status, bool) and 100 <= status <= 599:
+        diagnostics["http_status"] = status
+    for key in ("message_zh", "message_en"):
+        value = details.get(key)
+        if isinstance(value, str) and value.strip():
+            diagnostics[key] = value.strip()[:200]
+    return diagnostics
+
+
 def _expected_rss_url(request: dict[str, Any] | None) -> str | None:
     """The server-private exact RSS identity of the saved plan, if any."""
     confirmable = request.get("confirmable_config") if isinstance(request, dict) else None
@@ -1356,6 +1378,7 @@ def _default_persist_ab_result(config: StorageConfig) -> PersistAbResult:
 def _submit_result_payload(
     *,
     record: TrackingRecord,
+    ab_result: Any = None,
     outcome: str,
     checked_revision: int,
     operation_id: str | None,
@@ -1384,6 +1407,8 @@ def _submit_result_payload(
         "checked_at": timestamp,
         "operation_id": operation_id,
         "failure_category": submit_failure_category(outcome=outcome, error_type=error_type),
+        # Issue #101: the bounded upstream reason, never the raw response.
+        "diagnostics": _submit_diagnostics(ab_result),
         "issues": [
             {
                 "code": issue.code,

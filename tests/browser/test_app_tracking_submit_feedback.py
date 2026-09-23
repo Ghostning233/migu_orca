@@ -430,3 +430,87 @@ class TestAddedToDownloadLifecycle:
         # AC 23/25: the local history can still be deleted or reused.
         expect(page.locator("#tracking-delete-plan")).to_be_visible()
         expect(page.locator("#tracking-reuse-plan")).to_be_visible()
+
+class TestFailureDiagnostics:
+    """Issue #101: layered, sanitized failure feedback for both modes."""
+
+    def _submit(self, page: Page, button: str) -> None:
+        page.wait_for_selector("#tracking-submit")
+        page.locator("#tracking-submit").click()
+        page.wait_for_selector(button, timeout=10_000)
+        page.locator(button).click()
+        page.wait_for_timeout(400)
+
+    def test_one_time_failure_keeps_only_the_retryable_sentence(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        item = _pending_item()
+        _install(
+            page,
+            item,
+            {
+                "outcome": "SUBMIT_FAILED",
+                "failure_category": "REJECTED",
+                "diagnostics": {"http_status": 502, "message_zh": "上游繁忙"},
+                "tracking": {
+                    **item,
+                    "status": "SUBMIT_FAILED",
+                    "status_label": "提交失败",
+                    "status_group": "ATTENTION",
+                },
+            },
+        )
+
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        self._submit(page, "#tracking-mode-download")
+
+        result = page.locator("#tracking-submit-result")
+        expect(result).to_contain_text("提交失败，可重新提交")
+        # AC 1: a one-time failure claims nothing about external side effects.
+        body = page.locator("#app-main").inner_text()
+        for forbidden in ("尚未创建", "可能部分成功", "可安全重试"):
+            assert forbidden not in body
+
+        # AC 3/5: the bounded reason lives in the collapsed diagnostics only.
+        page.evaluate(
+            "() => document.querySelectorAll('.tracking-inspector-content details')"
+            ".forEach((el) => { el.open = true; })"
+        )
+        diagnostics = page.locator("#tracking-write-diagnostics")
+        expect(diagnostics).to_contain_text("502")
+        expect(diagnostics).to_contain_text("上游繁忙")
+
+    def test_missing_upstream_reason_is_stated_honestly(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        item = _pending_item()
+        _install(
+            page,
+            item,
+            {
+                "outcome": "SUBMIT_FAILED",
+                "failure_category": "AUTHENTICATION",
+                # Auto Bangumi gave no usable reason at all.
+                "diagnostics": {},
+                "tracking": {
+                    **item,
+                    "status": "SUBMIT_FAILED",
+                    "status_label": "提交失败",
+                    "status_group": "ATTENTION",
+                },
+            },
+        )
+
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        self._submit(page, "#tracking-mode-continue")
+        page.evaluate(
+            "() => document.querySelectorAll('.tracking-inspector-content details')"
+            ".forEach((el) => { el.open = true; })"
+        )
+
+        expect(page.locator("#tracking-write-diagnostic-reason")).to_have_text("未提供具体原因")
+        assert "请检查方案内容" not in page.locator("#app-main").inner_text()

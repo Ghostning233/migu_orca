@@ -1034,6 +1034,19 @@ class TrackingRevalidateResultDTO(_StrictBase):
     tracking: TrackingItemDTO
 
 
+class TrackingSubmitDiagnosticsDTO(_StrictBase):
+    """Bounded, sanitized Auto Bangumi failure diagnostics (issue #101).
+
+    Every field is optional on purpose: when Auto Bangumi gives no usable
+    reason the object is empty and the client states 未提供具体原因 rather than
+    inventing one. Nothing raw, no full RSS URL, magnet, credential or path.
+    """
+
+    http_status: int | None = None
+    message_zh: str | None = None
+    message_en: str | None = None
+
+
 class TrackingSubmitResultDTO(_StrictBase):
     """Result of ``POST /api/v1/tracking/items/{tracking_id}/submit`` (US-225).
 
@@ -1062,6 +1075,7 @@ class TrackingSubmitResultDTO(_StrictBase):
     #: Published, non-sensitive failure classification (issue #86). ``None`` on
     #: success; every other code maps to fixed client copy and a fixed display
     #: channel (blocking dialog vs. inline item message).
+    diagnostics: TrackingSubmitDiagnosticsDTO = Field(default_factory=TrackingSubmitDiagnosticsDTO)
     failure_category: Literal[
         "CONNECTION",
         "AUTHENTICATION",

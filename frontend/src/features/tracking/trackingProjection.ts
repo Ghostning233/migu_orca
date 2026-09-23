@@ -662,6 +662,34 @@ export interface TrackingWriteSession {
   readonly issues: TrackingRevalidateIssueView[]
   /** Published failure class of a failed/indeterminate result, when provided. */
   readonly failureCategory: WriteFailureCategory | null
+  /**
+   * Issue #101: the bounded, sanitized Auto Bangumi reason for a failure. Empty
+   * means Auto Bangumi gave none, and the page then says 未提供具体原因.
+   */
+  readonly diagnostics: TrackingWriteDiagnostics
+}
+
+export interface TrackingWriteDiagnostics {
+  readonly httpStatus: number | null
+  readonly messageZh: string | null
+  readonly messageEn: string | null
+}
+
+/** Issue #101 AC 1: a one-time failure never claims an external effect either way. */
+export const ONE_TIME_SUBMIT_FAILED_MESSAGE = '提交失败，可重新提交。'
+
+export function projectWriteDiagnostics(value: unknown): TrackingWriteDiagnostics {
+  const empty: TrackingWriteDiagnostics = { httpStatus: null, messageZh: null, messageEn: null }
+  if (!value || typeof value !== 'object') return empty
+  const source = value as Record<string, unknown>
+  const status = source.http_status
+  const zh = source.message_zh
+  const en = source.message_en
+  return {
+    httpStatus: typeof status === 'number' && Number.isInteger(status) ? status : null,
+    messageZh: typeof zh === 'string' && zh.trim() ? zh.trim() : null,
+    messageEn: typeof en === 'string' && en.trim() ? en.trim() : null,
+  }
 }
 
 /**
@@ -726,13 +754,19 @@ export function createWriteSession(
   state: TrackingWriteState,
   issues: TrackingRevalidateIssueView[] = [],
   failureCategory: WriteFailureCategory | null = null,
+  submissionMode: 'CONTINUE_TRACKING' | 'DOWNLOAD_EXISTING' | null = null,
+  diagnostics: TrackingWriteDiagnostics = { httpStatus: null, messageZh: null, messageEn: null },
 ): TrackingWriteSession {
   // A published failure class owns the copy for its own channel; otherwise the
-  // fixed per-state sentence stays authoritative.
-  const message = failureCategory
-    ? WRITE_FAILURE_PRESENTATIONS[failureCategory].message
-    : WRITE_MESSAGES[state]
-  return { trackingId, action, state, message, issues, failureCategory }
+  // fixed per-state sentence stays authoritative. A one-time attempt has no
+  // external subscription to reason about, so its failure copy is the plain
+  // retryable sentence (issue #101 AC 1).
+  const message = state === 'SUBMIT_FAILED' && submissionMode === 'DOWNLOAD_EXISTING'
+    ? ONE_TIME_SUBMIT_FAILED_MESSAGE
+    : failureCategory
+      ? WRITE_FAILURE_PRESENTATIONS[failureCategory].message
+      : WRITE_MESSAGES[state]
+  return { trackingId, action, state, message, issues, failureCategory, diagnostics }
 }
 
 /** Fixed next step for one documented conflict; unknown types fail closed. */
@@ -755,6 +789,7 @@ export function createWriteConflictSession(
   return {
     trackingId, action, state: 'CONFLICT',
     message: writeConflictMessage(errorType), issues: [], failureCategory: null,
+    diagnostics: { httpStatus: null, messageZh: null, messageEn: null },
   }
 }
 
@@ -791,6 +826,7 @@ export function projectWriteOutcome(
   trackingId: string,
   action: TrackingActionCode,
   result: TrackingWriteResult,
+  submissionMode: 'CONTINUE_TRACKING' | 'DOWNLOAD_EXISTING' | null = null,
 ): TrackingWriteSession {
   const outcome: TrackingWriteState = isSubmitOutcome(result.outcome) ? result.outcome : 'UNKNOWN'
   return createWriteSession(
@@ -799,6 +835,8 @@ export function projectWriteOutcome(
     outcome,
     projectRevalidateIssues(result.issues),
     writeFailureCategory(result.failure_category),
+    submissionMode,
+    projectWriteDiagnostics((result as { diagnostics?: unknown }).diagnostics),
   )
 }
 

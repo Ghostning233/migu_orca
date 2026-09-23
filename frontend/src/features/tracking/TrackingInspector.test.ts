@@ -186,6 +186,7 @@ function writeSession(overrides: Record<string, unknown> = {}): TrackingWriteSes
   return {
     trackingId: 'tracking-1', action: 'SUBMIT', state: 'ACTIVE',
     message: '提交成功：已在 Auto Bangumi 创建外部订阅。', issues: [], failureCategory: null,
+    diagnostics: { httpStatus: null, messageZh: null, messageEn: null },
     ...overrides,
   } as TrackingWriteSession
 }

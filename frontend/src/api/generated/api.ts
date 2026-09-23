@@ -4878,6 +4878,31 @@ export interface operations {
                                      */
                                     operation_id: string | null;
                                     /**
+                                     * TrackingSubmitDiagnosticsDTO
+                                     * @description Bounded, sanitized Auto Bangumi failure diagnostics (issue #101).
+                                     *
+                                     *     Every field is optional on purpose: when Auto Bangumi gives no usable
+                                     *     reason the object is empty and the client states 未提供具体原因 rather than
+                                     *     inventing one. Nothing raw, no full RSS URL, magnet, credential or path.
+                                     */
+                                    diagnostics?: {
+                                        /**
+                                         * Http Status
+                                         * @default null
+                                         */
+                                        http_status: number | null;
+                                        /**
+                                         * Message Zh
+                                         * @default null
+                                         */
+                                        message_zh: string | null;
+                                        /**
+                                         * Message En
+                                         * @default null
+                                         */
+                                        message_en: string | null;
+                                    };
+                                    /**
                                      * Failure Category
                                      * @default null
                                      */
@@ -11887,6 +11912,11 @@ export interface operations {
                      *         "next_revision": 1,
                      *         "checked_at": "示例",
                      *         "operation_id": null,
+                     *         "diagnostics": {
+                     *           "http_status": null,
+                     *           "message_zh": null,
+                     *           "message_en": null
+                     *         },
                      *         "failure_category": null,
                      *         "issues": [
                      *           {
@@ -11962,6 +11992,31 @@ export interface operations {
                              * @default null
                              */
                             operation_id: string | null;
+                            /**
+                             * TrackingSubmitDiagnosticsDTO
+                             * @description Bounded, sanitized Auto Bangumi failure diagnostics (issue #101).
+                             *
+                             *     Every field is optional on purpose: when Auto Bangumi gives no usable
+                             *     reason the object is empty and the client states 未提供具体原因 rather than
+                             *     inventing one. Nothing raw, no full RSS URL, magnet, credential or path.
+                             */
+                            diagnostics?: {
+                                /**
+                                 * Http Status
+                                 * @default null
+                                 */
+                                http_status: number | null;
+                                /**
+                                 * Message Zh
+                                 * @default null
+                                 */
+                                message_zh: string | null;
+                                /**
+                                 * Message En
+                                 * @default null
+                                 */
+                                message_en: string | null;
+                            };
                             /**
                              * Failure Category
                              * @default null
@@ -13045,6 +13100,11 @@ export interface operations {
                      *         "next_revision": 1,
                      *         "checked_at": "示例",
                      *         "operation_id": null,
+                     *         "diagnostics": {
+                     *           "http_status": null,
+                     *           "message_zh": null,
+                     *           "message_en": null
+                     *         },
                      *         "failure_category": null,
                      *         "issues": [
                      *           {
@@ -13120,6 +13180,31 @@ export interface operations {
                              * @default null
                              */
                             operation_id: string | null;
+                            /**
+                             * TrackingSubmitDiagnosticsDTO
+                             * @description Bounded, sanitized Auto Bangumi failure diagnostics (issue #101).
+                             *
+                             *     Every field is optional on purpose: when Auto Bangumi gives no usable
+                             *     reason the object is empty and the client states 未提供具体原因 rather than
+                             *     inventing one. Nothing raw, no full RSS URL, magnet, credential or path.
+                             */
+                            diagnostics?: {
+                                /**
+                                 * Http Status
+                                 * @default null
+                                 */
+                                http_status: number | null;
+                                /**
+                                 * Message Zh
+                                 * @default null
+                                 */
+                                message_zh: string | null;
+                                /**
+                                 * Message En
+                                 * @default null
+                                 */
+                                message_en: string | null;
+                            };
                             /**
                              * Failure Category
                              * @default null

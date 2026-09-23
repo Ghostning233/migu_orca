@@ -251,6 +251,17 @@ const thisManagementAction = computed(() => (
 ))
 
 /** This item's own conflicting action is in flight: all of them bump its revision. */
+/**
+ * Issue #101: the failure diagnostics of this item's last write, when there was
+ * one. An empty diagnostic object still renders, so the page can honestly say
+ * 未提供具体原因 instead of inventing a cause.
+ */
+const writeDiagnostics = computed(() => (
+  thisWrite.value && thisWrite.value.state !== 'IN_FLIGHT' && thisWrite.value.state !== 'ACTIVE'
+    ? thisWrite.value.diagnostics
+    : null
+))
+
 const submissionModeLabel = computed(() => formatSubmissionMode(detail.value?.submission_mode))
 
 const itemActionInFlight = computed(() => (
@@ -862,6 +873,27 @@ defineExpose({ reload: () => fetchDetail(true) })
       <details id="tracking-tech-diagnostics" class="tracking-inspector-disclosure">
         <summary>技术诊断</summary>
         <div class="tracking-inspector-disclosure-body">
+          <section
+            v-if="writeDiagnostics"
+            id="tracking-write-diagnostics"
+            class="tracking-inspector-section"
+            aria-labelledby="tracking-write-diagnostics-heading"
+          >
+            <h4 id="tracking-write-diagnostics-heading">提交失败诊断</h4>
+            <dl>
+              <div><dt>失败类别</dt><dd>{{ thisWrite?.failureCategory || '未提供' }}</dd></div>
+              <div><dt>HTTP 类别</dt><dd>{{ writeDiagnostics.httpStatus ?? '未提供' }}</dd></div>
+              <div>
+                <dt>Auto Bangumi 原因</dt>
+                <dd id="tracking-write-diagnostic-reason">
+                  {{ writeDiagnostics.messageZh || writeDiagnostics.messageEn || '未提供具体原因' }}
+                </dd>
+              </div>
+              <div v-if="writeDiagnostics.messageZh && writeDiagnostics.messageEn">
+                <dt>原因（EN）</dt><dd>{{ writeDiagnostics.messageEn }}</dd>
+              </div>
+            </dl>
+          </section>
           <section v-if="detail.external_mapping" class="tracking-inspector-section" aria-labelledby="tracking-external-heading">
             <h4 id="tracking-external-heading">外部安全摘要</h4>
             <dl>

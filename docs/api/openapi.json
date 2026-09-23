@@ -8236,6 +8236,50 @@
                                         "default": null,
                                         "title": "Operation Id"
                                       },
+                                      "diagnostics": {
+                                        "additionalProperties": false,
+                                        "description": "Bounded, sanitized Auto Bangumi failure diagnostics (issue #101).\n\nEvery field is optional on purpose: when Auto Bangumi gives no usable\nreason the object is empty and the client states 未提供具体原因 rather than\ninventing one. Nothing raw, no full RSS URL, magnet, credential or path.",
+                                        "properties": {
+                                          "http_status": {
+                                            "anyOf": [
+                                              {
+                                                "type": "integer"
+                                              },
+                                              {
+                                                "type": "null"
+                                              }
+                                            ],
+                                            "default": null,
+                                            "title": "Http Status"
+                                          },
+                                          "message_zh": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string"
+                                              },
+                                              {
+                                                "type": "null"
+                                              }
+                                            ],
+                                            "default": null,
+                                            "title": "Message Zh"
+                                          },
+                                          "message_en": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string"
+                                              },
+                                              {
+                                                "type": "null"
+                                              }
+                                            ],
+                                            "default": null,
+                                            "title": "Message En"
+                                          }
+                                        },
+                                        "title": "TrackingSubmitDiagnosticsDTO",
+                                        "type": "object"
+                                      },
                                       "failure_category": {
                                         "anyOf": [
                                           {
@@ -23236,6 +23280,50 @@
                           "default": null,
                           "title": "Operation Id"
                         },
+                        "diagnostics": {
+                          "additionalProperties": false,
+                          "description": "Bounded, sanitized Auto Bangumi failure diagnostics (issue #101).\n\nEvery field is optional on purpose: when Auto Bangumi gives no usable\nreason the object is empty and the client states 未提供具体原因 rather than\ninventing one. Nothing raw, no full RSS URL, magnet, credential or path.",
+                          "properties": {
+                            "http_status": {
+                              "anyOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Http Status"
+                            },
+                            "message_zh": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Message Zh"
+                            },
+                            "message_en": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Message En"
+                            }
+                          },
+                          "title": "TrackingSubmitDiagnosticsDTO",
+                          "type": "object"
+                        },
                         "failure_category": {
                           "anyOf": [
                             {
@@ -23573,6 +23661,11 @@
                     "next_revision": 1,
                     "checked_at": "示例",
                     "operation_id": null,
+                    "diagnostics": {
+                      "http_status": null,
+                      "message_zh": null,
+                      "message_en": null
+                    },
                     "failure_category": null,
                     "issues": [
                       {
@@ -25337,6 +25430,50 @@
                           "default": null,
                           "title": "Operation Id"
                         },
+                        "diagnostics": {
+                          "additionalProperties": false,
+                          "description": "Bounded, sanitized Auto Bangumi failure diagnostics (issue #101).\n\nEvery field is optional on purpose: when Auto Bangumi gives no usable\nreason the object is empty and the client states 未提供具体原因 rather than\ninventing one. Nothing raw, no full RSS URL, magnet, credential or path.",
+                          "properties": {
+                            "http_status": {
+                              "anyOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Http Status"
+                            },
+                            "message_zh": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Message Zh"
+                            },
+                            "message_en": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Message En"
+                            }
+                          },
+                          "title": "TrackingSubmitDiagnosticsDTO",
+                          "type": "object"
+                        },
                         "failure_category": {
                           "anyOf": [
                             {
@@ -25674,6 +25811,11 @@
                     "next_revision": 1,
                     "checked_at": "示例",
                     "operation_id": null,
+                    "diagnostics": {
+                      "http_status": null,
+                      "message_zh": null,
+                      "message_en": null
+                    },
                     "failure_category": null,
                     "issues": [
                       {
