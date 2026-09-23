@@ -69,7 +69,8 @@ def _detail(item: dict[str, Any]) -> dict[str, Any]:
         "current_operation": None,
         "revalidation_issues": [],
         "external_mapping": None,
-        "audit_events": [],
+        # A submit result may carry the audit note the detail must render.
+        "audit_events": item.get("audit_events", []),
         "warnings": [],
     }
 
@@ -216,3 +217,90 @@ class TestSubmitFeedback:
         assert page.locator(".confirm-dialog").count() == 0
         assert page.locator(".global-notification").count() == 0
         expect(page.locator("#tracking-submit-result")).to_contain_text("明确拒绝")
+
+class TestExactReadbackFeedback:
+    """Issue #97: the page shows the exact read-back outcomes, not the body."""
+
+    def test_zero_resources_keeps_the_plan_pending_with_the_exact_wording(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        item = _pending_item()
+        _install(
+            page,
+            item,
+            {
+                "tracking": {
+                    **item,
+                    "status": "NEEDS_RECONFIRM",
+                    "status_label": "需重新确认",
+                    "status_group": "ATTENTION",
+                },
+                "issues": [
+                    {
+                        "code": "NO_VALID_RESOURCES",
+                        "field": "resources",
+                        "message": "在现有筛选规则下未找到资源，请重新检查追番方案",
+                        "severity": "BLOCKING",
+                    }
+                ],
+            },
+        )
+
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-submit")
+        page.locator("#tracking-submit").click()
+        page.wait_for_selector(".confirm-dialog", timeout=10_000)
+        page.locator(".confirm-dialog .primary-button").click()
+
+        # The exact, actionable wording is what the user reads; no success notice.
+        expect(page.locator("#app-main")).to_contain_text(
+            "在现有筛选规则下未找到资源，请重新检查追番方案"
+        )
+        assert page.locator(".global-notification").count() == 0
+
+    def test_confirmed_subscription_with_an_unconfirmed_body_stays_active(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        """AC 4: the read-back wins, and the record keeps a safe warning note."""
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        item = _pending_item()
+        warning = "订阅已建立，但 Auto Bangumi 的写响应未确认"
+        _install(
+            page,
+            item,
+            {
+                "tracking": {
+                    **item,
+                    "status": "ACTIVE",
+                    "status_label": "追番中",
+                    "status_group": "ACTIVE",
+                    "audit_events": [
+                        {
+                            "action": "SUBMIT_SUCCEEDED",
+                            "actor": "SYSTEM",
+                            "safe_message": warning,
+                            "reason_code": None,
+                            "created_at": "2026-09-14T00:00:00Z",
+                        }
+                    ],
+                },
+                "issues": [],
+            },
+        )
+
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-submit")
+        page.locator("#tracking-submit").click()
+        page.wait_for_selector(".confirm-dialog", timeout=10_000)
+        page.locator(".confirm-dialog .primary-button").click()
+
+        page.wait_for_selector("#tracking-overview", timeout=10_000)
+        page.evaluate(
+            "() => document.querySelectorAll('.tracking-inspector-content details')"
+            ".forEach((el) => { el.open = true; })"
+        )
+        expect(page.locator("#app-main")).to_contain_text("追番中")
+        expect(page.locator("#app-main")).to_contain_text(warning)
