@@ -51,6 +51,38 @@ export function batchSkipReason(item: TrackingItem): string | null {
   return null
 }
 
+export interface SkippedBatchEntry {
+  readonly trackingId: string
+  readonly title: string
+  /** Fixed safe reason from the local pre-check — never raw text. */
+  readonly reason: string
+}
+
+/**
+ * The selected plans this batch will not send (issue #100).
+ *
+ * The batch pre-check uses only the saved plan evidence the list already holds
+ * (status + server-advertised actions); it never re-runs the server's state
+ * machine and never contacts Auto Bangumi.
+ */
+export function skippedBatchEntries(
+  selection: TrackingBatchSelection,
+  items: readonly TrackingItem[],
+): SkippedBatchEntry[] {
+  const byId = new Map(items.map((item) => [item.tracking_id, item]))
+  const skipped: SkippedBatchEntry[] = []
+  for (const trackingId of selection.selected) {
+    const item = byId.get(trackingId)
+    if (!item) {
+      skipped.push({ trackingId, title: '未命名番剧', reason: '不在当前列表中，请刷新后重试' })
+      continue
+    }
+    const reason = batchSkipReason(item)
+    if (reason) skipped.push({ trackingId, title: item.title || '未命名番剧', reason })
+  }
+  return skipped
+}
+
 export function isBatchSelected(selection: TrackingBatchSelection, trackingId: string): boolean {
   return selection.selected.includes(trackingId)
 }

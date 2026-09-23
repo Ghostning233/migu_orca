@@ -306,3 +306,46 @@ class TestBatchSubmit:
         # Nothing is resent on its own.
         page.wait_for_timeout(300)
         assert len(bodies) == 1
+
+class TestBatchLocalPreCheck:
+    """Issue #100 AC 5/6/8: the local pre-check result never reaches Auto Bangumi."""
+
+    def test_a_fully_unsubmittable_list_can_select_nothing_and_sends_nothing(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        bodies = _open(
+            page,
+            live_server_url,
+            storage_dir,
+            [_processing("tracking-a", "处理中 A"), _processing("tracking-b", "处理中 B")],
+        )
+
+        page.locator("#tracking-batch-mode").click()
+        page.locator("#tracking-batch-select-all").click()
+
+        # AC 8: 全选只依赖服务端广告的可提交动作 —— 处理中的条目根本选不上。
+        expect(page.locator("#tracking-batch-count")).to_contain_text("已选 0 条")
+        expect(page.locator("#tracking-batch-submit")).to_be_disabled()
+        assert bodies == [], "nothing submittable must never reach Auto Bangumi"
+
+    def test_only_the_submittable_plans_are_sent(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        bodies = _open(
+            page,
+            live_server_url,
+            storage_dir,
+            [_pending("tracking-a", "可提交 A"), _processing("tracking-b", "处理中 B")],
+        )
+
+        page.locator("#tracking-batch-mode").click()
+        page.locator("#tracking-batch-select-all").click()
+        expect(page.locator("#tracking-batch-count")).to_contain_text("已选 1 条")
+        page.locator("#tracking-batch-submit").click()
+        page.wait_for_selector("#tracking-mode-continue", timeout=10_000)
+        page.locator("#tracking-mode-continue").click()
+
+        page.wait_for_selector("#tracking-batch-result", timeout=10_000)
+        assert len(bodies) == 1
+        # The skipped plan is never part of the batch request.
+        assert [entry["tracking_id"] for entry in bodies[0]["items"]] == ["tracking-a"]

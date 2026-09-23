@@ -93,6 +93,8 @@ import {
   batchSelectionSummary,
   batchSkipReason,
   buildBatchSubmitBody,
+  skippedBatchEntries,
+  type SkippedBatchEntry,
   clearBatchSelection,
   isBatchSelected,
   projectBatchOutcome,
@@ -804,6 +806,23 @@ function titleFor(trackingId: string): string {
  */
 const batchModeOpen = ref(false)
 
+/**
+ * AC 9: the local pre-check result lives in its own dialog; external success,
+ * failure and unknown results stay in the batch result area.
+ */
+async function showSkippedPlans(title: string, skipped: readonly SkippedBatchEntry[]): Promise<void> {
+  if (!skipped.length) return
+  await confirmDialog.value?.confirm({
+    title,
+    message: '以下所选方案未通过本地预检，本次不会提交到 Auto Bangumi：',
+    items: skipped.map((entry) => `${entry.title}：${entry.reason}`),
+    itemsLabel: '未提交的方案',
+    confirmLabel: '知道了',
+    cancelLabel: '关闭',
+  })
+}
+
+
 /** Issue #100 AC 1: the entry opens one mode choice for the whole batch. */
 function runBatchSubmit(): void {
   if (batchPending.value || batchLoading.value) return
@@ -834,6 +853,9 @@ async function performBatchSubmit(): Promise<void> {
   // silently reuse it.
   const submissionMode = batchSubmissionMode.value ?? undefined
   batchSubmissionMode.value = null
+  // AC 5/6/9: the local pre-check result is stated before (and separately from)
+  // any external result, and a fully skipped batch sends nothing at all.
+  const skipped = skippedBatchEntries(batchSelection.value, items.value)
   const body = buildBatchSubmitBody(
     batchSelection.value,
     items.value,
@@ -844,7 +866,19 @@ async function performBatchSubmit(): Promise<void> {
     storageQuery().storage_dir,
     submissionMode,
   )
-  if (!body) return
+  if (!body) {
+    // AC 6: a fully skipped batch proves zero Auto Bangumi requests.
+    batchOutcome.value = null
+    batchNotice.value = '没有可提交的方案'
+    void showSkippedPlans('没有可提交的方案', skipped)
+    return
+  }
+  if (skipped.length) {
+    // AC 4: the information dialog never gates the run — the submittable plans
+    // start immediately, with no second confirmation.
+    batchNotice.value = '部分方案未提交'
+    void showSkippedPlans('部分方案未提交', skipped)
+  }
 
   const sequence = ++batchSequence
   batchLoading.value = true
@@ -1482,7 +1516,7 @@ onBeforeUnmount(() => {
       role="status"
     >
       <h2 id="tracking-batch-result-heading">批量提交结果</h2>
-      <p v-if="batchNotice" class="tracking-batch-verdict">{{ batchNotice }}</p>
+      <p v-if="batchNotice" id="tracking-batch-notice" class="tracking-batch-verdict">{{ batchNotice }}</p>
       <ul v-if="batchOutcome" class="tracking-batch-entries">
         <li v-for="entry in batchOutcome.entries" :key="entry.trackingId" :class="entry.ok ? 'is-ok' : 'is-failed'">
           <strong>{{ titleFor(entry.trackingId) }}</strong>：{{ entry.message }}
