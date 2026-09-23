@@ -18,15 +18,13 @@ import { legacyRouteCatalog, routeCatalog, routeLocation } from './catalog'
  */
 const routeComponents = {
   add: () => import('@/features/workbench/WorkbenchView.vue'),
-  plans: () => import('@/features/requests/RequestsView.vue'),
   tracking: () => import('@/features/tracking/TrackingView.vue'),
   settings: () => import('@/features/settings/SettingsView.vue'),
 } satisfies Record<AppRouteKey, () => Promise<unknown>>
 
 const routeTitles = {
   add: '添加番剧',
-  plans: '追番方案',
-  tracking: '追番管理',
+  tracking: '我的追番',
   settings: '设置',
 } satisfies Record<AppRouteKey, string>
 

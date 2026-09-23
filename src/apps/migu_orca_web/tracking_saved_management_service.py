@@ -41,6 +41,7 @@ def run_saved_tracking_management(
             idempotency_key=payload.idempotency_key.strip(), confirm=payload.confirm,
             operation=payload.operation, target_scope=payload.target_scope,
             patch=payload.patch, enabled=payload.enabled, connection_ref=str(ref),
+            local_plan=_local_plan(payload),
         )
     repository = AutoBangumiConfigRepository(config_root)
     with repository.acquire_lease(connection_ref=ref, configuration_revision=payload.configuration_revision) as lease:
@@ -57,7 +58,16 @@ def run_saved_tracking_management(
             operation=payload.operation, target_scope=payload.target_scope,
             management_client=client, patch=payload.patch, enabled=payload.enabled,
             write=write, readback=readback, connection_ref=str(ref),
+            local_plan=_local_plan(payload),
         )
+
+
+def _local_plan(payload: SavedTrackingManagementInput) -> dict[str, object] | None:
+    """Validated local plan values, or ``None`` when this request raises none."""
+    plan = payload.local_plan
+    if plan is None:
+        return None
+    return plan.model_dump(exclude_none=True)
 
 
 __all__ = ["run_saved_tracking_management"]

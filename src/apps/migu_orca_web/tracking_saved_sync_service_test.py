@@ -31,7 +31,6 @@ from tracking_engine.models.operation import (
 from tracking_engine.models.tracking import (
     TRACKING_STATUS_ACTIVE,
     create_tracking_record,
-    tracking_id_for_external,
 )
 
 
@@ -83,6 +82,17 @@ def test_saved_sync_binds_mapping_to_requested_connection(monkeypatch, tmp_path:
         lambda *_args, **_kwargs: _Client(),
     )
     monkeypatch.setattr("apps.migu_orca_web.services._WEB_STORAGE_ROOT", tmp_path / "business")
+    business_config = load_storage_config(tmp_path / "business")
+    # Issue #88: only a record this product already controls is synced; the
+    # mapping stays bound to the connection that owns it.
+    local = replace(
+        create_tracking_record(
+            request_id="req-sync", status=TRACKING_STATUS_ACTIVE,
+            plan_summary={"title": "Show", "season": 1, "subtitle_group": "Group"},
+        ),
+        external_mapping={"subscription_id": "sub-1", "connection_ref": str(record.connection_ref)},
+    )
+    ensure_tracking_record(business_config, local)
     result = run_saved_tracking_sync(
         SavedTrackingSyncInput(
             connection_ref=str(record.connection_ref),
@@ -92,10 +102,8 @@ def test_saved_sync_binds_mapping_to_requested_connection(monkeypatch, tmp_path:
         ),
         config_root=config_root,
     )
-    assert result.summary.created == 1
-    from storage_engine.controllers.storage_config import load_storage_config
-    from storage_engine.controllers.tracking_repository import list_tracking_records
-    mapping = list_tracking_records(load_storage_config(tmp_path / "business")).records[0].external_mapping
+    assert result.summary.updated == 1
+    mapping = list_tracking_records(business_config).records[0].external_mapping
     assert mapping["connection_ref"] == str(record.connection_ref)
     assert mapping["schema_version"] == 2
 
@@ -152,7 +160,7 @@ def test_saved_sync_ambiguous_rss_match_preserves_old_record_bytes(monkeypatch, 
             plan_summary={"title": "Show", "season": 1, "subtitle_group": "Group"},
         ),
             external_mapping={
-                "schema_version": 2, "adapter": "legacy_3_1", "subscription_id": "old-sub",
+                "schema_version": 2, "adapter": "legacy_3_1", "subscription_id": "new-1",
                 "rss_ids": [], "match_reason": "EXTERNAL_ID", "external_deleted": False,
                 "enabled": True, "missing_sync_count": 0, "last_verified_at": None,
                 "connection_ref": str(record.connection_ref),
@@ -166,7 +174,9 @@ def test_saved_sync_ambiguous_rss_match_preserves_old_record_bytes(monkeypatch, 
             request_id=other_request["request_id"], status=TRACKING_STATUS_ACTIVE,
             plan_summary={"title": "Show", "season": 1, "subtitle_group": "Group"},
         ),
-        external_mapping={},
+        external_mapping={
+            "subscription_id": "new-1", "connection_ref": str(record.connection_ref),
+        },
     )
     ensure_tracking_record(config, other)
     before = (business / "tracking" / f"{local.tracking_id}.json").read_bytes()
@@ -198,8 +208,8 @@ def test_saved_sync_dual_instances_same_external_id_are_isolated(monkeypatch, tm
     first = _save_config(private, password="one")
     business = tmp_path / "business"
     monkeypatch.setattr("apps.migu_orca_web.services._WEB_STORAGE_ROOT", business)
+    config = load_storage_config(business)
     clients = []
-    first_path = business / "tracking" / f"{tracking_id_for_external('legacy_3_1', 'subscription', 'sub-1', first.connection_ref)}.json"
 
     class Client(_Client):
         pass
@@ -208,14 +218,34 @@ def test_saved_sync_dual_instances_same_external_id_are_isolated(monkeypatch, tm
         "apps.migu_orca_web.tracking_saved_sync_service.create_legacy_31_management_client",
         lambda *_args, **_kwargs: clients.append(Client()) or clients[-1],
     )
+    first_local = replace(
+        create_tracking_record(
+            request_id="req-first", status=TRACKING_STATUS_ACTIVE,
+            plan_summary={"title": "Show", "season": 1, "subtitle_group": "Group"},
+        ),
+        external_mapping={"subscription_id": "sub-1", "connection_ref": str(first.connection_ref)},
+    )
+    ensure_tracking_record(config, first_local)
     run_saved_tracking_sync(_payload(first), config_root=private)
+    first_path = business / "tracking" / f"{first_local.tracking_id}.json"
     first_bytes = first_path.read_bytes()
+
     second = _save_config(private, password="two")
+    second_local = replace(
+        create_tracking_record(
+            request_id="req-second", status=TRACKING_STATUS_ACTIVE,
+            plan_summary={"title": "Show", "season": 1, "subtitle_group": "Group"},
+        ),
+        external_mapping={"subscription_id": "sub-1", "connection_ref": str(second.connection_ref)},
+    )
+    ensure_tracking_record(config, second_local)
     run_saved_tracking_sync(_payload(second), config_root=private)
-    records = list_tracking_records(load_storage_config(business)).records
+
+    records = list_tracking_records(config).records
     refs = {record.external_mapping.get("connection_ref") for record in records}
     assert str(first.connection_ref) in refs
     assert str(second.connection_ref) in refs
+    # The first connection's own record bytes never change because of the second.
     assert first_path.read_bytes() == first_bytes
 
 
@@ -224,12 +254,21 @@ def test_saved_sync_partial_or_failed_snapshot_preserves_existing_record(monkeyp
     saved = _save_config(private)
     business = tmp_path / "business"
     monkeypatch.setattr("apps.migu_orca_web.services._WEB_STORAGE_ROOT", business)
+    config = load_storage_config(business)
+    local = replace(
+        create_tracking_record(
+            request_id="sync-preserved", status=TRACKING_STATUS_ACTIVE,
+            plan_summary={"title": "Show", "season": 1, "subtitle_group": "Group"},
+        ),
+        external_mapping={"subscription_id": "sub-1", "connection_ref": str(saved.connection_ref)},
+    )
+    ensure_tracking_record(config, local)
     monkeypatch.setattr(
         "apps.migu_orca_web.tracking_saved_sync_service.create_legacy_31_management_client",
         lambda *_args, **_kwargs: _Client(),
     )
     run_saved_tracking_sync(_payload(saved), config_root=private)
-    path = next((business / "tracking").glob("*.json"))
+    path = business / "tracking" / f"{local.tracking_id}.json"
     before = path.read_bytes()
 
     class Broken(_Client):

@@ -25,8 +25,7 @@ let observedProfile = ''
 
 const navigation = [
   { route: 'add', label: '添加番剧' },
-  { route: 'plans', label: '追番方案' },
-  { route: 'tracking', label: '追番管理' },
+  { route: 'tracking', label: '我的追番' },
   { route: 'settings', label: '设置' },
 ] as const satisfies ReadonlyArray<{ route: AppRouteKey; label: string }>
 

@@ -1,6 +1,7 @@
 """Trusted, same-origin retrieval for MiKan poster cache entries."""
 from __future__ import annotations
 
+import contextlib
 import socket
 from collections.abc import Callable
 from ipaddress import ip_address
@@ -48,6 +49,24 @@ class MikanPosterService:
             return None
         key = poster_cache_key(poster_url)
         self._sources[key] = poster_url
+        return key
+
+    def persist(self, poster_url: str | None) -> str | None:
+        """Return the durable opaque key for a saved plan's cover.
+
+        The key is registered like :meth:`register`, and when the bytes are
+        already cached (the browser rendered the candidate card) the entry is
+        pinned so the cover keeps being served after a restart and past the
+        candidate-cache TTL.  This never fetches an uncached source: a missing
+        cover stays a cache miss the route reports as ``poster_not_found`` so the
+        client shows its placeholder, and the cache never becomes an open proxy.
+        """
+        key = self.register(poster_url)
+        if key is None:
+            return None
+        # A cache that cannot be updated must not fail an unrelated save.
+        with contextlib.suppress(Stage1Error):
+            self._cache.pin_existing(key)
         return key
 
     def get(self, key: str) -> tuple[Path, str]:

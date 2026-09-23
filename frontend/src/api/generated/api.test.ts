@@ -46,6 +46,8 @@ const EXPECTED_OPERATION_IDS = [
   'submitTrackingItem',
   'retryTrackingItem',
   'recoverTrackingItem',
+  'submitTrackingBatch',
+  'deleteTrackingPlan',
   'syncTrackingItems',
   'modifyTrackingItem',
   'setTrackingItemEnabled',
@@ -87,6 +89,8 @@ describe('generated API client (US-198)', () => {
       | 'submitTrackingItem'
       | 'retryTrackingItem'
       | 'recoverTrackingItem'
+      | 'submitTrackingBatch'
+      | 'deleteTrackingPlan'
       | 'syncTrackingItems'
       | 'modifyTrackingItem'
       | 'setTrackingItemEnabled'
@@ -120,6 +124,8 @@ describe('generated API client (US-198)', () => {
       | '/api/v1/tracking/items/{tracking_id}'
       | '/api/v1/tracking/items/{tracking_id}/revalidate'
       | '/api/v1/tracking/items/{tracking_id}/submit'
+      | '/api/v1/tracking/batch-submit'
+      | '/api/v1/tracking/items/{tracking_id}/delete-plan'
       | '/api/v1/tracking/items/{tracking_id}/retry'
       | '/api/v1/tracking/items/{tracking_id}/recover'
       | '/api/v1/tracking/items/{tracking_id}/modify'
@@ -162,6 +168,6 @@ describe('generated API client (US-198)', () => {
   })
 
   it('has a non-empty expected operation set (guards the fixture)', () => {
-    expect(EXPECTED_OPERATION_IDS).toHaveLength(34)
+    expect(EXPECTED_OPERATION_IDS).toHaveLength(36)
   })
 })

@@ -27,6 +27,7 @@ import {
   projectRecoveryOutcome,
   projectRevalidateIssues,
   projectTrackingActionScopes,
+  formatTrackingUpdatedAt,
   projectTrackingOverview,
   projectWriteOutcome,
   RECOVERY_ACTION_BODIES,
@@ -87,15 +88,36 @@ function action(overrides: Partial<ItemAction> = {}): ItemAction {
 }
 
 describe('tracking projection (US-304)', () => {
-  it('counts known server status groups and isolates unknown values', () => {
-    const result = projectTrackingOverview([
-      item(), item({ tracking_id: 'tracking-2', status_group: 'PENDING' }),
-      item({ tracking_id: 'tracking-3', status_group: 'UNTRUSTED' as never }),
-    ])
-    expect(result.total).toBe(3)
-    expect(result.byGroup.ACTIVE).toBe(1)
-    expect(result.byGroup.PENDING).toBe(1)
+  it('projects the overview from the server summary, never from loaded rows', () => {
+    const result = projectTrackingOverview({
+      total: 7, pending: 2, processing: 1, active: 3, inactive: 1,
+      needs_attention: 0, unreadable: 1,
+    })
+    expect(result.total).toBe(7)
+    expect(result.byGroup).toEqual({ PENDING: 2, ACTIVE: 3, INACTIVE: 1, ATTENTION: 0 })
     expect(result.unreadable).toBe(1)
+  })
+
+  it('fails closed to zero for a missing or malformed summary', () => {
+    expect(projectTrackingOverview(null)).toEqual({
+      total: 0,
+      byGroup: { PENDING: 0, ACTIVE: 0, INACTIVE: 0, ATTENTION: 0 },
+      unreadable: 0,
+    })
+    const malformed = projectTrackingOverview({
+      total: -1, pending: 'x', active: Number.NaN, inactive: null, needs_attention: 2,
+      processing: 0, unreadable: undefined,
+    } as never)
+    expect(malformed.total).toBe(0)
+    expect(malformed.byGroup).toEqual({ PENDING: 0, ACTIVE: 0, INACTIVE: 0, ATTENTION: 2 })
+    expect(malformed.unreadable).toBe(0)
+  })
+
+  it('formats a usable updated-at label and fails closed on bad values', () => {
+    expect(formatTrackingUpdatedAt('2026-09-14T00:00:00Z')).toContain('2026')
+    expect(formatTrackingUpdatedAt(null)).toBe('更新时间不可用')
+    expect(formatTrackingUpdatedAt('')).toBe('更新时间不可用')
+    expect(formatTrackingUpdatedAt('not-a-date')).toBe('更新时间不可用')
   })
 
   it('searches only public title/subtitle and applies server group filter', () => {
@@ -118,46 +140,55 @@ describe('tracking projection (US-304)', () => {
     expect(rows.map((row) => row.tracking_id)).toEqual(['old', 'new', 'invalid-a', 'invalid-b'])
   })
 
-  it('fails closed for unknown action/style/scope and unsupported capability', () => {
+  it('fails closed for unknown action/style/scope values', () => {
     const rows = item({ available_actions: [
       action(),
       action({ code: 'NOT_KNOWN' as never }),
       action({ style: 'NOT_KNOWN' as never }),
       action({ target_scopes: ['NOT_KNOWN'] as never }),
     ] })
-    expect(executableTrackingActions(rows, capabilities())).toHaveLength(1)
-    expect(executableTrackingActions(rows, capabilities({ subscription_modify: 'UNKNOWN' }))).toHaveLength(0)
-    expect(executableTrackingActions(item({ available_actions: [action({ code: 'SUBMIT', target_scopes: [] })] }))).toHaveLength(0)
+    // Only the fully known action survives; unknown values are never guessed.
+    expect(executableTrackingActions(rows)).toHaveLength(1)
+    // Issues #86/#89: submission and management are never gated on a probe.
+    expect(executableTrackingActions(item({ available_actions: [action({ code: 'SUBMIT', target_scopes: [] })] }))).toHaveLength(1)
   })
 
   it('creates one revision-bound opaque intent and reuses its key on transport retry', () => {
     const current = item({ available_actions: [action()] })
-    const candidate = executableTrackingActions(current, capabilities())[0]!
-    const intent = createTrackingActionIntent(current, candidate, 'SUBSCRIPTION', capabilities())
+    const candidate = executableTrackingActions(current)[0]!
+    const intent = createTrackingActionIntent(current, candidate, 'SUBSCRIPTION')
     expect(intent).toMatchObject({ action: 'MODIFY', targetScope: 'SUBSCRIPTION', expectedRevision: 3, confirm: true })
     expect(intent?.idempotencyKey).toMatch(/^[A-Za-z0-9-]{8,128}$/)
     expect(reuseTrackingActionIntent(intent!)).toBe(intent)
-    expect(createTrackingActionIntent(current, candidate, 'ASSOCIATED_RSS', capabilities())).toBeNull()
+    expect(createTrackingActionIntent(current, candidate, 'ASSOCIATED_RSS')).toBeNull()
   })
 
-  it('projects only supported scopes and gates submit on verified capability', () => {
+  it('projects every server-offered scope and keeps actions independent of the probe', () => {
     const current = item({ available_actions: [
       action({ target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'] }),
       action({ code: 'SET_ENABLED', target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'] }),
       action({ code: 'SUBMIT', target_scopes: [] }),
     ] })
-    const projected = executableTrackingActions(current, capabilities({ rss_modify: 'UNKNOWN', subscription_submit: 'UNSUPPORTED' }))
-    expect(projected[0]?.target_scopes).toEqual(['SUBSCRIPTION'])
-    expect(projected.some((candidate) => candidate.code === 'SUBMIT')).toBe(false)
-    expect(createTrackingActionIntent(current, projected[0]!, 'ASSOCIATED_RSS', capabilities({ rss_modify: 'UNKNOWN' }))).toBeNull()
-    expect(createTrackingActionIntent(current, { ...projected[0]!, target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'] }, 'ASSOCIATED_RSS', capabilities({ rss_modify: 'UNKNOWN' }))).toBeNull()
+    const projected = executableTrackingActions(current)
+    // Issue #89: the server-projected scopes survive unchanged.
+    expect(projected[0]?.target_scopes).toEqual(['SUBSCRIPTION', 'ASSOCIATED_RSS'])
+    expect(projected.some((candidate) => candidate.code === 'SUBMIT')).toBe(true)
+    // A scope the server did not project for this very action is refused.
+    expect(createTrackingActionIntent(current, { ...projected[0]!, target_scopes: ['SUBSCRIPTION'] }, 'ASSOCIATED_RSS')).toBeNull()
+    expect(createTrackingActionIntent(current, projected[0]!, 'ASSOCIATED_RSS')).toMatchObject({
+      action: 'MODIFY', targetScope: 'ASSOCIATED_RSS',
+    })
   })
 
-  it('uses disable capability for active and enable capability for disabled', () => {
+  it('keeps enable and disable actions available for both directions', () => {
     const active = item({ status: 'ACTIVE', available_actions: [action({ code: 'SET_ENABLED', target_scopes: ['SUBSCRIPTION'] })] })
     const disabled = item({ status: 'DISABLED', available_actions: [action({ code: 'SET_ENABLED', target_scopes: ['SUBSCRIPTION'] })] })
-    expect(executableTrackingActions(active, capabilities({ subscription_enable: 'UNKNOWN' }))).toHaveLength(1)
-    expect(executableTrackingActions(disabled, capabilities({ subscription_enable: 'UNKNOWN' }))).toHaveLength(0)
+    expect(executableTrackingActions(active)).toHaveLength(1)
+    // The direction comes from the record's status, not from a probe.
+    expect(executableTrackingActions(disabled)).toHaveLength(1)
+    // A status that implies no direction keeps the action out.
+    const pending = item({ status: 'PENDING_SUBMIT', available_actions: [action({ code: 'SET_ENABLED', target_scopes: ['SUBSCRIPTION'] })] })
+    expect(executableTrackingActions(pending)).toHaveLength(1)
   })
 })
 
@@ -310,7 +341,7 @@ describe('tracking write session projection (US-310)', () => {
     const session = createWriteSession('tracking-1', 'SUBMIT', 'IN_FLIGHT')
     expect(session).toEqual({
       trackingId: 'tracking-1', action: 'SUBMIT', state: 'IN_FLIGHT',
-      message: writeSessionMessage('IN_FLIGHT'), issues: [],
+      message: writeSessionMessage('IN_FLIGHT'), issues: [], failureCategory: null,
     })
     expect(Object.keys(session)).not.toContain('idempotencyKey')
   })
@@ -496,14 +527,14 @@ describe('tracking recovery projection (saved connection body)', () => {
     expect(createTrackingRecoveryIntent(recoverableItem({ available_actions: [markFailedAction] }), 'RECOVER_AUTO')).toBeNull()
     expect(createTrackingRecoveryIntent(item({ status: 'ACTIVE' }), 'MARK_SUCCEEDED')).toBeNull()
     expect(createTrackingRecoveryIntent(recoverableItem({ revision: 0 }), 'RECOVER_AUTO')).toBeNull()
-    // The read-only external verification needs both a recoverable record and
-    // the capability the live page session proved.
+    // The read-only external verification still needs both a recoverable record
+    // and the capability the live page session proved (a read-only path that is
+    // deliberately outside the #89 write-gate convergence).
     expect(createTrackingRecoveryIntent(recoverableItem(), 'VERIFY_EXTERNAL', capabilities())).toEqual({
       action: 'VERIFY_EXTERNAL', expectedRevision: 3,
     })
-    expect(createTrackingRecoveryIntent(recoverableItem(), 'VERIFY_EXTERNAL')).toBeNull()
-    expect(createTrackingRecoveryIntent(recoverableItem(), 'VERIFY_EXTERNAL', capabilities({ external_verify: 'UNSUPPORTED' }))).toBeNull()
-    expect(createTrackingRecoveryIntent(recoverableItem(), 'VERIFY_EXTERNAL', capabilities({ probe_status: 'PARTIAL' }))).toBeNull()
+    expect(createTrackingRecoveryIntent(recoverableItem(), 'VERIFY_EXTERNAL', capabilities({ external_verify: 'UNKNOWN' }))).toBeNull()
+    expect(createTrackingRecoveryIntent(recoverableItem(), 'VERIFY_EXTERNAL', null)).toBeNull()
     expect(createTrackingRecoveryIntent(item({ status: 'ACTIVE' }), 'VERIFY_EXTERNAL', capabilities())).toBeNull()
 
     expect(canVerifyExternally(capabilities())).toBe(true)
@@ -554,26 +585,23 @@ describe('tracking recovery projection (saved connection body)', () => {
 })
 
 describe('tracking management projection (US-313)', () => {
-  it('requests only a scope the server offered and the live session proves', () => {
+  it('requests only a scope the server actually offered', () => {
     const scoped = item({
       available_actions: [action({ target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'] })],
     })
     // Both scopes are requestable while both capabilities are proven.
-    expect(projectTrackingActionScopes(scoped, 'MODIFY', 'SUBSCRIPTION', capabilities()))
+    expect(projectTrackingActionScopes(scoped, 'MODIFY', 'SUBSCRIPTION'))
       .toEqual(['SUBSCRIPTION'])
-    expect(projectTrackingActionScopes(scoped, 'MODIFY', 'ASSOCIATED_RSS', capabilities()))
+    expect(projectTrackingActionScopes(scoped, 'MODIFY', 'ASSOCIATED_RSS'))
       .toEqual(['ASSOCIATED_RSS'])
 
-    // A scope the server did not offer is never requestable, even with the
-    // capability proven, and an unproven capability drops the offered scope.
+    // A scope the server did not offer is never requestable (issue #89), while
+    // an offered scope no longer depends on a diagnostic probe.
     const subscriptionOnly = item({
       available_actions: [action({ target_scopes: ['SUBSCRIPTION'] })],
     })
-    expect(projectTrackingActionScopes(subscriptionOnly, 'MODIFY', 'ASSOCIATED_RSS', capabilities())).toEqual([])
-    expect(projectTrackingActionScopes(
-      subscriptionOnly, 'MODIFY', 'SUBSCRIPTION', capabilities({ subscription_modify: 'UNSUPPORTED' }),
-    )).toEqual([])
-    expect(projectTrackingActionScopes(subscriptionOnly, 'MODIFY', 'SUBSCRIPTION', capabilities({ rss_modify: 'SUPPORTED' })))
+    expect(projectTrackingActionScopes(subscriptionOnly, 'MODIFY', 'ASSOCIATED_RSS')).toEqual([])
+    expect(projectTrackingActionScopes(subscriptionOnly, 'MODIFY', 'SUBSCRIPTION'))
       .toEqual(['SUBSCRIPTION'])
   })
 
@@ -585,12 +613,12 @@ describe('tracking management projection (US-313)', () => {
       item({ available_actions: [action({ target_scopes: [] })] }),
     ]
     for (const record of cases) {
-      expect(projectTrackingActionScopes(record, 'MODIFY', 'SUBSCRIPTION', capabilities())).toEqual([])
+      expect(projectTrackingActionScopes(record, 'MODIFY', 'SUBSCRIPTION')).toEqual([])
     }
-    // A record with no live session has no requestable scope either.
+    // The server projection alone makes the scope requestable (issue #89).
     expect(projectTrackingActionScopes(item({
       available_actions: [action()],
-    }), 'MODIFY', 'SUBSCRIPTION', null)).toEqual([])
+    }), 'MODIFY', 'SUBSCRIPTION')).toEqual(['SUBSCRIPTION'])
   })
 
   it('maps every documented management conflict to a fixed next step and fails closed', () => {

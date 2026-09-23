@@ -12,12 +12,11 @@
  * The refresh action has exactly one legitimate target (this record's own
  * associated RSS), so it needs no scope choice and no scope is emitted for it.
  */
-import { computed, ref, watch } from 'vue'
+import { computed } from 'vue'
 
 import BaseButton from '@/components/forms/BaseButton.vue'
 import {
   MANAGEMENT_NEEDS_MANUAL_NOTICE,
-  MANAGEMENT_SCOPE_LABELS,
   isTrackingManagementScope,
   type TrackingAction,
   type TrackingItem,
@@ -62,15 +61,16 @@ const refreshScope = computed<TrackingManagementScope | null>(() => (
     .find((scope) => scope === 'ASSOCIATED_RSS') ?? null
 ))
 
-// The enable/disable target is never pre-selected: "启用哪个、停用哪个" is the
-// user's explicit choice, and a new server revision invalidates the old one.
-const selectedScope = ref<TrackingManagementScope | ''>('')
-watch(() => [props.item.tracking_id, props.item.revision], () => { selectedScope.value = '' })
+// Issue #89: enable/disable always addresses the current controlled external
+// anime subscription; the target scope is a server detail, never a user choice.
+const setEnabledScope = computed<TrackingManagementScope | null>(() => (
+  setEnabledScopes.value.find((scope) => scope === 'SUBSCRIPTION') ?? null
+))
 
 function submitSetEnabled(): void {
-  if (props.busy || !props.setEnabled || !selectedScope.value) return
+  if (props.busy || !props.setEnabled || !setEnabledScope.value) return
   emit('submit', {
-    action: props.setEnabled, item: props.item, targetScope: selectedScope.value, patch: null,
+    action: props.setEnabled, item: props.item, targetScope: setEnabledScope.value, patch: null,
   })
 }
 
@@ -85,7 +85,7 @@ function submitRefresh(): void {
 <template>
   <div class="tracking-management-actions">
     <form
-      v-if="setEnabled"
+      v-if="setEnabled && setEnabledScope"
       class="tracking-management-form"
       aria-labelledby="tracking-set-enabled-heading"
       @submit.prevent="submitSetEnabled"
@@ -94,27 +94,10 @@ function submitRefresh(): void {
       <p class="field-help">
         该操作只改变 Auto Bangumi 中的外部对象是否启用，不删除任何外部对象，也不修改 MiGuOrca 本地方案。
       </p>
-      <fieldset class="tracking-management-scopes">
-        <legend>请选择启停目标</legend>
-        <label v-for="scope in setEnabledScopes" :key="scope" class="tracking-management-scope">
-          <input
-            :id="`tracking-set-enabled-scope-${scope}`"
-            v-model="selectedScope"
-            type="radio"
-            class="base-checkbox"
-            name="tracking-set-enabled-scope"
-            :value="scope"
-          />
-          <span>{{ MANAGEMENT_SCOPE_LABELS[scope] }}</span>
-        </label>
-      </fieldset>
-      <p v-if="!selectedScope" id="tracking-set-enabled-hint" class="field-help" role="status">
-        请先明确选择启停目标。
-      </p>
       <BaseButton
         id="tracking-set-enabled-submit"
         type="submit"
-        :disabled="busy || !selectedScope"
+        :disabled="busy"
         :loading="loading"
       >{{ setEnabled.label }}</BaseButton>
     </form>
@@ -146,9 +129,7 @@ function submitRefresh(): void {
       :class="`is-${result.state.toLowerCase()}`"
       role="status"
     >
-      <p class="tracking-management-verdict">
-        本次目标：{{ MANAGEMENT_SCOPE_LABELS[result.targetScope] }}。{{ result.message }}
-      </p>
+      <p class="tracking-management-verdict">{{ result.message }}</p>
       <p v-if="result.needsManual" id="tracking-management-manual-notice" class="tracking-management-manual">
         {{ MANAGEMENT_NEEDS_MANUAL_NOTICE }}
       </p>

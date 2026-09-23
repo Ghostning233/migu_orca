@@ -71,9 +71,31 @@ export const TRACKING_STATUS_GROUPS = [
 
 export type TrackingStatusGroup = (typeof TRACKING_STATUS_GROUPS)[number]
 
+/**
+ * Overview cards (issue #85). PROCESSING is a transient per-row state and
+ * deliberately has no category of its own — those rows stay visible in the list
+ * and inside the server total.
+ */
+export const TRACKING_OVERVIEW_GROUPS = [
+  'PENDING', 'ACTIVE', 'INACTIVE', 'ATTENTION',
+] as const satisfies readonly TrackingStatusGroup[]
+
+export type TrackingOverviewGroup = (typeof TRACKING_OVERVIEW_GROUPS)[number]
+
 export interface TrackingOverview {
   total: number
-  byGroup: Record<TrackingStatusGroup, number>
+  byGroup: Record<TrackingOverviewGroup, number>
+  unreadable: number
+}
+
+/** Server-authoritative list counts from ``GET /api/v1/tracking/items``. */
+export interface TrackingListSummary {
+  total: number
+  pending: number
+  processing: number
+  active: number
+  inactive: number
+  needs_attention: number
   unreadable: number
 }
 
@@ -160,18 +182,45 @@ function isKnownScope(value: unknown): value is TrackingScope {
   return typeof value === 'string' && KNOWN_SCOPES.has(value as TrackingScope)
 }
 
-/** Count only server-provided known status groups; unknown data is unreadable. */
-export function projectTrackingOverview(items: readonly TrackingItem[]): TrackingOverview {
-  const byGroup = Object.fromEntries(TRACKING_STATUS_GROUPS.map((group) => [group, 0])) as Record<TrackingStatusGroup, number>
-  let unreadable = 0
-  for (const item of items) {
-    if (!isKnownStatusGroup(item.status_group)) {
-      unreadable += 1
-      continue
-    }
-    byGroup[item.status_group] += 1
+/**
+ * Project the overview strictly from the server summary (issue #85).
+ *
+ * The page never rebuilds the server state machine: counts come from the
+ * authoritative projection, and any missing or malformed value renders 0
+ * instead of being guessed from whichever rows happen to be loaded/filtered.
+ */
+export function projectTrackingOverview(
+  summary: TrackingListSummary | null | undefined,
+): TrackingOverview {
+  return {
+    total: _safeCount(summary?.total),
+    byGroup: {
+      PENDING: _safeCount(summary?.pending),
+      ACTIVE: _safeCount(summary?.active),
+      INACTIVE: _safeCount(summary?.inactive),
+      ATTENTION: _safeCount(summary?.needs_attention),
+    },
+    unreadable: _safeCount(summary?.unreadable),
   }
-  return { total: items.length, byGroup, unreadable }
+}
+
+function _safeCount(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0
+}
+
+/** Format a server timestamp for the list's "最近更新时间" column (issue #85). */
+export function formatTrackingUpdatedAt(value: string | null | undefined): string {
+  if (typeof value !== 'string' || !value.trim()) return '更新时间不可用'
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return '更新时间不可用'
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(parsed)
 }
 
 /** Search only public title/subtitle fields and apply a server status group. */
@@ -212,11 +261,16 @@ function supported(capabilities: CapabilityResult | null | undefined, field: key
   return capabilities?.probe_status === 'VERIFIED' && capabilities[field] === 'SUPPORTED'
 }
 
-/** Filter server actions by strict known values and current proven capability. */
-export function executableTrackingActions(
-  item: TrackingItem,
-  capabilities?: CapabilityResult | null,
-): TrackingAction[] {
+/**
+ * Filter server actions by strict known values only.
+ *
+ * Issue #86/#89: a settings-page probe is diagnostic, never an authorization
+ * gate. Every external write re-validates the saved connection, credentials,
+ * exact version and write capability inside the same server request and fails
+ * closed, so unknown action/scope values still fail closed here while a
+ * diagnostic "unsupported" probe no longer hides an action.
+ */
+export function executableTrackingActions(item: TrackingItem): TrackingAction[] {
   const result: TrackingAction[] = []
   for (const action of item.available_actions ?? []) {
     if (!isKnownAction(action.code) || !isKnownStyle(action.style)) continue
@@ -225,26 +279,18 @@ export function executableTrackingActions(
     if (scopes.length !== rawScopes.length || new Set(scopes).size !== scopes.length) continue
     const capability = MANAGEMENT_CAPABILITY[action.code]
     if (capability) {
-      if (!capabilities || scopes.length === 0) continue
-      const supportedScopes = scopes.filter((scope) => {
-        let field: keyof CapabilityResult | undefined = capability[scope]
-        if (action.code === 'SET_ENABLED') {
-          if (item.status === 'DISABLED') {
-            field = scope === 'SUBSCRIPTION' ? 'subscription_enable' : 'rss_enable'
-          } else if (item.status === 'ACTIVE' || item.status === 'EXTERNAL_ONLY') {
-            field = scope === 'SUBSCRIPTION' ? 'subscription_disable' : 'rss_disable'
-          } else {
-            field = undefined
-          }
-        }
-        return field !== undefined && supported(capabilities, field)
-      })
-      if (!supportedScopes.length) continue
-      result.push({ ...action, target_scopes: supportedScopes })
+      // A management action needs a real, known target scope; the server owns
+      // whether this connection can actually perform it (issue #89).
+      if (scopes.length === 0) continue
+      result.push({ ...action, target_scopes: scopes })
       continue
     }
     if (action.code === 'SUBMIT' || action.code === 'RETRY') {
-      if (scopes.length > 0 || !supported(capabilities, 'subscription_submit')) continue
+      // Issue #86: submission is offered whenever the server projects the
+      // action. The server re-validates the saved connection, authentication,
+      // exact version and write capability inside the same request and fails
+      // closed, so a settings-page probe is diagnostic only — never a gate.
+      if (scopes.length > 0) continue
     } else if (scopes.length > 0) {
       continue
     }
@@ -266,17 +312,45 @@ export function projectTrackingActionScopes(
   item: TrackingItem,
   actionCode: TrackingActionCode,
   targetScope: TrackingScope,
-  capabilities?: CapabilityResult | null,
 ): TrackingManagementScope[] {
   if (!isTrackingManagementScope(targetScope)) return []
-  const requested = executableTrackingActions(item, capabilities)
+  const requested = executableTrackingActions(item)
     .filter((candidate) => candidate.code === actionCode)
     .flatMap((candidate) => candidate.target_scopes ?? [])
     .filter((scope): scope is TrackingManagementScope => scope === targetScope)
   return requested.length === 1 ? requested : []
 }
 
-function makeOpaqueKey(): string {
+/**
+ * Page-owned result of one unified plan delete (issue #92).
+ *
+ * ``DELETED`` is the only state where the local plan and its tracking record are
+ * gone; the two external states mean nothing local was removed and the user must
+ * retry or recover deliberately.
+ */
+export type TrackingPlanDeleteState = 'IN_FLIGHT' | 'DELETED' | 'EXTERNAL_FAILED' | 'EXTERNAL_UNKNOWN'
+
+export interface TrackingPlanDeleteSession {
+  readonly trackingId: string
+  readonly state: TrackingPlanDeleteState
+  readonly message: string
+}
+
+const PLAN_DELETE_MESSAGES: Record<TrackingPlanDeleteState, string> = {
+  IN_FLIGHT: '正在删除追番方案，请稍候…',
+  DELETED: '追番方案已删除。',
+  EXTERNAL_FAILED: 'Auto Bangumi 未删除该受控外部订阅，本地方案与追番记录均已保留；请核对后重试。',
+  EXTERNAL_UNKNOWN: '外部删除结果未知，本地方案与追番记录均已保留；请先恢复核验后再决定。',
+}
+
+export function createPlanDeleteSession(
+  trackingId: string,
+  state: TrackingPlanDeleteState,
+): TrackingPlanDeleteSession {
+  return { trackingId, state, message: PLAN_DELETE_MESSAGES[state] }
+}
+
+export function makeOpaqueKey(): string {
   const candidate = globalThis.crypto?.randomUUID?.()
   return candidate && /^[A-Za-z0-9-]{8,128}$/.test(candidate)
     ? candidate
@@ -288,9 +362,8 @@ export function createTrackingActionIntent(
   item: TrackingItem,
   action: TrackingAction,
   targetScope?: TrackingScope,
-  capabilities?: CapabilityResult | null,
 ): TrackingActionIntent | null {
-  const executable = executableTrackingActions(item, capabilities)
+  const executable = executableTrackingActions(item)
   const projected = executable.find((candidate) => candidate === action || (
     candidate.code === action.code && candidate.label === action.label && candidate.style === action.style &&
     candidate.requires_confirmation === action.requires_confirmation &&
@@ -450,12 +523,12 @@ export interface TrackingWriteConfirmation {
 export const WRITE_ACTION_CONFIRMATIONS: Record<TrackingWriteActionCode, TrackingWriteConfirmation> = {
   SUBMIT: {
     title: '提交 Auto Bangumi 订阅',
-    message: '将在 Auto Bangumi 创建该追番的外部订阅，并可能触发下载。提交只使用本页面已探测的连接，是否继续？',
+    message: '将在 Auto Bangumi 创建该追番的外部订阅，并可能触发下载。提交只使用已保存的 Auto Bangumi 连接，是否继续？',
     confirmLabel: '确认提交',
   },
   RETRY: {
     title: '重试 Auto Bangumi 提交',
-    message: '该追番上次提交明确失败。重试会使用本页面已探测的连接重新创建外部订阅，并可能触发下载，是否继续？',
+    message: '该追番上次提交明确失败。重试会使用已保存的 Auto Bangumi 连接重新创建外部订阅，并可能触发下载，是否继续？',
     confirmLabel: '确认重试',
   },
 }
@@ -489,12 +562,83 @@ export type TrackingSubmitOutcome = (typeof SUBMIT_OUTCOMES)[number]
  */
 export type TrackingWriteState = 'IN_FLIGHT' | TrackingSubmitOutcome | 'CONFLICT' | 'REJECTED' | 'UNKNOWN'
 
+/**
+ * Published, non-sensitive failure classification (issue #86). The server sends
+ * only this code; every user-facing sentence lives here so an upstream response
+ * can never reach the UI.
+ */
+export const WRITE_FAILURE_CATEGORIES = [
+  'CONNECTION', 'AUTHENTICATION', 'VERSION', 'DUPLICATE_SUBSCRIPTION',
+  'VALIDATION', 'REJECTED', 'OUTCOME_UNKNOWN',
+] as const
+
+export type WriteFailureCategory = (typeof WRITE_FAILURE_CATEGORIES)[number]
+
+export interface WriteFailurePresentation {
+  readonly title: string
+  readonly message: string
+  /**
+   * ``dialog``: a blocking connection/credential/version problem takes over the
+   * page and offers a settings deep link. ``item``: the rejection belongs to the
+   * record the user acted on. ``recovery``: the outcome is indeterminate and the
+   * existing recovery controls must be used.
+   */
+  readonly channel: 'dialog' | 'item' | 'recovery'
+}
+
+export const WRITE_FAILURE_PRESENTATIONS: Readonly<Record<WriteFailureCategory, WriteFailurePresentation>> = {
+  CONNECTION: {
+    title: '无法连接 Auto Bangumi',
+    message: '保存的 Auto Bangumi 配置当前无法连接。请前往设置检查地址与网络后重试；本次未创建外部订阅。',
+    channel: 'dialog',
+  },
+  AUTHENTICATION: {
+    title: 'Auto Bangumi 认证失败',
+    message: '保存的连接凭据被 Auto Bangumi 拒绝。请前往设置更新账号或密码后重试；本次未创建外部订阅。',
+    channel: 'dialog',
+  },
+  VERSION: {
+    title: 'Auto Bangumi 版本不受支持',
+    message: '当前 Auto Bangumi 版本不在已验证的 3.1.18 能力范围内。请前往设置确认版本后重试；本次未创建外部订阅。',
+    channel: 'dialog',
+  },
+  DUPLICATE_SUBSCRIPTION: {
+    title: '已存在相同订阅',
+    message: 'Auto Bangumi 中已存在相同订阅，本次未重复创建。请核对既有订阅后再决定是否继续。',
+    channel: 'item',
+  },
+  VALIDATION: {
+    title: '提交前检查未通过',
+    message: '本地方案未通过提交前检查，本次未创建外部订阅。请按提示修改追番方案后重新提交。',
+    channel: 'item',
+  },
+  REJECTED: {
+    title: 'Auto Bangumi 明确拒绝',
+    message: 'Auto Bangumi 明确拒绝了本次提交，尚未创建外部订阅。请检查方案内容后重新确认提交。',
+    channel: 'item',
+  },
+  OUTCOME_UNKNOWN: {
+    title: '提交结果未知',
+    message: '无法确认 Auto Bangumi 是否已创建订阅。请先使用恢复核验，未确认前不会再次提交。',
+    channel: 'recovery',
+  },
+}
+
+/** Parse the server's published category; anything unknown fails closed. */
+export function writeFailureCategory(value: unknown): WriteFailureCategory | null {
+  return typeof value === 'string' && (WRITE_FAILURE_CATEGORIES as readonly string[]).includes(value)
+    ? (value as WriteFailureCategory)
+    : null
+}
+
 export interface TrackingWriteSession {
   readonly trackingId: string
   readonly action: TrackingActionCode
   readonly state: TrackingWriteState
   readonly message: string
   readonly issues: TrackingRevalidateIssueView[]
+  /** Published failure class of a failed/indeterminate result, when provided. */
+  readonly failureCategory: WriteFailureCategory | null
 }
 
 /**
@@ -556,8 +700,14 @@ export function createWriteSession(
   action: TrackingActionCode,
   state: TrackingWriteState,
   issues: TrackingRevalidateIssueView[] = [],
+  failureCategory: WriteFailureCategory | null = null,
 ): TrackingWriteSession {
-  return { trackingId, action, state, message: WRITE_MESSAGES[state], issues }
+  // A published failure class owns the copy for its own channel; otherwise the
+  // fixed per-state sentence stays authoritative.
+  const message = failureCategory
+    ? WRITE_FAILURE_PRESENTATIONS[failureCategory].message
+    : WRITE_MESSAGES[state]
+  return { trackingId, action, state, message, issues, failureCategory }
 }
 
 /** Fixed next step for one documented conflict; unknown types fail closed. */
@@ -577,7 +727,10 @@ export function createWriteConflictSession(
   action: TrackingActionCode,
   errorType: unknown,
 ): TrackingWriteSession {
-  return { trackingId, action, state: 'CONFLICT', message: writeConflictMessage(errorType), issues: [] }
+  return {
+    trackingId, action, state: 'CONFLICT',
+    message: writeConflictMessage(errorType), issues: [], failureCategory: null,
+  }
 }
 
 /**
@@ -615,7 +768,13 @@ export function projectWriteOutcome(
   result: TrackingWriteResult,
 ): TrackingWriteSession {
   const outcome: TrackingWriteState = isSubmitOutcome(result.outcome) ? result.outcome : 'UNKNOWN'
-  return createWriteSession(trackingId, action, outcome, projectRevalidateIssues(result.issues))
+  return createWriteSession(
+    trackingId,
+    action,
+    outcome,
+    projectRevalidateIssues(result.issues),
+    writeFailureCategory(result.failure_category),
+  )
 }
 
 /**
@@ -693,7 +852,7 @@ export const RECOVERY_ACTION_CONFIRMATIONS = {
   },
   VERIFY_EXTERNAL: {
     title: '只读核验外部状态',
-    message: '将使用本页面已探测的连接，只读核对该追番在 Auto Bangumi 中的当前状态；不会创建、修改或删除任何外部订阅，是否继续？',
+    message: '将使用已保存的 Auto Bangumi 连接，只读核对该追番在 Auto Bangumi 中的当前状态；不会创建、修改或删除任何外部订阅，是否继续？',
     confirmLabel: '确认只读核验',
   },
 } as const satisfies Record<Exclude<TrackingRecoveryActionCode, 'RECOVER_AUTO'>, TrackingRecoveryConfirmation>
@@ -770,7 +929,7 @@ export function createTrackingRecoveryIntent(
 ): TrackingRecoveryIntent | null {
   if (!isRecoveryActionCode(action)) return null
   if (!Number.isInteger(item.revision) || item.revision < 1) return null
-  const offered = executableTrackingActions(item, null).map((candidate) => candidate.code)
+  const offered = executableTrackingActions(item).map((candidate) => candidate.code)
   if (action === 'VERIFY_EXTERNAL') {
     if (!offered.includes('RECOVER_AUTO') || !canVerifyExternally(capabilities)) return null
   } else if (!offered.includes(action)) {
@@ -926,10 +1085,10 @@ const MANAGEMENT_ACTION_MESSAGES: Record<
     UNKNOWN: '外部启停结果未知，正在只读回查；未确认生效前不会自动重试。',
   },
   REFRESH_RSS: {
-    IN_FLIGHT: '正在请求刷新关联 RSS，请稍候…',
+    IN_FLIGHT: '正在请求立即刷新资源，请稍候…',
     SUCCEEDED: '关联 RSS 刷新已完成：Auto Bangumi 已接受本次刷新请求。',
     FAILED: '关联 RSS 刷新明确失败，Auto Bangumi 未接受本次刷新；可核对后重新发起。',
-    CONFLICT: '追番记录已变化或当前状态不允许刷新关联 RSS，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
+    CONFLICT: '追番记录已变化或当前状态不允许立即刷新资源，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
     REJECTED: '服务端明确拒绝了本次刷新请求，本次未刷新 Auto Bangumi 关联 RSS；正在刷新最新详情，请重新确认。',
     UNKNOWN: '关联 RSS 刷新结果未知，正在只读回查；未确认完成前不会自动重试。',
   },

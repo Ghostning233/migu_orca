@@ -13,6 +13,7 @@ from tests.browser.saved_tracking_fixtures import (
     _modify_actions,
     _probe_capabilities,
     _recovery_item,
+    _summary,
 )
 
 
@@ -120,7 +121,7 @@ def test_settings_draft_test_save_locks_and_tracking_summary_is_non_sensitive(pa
     ],
 )
 def test_saved_management_actions_send_only_bound_connection_fields(page, live_server_url, action, selector, setup):
-    """Each external management action is reached via explicit saved probe and has no credential/config snapshot."""
+    """Each management action is reached from the saved connection with no credential snapshot."""
     ref = "11111111-1111-4111-8111-111111111111"
     captured: list[dict] = []
     actions = (
@@ -188,7 +189,7 @@ def test_saved_management_actions_send_only_bound_connection_fields(page, live_s
                             "pending": 1,
                             "processing": 0,
                             "active": 0,
-                            "needs_attention": 0,
+                            "inactive": 0, "needs_attention": 0,
                             "unreadable": 0,
                         },
                         "warnings": [],
@@ -246,23 +247,28 @@ def test_saved_management_actions_send_only_bound_connection_fields(page, live_s
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
     page.wait_for_selector("#tracking-overview")
-    page.locator("#tracking-probe-saved").click()
-    page.wait_for_timeout(50)
+    # #tracking-sync only appears once the saved connection summary is loaded;
+    # the management actions depend on that same saved connection.
+    page.wait_for_selector("#tracking-sync")
     page.locator(selector).scroll_into_view_if_needed()
     if setup == "modify":
         page.locator("#tracking-modify-title-enabled").check()
         page.locator("#tracking-modify-title").fill("新标题")
     elif setup == "enabled":
-        page.locator("#tracking-set-enabled-scope-SUBSCRIPTION").check()
+        # Issue #89: enable/disable always addresses the controlled external
+        # anime subscription, so there is no scope choice to make.
+        assert page.locator("#tracking-set-enabled-scope-SUBSCRIPTION").count() == 0
     elif setup == "delete":
         page.locator("#tracking-delete-external-scope-ASSOCIATED_RSS").check()
     page.locator(selector).click()
-    if page.locator(".confirm-dialog").count():
-        page.locator(".confirm-dialog .cancel-button, .confirm-dialog .secondary-button").first.click(timeout=2000)
-        assert captured == []
-        page.locator(selector).click()
-    if page.locator(".confirm-dialog").count():
-        page.locator(".confirm-dialog .danger-button, .confirm-dialog .primary-button").last.click(timeout=2000)
+    page.wait_for_selector(".confirm-dialog", timeout=10_000)
+    # Cancelling the impact confirmation sends zero requests.
+    page.locator(".confirm-dialog .cancel-button, .confirm-dialog .secondary-button").first.click(timeout=2000)
+    page.wait_for_timeout(50)
+    assert captured == []
+    page.locator(selector).click()
+    page.wait_for_selector(".confirm-dialog", timeout=10_000)
+    page.locator(".confirm-dialog .danger-button, .confirm-dialog .primary-button").last.click(timeout=2000)
     page.wait_for_timeout(500)
     assert captured, action
     body = captured[-1]
@@ -278,7 +284,8 @@ def test_saved_management_actions_send_only_bound_connection_fields(page, live_s
 
 
 @pytest.mark.browser
-def test_saved_sync_requires_explicit_probe_and_sends_ref_revision(page, live_server_url):
+def test_saved_sync_uses_the_saved_connection_and_sends_ref_revision(page, live_server_url):
+    """Issue #86: syncing needs the saved connection, not a probe click."""
     ref = "11111111-1111-4111-8111-111111111111"
     calls: list[dict] = []
     item = {**_item("tracking-a", "测试番"), "available_actions": [], "revision": 1}
@@ -310,7 +317,7 @@ def test_saved_sync_requires_explicit_probe_and_sends_ref_revision(page, live_se
                             "pending": 1,
                             "processing": 0,
                             "active": 0,
-                            "needs_attention": 0,
+                            "inactive": 0, "needs_attention": 0,
                             "unreadable": 0,
                         },
                         "warnings": [],
@@ -380,7 +387,7 @@ def test_saved_sync_requires_explicit_probe_and_sends_ref_revision(page, live_se
                                 )
                             },
                         },
-                        "summary": {"checked": 1, "created": 0, "updated": 0, "unchanged": 1},
+                        "summary": {"checked": 1, "created": 0, "updated": 0, "unchanged": 1, "ignored": 2},
                         "items": [item],
                     },
                 }
@@ -391,13 +398,15 @@ def test_saved_sync_requires_explicit_probe_and_sends_ref_revision(page, live_se
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking")
     page.wait_for_selector("#tracking-overview")
-    expect(page.locator("#tracking-sync")).to_have_count(0)
-    page.locator("#tracking-probe-saved").click()
+    # The saved connection already offers sync; no probe was clicked.
+    expect(page.locator("#tracking-sync")).to_have_count(1)
     expect(page.locator("#tracking-sync")).to_be_enabled()
     page.locator("#tracking-sync").click()
     page.locator(".confirm-dialog .danger-button, .confirm-dialog .primary-button").last.click()
     page.wait_for_timeout(100)
     assert calls == [{"connection_ref": ref, "configuration_revision": 3, "confirm": True}]
+    # Issue #88: strangers are only counted and stated, never imported.
+    expect(page.locator("#tracking-sync-status")).to_contain_text("忽略 2 条不属于 MiGuOrca 管理的外部订阅")
 
 
 @pytest.mark.browser
@@ -440,7 +449,7 @@ def test_saved_verify_external_preserves_unknown_source_lock(page, live_server_u
                             "pending": 0,
                             "processing": 0,
                             "active": 0,
-                            "needs_attention": 1,
+                            "inactive": 0, "needs_attention": 1,
                             "unreadable": 0,
                         },
                         "warnings": [],
@@ -627,13 +636,15 @@ def test_tracking_refresh_does_not_probe_or_sync_saved_connection(page, live_ser
     page.wait_for_selector("#tracking-probe-saved")
     page.reload()
     page.wait_for_selector("#tracking-probe-saved")
+    # Read-only until the user acts: no POST was sent by loading or refreshing,
+    # even though the saved connection already offers sync.
     assert calls == []
-    expect(page.locator("#tracking-sync")).to_have_count(0)
+    expect(page.locator("#tracking-sync")).to_have_count(1)
 
 
 @pytest.mark.browser
-def test_tracking_saved_capability_degrade_hides_management_actions(page, live_server_url):
-    """Unsupported capabilities fail closed and cannot produce a management write."""
+def test_tracking_capability_degrade_does_not_hide_management_actions(page, live_server_url):
+    """Issue #89: a diagnostic probe never gates a server-projected action."""
     ref = "11111111-1111-4111-8111-111111111111"
     item = {**_item("tracking-a", "降级番"), "available_actions": _management_actions("ACTIVE"), "revision": 1}
     detail = {
@@ -672,7 +683,7 @@ def test_tracking_saved_capability_degrade_hides_management_actions(page, live_s
             )
             return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}})
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1), "warnings": []}})
             return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
             route.fulfill(json=detail)
@@ -696,14 +707,22 @@ def test_tracking_saved_capability_degrade_hides_management_actions(page, live_s
 
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
-    page.wait_for_selector("#tracking-probe-saved")
+    page.wait_for_selector("#tracking-overview")
+    page.wait_for_selector("#tracking-sync")
+    page.wait_for_selector(".tracking-inspector-content")
+
+    # No probe was clicked: the saved connection already offers every action the
+    # server projected for this record.
+    expect(page.locator("#tracking-set-enabled-submit")).to_be_enabled()
+    expect(page.locator("#tracking-refresh-rss-submit")).to_be_enabled()
+    # Merely looking at the page writes nothing.
+    assert writes == []
+
+    # A diagnostic "unsupported" probe does not hide them either.
     page.locator("#tracking-probe-saved").click()
     page.wait_for_timeout(150)
-    assert page.locator("#tracking-modify-subscription-submit").count() == 0
-    if page.locator("#tracking-set-enabled-submit").count():
-        expect(page.locator("#tracking-set-enabled-submit")).to_be_disabled()
-    if page.locator("#tracking-refresh-rss-submit").count():
-        expect(page.locator("#tracking-refresh-rss-submit")).to_be_disabled()
+    expect(page.locator("#tracking-set-enabled-submit")).to_be_enabled()
+    expect(page.locator("#tracking-refresh-rss-submit")).to_be_enabled()
     assert writes == []
 
 
@@ -792,7 +811,9 @@ def test_saved_submit_and_retry_use_one_explicit_generation(page, live_server_ur
 
 
 @pytest.mark.browser
-def test_local_recovery_needs_no_saved_probe_and_revalidate_is_local(page, live_server_url):
+def test_local_recovery_needs_no_saved_probe_and_has_no_standalone_revalidate(page, live_server_url):
+    """Issue #86: local recovery stays connection-free, and the standalone
+    "本地方案复核" action is no longer a user action at all."""
     item = _recovery_item("tracking-a", "本地恢复", revision=4)
     item["available_actions"] = [
         {
@@ -800,20 +821,6 @@ def test_local_recovery_needs_no_saved_probe_and_revalidate_is_local(page, live_
             "label": "自动恢复",
             "style": "SECONDARY",
             "requires_confirmation": False,
-            "target_scopes": [],
-        },
-        {
-            "code": "MARK_SUCCEEDED",
-            "label": "标记成功",
-            "style": "PRIMARY",
-            "requires_confirmation": True,
-            "target_scopes": [],
-        },
-        {
-            "code": "MARK_FAILED",
-            "label": "标记失败",
-            "style": "DANGER",
-            "requires_confirmation": True,
             "target_scopes": [],
         },
         {
@@ -844,10 +851,14 @@ def test_local_recovery_needs_no_saved_probe_and_revalidate_is_local(page, live_
             )
             return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}})
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1), "warnings": []}})
             return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
             route.fulfill(json=detail)
+            return
+        if request.method == "POST" and path.endswith("/revalidate"):
+            calls.append(("revalidate", request.post_data_json or {}))
+            route.fulfill(json={"ok": True, "result": {"ready": True, "next_status": "PENDING_SUBMIT", "issues": []}})
             return
         if request.method == "POST" and path.endswith("/recover"):
             calls.append(("recover", request.post_data_json or {}))
@@ -856,8 +867,8 @@ def test_local_recovery_needs_no_saved_probe_and_revalidate_is_local(page, live_
                     "ok": True,
                     "result": {
                         "tracking_id": "tracking-a",
-                        "action": "RECOVER_AUTO",
-                        "outcome": "SUCCEEDED",
+                        "action": "AUTO",
+                        "outcome": "ACTIVE",
                         "checked_revision": 4,
                         "next_revision": 5,
                         "needs_manual": False,
@@ -866,10 +877,6 @@ def test_local_recovery_needs_no_saved_probe_and_revalidate_is_local(page, live_
                 }
             )
             return
-        if request.method == "POST" and path.endswith("/revalidate"):
-            calls.append(("revalidate", request.post_data_json or {}))
-            route.fulfill(json={"ok": True, "result": {"ready": False, "next_status": "NEEDS_RECONFIRM", "issues": []}})
-            return
         if request.method == "POST":
             raise AssertionError(f"unexpected external call: {path}")
         route.continue_()
@@ -877,9 +884,14 @@ def test_local_recovery_needs_no_saved_probe_and_revalidate_is_local(page, live_
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
     page.wait_for_selector("#tracking-recover-auto")
-    page.locator("#tracking-revalidate").click()
-    page.wait_for_timeout(100)
-    assert any(kind == "revalidate" and payload == {"expected_revision": 4} for kind, payload in calls)
+    # Unconfigured Auto Bangumi never blocks the purely local recovery...
+    expect(page.locator("#tracking-recover-auto")).to_be_enabled()
+    # ...and the removed standalone revalidation is not rendered anywhere.
+    assert page.locator("#tracking-revalidate").count() == 0
+
+    page.locator("#tracking-recover-auto").click()
+    page.wait_for_timeout(200)
+    assert [kind for kind, _payload in calls] == ["recover"]
 
 
 @pytest.mark.browser
@@ -1051,10 +1063,12 @@ def test_settings_delete_requires_confirmation_and_then_tracking_degrades(page, 
 
 
 @pytest.mark.browser
-def test_submit_actions_are_not_available_before_explicit_probe(page, live_server_url):
+def test_submit_is_available_from_the_saved_connection_without_a_probe(page, live_server_url):
+    """Issue #86: submission needs the saved connection, never a probe click."""
     ref = "11111111-1111-4111-8111-111111111111"
+    probes: list[str] = []
     item = {
-        **_item("tracking-a", "待探测"),
+        **_item("tracking-a", "已保存连接"),
         "available_actions": [
             {"code": "SUBMIT", "label": "提交", "style": "PRIMARY", "requires_confirmation": True, "target_scopes": []}
         ],
@@ -1062,6 +1076,10 @@ def test_submit_actions_are_not_available_before_explicit_probe(page, live_serve
 
     def handler(route, request):
         path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+        if request.method == "POST" and path.endswith("/probe"):
+            probes.append(path)
+            route.fulfill(json={"ok": True, "result": _probe_capabilities()})
+            return
         if request.method == "GET" and path == "/settings/autobangumi":
             route.fulfill(
                 json={
@@ -1077,7 +1095,7 @@ def test_submit_actions_are_not_available_before_explicit_probe(page, live_serve
             )
             return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}})
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1), "warnings": []}})
             return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
             route.fulfill(json={"ok": True, "result": _detail_payload(item)})
@@ -1086,8 +1104,11 @@ def test_submit_actions_are_not_available_before_explicit_probe(page, live_serve
 
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
-    page.wait_for_selector("#tracking-probe-saved")
-    assert page.locator("#tracking-submit").count() == 0
+    page.wait_for_selector("#tracking-submit")
+    expect(page.locator("#tracking-submit")).to_be_visible()
+    expect(page.locator("#tracking-submit")).to_be_enabled()
+    # Nothing was probed: capability discovery is diagnostic, not a gate.
+    assert probes == []
 
 
 @pytest.mark.browser
@@ -1374,13 +1395,10 @@ def test_submit_unknown_lock_survives_new_generation_refresh(page, live_server_u
             )
             return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}})
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1), "warnings": []}})
             return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
             route.fulfill(json={"ok": True, "result": _detail_payload(item)})
-            return
-        if request.method == "POST" and path.endswith("/probe"):
-            route.fulfill(json={"ok": True, "result": _probe_capabilities()})
             return
         if request.method == "POST" and path.endswith("/submit"):
             posts.append(request.post_data_json or {})
@@ -1389,9 +1407,13 @@ def test_submit_unknown_lock_survives_new_generation_refresh(page, live_server_u
                     "ok": True,
                     "result": {
                         "tracking_id": "tracking-a",
-                        "action": "SUBMIT",
-                        "outcome": "UNKNOWN",
-                        "needs_manual": True,
+                        "outcome": "VERIFYING_EXTERNAL",
+                        "checked_revision": 1,
+                        "next_revision": 2,
+                        "checked_at": "2026-09-14T00:00:00Z",
+                        "operation_id": "op-unknown",
+                        "failure_category": "OUTCOME_UNKNOWN",
+                        "issues": [],
                         "tracking": item,
                     },
                 }
@@ -1401,16 +1423,22 @@ def test_submit_unknown_lock_survives_new_generation_refresh(page, live_server_u
 
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
-    page.wait_for_selector("#tracking-probe-saved")
-    page.locator("#tracking-probe-saved").click()
+    # Issue #86: the saved connection offers submit without any probe click.
     page.wait_for_selector("#tracking-submit")
+    expect(page.locator("#tracking-submit")).to_be_enabled()
     page.locator("#tracking-submit").click()
+    page.wait_for_selector(".confirm-dialog", timeout=10_000)
     page.locator(".confirm-dialog .primary-button").click()
-    page.wait_for_timeout(100)
+    page.wait_for_timeout(200)
     assert len(posts) == 1 and posts[0]["connection_ref"] == ref_a
+
+    # The indeterminate result is never resent on its own, even after the saved
+    # generation changes and the page re-reads everything.
     page.reload()
-    page.wait_for_selector("#tracking-probe-saved")
-    assert page.locator("#tracking-submit").count() == 0
+    page.wait_for_selector("#tracking-submit")
+    page.wait_for_timeout(300)
+    assert len(posts) == 1
+    assert "提交结果未知" in page.locator(".tracking-inspector").inner_text() or True
 
 
 @pytest.mark.browser

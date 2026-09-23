@@ -263,7 +263,7 @@ export function batchCardNextStep(guidance: BatchCardGuidance): string {
   }
   if (status === 'CONFIRMED') {
     return guidance.trackingLocated
-      ? '在追番管理中再次确认后提交外部订阅。'
+      ? '在我的追番中再次确认后提交外部订阅。'
       : '点「重试定位」找回追番记录后继续。'
   }
   if (status === 'FAILED') return '删除该条目，或调整名称后重新获取批量草案。'
@@ -481,7 +481,7 @@ export function batchSelectedConfirmCopy(
     confirmLabel: label,
     itemsLabel: titles.length ? `本次将保存并确认的 ${titles.length} 部` : '',
     items: [...titles],
-    message: `${clauses.join('，')}。${exclusion}仅保存本地订阅方案，不会提交到 Auto Bangumi；外部提交需在追番管理再次确认。`,
+    message: `${clauses.join('，')}。${exclusion}仅保存本地订阅方案，不会提交到 Auto Bangumi；外部提交需在我的追番再次确认。`,
   }
 }
 
@@ -529,7 +529,7 @@ export function batchAcceptAllConfirmCopy(
     confirmLabel: label,
     itemsLabel: titles.length ? `本次将保存并确认的 ${titles.length} 部` : '',
     items: [...titles],
-    message: `${clauses.join('，')}。${exclusion}仅保存本地订阅方案，不会提交到 Auto Bangumi；外部提交需在追番管理再次确认。`,
+    message: `${clauses.join('，')}。${exclusion}仅保存本地订阅方案，不会提交到 Auto Bangumi；外部提交需在我的追番再次确认。`,
   }
 }
 

@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 import apps.migu_orca_web.tracking_management_service as management_service
 from ab_engine.models.management import AutoBangumiCapabilities, ExternalRss, ExternalSubscription
+from apps.migu_orca_web.save_confirm_service import compute_request_fingerprint
 from apps.migu_orca_web.tracking_management_service import recover_tracking_management, run_tracking_management
 from shared.errors import Stage1Error
 from storage_engine.controllers.operation_repository import load_tracking_operation
+from storage_engine.controllers.request_repository import (
+    load_request_snapshot,
+    save_request_snapshot,
+)
 from storage_engine.controllers.storage_config import load_storage_config
 from storage_engine.controllers.tracking_repository import ensure_tracking_record, load_tracking_record
 from tracking_engine.controllers.management_target import ResolvedManagementTarget
@@ -22,6 +28,7 @@ from tracking_engine.models.tracking import (
     TRACKING_STATUS_ACTIVE,
     TRACKING_STATUS_EXTERNAL_DELETED,
     create_external_tracking_record,
+    tracking_id_for_request,
 )
 
 
@@ -50,6 +57,45 @@ def _seed(tmp_path: Path):
     )
     stored, _ = ensure_tracking_record(config, record)
     return config, stored
+
+
+def _seed_with_local_plan(tmp_path: Path):
+    """A controlled record plus the local plan snapshot it belongs to."""
+    config = load_storage_config(tmp_path / "storage")
+    request = {
+        "request_id": "req-local",
+        "status": "ACCEPTED",
+        "input": {"raw_title": "芙莉莲"},
+        "source_info": {
+            "matched_bangumi": {"title": "Test", "season": 1, "aliases": []},
+            "rss_sources": [],
+        },
+        "confirmable_config": {
+            "selected_subtitle_group": "Group",
+            "filter_rule": {
+                "must_contain": "", "must_not_contain": "",
+                "use_regex": False, "case_sensitive": False,
+            },
+            "expected_folder_name": "Old",
+            "warnings": [],
+        },
+        "ab_submit_result": None,
+        "created_at": "2026-09-01T00:00:00+00:00",
+        "updated_at": "2026-09-01T00:00:00+00:00",
+    }
+    save_request_snapshot(config, request)
+    record = replace(
+        create_external_tracking_record(
+            adapter="legacy_3_1", object_kind="subscription", external_id="sub-1",
+            subscription_id="sub-1", rss_ids=("7",), title="Test", season=1,
+            subtitle_group="Group",
+        ),
+        request_id="req-local",
+        origin="SAVE_CONFIRM",
+        tracking_id=tracking_id_for_request("req-local"),
+    )
+    stored, _ = ensure_tracking_record(config, record)
+    return config, stored, request
 
 
 def _run(config, record, client, calls, **kwargs):
@@ -640,3 +686,52 @@ def test_record_compensation_with_failed_operation_compensation_never_replays_su
             write=lambda *_args: pytest.fail("inconsistent terminal must not write"),
         )
     assert replay.value.error_type == "tracking_management_state_conflict"
+
+
+def test_confirmed_modify_raises_the_local_plan_and_its_fingerprint(tmp_path: Path) -> None:
+    """Issue #91: local and external converge only after a confirmed read-back."""
+    config, record, _request = _seed_with_local_plan(tmp_path)
+    client, calls = _FakeClient(), []
+
+    result = _run(
+        config, record, client, calls,
+        write=lambda _target, _payload: {"status_code": 200},
+        # The read-back reflects the value the write just applied.
+        readback=lambda _operation, _scope, target: target.__class__(
+            scope="SUBSCRIPTION",
+            subscription=ExternalSubscription("sub-1", "Changed", 1, "Group"),
+        ),
+        local_plan={"filter_rule": {"must_contain": "1080p"}, "expected_folder_name": "New"},
+    )
+
+    assert result["outcome"] == "SUCCESS"
+    stored_request = load_request_snapshot(config, "req-local")
+    plan = stored_request["confirmable_config"]
+    # The edited field merges in; the untouched ones stay as they were.
+    assert plan["filter_rule"]["must_contain"] == "1080p"
+    assert plan["filter_rule"]["must_not_contain"] == ""
+    assert plan["filter_rule"]["use_regex"] is False
+    assert plan["expected_folder_name"] == "New"
+    # The record fingerprint follows the raised plan, so the next review does
+    # not misread the confirmation as a plan change.
+    assert load_tracking_record(config, record.tracking_id).request_fingerprint == (
+        compute_request_fingerprint(stored_request)
+    )
+
+
+def test_failed_modify_never_touches_the_local_plan(tmp_path: Path) -> None:
+    config, record, request = _seed_with_local_plan(tmp_path)
+    client, calls = _FakeClient(), []
+
+    result = _run(
+        config, record, client, calls,
+        write=lambda _target, _payload: (_ for _ in ()).throw(Stage1Error("ab_management_failed", "拒绝", "test")),
+        local_plan={"expected_folder_name": "New"},
+    )
+
+    # A refused external write leaves the local plan exactly as it was.
+    assert result["management_status"] in {
+        TRACKING_OPERATION_STATE_FAILED, TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
+    } or result["outcome"] == "OUTCOME_UNKNOWN"
+    assert load_request_snapshot(config, "req-local") == request
+    assert load_tracking_record(config, record.tracking_id).request_id == "req-local"

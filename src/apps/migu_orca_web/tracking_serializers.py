@@ -98,14 +98,14 @@ def tracking_available_actions(
             target_scopes = [scope for scope in scopes if scope in scopes_by_action["SET_ENABLED"]]
             if target_scopes:
                 actions.append(_action(
-                    "SET_ENABLED", "启用外部订阅" if status == TRACKING_STATUS_DISABLED else "停用外部订阅",
+                    "SET_ENABLED", "启用追番" if status == TRACKING_STATUS_DISABLED else "停用追番",
                     _STYLE_PRIMARY if status == TRACKING_STATUS_DISABLED else _STYLE_SECONDARY,
                     requires_confirmation=True, target_scopes=target_scopes,
                 ))
         if "REFRESH_RSS" in management_actions_for_status(status):
             target_scopes = [scope for scope in scopes if scope in scopes_by_action["REFRESH_RSS"]]
             if target_scopes:
-                actions.append(_action("REFRESH_RSS", "刷新关联 RSS", _STYLE_SECONDARY, requires_confirmation=True, target_scopes=target_scopes))
+                actions.append(_action("REFRESH_RSS", "立即刷新资源", _STYLE_SECONDARY, requires_confirmation=True, target_scopes=target_scopes))
         if "DELETE_EXTERNAL" in management_actions_for_status(status):
             target_scopes = [scope for scope in scopes if scope in scopes_by_action["DELETE_EXTERNAL"]]
             if target_scopes:

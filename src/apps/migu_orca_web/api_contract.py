@@ -923,12 +923,17 @@ class TrackingItemDTO(_StrictBase):
 
 
 class TrackingItemListSummaryDTO(_StrictBase):
-    """Safe summary counts for the tracking list (§11.2)."""
+    """Safe summary counts for the tracking list (§11.2).
+
+    ``inactive`` counts the DISABLED group; ``processing`` stays a transient
+    per-row state that the page never renders as its own overview category.
+    """
 
     total: int
     pending: int
     processing: int
     active: int
+    inactive: int
     needs_attention: int
     unreadable: int
 
@@ -1037,8 +1042,66 @@ class TrackingSubmitResultDTO(_StrictBase):
     next_revision: int
     checked_at: str
     operation_id: str | None = None
+    #: Published, non-sensitive failure classification (issue #86). ``None`` on
+    #: success; every other code maps to fixed client copy and a fixed display
+    #: channel (blocking dialog vs. inline item message).
+    failure_category: Literal[
+        "CONNECTION",
+        "AUTHENTICATION",
+        "VERSION",
+        "DUPLICATE_SUBSCRIPTION",
+        "VALIDATION",
+        "REJECTED",
+        "OUTCOME_UNKNOWN",
+    ] | None = None
     issues: list[TrackingRevalidationIssueDTO] = Field(default_factory=list)
     tracking: TrackingItemDTO
+
+
+class TrackingBatchSubmitItemResultDTO(_StrictBase):
+    """One independent entry result inside a batch submit (issue #87).
+
+    ``ok`` is true only for a definite success.  ``error_type`` is a stable
+    pre-boundary refusal code (nothing was written); otherwise ``result`` carries
+    the same strict per-entry business result a single submit returns, including
+    its published ``failure_category``.
+    """
+
+    tracking_id: str
+    ok: bool
+    error_type: str | None = None
+    result: TrackingSubmitResultDTO | None = None
+
+
+class TrackingBatchSubmitSummaryDTO(_StrictBase):
+    """Safe batch counts. The buckets are disjoint per entry."""
+
+    total: int
+    succeeded: int
+    failed: int
+    unknown: int
+    blocked: int
+
+
+class TrackingPlanDeleteResultDTO(_StrictBase):
+    """Result of ``POST /api/v1/tracking/items/{tracking_id}/delete-plan`` (#92).
+
+    ``DELETED`` means the local plan and its tracking record are gone (and, when
+    requested, the controlled external subscription was removed first).
+    ``EXTERNAL_FAILED``/``EXTERNAL_UNKNOWN`` mean nothing local was removed: the
+    plan, record, mapping and recovery evidence are all kept.
+    """
+
+    tracking_id: str
+    outcome: Literal["DELETED", "EXTERNAL_FAILED", "EXTERNAL_UNKNOWN"]
+    external_deleted: bool = False
+
+
+class TrackingBatchSubmitResultDTO(_StrictBase):
+    """Result of ``POST /api/v1/tracking/batch-submit`` (issue #87)."""
+
+    items: list[TrackingBatchSubmitItemResultDTO]
+    summary: TrackingBatchSubmitSummaryDTO
 
 
 class TrackingRecoverResultDTO(_StrictBase):
@@ -1130,11 +1193,14 @@ class AutoBangumiConnectionTestResultDTO(_StrictBase):
 
 
 class TrackingSyncSummaryDTO(_StrictBase):
+    """Safe sync counts. ``ignored`` (issue #88) counts external subscriptions
+    this product does not control; they are never imported or adopted."""
+
     checked: int
     created: int
     updated: int
     unchanged: int
-    external_only: int
+    ignored: int
     failed: int
     unreadable: int
 

@@ -5,7 +5,7 @@ def _modify_actions():
     return [{"code": "MODIFY", "label": "修改外部方案", "style": "SECONDARY", "requires_confirmation": True, "target_scopes": ["SUBSCRIPTION", "ASSOCIATED_RSS"]}]
 
 def _management_actions(status):
-    return [{"code": "SET_ENABLED", "label": "停用外部订阅", "style": "PRIMARY", "requires_confirmation": True, "target_scopes": ["SUBSCRIPTION"]}, {"code": "REFRESH_RSS", "label": "刷新关联 RSS", "style": "SECONDARY", "requires_confirmation": True, "target_scopes": ["ASSOCIATED_RSS"]}]
+    return [{"code": "SET_ENABLED", "label": "停用追番", "style": "PRIMARY", "requires_confirmation": True, "target_scopes": ["SUBSCRIPTION"]}, {"code": "REFRESH_RSS", "label": "立即刷新资源", "style": "SECONDARY", "requires_confirmation": True, "target_scopes": ["ASSOCIATED_RSS"]}]
 
 def _recovery_item(tracking_id, title, revision=1):
     return {**_item(tracking_id, title, "ATTENTION"), "status": "RECOVERY_REQUIRED", "status_label": "需要恢复", "revision": revision, "available_actions": [{"code": "RECOVER_AUTO", "label": "自动恢复", "style": "SECONDARY", "requires_confirmation": False, "target_scopes": []}]}
@@ -21,3 +21,10 @@ def _delete_detail(revision=1):
     item = _item("tracking-a", "测试番")
     item["available_actions"] = [{"code": "DELETE_EXTERNAL", "label": "删除外部订阅", "style": "DANGER", "requires_confirmation": True, "target_scopes": ["SUBSCRIPTION", "ASSOCIATED_RSS"]}]
     return {"ok": True, "result": {**_detail_payload(item), "revision": revision}}
+
+def _summary(total=1, **counts):
+    """Complete tracking-list summary with the authoritative inactive count."""
+    return {
+        "total": total, "pending": 0, "processing": 0, "active": 0,
+        "inactive": 0, "needs_attention": 0, "unreadable": 0, **counts,
+    }

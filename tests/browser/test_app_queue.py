@@ -110,7 +110,7 @@ def _mock_tracking(page: Page, items: list[dict[str, Any]]) -> None:
                         "items": items,
                         "summary": {
                             "total": len(items), "pending": len(items), "processing": 0,
-                            "active": 0, "needs_attention": 0, "unreadable": 0,
+                            "active": 0, "inactive": 0, "needs_attention": 0, "unreadable": 0,
                         },
                         "warnings": [],
                     },

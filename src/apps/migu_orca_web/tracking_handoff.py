@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from apps.migu_orca_web.save_confirm_service import compute_request_fingerprint
+from apps.migu_orca_web.tracking_poster import request_poster_path
 from request_engine.controllers.request_controller import ACCEPTED
 from shared.errors import Stage1Error
 from storage_engine.controllers.storage_config import StorageConfig
@@ -91,7 +92,10 @@ def ensure_confirmed_request_tracking(
     record = create_tracking_record(
         request_id=request_id.strip(),
         status=TRACKING_STATUS_PENDING_SUBMIT,
-        plan_summary=plan_summary_from_request(request),
+        plan_summary=plan_summary_from_request(
+            request,
+            poster_path=request_poster_path(request),
+        ),
         origin=origin,
         request_fingerprint=fingerprint,
         audit_action=TRACKING_AUDIT_TRACKING_CREATED,

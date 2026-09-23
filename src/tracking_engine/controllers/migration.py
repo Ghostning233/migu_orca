@@ -51,6 +51,7 @@ from tracking_engine.models.tracking import (
     append_audit_event,
     build_audit_event,
     create_tracking_record,
+    safe_poster_path,
 )
 
 # -- fixed, safe reason codes ------------------------------------------------
@@ -351,13 +352,19 @@ def classify_backfill(evidence: RequestBackfillEvidence) -> BackfillDecision:
     )
 
 
-def plan_summary_from_request(request: dict[str, Any] | None) -> dict[str, Any]:
+def plan_summary_from_request(
+    request: dict[str, Any] | None,
+    *,
+    poster_path: str | None = None,
+) -> dict[str, Any]:
     """Return a safe display ``plan_summary`` for a Request snapshot.
 
     Only public display fields participate (matched title, integer season,
-    selected subtitle group).  ``poster_path`` is intentionally omitted (legacy
-    requests carry no same-origin poster proxy key); the strict storage schema
-    drops any unknown nested key before it reaches disk.
+    selected subtitle group).  ``poster_path`` is supplied by the adapter that
+    owns the poster cache — it must already be a same-origin opaque route, and
+    anything else (an upstream image URL, an absolute path, traversal) is
+    dropped rather than persisted.  Legacy requests carry no poster reference,
+    so the summary simply omits the field.
     """
     if not isinstance(request, dict):
         return {}
@@ -377,6 +384,9 @@ def plan_summary_from_request(request: dict[str, Any] | None) -> dict[str, Any]:
         subtitle_group = confirmable.get("selected_subtitle_group")
         if isinstance(subtitle_group, str) and subtitle_group.strip():
             summary["subtitle_group"] = subtitle_group.strip()
+    safe_poster = safe_poster_path(poster_path)
+    if safe_poster is not None:
+        summary["poster_path"] = safe_poster
     return summary
 
 
@@ -386,6 +396,7 @@ def build_backfill_record(
     request: dict[str, Any] | None,
     request_fingerprint: str | None,
     now: str,
+    poster_path: str | None = None,
 ) -> TrackingRecord:
     """Build the revision-1 ``TrackingRecord`` for a create decision.
 
@@ -393,6 +404,7 @@ def build_backfill_record(
     safe audit event per extra consistent queue source) and a sanitized
     ``last_error`` on failed/recovery outcomes.  The runner persists it through
     ``ensure_tracking_record`` which never overwrites an existing record.
+    ``poster_path`` is the adapter-resolved same-origin cover reference.
     """
     if not decision.create or decision.status is None or decision.origin is None:
         raise ValueError("cannot build a backfill record for a non-create decision")
@@ -400,7 +412,7 @@ def build_backfill_record(
     record = create_tracking_record(
         request_id=decision.request_id,
         status=decision.status,
-        plan_summary=plan_summary_from_request(request),
+        plan_summary=plan_summary_from_request(request, poster_path=poster_path),
         origin=decision.origin,
         batch_id=decision.batch_id,
         request_fingerprint=request_fingerprint,

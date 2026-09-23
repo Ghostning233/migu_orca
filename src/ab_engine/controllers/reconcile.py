@@ -3,6 +3,14 @@
 This module intentionally has no storage or web dependencies.  RSS URLs are
 accepted only as request-scoped evidence and are never copied into a decision,
 mapping, warning, or representation.
+
+Ownership boundary (issue #88)
+------------------------------
+A *controlled* external subscription is one this product created **and** still
+holds an exact external mapping for.  Nothing else is ever claimed: a similar
+title, season, subtitle group or RSS set is not ownership evidence, so an
+unmapped external object is reported as ``UNMANAGED`` and never becomes a local
+tracking record.
 """
 
 from __future__ import annotations
@@ -22,6 +30,8 @@ from tracking_engine.models.tracking import (
 )
 
 RECONCILE_WARNING_AMBIGUOUS = "AMBIGUOUS_EXTERNAL_MATCH"
+#: Match reason for an external object this product does not control.
+RECONCILE_REASON_UNMANAGED = "UNMANAGED"
 RECONCILE_WARNING_CONFLICT = "EXTERNAL_MATCH_CONFLICT"
 RECONCILE_WARNING_EXTERNAL_DELETED = "EXTERNAL_SUBSCRIPTION_MISSING"
 RECONCILE_WARNING_UNPROVEN = "EXTERNAL_MATCH_UNPROVEN"
@@ -50,6 +60,8 @@ class ReconcileDecision:
     tracking_id: str | None
     status: str
     match_reason: str
+    #: True only for an external object claimed through an exact mapping.
+    managed: bool = True
     warning: str | None = None
     external_deleted: bool = False
     subscription_id: str | None = None
@@ -101,9 +113,10 @@ def reconcile_subscription(
     connection_ref: str | UUID | None = None,
 ) -> ReconcileDecision:
     """Classify one external subscription using deterministic strict evidence."""
-    # External-only records are projections of this same snapshot, not local
-    # evidence.  Including them would turn a stable EXTERNAL_ONLY result into
-    # an EXACT_FIELDS self-match on the next sync.
+    # Records created by an earlier external-only import are projections of this
+    # same snapshot, not local evidence: they carry no exact mapping, so they can
+    # never claim an external object. Issue #88 stopped creating them, so only
+    # historical ones remain.
     candidates = tuple(local for local in locals if local.origin != "EXTERNAL_SYNC")
     current_ref = str(connection_ref) if isinstance(connection_ref, UUID) else connection_ref
     external_id_matches = tuple(
@@ -123,31 +136,10 @@ def reconcile_subscription(
                               if connection_ref is not None else ()
                           ))
 
-    field_matches = tuple(
-        local for local in candidates
-        if _fields_match(
-            local, external,
-            require_rss=connection_ref is not None,
-        )
-    )
-    if len(field_matches) == 1:
-        return _decision(external, field_matches[0], "EXACT_FIELDS")
-    if len(field_matches) > 1:
-        return _ambiguous(external, RECONCILE_WARNING_AMBIGUOUS,
-                          protected_tracking_ids=(
-                              tuple(item.tracking_id for item in field_matches)
-                              if connection_ref is not None else ()
-                          ))
-    return ReconcileDecision(
-        external_id=external.external_id,
-        tracking_id=None,
-        status=TRACKING_STATUS_EXTERNAL_DELETED if external.deleted else TRACKING_STATUS_EXTERNAL_ONLY,
-        match_reason="EXTERNAL_ONLY",
-        external_deleted=external.deleted,
-        subscription_id=external.external_id,
-        rss_ids=_rss_ids(external),
-        warning=RECONCILE_WARNING_UNPROVEN if connection_ref is not None and candidates else None,
-    )
+    # No exact mapping: this product does not control the object. Similar titles
+    # or RSS sets are never ownership evidence (issue #88), so nothing is
+    # imported, adopted or claimed.
+    return _unmanaged(external, candidates=candidates, connection_ref=connection_ref)
 
 
 def reconcile_subscriptions(
@@ -171,7 +163,8 @@ def reconcile_subscriptions(
             ReconcileDecision(
                 external_id=decision.external_id, tracking_id=None,
                 status=(TRACKING_STATUS_EXTERNAL_DELETED if decision.external_deleted
-                        else TRACKING_STATUS_EXTERNAL_ONLY), match_reason="EXTERNAL_ONLY",
+                        else TRACKING_STATUS_EXTERNAL_ONLY), match_reason=RECONCILE_REASON_UNMANAGED,
+                managed=False,
                 warning=RECONCILE_WARNING_CONFLICT,
                 external_deleted=decision.external_deleted,
                 subscription_id=decision.subscription_id, rss_ids=decision.rss_ids,
@@ -202,7 +195,8 @@ def reconcile_subscriptions(
                 result.append(ReconcileDecision(
                     external_id=decision.external_id, tracking_id=None,
                     status=(TRACKING_STATUS_EXTERNAL_DELETED if decision.external_deleted
-                            else TRACKING_STATUS_EXTERNAL_ONLY), match_reason="EXTERNAL_ONLY",
+                            else TRACKING_STATUS_EXTERNAL_ONLY), match_reason=RECONCILE_REASON_UNMANAGED,
+                    managed=False,
                     warning=RECONCILE_WARNING_UNPROVEN,
                     external_deleted=decision.external_deleted,
                     subscription_id=decision.subscription_id, rss_ids=decision.rss_ids,
@@ -243,36 +237,28 @@ def classify_missing_mapping(
     )
 
 
-def _fields_match(
-    local: LocalTrackingEvidence,
+def _unmanaged(
     external: ExternalSubscription,
     *,
-    require_rss: bool = False,
-) -> bool:
-    summary = local.plan_summary
-    if require_rss and (
-        not normalize_match_text(summary.get("title"))
-        or not isinstance(summary.get("season"), int)
-        or isinstance(summary.get("season"), bool)
-        or summary.get("season") < 1
-        or not normalize_match_text(summary.get("subtitle_group"))
-        or not normalize_match_text(external.title)
-        or not isinstance(external.season, int)
-        or isinstance(external.season, bool)
-        or external.season < 1
-        or not normalize_match_text(external.subtitle_group)
-    ):
-        return False
-    if normalize_match_text(summary.get("title")) != normalize_match_text(external.title):
-        return False
-    if summary.get("season") != external.season:
-        return False
-    if normalize_match_text(summary.get("subtitle_group")) != normalize_match_text(external.subtitle_group):
-        return False
-    local_rss = tuple(local.rss_urls)
-    external_rss = tuple(external.rss_urls)
-    return bool(local_rss and external_rss and set(local_rss) == set(external_rss)) if require_rss else (
-        not local_rss or not external_rss or set(local_rss) == set(external_rss)
+    candidates: tuple[LocalTrackingEvidence, ...],
+    connection_ref: str | UUID | None,
+) -> ReconcileDecision:
+    """Report an external object this product does not control (issue #88).
+
+    ``managed=False`` tells the sync use case to ignore the object entirely: no
+    tracking record is created, adopted or refreshed from it.  The warning is
+    purely diagnostic and never carries the external title or RSS identity.
+    """
+    return ReconcileDecision(
+        external_id=external.external_id,
+        tracking_id=None,
+        status=TRACKING_STATUS_EXTERNAL_DELETED if external.deleted else TRACKING_STATUS_EXTERNAL_ONLY,
+        match_reason=RECONCILE_REASON_UNMANAGED,
+        managed=False,
+        external_deleted=external.deleted,
+        subscription_id=external.external_id,
+        rss_ids=_rss_ids(external),
+        warning=RECONCILE_WARNING_UNPROVEN if connection_ref is not None and candidates else None,
     )
 
 
@@ -314,7 +300,7 @@ def _ambiguous(
     return ReconcileDecision(
         external_id=external.external_id, tracking_id=None,
         status=TRACKING_STATUS_EXTERNAL_DELETED if external.deleted else TRACKING_STATUS_EXTERNAL_ONLY,
-        match_reason="EXTERNAL_ONLY", warning=warning,
+        match_reason=RECONCILE_REASON_UNMANAGED, managed=False, warning=warning,
         external_deleted=external.deleted, subscription_id=external.external_id,
         rss_ids=_rss_ids(external),
         protected_tracking_ids=protected_tracking_ids,
@@ -326,7 +312,8 @@ def _rss_ids(external: ExternalSubscription) -> tuple[str, ...]:
 
 
 __all__ = [
-    "LocalTrackingEvidence", "ReconcileDecision", "RECONCILE_WARNING_AMBIGUOUS",
+    "LocalTrackingEvidence", "ReconcileDecision", "RECONCILE_REASON_UNMANAGED",
+    "RECONCILE_WARNING_AMBIGUOUS",
     "RECONCILE_WARNING_CONFLICT", "RECONCILE_WARNING_EXTERNAL_DELETED",
     "RECONCILE_WARNING_UNPROVEN",
     "classify_missing_mapping", "normalize_match_text", "reconcile_subscription",

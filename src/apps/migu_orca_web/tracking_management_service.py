@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import replace
 from typing import Any, Protocol
 from uuid import UUID
@@ -143,6 +144,8 @@ def run_tracking_management(
     capabilities: AutoBangumiCapabilities | None = None,
     patch: Mapping[str, Any] | None = None,
     enabled: bool | None = None,
+    #: Local plan values to raise once the external write is confirmed.
+    local_plan: Mapping[str, Any] | None = None,
     write: ManagementWriter | None = None,
     readback: Callable[[str, str, ResolvedManagementTarget], Any] | None = None,
     now: str | None = None,
@@ -317,7 +320,8 @@ def run_tracking_management(
         if operation == TRACKING_OPERATION_KIND_REFRESH_RSS:
             return _finish_management(config=resolved_config, record=started,
                 operation=in_progress, outcome=MANAGEMENT_OUTCOME_SUCCESS, target=target,
-                operation_id=in_progress.operation_id, reason="management_verified", now=now)
+                operation_id=in_progress.operation_id, reason="management_verified", now=now,
+                enabled=enabled, patch=safe_patch, local_plan=local_plan)
         try:
             actual = readback(operation, target_scope, target) if readback is not None else _readback_target(management_client, record, target_scope, operation, connection_ref=connection_ref)
             readback_outcome = _classify_target_readback(operation, target_scope, actual, binding.expected_external_fingerprint)
@@ -326,7 +330,8 @@ def run_tracking_management(
         return _finish_management(config=resolved_config, record=started,
             operation=in_progress, outcome=readback_outcome, target=target,
             operation_id=in_progress.operation_id, reason="management_readback_failed" if readback_outcome != MANAGEMENT_OUTCOME_SUCCESS else "management_verified", now=now,
-            actual=actual if 'actual' in locals() else None, enabled=enabled, patch=safe_patch)
+            actual=actual if 'actual' in locals() else None, enabled=enabled, patch=safe_patch,
+            local_plan=local_plan)
     return {"operation_id": in_progress.operation_id, "management_status": "IN_PROGRESS", "created": True}
 
 
@@ -637,7 +642,8 @@ def _classify_target_readback(operation: str, scope: str, actual: Any, expected:
 def _finish_management(*, config: StorageConfig, record: TrackingRecord, operation: TrackingOperation,
                        outcome: str, target: ResolvedManagementTarget, operation_id: str,
                        reason: str, now: str | None, actual: Any = None,
-                       enabled: bool | None = None, patch: Mapping[str, Any] | None = None) -> dict[str, Any]:
+                       enabled: bool | None = None, patch: Mapping[str, Any] | None = None,
+                       local_plan: Mapping[str, Any] | None = None) -> dict[str, Any]:
     timestamp = now or utc_now()
     if outcome == MANAGEMENT_OUTCOME_SUCCESS:
         status = record.status
@@ -671,6 +677,14 @@ def _finish_management(*, config: StorageConfig, record: TrackingRecord, operati
         mapping.update({"enabled": item.enabled, "external_deleted": item.deleted})
         if operation.operation == TRACKING_OPERATION_KIND_MODIFY:
             next_record = replace(next_record, plan_summary={**next_record.plan_summary, "title": item.title, "season": item.season, "subtitle_group": item.subtitle_group})
+            # Issue #91: the local plan is raised only after the external write was
+            # confirmed by read-back, so the two never diverge on a failure.
+            if local_plan:
+                promoted_fingerprint = _promote_local_plan(
+                    config=config, record=next_record, local_plan=local_plan, now=timestamp
+                )
+                if promoted_fingerprint is not None:
+                    next_record = replace(next_record, request_fingerprint=promoted_fingerprint)
     if outcome == MANAGEMENT_OUTCOME_SUCCESS and operation.operation == TRACKING_OPERATION_KIND_DELETE_EXTERNAL:
         if operation.target_scope == "SUBSCRIPTION":
             mapping["external_deleted"] = True
@@ -695,6 +709,53 @@ def _finish_management(*, config: StorageConfig, record: TrackingRecord, operati
             "outcome": outcome if not persistence_failed else MANAGEMENT_OUTCOME_UNKNOWN,
             "needs_manual": persisted_state == "RECOVERY_REQUIRED" or outcome == MANAGEMENT_OUTCOME_UNKNOWN,
             "created": True}
+
+
+def _promote_local_plan(
+    *,
+    config: StorageConfig,
+    record: TrackingRecord,
+    local_plan: Mapping[str, Any],
+    now: str,
+) -> str | None:
+    """Raise the local Request to the values the external write just confirmed.
+
+    Returns the new request fingerprint so the record can be persisted in the
+    same write, or ``None`` when there is no local plan to raise. The stored
+    snapshot stays the authority: only whitelisted plan fields change.
+    """
+    request_id = record.request_id
+    if not request_id:
+        return None
+    # Imported lazily: the save-confirm module owns the fingerprint rule and must
+    # not be pulled in at module import time (cycle through the web adapters).
+    from apps.migu_orca_web.save_confirm_service import compute_request_fingerprint
+    from storage_engine.controllers.request_repository import (
+        load_request_snapshot,
+        save_request_snapshot,
+    )
+
+    request = load_request_snapshot(config, request_id)
+    if not isinstance(request, dict):
+        return None
+    confirmable = request.get("confirmable_config")
+    if not isinstance(confirmable, dict):
+        return None
+
+    updated = deepcopy(request)
+    target_config = updated["confirmable_config"]
+    filter_rule = local_plan.get("filter_rule")
+    if isinstance(filter_rule, dict):
+        current_rule = target_config.get("filter_rule")
+        merged_rule = dict(current_rule) if isinstance(current_rule, dict) else {}
+        merged_rule.update(filter_rule)
+        target_config["filter_rule"] = merged_rule
+    folder = local_plan.get("expected_folder_name")
+    if isinstance(folder, str):
+        target_config["expected_folder_name"] = folder
+    updated["updated_at"] = now
+    save_request_snapshot(config, updated)
+    return compute_request_fingerprint(updated)
 
 
 def _persist_management_storage_failure(

@@ -53,9 +53,11 @@ from apps.migu_orca_web.api_contract import (
     RequestPreviewModifyResultDTO,
     RequestSafeInfoResultDTO,
     RequestSaveConfirmResultDTO,
+    TrackingBatchSubmitResultDTO,
     TrackingDetailResultDTO,
     TrackingItemListResultDTO,
     TrackingManagementResultDTO,
+    TrackingPlanDeleteResultDTO,
     TrackingRecoverResultDTO,
     TrackingRevalidateResultDTO,
     TrackingSubmitResultDTO,
@@ -362,6 +364,21 @@ def _modify_request_body() -> dict[str, Any]:
             "offset": {"type": ["integer", "null"], "minimum": 0},
             "expected_folder_name": {"type": ["string", "null"]},
     }
+    local_plan = {
+        "type": ["object", "null"],
+        "additionalProperties": False,
+        "description": "issue #91：外部修改确认成功后同时提升的本地方案字段（身份字段不可编辑）。与 patch 独立，缺省表示只改外部对象。",
+        "properties": {
+            "filter_rule": {
+                "type": ["object", "null"],
+                "additionalProperties": False,
+                "properties": filter_properties,
+                "minProperties": 1,
+            },
+            "expected_folder_name": {"type": ["string", "null"], "maxLength": 255},
+        },
+        "minProperties": 1,
+    }
     subscription_patch = {
         "allOf": [
             {"type": "object", "additionalProperties": False, "properties": subscription_properties},
@@ -395,6 +412,8 @@ def _modify_request_body() -> dict[str, Any]:
                 **common,
                 "target_scope": {"const": scope},
                 "patch": patch,
+                # Only a subscription modify has a local plan to raise.
+                **({"local_plan": local_plan} if scope == "SUBSCRIPTION" else {}),
             },
         }
 
@@ -460,6 +479,42 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "success": AutoBangumiConnectionTestResultDTO,
         "errors": {"400": {"validation_error": "请求参数校验失败", "config_error": "Auto Bangumi 配置无效"}},
     },
+    "POST /api/v1/tracking/items/<path:tracking_id>/delete-plan": {
+        "operationId": "deleteTrackingPlan",
+        "summary": "删除追番方案（可选同时删除受控外部订阅）",
+        "description": "issue #92：删除本地追番方案与追番记录。存在受控外部订阅时可显式勾选同时删除该外部对象，默认不勾选；未勾选时外部订阅继续运行且 MiGuOrca 放弃管理。勾选时先以可靠管理序列删除精确映射的外部对象，只有明确成功才继续删除本地；明确失败或结果未知时保留本地方案、追番记录、映射与恢复依据。外部删除固定不删除已下载媒体。",
+        "requestBody": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["confirm", "idempotency_key", "connection_ref", "configuration_revision"],
+            "properties": {
+                "delete_external": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "仅当用户显式勾选“同时删除 Auto Bangumi 中的受控外部订阅”时为 true。",
+                },
+                "confirm": {"type": "boolean", "enum": [True], "description": "必须为 true：用户显式确认删除追番方案。"},
+                "idempotency_key": {"type": "string", "description": "opaque 幂等键；同键重放复用同一次外部删除。"},
+                "connection_ref": {"type": "string", "format": "uuid"},
+                "configuration_revision": {"type": "integer", "minimum": 0},
+                "storage_dir": {"type": "string", "description": "服务端允许根目录下的相对目录 profile。"},
+            },
+        },
+        "success": TrackingPlanDeleteResultDTO,
+        "errors": {
+            "400": {
+                "data_validation_errors": "请求参数校验失败",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+                "tracking_confirmation_required": "删除追番方案必须显式确认",
+            },
+            "404": {"tracking_not_found": "未找到该追番记录"},
+            "409": {"tracking_state_conflict": "当前追番正在进行外部操作或存在未决结果，请先恢复后再删除"},
+            "500": {
+                "storage_error": "删除本地追番数据失败",
+                "storage_json_error": "追番记录 JSON 损坏",
+            },
+        },
+    },
     "POST /api/v1/tracking/items/<path:tracking_id>/modify": {
         **_management_endpoint("modifyTrackingItem", "修改外部追番方案", required_extra=["patch"]),
         "requestBody": _modify_request_body(),
@@ -472,7 +527,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "deleteExternalTrackingItem", "删除外部追番方案（保留本地数据）"
     ),
     "POST /api/v1/tracking/items/<path:tracking_id>/refresh": _management_endpoint(
-        "refreshTrackingRss", "刷新关联 RSS", scope=["ASSOCIATED_RSS"]
+        "refreshTrackingRss", "立即刷新资源", scope=["ASSOCIATED_RSS"]
     ),
     "GET /api/v1/requests": {
         "operationId": "listRequests",
@@ -932,6 +987,60 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             },
             "500": {
                 "storage_error": "读取追番记录失败",
+                "storage_json_error": "追番记录 JSON 损坏",
+                "tracking_storage_error": "追番记录存储失败",
+                "tracking_migration_error": "历史数据迁移失败",
+            },
+        },
+    },
+    "POST /api/v1/tracking/batch-submit": {
+        "operationId": "submitTrackingBatch",
+        "summary": "批量提交显式选择的追番方案（逐条独立结果）",
+        "description": "issue #87：一次显式批量提交 1～36 条互不相同的追番记录。每条携带自己的 expected_revision 与 opaque idempotency_key，并由服务端逐条走单条可靠提交序列；批量不是整批事务，单条失败不回滚已成功条目。逐条返回业务结果（或外部边界前的稳定 error_type），请求被接受时整体为 HTTP 200。同键重放复用原 operation，不会创建第二个外部订阅。",
+        "requestBody": {
+            "type": "object",
+            "required": ["items", "confirm", "connection_ref", "configuration_revision"],
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 36,
+                    "description": "显式选择的追番记录；每条独立提交，不重复指向同一记录。",
+                    "items": {
+                        "type": "object",
+                        "required": ["tracking_id", "expected_revision", "idempotency_key"],
+                        "properties": {
+                            "tracking_id": {"type": "string"},
+                            "expected_revision": {"type": "integer", "minimum": 1},
+                            "idempotency_key": {
+                                "type": "string",
+                                "description": "opaque 客户端操作 id；同键网络重放收敛到同一次外部调用。",
+                            },
+                        },
+                    },
+                },
+                "confirm": {
+                    "type": "boolean",
+                    "enum": [True],
+                    "description": "必须为 true：用户显式确认这一批外部提交。",
+                },
+                "connection_ref": {"type": "string", "format": "uuid"},
+                "configuration_revision": {"type": "integer", "minimum": 0},
+                "storage_dir": {
+                    "type": "string",
+                    "description": "存储目录（服务端允许根目录下的相对目录 profile）。",
+                },
+            },
+        },
+        "success": TrackingBatchSubmitResultDTO,
+        "errors": {
+            "400": {
+                "data_validation_errors": "请求参数校验失败",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+                "tracking_confirmation_required": "批量提交 Auto Bangumi 必须显式确认",
+            },
+            "500": {
+                "storage_error": "写入/读取追番记录失败",
                 "storage_json_error": "追番记录 JSON 损坏",
                 "tracking_storage_error": "追番记录存储失败",
                 "tracking_migration_error": "历史数据迁移失败",

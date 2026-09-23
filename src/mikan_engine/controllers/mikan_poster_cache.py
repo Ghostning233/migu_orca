@@ -19,6 +19,10 @@ from shared.config import PROJECT_ROOT
 from shared.errors import Stage1Error
 
 POSTER_CACHE_VERSION = "v1"
+#: Sidecar marker for a poster the product must keep serving long-term (a saved
+#: plan's cover).  A pinned entry is never expired or cleaned; the marker holds
+#: no bytes and no source URL.
+POSTER_PIN_SUFFIX = ".pin"
 DEFAULT_POSTER_CACHE_DIR = PROJECT_ROOT / ".migu_orca" / "mikan_posters_v1"
 DEFAULT_POSTER_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
 DEFAULT_POSTER_DOWNLOAD_TIMEOUT_SECONDS = 10.0
@@ -70,7 +74,7 @@ class MikanPosterCacheRepository:
 
         if not path.is_file() or path.is_symlink():
             return None
-        if self._is_expired(stat.st_mtime):
+        if not self._is_pinned_file(path) and self._is_expired(stat.st_mtime):
             self._unlink_regular_file(path)
             return None
         try:
@@ -79,6 +83,41 @@ class MikanPosterCacheRepository:
         except OSError as exc:
             raise _storage_error("更新封面缓存有效期失败", "get_mikan_poster", exc) from exc
         return path
+
+    def pin_existing(self, key: str) -> bool:
+        """Keep an already-cached poster forever; return ``False`` on a cache miss.
+
+        Only a validated key with real cached bytes can be pinned: this never
+        fetches a source, so a saved plan's cover stays available across restarts
+        without turning the cache into an open proxy.
+        """
+        path = self._path_for_key(key)
+        try:
+            stat = path.lstat()
+        except FileNotFoundError:
+            return False
+        except OSError as exc:
+            raise _storage_error("读取封面缓存失败", "pin_mikan_poster", exc) from exc
+        if not path.is_file() or path.is_symlink() or self._is_expired(stat.st_mtime):
+            return False
+        self._pin_marker(key).write_bytes(b"")
+        return True
+
+    def is_pinned(self, key: str) -> bool:
+        """Return whether ``key`` carries a pin marker."""
+        return self._pin_marker(key).is_file()
+
+    def unpin(self, key: str) -> bool:
+        """Drop a pin marker; return whether one existed (TTL cleanup then resumes)."""
+        marker = self._pin_marker(key)
+        self._path_for_key(key)
+        try:
+            marker.unlink()
+            return True
+        except FileNotFoundError:
+            return False
+        except OSError as exc:
+            raise _storage_error("更新封面缓存失败", "unpin_mikan_poster", exc) from exc
 
     def put(self, key: str, content_type: str, chunks: Iterable[bytes]) -> Path:
         """Atomically store image chunks; invalid or failed writes leave no partial file."""
@@ -138,10 +177,17 @@ class MikanPosterCacheRepository:
             if not _is_cache_filename(entry.name) or entry.is_symlink() or not entry.is_file():
                 continue
             try:
-                if self._is_expired(entry.stat().st_mtime):
-                    self._unlink_regular_file(entry)
+                if self._is_pinned_file(entry) or not self._is_expired(entry.stat().st_mtime):
+                    continue
+                self._unlink_regular_file(entry)
             except OSError as exc:
                 raise _storage_error("清理封面缓存失败", "cleanup_mikan_posters", exc) from exc
+
+    def _pin_marker(self, key: str) -> Path:
+        return self._path_for_key(key).with_suffix(POSTER_PIN_SUFFIX)
+
+    def _is_pinned_file(self, path: Path) -> bool:
+        return path.with_suffix(POSTER_PIN_SUFFIX).is_file()
 
     def _path_for_key(self, key: str) -> Path:
         if not _is_cache_key(key):
@@ -193,5 +239,6 @@ __all__ = [
     "MikanPosterCacheConfig",
     "MikanPosterCacheRepository",
     "POSTER_CACHE_VERSION",
+    "POSTER_PIN_SUFFIX",
     "poster_cache_key",
 ]

@@ -3,6 +3,7 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api/client'
+import { clearReuseHandoff, consumeReuseHandoff } from '@/features/requests/reuseHandoff'
 import TrackingInspector from './TrackingInspector.vue'
 import { createManagementSession, RECOVERY_NEEDS_MANUAL_NOTICE } from './trackingProjection'
 import type { CapabilityResult, TrackingRecoverySession, TrackingWriteSession } from './trackingProjection'
@@ -43,25 +44,6 @@ const revalidateAction = {
   requires_confirmation: false, target_scopes: [],
 }
 
-/** A §11.5 revalidate result whose returned tracking is the convergent summary. */
-function revalidateResult(overrides: Record<string, unknown> = {}) {
-  return {
-    tracking_id: 'tracking-1', ready: false, checked_revision: 2, next_revision: 3,
-    checked_at: '2026-09-13T02:00:00Z', next_status: 'NEEDS_RECONFIRM',
-    issues: [{
-      code: 'REQUEST_CHANGED', field: null,
-      message: '本地方案已变化，需要重新确认后再提交', recovery_action: 'SUBMIT',
-    }],
-    tracking: {
-      tracking_id: 'tracking-1', request_id: 'request-1', title: '葬送的芙莉莲', season: 1,
-      subtitle_group: '喵萌奶茶屋', poster_path: null, status: 'NEEDS_RECONFIRM',
-      status_label: '需重新确认', status_group: 'ATTENTION', available_actions: [revalidateAction],
-      valid_resource_count: 2, updated_episode: null, updated_episode_status: 'NOT_IMPLEMENTED',
-      total_episodes: null, revision: 3, updated_at: '2026-09-13T02:00:00Z',
-    },
-    ...overrides,
-  }
-}
 
 function inspectorRouter() {
   return createRouter({ history: createMemoryHistory('/app/'), routes: [
@@ -89,16 +71,83 @@ describe('TrackingInspector secure detail (US-306)', () => {
     expect(wrapper.text()).toContain('有效资源')
     expect(wrapper.text()).toContain('已更新集数')
     expect(wrapper.text()).toContain('待开发')
-    expect(wrapper.find('.tracking-plan-link').exists()).toBe(true)
+    // Issue #93: the retired 追番方案 page is gone; reuse travels through the
+    // add journey instead of a link back to the old page.
+    expect(wrapper.find('.tracking-plan-link').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('request-1')
     expect(wrapper.text()).toContain('第一集.mkv')
   })
 
-  it('hides local plan link for external-only records', async () => {
-    apiGet.mockResolvedValue(detail({ status: 'EXTERNAL_ONLY', request_id: 'request-1' }) as never)
+  it('states the missing local plan instead of linking to a retired page', async () => {
+    apiGet.mockResolvedValue(detail({ status: 'EXTERNAL_ONLY', request_id: null }) as never)
     const wrapper = await mountInspector()
     expect(wrapper.find('.tracking-plan-link').exists()).toBe(false)
-    expect(wrapper.text()).toContain('没有可返回的本地订阅方案')
+    expect(wrapper.text()).toContain('没有关联的本地追番方案')
+  })
+
+  it('renders the persisted same-origin cover in the tracking detail', async () => {
+    const cover = `/api/v1/mikan/posters/${'c'.repeat(64)}`
+    apiGet.mockResolvedValue(detail({ poster_path: cover }) as never)
+
+    const wrapper = await mountInspector()
+
+    const poster = wrapper.find('.tracking-inspector-identity .tracking-poster')
+    expect(poster.attributes('data-poster-state')).toBe('ready')
+    expect(poster.find('img').attributes('src')).toBe(cover)
+    expect(wrapper.html()).not.toContain('mikan.example')
+  })
+
+  it('keeps a stable placeholder when the detail has no cover', async () => {
+    apiGet.mockResolvedValue(detail() as never)
+
+    const wrapper = await mountInspector()
+
+    const poster = wrapper.find('.tracking-inspector-identity .tracking-poster')
+    expect(poster.attributes('data-poster-state')).toBe('placeholder')
+    expect(poster.find('img').exists()).toBe(false)
+  })
+
+  it('names the panel 追番详情 and folds activity/technical detail by default', async () => {
+    apiGet.mockResolvedValue(detail({
+      current_operation: { operation_id: 'op-1', state: 'UNKNOWN', operation: 'SUBMIT', attempt: 1 },
+      audit_events: [{ action: 'SUBMIT', safe_message: '已提交', created_at: '2026-09-13T00:00:00Z' }],
+      external_mapping: { match_reason: '标题', enabled: true, external_deleted: false },
+    }) as never)
+
+    const wrapper = await mountInspector()
+
+    expect(wrapper.find('#tracking-inspector-heading').text()).toBe('追番详情')
+    const activity = wrapper.find('#tracking-activity-log')
+    const diagnostics = wrapper.find('#tracking-tech-diagnostics')
+    expect(activity.exists()).toBe(true)
+    expect(diagnostics.exists()).toBe(true)
+    // Collapsed by default: the user must opt in to operational detail.
+    expect(activity.attributes('open')).toBeUndefined()
+    expect(diagnostics.attributes('open')).toBeUndefined()
+    expect(activity.find('summary').text()).toBe('操作记录')
+    expect(diagnostics.find('summary').text()).toBe('技术诊断')
+
+    // Everyday essentials stay directly visible.
+    const summary = wrapper.find('.tracking-inspector-summary')
+    expect(summary.text()).toContain('有效资源')
+    expect(summary.text()).toContain('字幕组')
+    expect(summary.text()).toContain('追番中')
+  })
+
+  it('keeps an unknown server status label without rebuilding the state machine', async () => {
+    apiGet.mockResolvedValue(detail({
+      status: 'UNTRUSTED' as never,
+      status_label: '未知状态',
+      status_group: 'UNTRUSTED' as never,
+    }) as never)
+
+    const wrapper = await mountInspector()
+
+    // The page renders the server projection verbatim; it neither guesses a
+    // familiar group nor offers actions for a state it does not understand.
+    expect(wrapper.find('.tracking-inspector-summary').text()).toContain('未知状态')
+    expect(wrapper.find('#tracking-submit').exists()).toBe(false)
+    expect(wrapper.find('#tracking-revalidate').exists()).toBe(false)
   })
 
   it('does not let an older detail response overwrite a newer selection', async () => {
@@ -116,144 +165,6 @@ describe('TrackingInspector secure detail (US-306)', () => {
   })
 })
 
-describe('TrackingInspector local revalidation (US-309)', () => {
-  beforeEach(() => {
-    apiGet.mockReset()
-    apiPost.mockReset()
-    window.localStorage.clear()
-  })
-
-  it('sends only the latest revision and safe storage profile, never credentials', async () => {
-    window.localStorage.setItem('miguOrca.web.storageDir', 'backups')
-    apiGet.mockResolvedValue(detail({ available_actions: [revalidateAction] }) as never)
-    apiPost.mockResolvedValue(revalidateResult({ ready: true, next_status: 'PENDING_SUBMIT', issues: [] }) as never)
-
-    const wrapper = await mountInspector()
-    await wrapper.find('#tracking-revalidate').trigger('click')
-    await flushPromises()
-
-    expect(apiPost).toHaveBeenCalledTimes(1)
-    const call = apiPost.mock.calls.at(0)
-    expect(call?.[0]).toBe('/api/v1/tracking/items/{tracking_id}/revalidate')
-    expect(call?.[1]?.path).toEqual({ tracking_id: 'tracking-1' })
-    expect(call?.[1]?.body).toEqual({ expected_revision: 2, storage_dir: 'backups' })
-    expect(call?.[1]?.signal).toBeInstanceOf(AbortSignal)
-    expect(JSON.stringify(call?.[1]?.body)).not.toContain('ab_config')
-    expect(wrapper.find('#tracking-revalidate-result').text()).toContain('复核通过')
-    expect(wrapper.text()).toContain('尚未向 Auto Bangumi 创建订阅')
-  })
-
-  it('renders a ready=false business result with server issues and no external subscription', async () => {
-    apiGet.mockResolvedValue(detail({ available_actions: [revalidateAction] }) as never)
-    apiPost.mockResolvedValue(revalidateResult() as never)
-
-    const wrapper = await mountInspector()
-    await wrapper.find('#tracking-revalidate').trigger('click')
-    await flushPromises()
-
-    const result = wrapper.find('#tracking-revalidate-result')
-    expect(result.text()).toContain('提交前复核未通过')
-    expect(result.text()).toContain('尚未向 Auto Bangumi 创建订阅')
-    expect(result.find('.tracking-revalidate-issues').text()).toContain('本地方案已变化，需要重新确认后再提交')
-    // The returned tracking converges the inspector without a second detail read.
-    expect(apiGet).toHaveBeenCalledTimes(1)
-    expect(wrapper.text()).toContain('需重新确认')
-    expect(wrapper.emitted('tracking-updated')?.at(-1)?.[0]).toMatchObject({
-      tracking_id: 'tracking-1', revision: 3, status: 'NEEDS_RECONFIRM',
-    })
-  })
-
-  it('fails closed on unknown issue codes and never echoes unvetted server text', async () => {
-    apiGet.mockResolvedValue(detail({ available_actions: [revalidateAction] }) as never)
-    apiPost.mockResolvedValue(revalidateResult({
-      issues: [
-        { code: 'TOTALLY_NEW_CODE', field: null, message: 'https://private.invalid/leak', recovery_action: '' },
-        { code: 'NO_VALID_RESOURCES', field: null, message: '', recovery_action: '' },
-      ],
-    }) as never)
-
-    const wrapper = await mountInspector()
-    await wrapper.find('#tracking-revalidate').trigger('click')
-    await flushPromises()
-
-    const issues = wrapper.find('.tracking-revalidate-issues')
-    expect(issues.text()).not.toContain('private.invalid')
-    expect(issues.text()).not.toContain('TOTALLY_NEW_CODE')
-    expect(issues.text()).toContain('本地方案尚未通过提交前复核')
-  })
-
-  it('refreshes the detail and requires a new confirmation on a revision conflict', async () => {
-    apiGet.mockResolvedValueOnce(detail({ available_actions: [revalidateAction] }) as never)
-      .mockResolvedValueOnce(detail({ revision: 5, available_actions: [revalidateAction] }) as never)
-    apiPost.mockRejectedValueOnce({
-      type: 'tracking_revision_conflict', message: '追番记录版本已变化，请刷新后重试', status: 409,
-      cancelled: false, httpError: true,
-    } as never)
-
-    const wrapper = await mountInspector()
-    await wrapper.find('#tracking-revalidate').trigger('click')
-    await flushPromises()
-
-    // The old intent is dropped and the detail is re-read — nothing is resent.
-    expect(apiPost).toHaveBeenCalledTimes(1)
-    expect(apiGet).toHaveBeenCalledTimes(2)
-    expect(wrapper.find('#tracking-revalidate-result').text()).toContain('请重新确认后再发起复核')
-
-    apiPost.mockResolvedValueOnce(revalidateResult({ checked_revision: 5, next_revision: 5 }) as never)
-    await wrapper.find('#tracking-revalidate').trigger('click')
-    await flushPromises()
-    expect(apiPost).toHaveBeenCalledTimes(2)
-    expect(apiPost.mock.calls.at(-1)?.[1]?.body).toEqual({ expected_revision: 5 })
-  })
-
-  it('reuses the same intent on a transport retry instead of rebuilding it', async () => {
-    apiGet.mockResolvedValue(detail({ available_actions: [revalidateAction] }) as never)
-    apiPost.mockRejectedValueOnce({
-      type: 'network_error', message: '网络请求失败', status: 0, cancelled: false, httpError: false,
-    } as never).mockResolvedValueOnce(revalidateResult({ ready: true, issues: [] }) as never)
-
-    const wrapper = await mountInspector()
-    await wrapper.find('#tracking-revalidate').trigger('click')
-    await flushPromises()
-    expect(wrapper.find('#tracking-revalidate-result').text()).toContain('复核请求失败')
-
-    await wrapper.find('#tracking-revalidate').trigger('click')
-    await flushPromises()
-    expect(apiPost).toHaveBeenCalledTimes(2)
-    expect(apiPost.mock.calls.at(-1)?.[1]?.body).toEqual({ expected_revision: 2 })
-    expect(wrapper.find('#tracking-revalidate-result').text()).toContain('复核通过')
-  })
-
-  it('discards an in-flight revalidate when the selection changes', async () => {
-    let resolveRevalidate: ((value: unknown) => void) | undefined
-    apiGet.mockResolvedValueOnce(detail({ available_actions: [revalidateAction] }) as never)
-      .mockResolvedValueOnce(detail({ tracking_id: 'tracking-2', title: '咒术回战', available_actions: [revalidateAction] }) as never)
-    apiPost.mockReturnValueOnce(new Promise((resolve) => { resolveRevalidate = resolve }) as never)
-
-    const wrapper = await mountInspector()
-    await wrapper.find('#tracking-revalidate').trigger('click')
-    await flushPromises()
-    const signal = apiPost.mock.calls.at(-1)?.[1]?.signal as AbortSignal
-
-    await wrapper.setProps({ trackingId: 'tracking-2' })
-    await flushPromises()
-    expect(signal.aborted).toBe(true)
-
-    resolveRevalidate?.(revalidateResult())
-    await flushPromises()
-    expect(wrapper.find('#tracking-revalidate-result').exists()).toBe(false)
-    expect(wrapper.emitted('tracking-updated')).toBeUndefined()
-    expect(wrapper.text()).toContain('咒术回战')
-  })
-
-  it('offers no revalidate button when the server does not return the action', async () => {
-    apiGet.mockResolvedValue(detail() as never)
-    const wrapper = await mountInspector()
-    expect(wrapper.find('#tracking-revalidate').exists()).toBe(false)
-    expect(wrapper.text()).toContain('当前状态不可发起本地复核')
-    expect(apiPost).not.toHaveBeenCalled()
-  })
-})
 
 const submitAction = {
   code: 'SUBMIT', label: '提交到 Auto Bangumi', style: 'PRIMARY',
@@ -274,7 +185,8 @@ function capabilities(overrides: Partial<CapabilityResult> = {}): CapabilityResu
 function writeSession(overrides: Record<string, unknown> = {}): TrackingWriteSession {
   return {
     trackingId: 'tracking-1', action: 'SUBMIT', state: 'ACTIVE',
-    message: '提交成功：已在 Auto Bangumi 创建外部订阅。', issues: [], ...overrides,
+    message: '提交成功：已在 Auto Bangumi 创建外部订阅。', issues: [], failureCategory: null,
+    ...overrides,
   } as TrackingWriteSession
 }
 
@@ -288,7 +200,7 @@ async function mountSubmittable(
     { path: '/tracking', component: TrackingInspector }, { path: '/plans', component: { template: '<div />' } },
   ] })
   const wrapper = mount(TrackingInspector, {
-    props: { trackingId: 'tracking-1', credentialReady: true, capabilities: capabilities(), ...props },
+    props: { trackingId: 'tracking-1', connectionReady: true, capabilities: capabilities(), ...props },
     global: { plugins: [router] },
   })
   await flushPromises()
@@ -298,20 +210,21 @@ async function mountSubmittable(
 describe('TrackingInspector explicit submission (US-310)', () => {
   beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
 
-  it('offers SUBMIT only with a live page session and a proven capability', async () => {
+  it('offers SUBMIT from the saved connection without requiring a probe', async () => {
     apiGet.mockResolvedValue(detail({ available_actions: [submitAction] }) as never)
     const wrapper = await mountInspector()
-    expect(wrapper.find('#tracking-submit').exists()).toBe(false)
-    expect(wrapper.text()).toContain('需要先在页面连接 Auto Bangumi')
+    // Issue #86: the server projects the action and re-validates everything in
+    // the submit request, so no settings-page probe gates the button.
+    expect(wrapper.find('#tracking-submit').exists()).toBe(true)
+    expect(wrapper.find('#tracking-revalidate').exists()).toBe(false)
     expect(apiPost).not.toHaveBeenCalled()
   })
 
-  it('hides SUBMIT and downgrades to read-only when the capability is unsupported', async () => {
+  it('keeps SUBMIT available when the diagnostic probe reports no capability', async () => {
     const wrapper = await mountSubmittable(
       { capabilities: capabilities({ subscription_submit: 'UNSUPPORTED' }) },
     )
-    expect(wrapper.find('#tracking-submit').exists()).toBe(false)
-    expect(wrapper.text()).toContain('未确认提交能力，已降级为只读')
+    expect(wrapper.find('#tracking-submit').exists()).toBe(true)
   })
 
   it('leaves the request to the page and emits the action with the latest revision', async () => {
@@ -332,9 +245,7 @@ describe('TrackingInspector explicit submission (US-310)', () => {
     const wrapper = await mountSubmittable({ writeSession: writeSession({ state: 'IN_FLIGHT' }) })
     expect(wrapper.find('#tracking-submit').attributes('disabled')).toBeDefined()
     expect(wrapper.find('#tracking-submit').attributes('aria-busy')).toBe('true')
-    expect(wrapper.find('#tracking-revalidate').attributes('disabled')).toBeDefined()
     await wrapper.find('#tracking-submit').trigger('click')
-    await wrapper.find('#tracking-revalidate').trigger('click')
     await flushPromises()
     expect(wrapper.emitted('write-requested')).toBeUndefined()
     expect(apiPost).not.toHaveBeenCalled()
@@ -373,25 +284,24 @@ const retryAction = {
   requires_confirmation: true, target_scopes: [],
 }
 
-const LIVE_SESSION = { credentialReady: true, capabilities: capabilities() }
+const LIVE_SESSION = { connectionReady: true, capabilities: capabilities() }
 
 describe('TrackingInspector explicit retry (US-311)', () => {
   beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
 
-  it('offers RETRY only for the server action with a proven submit capability', async () => {
-    apiGet.mockResolvedValue(detail({ available_actions: [revalidateAction, retryAction] }) as never)
+  it('offers RETRY from the saved connection without requiring a probe', async () => {
+    apiGet.mockResolvedValue(detail({ available_actions: [retryAction] }) as never)
     const wrapper = await mountInspector()
-    expect(wrapper.find('#tracking-retry').exists()).toBe(false)
-    expect(wrapper.text()).toContain('需要先在页面连接 Auto Bangumi')
+    // Issue #86: a definitely-failed record always offers its retry.
+    expect(wrapper.find('#tracking-retry').exists()).toBe(true)
   })
 
-  it('hides RETRY and downgrades to read-only when the capability is unsupported', async () => {
+  it('keeps RETRY available when the diagnostic probe reports no capability', async () => {
     apiGet.mockResolvedValue(detail({ available_actions: [retryAction] }) as never)
     const wrapper = await mountInspector('tracking-1', {
       ...LIVE_SESSION, capabilities: capabilities({ subscription_submit: 'UNSUPPORTED' }),
     })
-    expect(wrapper.find('#tracking-retry').exists()).toBe(false)
-    expect(wrapper.text()).toContain('未确认提交能力，已降级为只读')
+    expect(wrapper.find('#tracking-retry').exists()).toBe(true)
   })
 
   it('emits the retry action with the latest revision and never writes itself', async () => {
@@ -424,14 +334,12 @@ describe('TrackingInspector explicit retry (US-311)', () => {
       }),
     })
     expect(wrapper.find('#tracking-retry').attributes('disabled')).toBeUndefined()
-    expect(wrapper.find('#tracking-revalidate').attributes('disabled')).toBeUndefined()
     expect(wrapper.find('#tracking-submit-result').text()).toContain('提交明确失败')
 
     await wrapper.setProps({ writeSession: writeSession({ action: 'RETRY', state: 'IN_FLIGHT' }) })
     await flushPromises()
     expect(wrapper.find('#tracking-retry').attributes('disabled')).toBeDefined()
     expect(wrapper.find('#tracking-retry').attributes('aria-busy')).toBe('true')
-    expect(wrapper.find('#tracking-revalidate').attributes('disabled')).toBeDefined()
     await wrapper.find('#tracking-retry').trigger('click')
     await flushPromises()
     expect(wrapper.emitted('write-requested')).toBeUndefined()
@@ -596,22 +504,24 @@ describe('TrackingInspector per-record external delete (US-315)', () => {
     requires_confirmation: true, target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'],
   }
 
-  it('offers the delete only with a live session and a proven per-scope capability', async () => {
+  it('offers the delete from the server projection alone', async () => {
     apiGet.mockResolvedValue(detail({ available_actions: [deleteAction] }) as never)
+
+    // No probe and no live page session is required (issue #89).
     const wrapper = await mountInspector()
-    expect(wrapper.find('#tracking-delete-external-submit').exists()).toBe(false)
-    expect(wrapper.find('.tracking-delete-external-section').text())
-      .toContain('需要先在页面连接 Auto Bangumi')
+    expect(wrapper.find('#tracking-delete-external-submit').exists()).toBe(true)
 
-    const connected = await mountInspector('tracking-1', LIVE_SESSION)
-    expect(connected.find('#tracking-delete-external-submit').exists()).toBe(true)
-
-    // Only the scope whose own delete capability is proven keeps a control.
+    // A diagnostic "unsupported" probe never hides a projected delete either.
     const degraded = await mountInspector('tracking-1', {
       ...LIVE_SESSION, capabilities: capabilities({ subscription_delete: 'UNSUPPORTED' }),
     })
-    expect(degraded.find('#tracking-delete-external-scope-SUBSCRIPTION').exists()).toBe(false)
+    expect(degraded.find('#tracking-delete-external-scope-SUBSCRIPTION').exists()).toBe(true)
     expect(degraded.find('#tracking-delete-external-scope-ASSOCIATED_RSS').exists()).toBe(true)
+
+    // A record the server does not project the action for keeps it hidden.
+    apiGet.mockResolvedValue(detail() as never)
+    const unoffered = await mountInspector()
+    expect(unoffered.find('#tracking-delete-external-submit').exists()).toBe(false)
   })
 
   it('never projects an unknown, out-of-family or scope-less delete', async () => {
@@ -671,5 +581,308 @@ describe('TrackingInspector per-record external delete (US-315)', () => {
       managementSession: createManagementSession('tracking-2', 'DELETE_EXTERNAL', 'SUBSCRIPTION', 'SUCCEEDED'),
     })
     expect(other.find('#tracking-delete-external-result').exists()).toBe(false)
+  })
+})
+
+function requestSnapshot() {
+  return {
+    request: {
+      request_id: 'request-1',
+      status: 'ACCEPTED',
+      input: { raw_title: '芙莉莲' },
+      source_info: {
+        matched_bangumi: { title: '葬送的芙莉莲', season: 1, aliases: [], mikan_url: null, match_score: 1 },
+        rss_sources: [{
+          subtitle_group: '喵萌奶茶屋', rss_url: null, source_type: 'rss',
+          valid_seed_names: ['第一集.mkv'], excluded_seed_names: [],
+        }],
+      },
+      confirmable_config: {
+        selected_subtitle_group: '喵萌奶茶屋',
+        selected_rss_url: null,
+        filter_rule: { must_contain: '', must_not_contain: '', use_regex: false, case_sensitive: false },
+        effective_seed_names: ['第一集.mkv'],
+        expected_folder_name: '芙莉莲',
+        warnings: [],
+      },
+      ab_submit_result: null,
+      created_at: '2026-09-01T00:00:00Z',
+      updated_at: '2026-09-01T00:00:00Z',
+    },
+  } as never
+}
+
+describe('TrackingInspector saved plan editing (issue #90)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  it('edits a pending plan in place with the shared editor core', async () => {
+    apiGet.mockImplementation(async (path: string) => (
+      path === '/api/v1/requests/{request_id}'
+        ? requestSnapshot()
+        : detail({ status: 'PENDING_SUBMIT', status_label: '待提交' }) as never
+    ))
+    apiPost.mockResolvedValue({} as never)
+
+    const wrapper = await mountInspector()
+
+    const editButton = wrapper.find('#tracking-edit-plan')
+    expect(editButton.exists()).toBe(true)
+    expect(editButton.text()).toBe('修改追番方案')
+    // The editor stays collapsed until the user asks for it.
+    expect(wrapper.find('#tracking-plan-editor').exists()).toBe(false)
+
+    await editButton.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#tracking-plan-editor').exists()).toBe(true)
+    expect(apiGet).toHaveBeenCalledWith('/api/v1/requests/{request_id}', expect.objectContaining({
+      path: { request_id: 'request-1' },
+    }))
+  })
+
+  it('offers no plan editing for a record that is not pending', async () => {
+    apiGet.mockResolvedValue(detail({ status: 'ACTIVE', status_label: '追番中' }) as never)
+
+    const wrapper = await mountInspector()
+
+    expect(wrapper.find('#tracking-edit-plan').exists()).toBe(false)
+  })
+
+  it('keeps the editor locked while a saved-plan write is unconfirmed', async () => {
+    apiGet.mockImplementation(async (path: string) => (
+      path === '/api/v1/requests/{request_id}'
+        ? requestSnapshot()
+        : detail({ status: 'PENDING_SUBMIT', status_label: '待提交' }) as never
+    ))
+    const wrapper = await mountInspector()
+    await wrapper.find('#tracking-edit-plan').trigger('click')
+    await flushPromises()
+    // The shared session owns the unconfirmed-write lock; the host only renders
+    // it, so a locked session disables the entry point.
+    expect(wrapper.find('#tracking-edit-plan').attributes('disabled')).toBeUndefined()
+  })
+})
+
+const applyModifyAction = {
+  code: 'MODIFY', label: '修改外部订阅', style: 'SECONDARY',
+  requires_confirmation: true, target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'],
+}
+
+function activeRecord(overrides: Record<string, unknown> = {}) {
+  return detail({
+    status: 'ACTIVE',
+    status_label: '追番中',
+    available_actions: [applyModifyAction],
+    external_mapping: { match_reason: '标题', enabled: true, external_deleted: false },
+    ...overrides,
+  })
+}
+
+describe('TrackingInspector apply-to-Auto-Bangumi (issue #91)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  it('offers the apply entry only for a controlled active record', async () => {
+    apiGet.mockResolvedValue(activeRecord() as never)
+    const wrapper = await mountInspector()
+    expect(wrapper.find('#tracking-apply-plan').exists()).toBe(true)
+    expect(wrapper.find('#tracking-apply-plan').text()).toBe('保存并应用到 Auto Bangumi')
+
+    // A record without a controlled external mapping has nothing to apply to.
+    apiGet.mockResolvedValue(detail({ status: 'ACTIVE', available_actions: [applyModifyAction] }) as never)
+    const unmapped = await mountInspector()
+    expect(unmapped.find('#tracking-apply-plan').exists()).toBe(false)
+  })
+
+  it('opens the shared editor and states the identity boundary', async () => {
+    apiGet.mockImplementation(async (path: string) => (
+      path === '/api/v1/requests/{request_id}' ? requestSnapshot() : activeRecord() as never
+    ))
+    const wrapper = await mountInspector()
+
+    await wrapper.find('#tracking-apply-plan').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#tracking-apply-editor').exists()).toBe(true)
+    expect(wrapper.text()).toContain('更换真实 RSS 来源需要删除该追番后重新添加')
+    // The subtitle group is part of the plan's identity, so it is read-only.
+    expect(wrapper.find('#tracking-apply-subtitle-group').exists()).toBe(true)
+  })
+
+  it('sends only the editable fields and asks the server to raise the local plan', async () => {
+    apiGet.mockImplementation(async (path: string) => (
+      path === '/api/v1/requests/{request_id}' ? requestSnapshot() : activeRecord() as never
+    ))
+    const wrapper = await mountInspector()
+    await wrapper.find('#tracking-apply-plan').trigger('click')
+    await flushPromises()
+
+    const editor = wrapper.findComponent({ name: 'AnimeDraftEditor' })
+    expect(editor.exists()).toBe(true)
+    editor.vm.$emit('apply', {
+      selected_subtitle_group: '别的字幕组',
+      filter_rule: { must_contain: '1080p' },
+      expected_folder_name: '新目录',
+    })
+    await flushPromises()
+
+    const payload = wrapper.emitted('management-requested')?.at(-1)?.[0] as {
+      targetScope: string
+      patch: Record<string, unknown>
+      localPlan: Record<string, unknown>
+    }
+    expect(payload.targetScope).toBe('SUBSCRIPTION')
+    // Identity fields never travel: no subtitle group, only the plan's own.
+    expect(payload.patch).toEqual({
+      filter_rule: { must_contain: '1080p' },
+      expected_folder_name: '新目录',
+    })
+    expect(payload.localPlan).toEqual(payload.patch)
+  })
+})
+
+describe('TrackingInspector unified plan delete (issue #92)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  function deletable(overrides: Record<string, unknown> = {}) {
+    return detail({
+      status: 'ACTIVE',
+      status_label: '追番中',
+      available_actions: [],
+      external_mapping: { match_reason: '标题', enabled: true, external_deleted: false },
+      ...overrides,
+    })
+  }
+
+  it('offers the delete entry only while no external action is unresolved', async () => {
+    apiGet.mockResolvedValue(deletable() as never)
+    const wrapper = await mountInspector()
+    expect(wrapper.find('#tracking-delete-plan').text()).toBe('删除追番方案')
+
+    for (const status of ['SUBMITTING', 'REVALIDATING', 'VERIFYING_EXTERNAL', 'RECOVERY_REQUIRED']) {
+      apiGet.mockResolvedValue(deletable({ status }) as never)
+      const blocked = await mountInspector()
+      expect(blocked.find('#tracking-delete-plan').exists()).toBe(false)
+    }
+  })
+
+  it('keeps the external option off by default and never changes the confirm label', async () => {
+    apiGet.mockResolvedValue(deletable() as never)
+    const wrapper = await mountInspector()
+
+    await wrapper.find('#tracking-delete-plan').trigger('click')
+
+    const checkbox = wrapper.find('#tracking-delete-plan-external')
+    expect(checkbox.exists()).toBe(true)
+    expect((checkbox.element as HTMLInputElement).checked).toBe(false)
+    expect(wrapper.find('#tracking-delete-plan-confirm').text()).toBe('删除追番方案')
+
+    await checkbox.setValue(true)
+    expect(wrapper.find('#tracking-delete-plan-confirm').text()).toBe('删除追番方案')
+    expect(wrapper.find('#tracking-delete-plan-section').text()).toContain('先删除 Auto Bangumi 中的受控外部订阅')
+
+    await checkbox.setValue(false)
+    expect(wrapper.find('#tracking-delete-plan-confirm').text()).toBe('删除追番方案')
+    expect(wrapper.find('#tracking-delete-plan-section').text()).toContain('MiGuOrca 不再管理')
+  })
+
+  it('asks for nothing on cancel and sends the ticked choice on confirm', async () => {
+    apiGet.mockResolvedValue(deletable() as never)
+    const wrapper = await mountInspector()
+    await wrapper.find('#tracking-delete-plan').trigger('click')
+
+    await wrapper.find('#tracking-delete-plan-cancel').trigger('click')
+    expect(wrapper.emitted('plan-delete-requested')).toBeUndefined()
+    expect(wrapper.find('#tracking-delete-plan').exists()).toBe(true)
+
+    await wrapper.find('#tracking-delete-plan').trigger('click')
+    await wrapper.find('#tracking-delete-plan-external').setValue(true)
+    await wrapper.find('#tracking-delete-plan-confirm').trigger('click')
+
+    const payload = wrapper.emitted('plan-delete-requested')?.at(-1)?.[0] as {
+      item: { tracking_id: string }
+      deleteExternal: boolean
+    }
+    expect(payload.item.tracking_id).toBe('tracking-1')
+    expect(payload.deleteExternal).toBe(true)
+  })
+
+  it('hides the external option for a plan with no controlled subscription', async () => {
+    apiGet.mockResolvedValue(detail({ status: 'ACTIVE', available_actions: [] }) as never)
+    const wrapper = await mountInspector()
+    await wrapper.find('#tracking-delete-plan').trigger('click')
+
+    expect(wrapper.find('#tracking-delete-plan-external').exists()).toBe(false)
+    await wrapper.find('#tracking-delete-plan-confirm').trigger('click')
+    const payload = wrapper.emitted('plan-delete-requested')?.at(-1)?.[0] as { deleteExternal: boolean }
+    expect(payload.deleteExternal).toBe(false)
+  })
+})
+
+describe('TrackingInspector plan reuse (issue #93)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset(); clearReuseHandoff() })
+
+  it('publishes only the safe suggestion and leaves navigation to the page', async () => {
+    const base = detail()
+    apiGet.mockResolvedValue({
+      ...base,
+      safe_info: {
+        ...base.safe_info,
+        mikan_collection: { bangumi_id: 'mikan-1234', title: '葬送的芙莉莲', season: 1 },
+      },
+    } as never)
+    const wrapper = await mountInspector()
+
+    const button = wrapper.find('#tracking-reuse-plan')
+    expect(button.exists()).toBe(true)
+    expect(button.text()).toBe('复制并重新添加')
+    expect(wrapper.find('.tracking-reuse-section').text()).toContain('需要重新选择真实 MiKan 合集')
+
+    await button.trigger('click')
+
+    // The handoff travels in memory and carries only public suggestion fields.
+    const handoff = consumeReuseHandoff()
+    expect(handoff).not.toBeNull()
+    expect(handoff?.title).toBe('葬送的芙莉莲')
+    expect(handoff?.suggestion.expectedFolderName).toBe('安全文件夹')
+    expect(JSON.stringify(handoff)).not.toContain('rss_url')
+    expect(JSON.stringify(handoff)).not.toContain('password')
+    // The page owns the navigation.
+    expect(wrapper.emitted('reuse-requested')).toHaveLength(1)
+  })
+
+  it('offers no reuse entry when the plan has no readable safe info',
+    async () => {
+      apiGet.mockResolvedValue(detail({ safe_info: null }) as never)
+      const wrapper = await mountInspector()
+      expect(wrapper.find('#tracking-reuse-plan').exists()).toBe(false)
+    })
+})
+
+describe('TrackingInspector unresolved-intent gate (issue #91 AC 6)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  it('blocks every conflicting action while this item\'s external result is unresolved', async () => {
+    apiGet.mockResolvedValue(detail({
+      status: 'ACTIVE',
+      status_label: '追番中',
+      available_actions: [applyModifyAction],
+      external_mapping: { match_reason: '标题', enabled: true, external_deleted: false },
+    }) as never)
+
+    for (const session of [
+      { trackingId: 'tracking-1', state: 'UNKNOWN', action: 'SUBMIT', message: '', issues: [], failureCategory: null },
+      { trackingId: 'tracking-1', state: 'VERIFYING_EXTERNAL', action: 'SUBMIT', message: '', issues: [], failureCategory: null },
+      { trackingId: 'tracking-1', state: 'RECOVERY_REQUIRED', action: 'SUBMIT', message: '', issues: [], failureCategory: null },
+    ]) {
+      const wrapper = await mountInspector('tracking-1', { writeSession: session })
+      expect(wrapper.find('#tracking-apply-plan').attributes('disabled')).toBeDefined()
+      expect(wrapper.find('#tracking-delete-plan').attributes('disabled')).toBeDefined()
+    }
+
+    // A definite result releases the gate again.
+    const settled = await mountInspector('tracking-1', {
+      writeSession: { trackingId: 'tracking-1', state: 'ACTIVE', action: 'SUBMIT', message: '', issues: [], failureCategory: null },
+    })
+    expect(settled.find('#tracking-apply-plan').attributes('disabled')).toBeUndefined()
   })
 })

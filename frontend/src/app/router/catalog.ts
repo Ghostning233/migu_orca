@@ -8,7 +8,7 @@ import type { LocationQuery, LocationQueryRaw } from 'vue-router'
  * the new paths and compatibility redirects.  Keeping the boundary here lets
  * navigation, redirects and future tests share one sanitizer.
  */
-export type AppRouteKey = 'add' | 'plans' | 'tracking' | 'settings'
+export type AppRouteKey = 'add' | 'tracking' | 'settings'
 
 export type PublicQueryKey = 'batch_id' | 'request_id' | 'tracking_id'
 
@@ -51,17 +51,6 @@ export const routeCatalog = {
       chromium: ['tests/browser/test_app_batch_workbench.py'],
     },
   },
-  plans: {
-    key: 'plans',
-    path: '/app/plans',
-    routerPath: '/plans',
-    queryKey: 'request_id',
-    parity: {
-      view: 'RequestsView',
-      vitest: ['src/features/requests/RequestsView.test.ts', 'src/features/requests/RequestDetailPanel.test.ts'],
-      chromium: ['tests/browser/test_app_requests.py', 'tests/browser/test_app_request_detail.py'],
-    },
-  },
   tracking: {
     key: 'tracking',
     path: '/app/tracking',
@@ -91,7 +80,6 @@ export const routeCatalog = {
 
 export const legacyRouteCatalog = [
   { source: '/app/workbench', target: 'add', replace: true },
-  { source: '/app/requests', target: 'plans', replace: true },
   { source: '/app/queue', target: 'tracking', replace: true },
 ] as const satisfies readonly LegacyRouteMapping[]
 

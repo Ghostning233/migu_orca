@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from apps.migu_orca_web.save_confirm_service import compute_request_fingerprint
+from apps.migu_orca_web.tracking_poster import request_poster_path
 from storage_engine.controllers.ab_result_repository import (
     AbResultListResult,
     list_ab_submit_results_tolerant,
@@ -161,6 +162,7 @@ def run_tracking_migration(
             request=request,
             request_fingerprint=fingerprint,
             now=timestamp,
+            poster_path=request_poster_path(request),
         )
         _, was_created = ensure_tracking_record(resolved_config, record)
         if was_created:

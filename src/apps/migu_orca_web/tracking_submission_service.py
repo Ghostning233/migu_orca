@@ -44,7 +44,10 @@ from uuid import UUID
 
 from ab_engine.controllers.tracking_submit_adapter import compose_tracking_submit_one
 from apps.migu_orca_web.save_confirm_service import compute_request_fingerprint
-from apps.migu_orca_web.schemas import SavedTrackingSubmitInput
+from apps.migu_orca_web.schemas import (
+    SavedTrackingBatchSubmitInput,
+    SavedTrackingSubmitInput,
+)
 from apps.migu_orca_web.serializers import (
     _sanitize_ab_submit_result,
     serialize_request_safe_info,
@@ -90,6 +93,7 @@ from tracking_engine.controllers.submit import (
     classify_external_submit_result,
     external_submit_error_type,
     external_submit_result_id,
+    submit_failure_category,
     tracking_status_for_operation_state,
 )
 from tracking_engine.models.operation import (
@@ -622,6 +626,7 @@ def _replay_terminal_outcome(
         issues=(),
         request=None,
         timestamp=timestamp,
+        error_type=operation.error_type,
     )
 
 
@@ -863,6 +868,7 @@ def _finalize_external_outcome(
         issues=(),
         request=request,
         timestamp=timestamp,
+        error_type=op_error_type,
     )
 
 
@@ -1191,8 +1197,14 @@ def _submit_result_payload(
     issues: tuple[RevalidationIssue, ...],
     request: dict[str, Any] | None,
     timestamp: str,
+    error_type: str | None = None,
 ) -> dict[str, Any]:
-    """Build the safe US-225 submit result (HTTP 200 business result)."""
+    """Build the safe US-225 submit result (HTTP 200 business result).
+
+    ``failure_category`` is the published, non-sensitive classification of a
+    failed/indeterminate outcome (issue #86): the client renders its fixed
+    next-step copy from this code and never from an upstream response.
+    """
     valid_count = 0
     if isinstance(request, dict):
         resources = serialize_request_safe_info(request, storage_profile=None).get("resources")
@@ -1206,6 +1218,7 @@ def _submit_result_payload(
         "next_revision": record.revision,
         "checked_at": timestamp,
         "operation_id": operation_id,
+        "failure_category": submit_failure_category(outcome=outcome, error_type=error_type),
         "issues": [
             {
                 "code": issue.code,
@@ -1256,5 +1269,82 @@ __all__ = [
     "run_saved_tracking_retry",
     "run_saved_tracking_submit",
     "run_tracking_retry",
+    "run_saved_tracking_batch_submit",
     "run_tracking_submit",
 ]
+
+
+#: Batch buckets: one definite success, one definite failure, one indeterminate
+#: outcome, and one request refused before any external call (issue #87).
+_BATCH_OUTCOME_BUCKETS = {
+    TRACKING_STATUS_ACTIVE: "succeeded",
+    TRACKING_STATUS_SUBMIT_FAILED: "failed",
+    TRACKING_STATUS_NEEDS_RECONFIRM: "failed",
+    TRACKING_STATUS_VERIFYING_EXTERNAL: "unknown",
+    TRACKING_STATUS_RECOVERY_REQUIRED: "unknown",
+}
+
+
+def _batch_bucket(outcome: Any) -> str:
+    """Bucket one per-entry outcome; anything unrecognized fails closed."""
+    return _BATCH_OUTCOME_BUCKETS.get(outcome, "unknown")
+
+
+def run_saved_tracking_batch_submit(
+    config: StorageConfig,
+    *,
+    payload: SavedTrackingBatchSubmitInput,
+    repository: AutoBangumiConfigRepository | None = None,
+    now: str | None = None,
+) -> dict[str, Any]:
+    """Run one explicit batch as N independent reliable submissions (issue #87).
+
+    Each entry keeps its own expected revision and opaque idempotency key and is
+    resolved through the single reliable submit sequence, so a failure never
+    rolls back an entry that already succeeded and a repeated request reuses the
+    same operations instead of creating a second external subscription.  Only
+    non-sensitive, stable values leave this function: the tracking id, the
+    per-entry business result and (for a refusal before the external boundary) a
+    stable ``error_type``.
+    """
+    items: list[dict[str, Any]] = []
+    summary = {"total": len(payload.items), "succeeded": 0, "failed": 0, "unknown": 0, "blocked": 0}
+    for entry in payload.items:
+        single = SavedTrackingSubmitInput(
+            tracking_id=entry.tracking_id,
+            expected_revision=entry.expected_revision,
+            idempotency_key=entry.idempotency_key,
+            confirm=payload.confirm,
+            # The single-entry contract takes the canonical string form.
+            connection_ref=str(payload.connection_ref),
+            configuration_revision=payload.configuration_revision,
+            storage_dir=payload.storage_dir,
+        )
+        try:
+            result = run_saved_tracking_submit(
+                config, payload=single, repository=repository, now=now
+            )
+        except Stage1Error as exc:
+            # Refused before the external boundary: the entry is reported with
+            # its stable code and nothing else. The remaining entries still run.
+            summary["blocked"] += 1
+            items.append(
+                {
+                    "tracking_id": entry.tracking_id,
+                    "ok": False,
+                    "error_type": exc.error_type,
+                    "result": None,
+                }
+            )
+            continue
+        bucket = _batch_bucket(result.get("outcome"))
+        summary[bucket] += 1
+        items.append(
+            {
+                "tracking_id": entry.tracking_id,
+                "ok": bucket == "succeeded",
+                "error_type": None,
+                "result": result,
+            }
+        )
+    return {"items": items, "summary": summary}

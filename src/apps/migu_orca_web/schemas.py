@@ -378,6 +378,20 @@ class SavedAutoBangumiProbePayload(BaseModel):
         return value
 
 
+def _clean_tracking_id_value(value: str) -> str:
+    tracking_id = value.strip()
+    if not tracking_id:
+        raise ValueError("tracking_id cannot be empty")
+    return tracking_id
+
+
+def _clean_idempotency_key_value(value: str) -> str:
+    key = value.strip()
+    if not _IDEMPOTENCY_KEY_RE.fullmatch(key):
+        raise ValueError("idempotency_key 包含不合法字符")
+    return key
+
+
 class SavedTrackingSubmitInput(BaseModel):
     """Strict server-side handoff for submit/retry using saved AB config.
 
@@ -400,18 +414,12 @@ class SavedTrackingSubmitInput(BaseModel):
     @field_validator("tracking_id")
     @classmethod
     def _clean_tracking_id(cls, value: str) -> str:
-        tracking_id = value.strip()
-        if not tracking_id:
-            raise ValueError("tracking_id cannot be empty")
-        return tracking_id
+        return _clean_tracking_id_value(value)
 
     @field_validator("idempotency_key")
     @classmethod
     def _clean_saved_submit_key(cls, value: str) -> str:
-        key = value.strip()
-        if not _IDEMPOTENCY_KEY_RE.fullmatch(key):
-            raise ValueError("idempotency_key 包含不合法字符")
-        return key
+        return _clean_idempotency_key_value(value)
 
     @field_validator("connection_ref", mode="before")
     @classmethod
@@ -439,6 +447,75 @@ class SavedTrackingSubmitInput(BaseModel):
 SavedTrackingRetryInput = SavedTrackingSubmitInput
 SavedTrackingSubmitPayload = SavedTrackingSubmitInput
 SavedTrackingRetryPayload = SavedTrackingRetryInput
+
+#: Upper bound of one explicit batch (issue #87). A batch is a user selection of
+#: independent submissions, never a single transactional external call.
+MAX_TRACKING_BATCH_SUBMIT_ITEMS = 36
+
+
+class SavedTrackingBatchSubmitItem(BaseModel):
+    """One independent submission inside an explicit batch (issue #87)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tracking_id: StrictStr
+    expected_revision: StrictInt = Field(ge=1)
+    idempotency_key: StrictStr
+
+    @field_validator("tracking_id")
+    @classmethod
+    def _clean_batch_tracking_id(cls, value: str) -> str:
+        return _clean_tracking_id_value(value)
+
+    @field_validator("idempotency_key")
+    @classmethod
+    def _clean_batch_submit_key(cls, value: str) -> str:
+        return _clean_idempotency_key_value(value)
+
+
+class SavedTrackingBatchSubmitInput(BaseModel):
+    """Strict server-side handoff for one explicit batch submit (issue #87).
+
+    Every entry keeps its own revision and opaque idempotency key, so a batch is
+    exactly N independent reliable submissions: one failure never rolls back the
+    entries that already succeeded.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[SavedTrackingBatchSubmitItem] = Field(
+        min_length=1, max_length=MAX_TRACKING_BATCH_SUBMIT_ITEMS
+    )
+    confirm: StrictBool
+    connection_ref: UUID
+    configuration_revision: StrictInt = Field(ge=0)
+    storage_dir: str | None = None
+
+    @field_validator("connection_ref", mode="before")
+    @classmethod
+    def _require_canonical_batch_ref(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            raise ValueError("connection_ref 必须是规范 UUID")
+        try:
+            parsed = UUID(value)
+        except (ValueError, AttributeError, TypeError) as exc:
+            raise ValueError("connection_ref 必须是规范 UUID") from exc
+        if str(parsed) != value:
+            raise ValueError("connection_ref 必须是规范 UUID")
+        return value
+
+    @model_validator(mode="after")
+    def _require_batch_confirmation(self) -> SavedTrackingBatchSubmitInput:
+        if self.confirm is not True:
+            raise ValueError("confirm must be true")
+        return self
+
+    @model_validator(mode="after")
+    def _require_unique_entries(self) -> SavedTrackingBatchSubmitInput:
+        seen = [item.tracking_id for item in self.items]
+        if len(set(seen)) != len(seen):
+            raise ValueError("batch items must address distinct tracking records")
+        return self
 
 
 class AutoBangumiCapabilitiesConfigPayload(BaseModel):
@@ -816,6 +893,87 @@ class TrackingRefreshRssPayload(_TrackingManagementBasePayload):
         return value
 
 
+class SavedTrackingPlanDeleteInput(BaseModel):
+    """Strict handoff for one "delete the tracking plan" request (issue #92).
+
+    ``delete_external`` defaults to false: the external subscription keeps
+    running and MiGuOrca simply stops managing it. Only the checkbox the user
+    explicitly ticked can ask for the external object to be removed too.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tracking_id: StrictStr
+    confirm: StrictBool
+    delete_external: StrictBool = False
+    idempotency_key: StrictStr
+    connection_ref: UUID
+    configuration_revision: StrictInt = Field(ge=0)
+    storage_dir: str | None = None
+
+    @field_validator("tracking_id")
+    @classmethod
+    def _clean_delete_tracking_id(cls, value: str) -> str:
+        return _clean_tracking_id_value(value)
+
+    @field_validator("idempotency_key")
+    @classmethod
+    def _clean_delete_key(cls, value: str) -> str:
+        return _clean_idempotency_key_value(value)
+
+    @field_validator("connection_ref", mode="before")
+    @classmethod
+    def _canonical_delete_ref(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            raise ValueError("connection_ref 必须是规范 UUID")
+        try:
+            parsed = UUID(value)
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ValueError("connection_ref 必须是规范 UUID") from exc
+        if str(parsed) != value:
+            raise ValueError("connection_ref 必须是规范 UUID")
+        return value
+
+    @model_validator(mode="after")
+    def _require_delete_confirmation(self) -> SavedTrackingPlanDeleteInput:
+        if self.confirm is not True:
+            raise ValueError("confirm must be true")
+        return self
+
+
+class SavedTrackingLocalPlan(BaseModel):
+    """Local plan values raised together with a confirmed external modify.
+
+    Identity fields (title/season/subtitle_group) are deliberately absent: they
+    come from the real MiKan collection and are never edited here. Only the
+    editable plan fields travel, and the server merges them into the stored
+    snapshot instead of replacing it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    filter_rule: TrackingFilterRulePatch | None = None
+    expected_folder_name: str | None = None
+
+    @model_validator(mode="after")
+    def _require_local_field(self) -> SavedTrackingLocalPlan:
+        if not self.model_fields_set:
+            raise ValueError("local_plan 不能为空")
+        return self
+
+    @field_validator("expected_folder_name")
+    @classmethod
+    def _clean_local_folder(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        folder = value.strip()
+        if not folder:
+            raise ValueError("expected_folder_name 不能为空字符串")
+        if len(folder) > 255 or any(char in folder for char in "/\\"):
+            raise ValueError("expected_folder_name 含不合法字符")
+        return folder
+
+
 class SavedTrackingManagementInput(BaseModel):
     """Strict handoff for management through one saved AB generation."""
     model_config = ConfigDict(extra="forbid")
@@ -829,6 +987,8 @@ class SavedTrackingManagementInput(BaseModel):
     configuration_revision: StrictInt = Field(ge=0)
     patch: dict[str, Any] | None = None
     enabled: StrictBool | None = None
+    #: Local plan values to raise once the external modify is confirmed.
+    local_plan: SavedTrackingLocalPlan | None = None
     storage_dir: str | None = None
 
     @field_validator("connection_ref", mode="before")

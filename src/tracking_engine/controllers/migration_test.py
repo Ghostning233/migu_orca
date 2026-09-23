@@ -2,6 +2,8 @@ from __future__ import annotations
 
 """US-221: pure historical-backfill classifier tests (Stage 29 PRD §10.2)."""
 
+import pytest
+
 from batch_engine.models.queue import (
     BATCH_QUEUE_STATUS_FAILED,
     BATCH_QUEUE_STATUS_READY_TO_SUBMIT,
@@ -343,6 +345,30 @@ def test_plan_summary_from_request_uses_only_public_display_fields() -> None:
 
     assert summary == {"title": "葬送的芙莉莲", "season": 2, "subtitle_group": "喵萌奶茶屋"}
     assert "poster_path" not in summary
+
+
+def test_plan_summary_keeps_only_a_same_origin_opaque_poster_path() -> None:
+    poster_path = f"/api/v1/mikan/posters/{'a' * 64}"
+
+    summary = plan_summary_from_request(_request(), poster_path=poster_path)
+
+    assert summary["poster_path"] == poster_path
+
+
+@pytest.mark.parametrize(
+    "unsafe",
+    [
+        "https://mikan.example/cover.jpg",
+        "//mikan.example/cover.jpg",
+        "/api/v1/mikan/posters/../escape",
+        "/api/v1/mikan/posters/",
+        "/api/v1/mikan/posters/a b",
+        "/etc/passwd",
+        "",
+    ],
+)
+def test_plan_summary_rejects_unsafe_poster_references(unsafe: str) -> None:
+    assert "poster_path" not in plan_summary_from_request(_request(), poster_path=unsafe)
 
 
 def test_plan_summary_from_non_request_is_empty() -> None:

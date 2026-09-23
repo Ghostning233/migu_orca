@@ -25,7 +25,6 @@ def _require_dist() -> None:
     ("path", "feature_root", "feature_control"),
     [
         ("/app/add", "#workbench-heading", "#mikan-candidate-query"),
-        ("/app/plans", "#request-list-container", "#request-list-search"),
         ("/app/tracking", "#tracking-overview", "#tracking-refresh"),
         ("/app/settings", "#settings-heading", "#settings-storage-dir"),
     ],
@@ -112,7 +111,7 @@ def _mock_tracking(page: Page, request_id: str) -> None:
                         "items": [item],
                         "summary": {
                             "total": 1, "pending": 0, "processing": 0,
-                            "active": 1, "needs_attention": 0, "unreadable": 0,
+                            "active": 1, "inactive": 0, "needs_attention": 0, "unreadable": 0,
                         },
                         "warnings": [],
                     },
@@ -145,5 +144,5 @@ def test_tracking_route_is_the_formal_tracking_screen_not_the_retired_queue(
     for selector in ("#batch-queue-list", "#batch-queue-refresh", "#batch-queue-submit-form",
                      "#batch-queue-ab-auth-mode", "#batch-queue-ab-endpoint"):
         assert page.locator(selector).count() == 0, selector
-    assert page.get_by_role("link", name="追番管理", exact=True).get_attribute("aria-current") == "page"
-    expect(page.locator("#tracking-heading")).to_contain_text("查看本地追番状态")
+    assert page.get_by_role("link", name="我的追番", exact=True).get_attribute("aria-current") == "page"
+    expect(page.locator("#tracking-heading")).to_contain_text("管理待提交任务和正在运行的追番")

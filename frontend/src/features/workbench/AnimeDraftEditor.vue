@@ -67,6 +67,12 @@ const props = defineProps<{
    */
   applyVariant?: 'primary' | 'secondary'
   /**
+   * Issue #91: an already-active plan keeps its identity read-only. The
+   * subtitle group decides the real RSS source, so changing it is not an edit —
+   * the user must delete the plan and add it again.
+   */
+  subtitleGroupReadOnly?: boolean
+  /**
    * F4: display-only projection of the collection the user selected. The
    * unsaved draft snapshot has no season/poster/total-episode fields and this
    * Stage adds no endpoint for them, so the host passes the public candidate
@@ -318,7 +324,7 @@ defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
             v-model="editGroup"
             :options="groupOptions"
             :input-id="`${idPrefix}-subtitle-group`"
-            :disabled="disabled"
+            :disabled="disabled || subtitleGroupReadOnly"
             :applying="applying"
           />
         </FormField>

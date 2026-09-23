@@ -24,11 +24,6 @@ function makeRouter() {
         component: { template: '<p class="shell-route">工作台路由内容</p>' },
       },
       {
-        path: '/plans',
-        name: 'plans',
-        component: { template: '<p class="shell-route">订阅方案路由内容</p>' },
-      },
-      {
         path: '/tracking',
         name: 'tracking',
         component: { template: '<p class="shell-route">提交队列路由内容</p>' },
@@ -47,7 +42,7 @@ describe('App shell (US-260)', () => {
     setActivePinia(createPinia())
   })
 
-  it('renders the header, 4-route navigation and a routed view', async () => {
+  it('renders the header, 3-route navigation and a routed view', async () => {
     const router = makeRouter()
     const wrapper = mount(App, {
       global: {
@@ -68,14 +63,14 @@ describe('App shell (US-260)', () => {
     // shows the honest "needs checking" label rather than an empty chip.
     expect(wrapper.find('.workspace-status').text()).toContain('需检查')
 
+    // Issue #93: the primary navigation is exactly three entries.
     const navLinks = wrapper.findAll('.top-nav .nav-link')
-    expect(navLinks).toHaveLength(4)
+    expect(navLinks).toHaveLength(3)
     expect(navLinks[0]?.text()).toContain('添加番剧')
-    expect(navLinks[1]?.text()).toContain('追番方案')
-    expect(navLinks[2]?.text()).toContain('追番管理')
-    expect(navLinks[3]?.text()).toContain('设置')
+    expect(navLinks[1]?.text()).toContain('我的追番')
+    expect(navLinks[2]?.text()).toContain('设置')
     expect(navLinks[0]?.attributes('id')).toBe('shell-nav-1')
-    expect(navLinks[3]?.attributes('id')).toBe('shell-nav-4')
+    expect(navLinks[2]?.attributes('id')).toBe('shell-nav-3')
     expect(navLinks[0]?.attributes('aria-current')).toBe('page')
     expect(navLinks[0]?.find('.nav-current-marker').exists()).toBe(false)
     expect(navLinks.slice(1).every((link) => link.attributes('aria-current') === undefined)).toBe(true)
@@ -93,9 +88,6 @@ describe('App shell (US-260)', () => {
       },
     })
     await router.isReady()
-
-    await router.push('/plans')
-    expect(wrapper.find('.app-main .shell-route').text()).toBe('订阅方案路由内容')
 
     await router.push('/tracking')
     expect(wrapper.find('.app-main .shell-route').text()).toBe('提交队列路由内容')
@@ -116,7 +108,7 @@ describe('App shell (US-260)', () => {
     })
     await router.isReady()
 
-    await router.push('/plans')
+    await router.push('/tracking')
     await wrapper.vm.$nextTick()
     expect(document.activeElement).toBe(wrapper.find('main#app-main').element)
     expect(wrapper.findAll('.nav-link')[1]?.attributes('aria-current')).toBe('page')
@@ -124,7 +116,7 @@ describe('App shell (US-260)', () => {
     const search = document.createElement('input')
     wrapper.find('main#app-main').element.append(search)
     search.focus()
-    await router.push({ path: '/plans', query: { request_id: 'request-1' } })
+    await router.push({ path: '/tracking', query: { tracking_id: 'tracking-1' } })
     await wrapper.vm.$nextTick()
     expect(document.activeElement).toBe(search)
 
@@ -190,7 +182,7 @@ describe('App shell (US-260)', () => {
       },
     })
     await router.isReady()
-    await router.push('/plans')
+    await router.push('/tracking')
 
     const skip = wrapper.find('.skip-link')
     expect(skip.exists()).toBe(true)

@@ -66,8 +66,45 @@ _DEFINITE_FAILURE_ERROR_TYPES = frozenset(
         "ab_auth_failed",  # 401/403 — the write was rejected before creation.
         "ab_submit_unsupported",
         "ab_unsupported_version",
+        "ab_duplicate_subscription",
+        # Provably raised before the write boundary (issue #86): authentication
+        # and the exact-version pre-check happen before the create request, so
+        # nothing was written and a retry is safe.
+        "ab_connection_failed_pre_write",
+        "ab_timeout_pre_write",
     }
 )
+
+#: Stable, non-sensitive failure categories published by the Web API (issue
+#: #86).  They tell the user what to do next — fix the connection, sign in,
+#: change the Auto Bangumi version, look at the existing subscription, fix the
+#: plan, read the rejection or recover an unknown result — and never carry an
+#: upstream response, endpoint, credential or path.
+SUBMIT_FAILURE_CATEGORIES = (
+    "CONNECTION",
+    "AUTHENTICATION",
+    "VERSION",
+    "DUPLICATE_SUBSCRIPTION",
+    "VALIDATION",
+    "REJECTED",
+    "OUTCOME_UNKNOWN",
+)
+
+#: Stable error_type -> published category.  Anything not listed is a definite
+#: external rejection (``REJECTED``) when the outcome is FAILED; the ambiguous
+#: codes never reach this map because their outcome is OUTCOME_UNKNOWN.
+_FAILURE_CATEGORY_BY_ERROR_TYPE = {
+    "ab_connection_failed": "CONNECTION",
+    "ab_connection_failed_pre_write": "CONNECTION",
+    "ab_timeout": "CONNECTION",
+    "ab_timeout_pre_write": "CONNECTION",
+    "ab_auth_failed": "AUTHENTICATION",
+    "ab_unsupported_version": "VERSION",
+    "ab_submit_unsupported": "VERSION",
+    "ab_duplicate_subscription": "DUPLICATE_SUBSCRIPTION",
+    "config_error": "VALIDATION",
+    "invalid_ab_payload": "VALIDATION",
+}
 
 #: Error types where the request may have reached Auto Bangumi (or the create
 #: outcome cannot be proven), so the operation must be OUTCOME_UNKNOWN and only
@@ -155,6 +192,28 @@ def external_submit_result_id(result: Any) -> str | None:
     return None
 
 
+def submit_failure_category(
+    *,
+    outcome: str | None,
+    error_type: str | None,
+) -> str | None:
+    """Return the published failure category for one persisted submit outcome.
+
+    ``outcome`` is the persisted TrackingRecord status.  A successful submit has
+    no failure category; a definite ``SUBMIT_FAILED`` maps its stable
+    ``error_type`` (an unlisted but definite rejection is ``REJECTED``); a local
+    pre-write block is ``VALIDATION``; and every indeterminate result is
+    ``OUTCOME_UNKNOWN`` so the client never offers a blind retry.
+    """
+    if outcome is None or outcome == TRACKING_STATUS_ACTIVE:
+        return None
+    if outcome == TRACKING_STATUS_SUBMIT_FAILED:
+        return _FAILURE_CATEGORY_BY_ERROR_TYPE.get(error_type or "", "REJECTED")
+    if outcome == TRACKING_STATUS_NEEDS_RECONFIRM:
+        return "VALIDATION"
+    return "OUTCOME_UNKNOWN"
+
+
 def tracking_status_for_operation_state(operation_state: str) -> str:
     """Map a terminal operation state to its public TrackingRecord status.
 
@@ -179,6 +238,7 @@ __all__ = [
     "OPERATION_OUTCOME_TRACKING_STATUS",
     "SUBMIT_ADOPTED_MESSAGE",
     "SUBMIT_FAILED_MESSAGE",
+    "SUBMIT_FAILURE_CATEGORIES",
     "SUBMIT_FROM_STATUSES",
     "SUBMIT_OUTCOME_UNKNOWN_MESSAGE",
     "SUBMIT_PERSIST_FAILED_MESSAGE",
@@ -187,5 +247,6 @@ __all__ = [
     "classify_external_submit_result",
     "external_submit_error_type",
     "external_submit_result_id",
+    "submit_failure_category",
     "tracking_status_for_operation_state",
 ]

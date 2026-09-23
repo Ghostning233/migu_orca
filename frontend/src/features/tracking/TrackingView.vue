@@ -14,6 +14,7 @@ import BaseInput from '@/components/forms/BaseInput.vue'
 import BaseSelect from '@/components/forms/BaseSelect.vue'
 import PanelSection from '@/components/layout/PanelSection.vue'
 import { routeLocation } from '@/app/router/catalog'
+import { useNotificationStore } from '@/app/stores/notification'
 import { refreshConnectionStatus } from '@/app/stores/connectionStatus'
 import { storageQuery } from '@/features/requests/requestStorage'
 import {
@@ -28,10 +29,13 @@ import {
   createWriteConflictSession,
   createWriteSession,
   filterTrackingItems,
+  formatTrackingUpdatedAt,
   isDefiniteWriteRejection,
   isRecoveryActionCode,
   isTrackingManagementScope,
   isWriteActionCode,
+  createPlanDeleteSession,
+  makeOpaqueKey,
   managementSessionKeepsIntent,
   probeStatusLabel,
   projectCapabilitySummary,
@@ -41,16 +45,20 @@ import {
   recoveryConfirmation,
   recoverySessionKeepsLock,
   sortTrackingItems,
+  TRACKING_OVERVIEW_GROUPS,
   TRACKING_RECOVER_ENDPOINT,
   TRACKING_STATUS_GROUPS,
   WRITE_ACTION_CONFIRMATIONS,
+  WRITE_FAILURE_PRESENTATIONS,
   WRITE_ACTION_ENDPOINTS,
   writeSessionKeepsIntent,
   type TrackingAction,
   type TrackingActionIntent,
   type TrackingItem,
+  type TrackingListSummary,
   type TrackingManagementScope,
   type TrackingManagementSession,
+  type TrackingPlanDeleteSession,
   type TrackingRecoverResult,
   type TrackingRecoveryActionCode,
   type TrackingRecoverySession,
@@ -76,6 +84,21 @@ import {
   type TrackingManagementResult,
 } from './trackingManagement'
 import TrackingInspector from './TrackingInspector.vue'
+import TrackingPoster from './TrackingPoster.vue'
+import {
+  EMPTY_BATCH_SELECTION,
+  batchSelectionSummary,
+  batchSkipReason,
+  buildBatchSubmitBody,
+  clearBatchSelection,
+  isBatchSelected,
+  projectBatchOutcome,
+  selectAllBatch,
+  selectionAfterBatch,
+  toggleBatchSelection,
+  type TrackingBatchOutcome,
+  type TrackingBatchSelection,
+} from './batchSelection'
 
 type ListResult = NonNullable<
   operations['listTrackingItems']['responses']['200']['content']['application/json']['result']
@@ -84,6 +107,12 @@ type CapabilityResult = NonNullable<
   operations['probeSavedAutoBangumiCapabilities']['responses']['200']['content']['application/json']['result']
 >
 type SavedConnection = NonNullable<operations['getAutoBangumiConnection']['responses']['200']['content']['application/json']['result']>
+type PlanDeleteResult = NonNullable<
+  operations['deleteTrackingPlan']['responses']['200']['content']['application/json']['result']
+>
+type BatchResult = NonNullable<
+  operations['submitTrackingBatch']['responses']['200']['content']['application/json']['result']
+>
 type SyncBody = NonNullable<
   operations['syncTrackingItems']['requestBody']['content']['application/json']
 >
@@ -93,6 +122,7 @@ type SyncResult = NonNullable<
 
 const route = useRoute()
 const router = useRouter()
+const notification = useNotificationStore()
 const items = ref<TrackingItem[]>([])
 const loading = ref(false)
 const failed = ref(false)
@@ -103,6 +133,15 @@ const listContainer = ref<HTMLElement | null>(null)
 type SavedConnectionState = Pick<SavedConnection, 'connection_ref' | 'configuration_revision'> & { capabilities: CapabilityResult }
 const savedConnection = ref<SavedConnection | null>(null)
 const savedState = ref<SavedConnectionState | null>(null)
+/**
+ * Issue #86: a saved Auto Bangumi connection is all a business action needs.
+ * The settings-page probe remains a diagnostic summary and never becomes a
+ * display condition or authorization state for tracking actions.
+ */
+const savedRef = computed<SavedConnection | null>(() => {
+  const summary = savedConnection.value
+  return summary?.connection_ref && summary.credential_present ? summary : null
+})
 const syncLoading = ref(false)
 const syncPending = ref(false)
 const syncMessage = ref('')
@@ -187,10 +226,13 @@ async function probeSavedConnection(): Promise<void> {
 }
 
 const statusLabels: Record<TrackingStatusGroup, string> = {
-  PENDING: '待处理', PROCESSING: '处理中', ACTIVE: '追番中',
-  ATTENTION: '需处理', INACTIVE: '已停用/已删除',
+  PENDING: '待提交', PROCESSING: '处理中', ACTIVE: '追番中',
+  ATTENTION: '需处理', INACTIVE: '已停用',
 }
-const overview = computed(() => projectTrackingOverview(items.value))
+// Issue #85: the overview is the server's authoritative count projection, not a
+// recount of whichever rows this page happens to hold or filter.
+const listSummary = ref<TrackingListSummary | null>(null)
+const overview = computed(() => projectTrackingOverview(listSummary.value))
 const capabilitySummary = computed(() => (
   savedState.value ? projectCapabilitySummary(savedState.value.capabilities) : []
 ))
@@ -322,6 +364,7 @@ async function loadList(silent = false): Promise<void> {
     if (sequence !== listSequence || generation !== writeGeneration) return
     const previous = selectedTrackingId.value
     items.value = result?.items ?? []
+    listSummary.value = result?.summary ?? null
     syncSelection(true)
     if (selectedTrackingId.value && selectedTrackingId.value !== previous) await focusSelection()
   } catch (error) {
@@ -462,21 +505,22 @@ async function syncTracking(): Promise<void> {
   // One sync intent at a time: the guard is taken before the confirmation
   // dialog opens so a second click cannot supersede a pending intent.
   if (syncPending.value || syncLoading.value) return
-  if (!savedState.value) return
+  // Issue #86: the saved connection is enough; the server validates it.
+  if (!savedRef.value) return
   syncPending.value = true
   let confirmed = false
   try {
     confirmed = (await confirmDialog.value?.confirm({
       title: '同步 Auto Bangumi',
-      message: '将使用本页面已探测的连接读取外部追番并更新本地安全摘要，是否继续？',
+      message: '将使用已保存的 Auto Bangumi 连接读取外部追番并更新本地安全摘要，是否继续？',
       confirmLabel: '确认同步',
       cancelLabel: '取消',
     })) ?? false
   } finally {
     syncPending.value = false
   }
-  if (!confirmed || !savedState.value) return
-  const config = savedState.value
+  if (!confirmed || !savedRef.value) return
+  const config = savedRef.value
   const sequence = ++syncSequence
   const controller = new AbortController()
   syncController?.abort()
@@ -500,7 +544,10 @@ async function syncTracking(): Promise<void> {
       items.value = result.items
       detailRevision.value += 1
       syncSelection(true)
-      syncMessage.value = `同步完成：检查 ${result.summary.checked} 条，新增 ${result.summary.created} 条，更新 ${result.summary.updated} 条。`
+      // Issue #88: strangers in Auto Bangumi are counted, never imported.
+      syncMessage.value = result.summary.ignored
+        ? `同步完成：检查 ${result.summary.checked} 条，新增 ${result.summary.created} 条，更新 ${result.summary.updated} 条；忽略 ${result.summary.ignored} 条不属于 MiGuOrca 管理的外部订阅。`
+        : `同步完成：检查 ${result.summary.checked} 条，新增 ${result.summary.created} 条，更新 ${result.summary.updated} 条。`
     } else if (incomplete) {
       syncMessage.value = result.sync_status === 'PARTIAL'
         ? '同步部分完成，已保留原有本地列表；可重连或再次同步。'
@@ -571,6 +618,210 @@ async function recheckAfterAction(trackingId: string, refreshList = false): Prom
   await inspector.value?.reload()
 }
 
+// -- explicit batch submit (issue #87) --------------------------------------
+// A batch is a user-visible selection of *independent* reliable submissions:
+// the page owns the single confirmation and the request, every entry keeps its
+// own revision and opaque key, and filtering never clears the selection.
+const TRACKING_BATCH_SUBMIT_ENDPOINT = '/api/v1/tracking/batch-submit'
+// Unified plan delete (issue #92): the page owns the single request and result.
+const planDeleteSession = ref<TrackingPlanDeleteSession | null>(null)
+let planDeleteSequence = 0
+
+async function openReuseJourney(): Promise<void> {
+  // The safe suggestion is already published in memory by the inspector; the
+  // add journey consumes it and still demands a real MiKan collection.
+  await router.push(routeLocation('add'))
+}
+
+async function runPlanDelete(payload: {
+  item: TrackingItem
+  deleteExternal: boolean
+}): Promise<void> {
+  const config = savedRef.value
+  if (!config?.connection_ref) return
+  const trackingId = payload.item.tracking_id
+  const sequence = ++planDeleteSequence
+  planDeleteSession.value = createPlanDeleteSession(trackingId, 'IN_FLIGHT')
+  try {
+    const storageDir = storageQuery().storage_dir
+    const result = await api.post<PlanDeleteResult>(
+      '/api/v1/tracking/items/{tracking_id}/delete-plan',
+      {
+        path: { tracking_id: trackingId },
+        body: {
+          confirm: true,
+          delete_external: payload.deleteExternal,
+          idempotency_key: makeOpaqueKey(),
+          connection_ref: config.connection_ref,
+          configuration_revision: config.configuration_revision,
+          ...(storageDir ? { storage_dir: storageDir } : {}),
+        },
+      },
+    )
+    if (sequence !== planDeleteSequence) return
+    const state = result?.outcome === 'DELETED'
+      ? 'DELETED'
+      : result?.outcome === 'EXTERNAL_FAILED' ? 'EXTERNAL_FAILED' : 'EXTERNAL_UNKNOWN'
+    planDeleteSession.value = createPlanDeleteSession(trackingId, state)
+    if (state === 'DELETED') {
+      notification.show(
+        'success',
+        '追番方案已删除',
+        payload.deleteExternal
+          ? '已同时删除受控外部订阅；已下载媒体保留。'
+          : 'Auto Bangumi 中的订阅继续运行，MiGuOrca 不再管理它。',
+      )
+      if (selectedTrackingId.value === trackingId) selectedTrackingId.value = ''
+      await loadList(true)
+      return
+    }
+    await recheckAfterAction(trackingId, true)
+  } catch (error) {
+    if (sequence !== planDeleteSequence) return
+    const apiError = toApiError(error)
+    if (apiError.cancelled && !apiError.httpError) return
+    planDeleteSession.value = createPlanDeleteSession(
+      trackingId,
+      apiError.status === 409 ? 'EXTERNAL_FAILED' : 'EXTERNAL_UNKNOWN',
+    )
+    await recheckAfterAction(trackingId, true)
+  }
+}
+
+const batchMode = ref(false)
+const batchSelection = ref<TrackingBatchSelection>(EMPTY_BATCH_SELECTION)
+const batchPending = ref(false)
+const batchLoading = ref(false)
+const batchOutcome = ref<TrackingBatchOutcome | null>(null)
+const batchNotice = ref('')
+let batchSequence = 0
+
+const batchSummary = computed(() => (
+  batchSelectionSummary(batchSelection.value, filteredItems.value)
+))
+const batchSkippedNotice = computed(() => {
+  const reasons = Object.values(batchSelection.value.skipped)
+  if (!reasons.length) return ''
+  const counts = new Map<string, number>()
+  for (const reason of reasons) counts.set(reason, (counts.get(reason) ?? 0) + 1)
+  const detail = [...counts].map(([reason, count]) => `${reason}（${count} 条）`).join('；')
+  return `已跳过 ${reasons.length} 条不可提交记录：${detail}。`
+})
+
+function toggleBatchMode(): void {
+  batchMode.value = !batchMode.value
+  batchSelection.value = clearBatchSelection()
+  batchOutcome.value = null
+  batchNotice.value = ''
+}
+
+function toggleRow(trackingId: string): void {
+  batchSelection.value = toggleBatchSelection(batchSelection.value, trackingId)
+}
+
+function selectAllCurrent(): void {
+  batchSelection.value = selectAllBatch(filteredItems.value)
+}
+
+function clearSelection(): void {
+  batchSelection.value = clearBatchSelection()
+}
+
+function titleFor(trackingId: string): string {
+  return items.value.find((item) => item.tracking_id === trackingId)?.title || '未命名番剧'
+}
+
+/**
+ * Run one explicitly confirmed batch.
+ *
+ * Each entry is sent once with its own revision and opaque key. A transport
+ * failure keeps the selection untouched and resends nothing; a persisted
+ * per-entry result converges the success list and leaves every failed or
+ * unresolved row selected for the user's next explicit action.
+ */
+async function runBatchSubmit(): Promise<void> {
+  if (batchPending.value || batchLoading.value) return
+  const config = savedRef.value
+  if (!config?.connection_ref) return
+  if (!batchSummary.value.selected) return
+  batchPending.value = true
+  let confirmed = false
+  try {
+    confirmed = (await confirmDialog.value?.confirm({
+      title: `提交所选 ${batchSummary.value.selected} 条`,
+      message: `将在 Auto Bangumi 为所选 ${batchSummary.value.selected} 条追番分别创建外部订阅，并可能触发下载。每条独立成功或失败，单条失败不会回滚已成功的条目；是否继续？`,
+      confirmLabel: '确认批量提交',
+      cancelLabel: '取消',
+    })) ?? false
+  } finally {
+    batchPending.value = false
+  }
+  if (!confirmed) return
+
+  const body = buildBatchSubmitBody(
+    batchSelection.value,
+    items.value,
+    {
+      connection_ref: config.connection_ref,
+      configuration_revision: config.configuration_revision,
+    },
+    storageQuery().storage_dir,
+  )
+  if (!body) return
+
+  const sequence = ++batchSequence
+  batchLoading.value = true
+  batchNotice.value = ''
+  batchOutcome.value = null
+  try {
+    const result = await api.post<BatchResult>(TRACKING_BATCH_SUBMIT_ENDPOINT, { body })
+    if (sequence !== batchSequence) return
+    const outcome = projectBatchOutcome(result)
+    batchOutcome.value = outcome
+    batchSelection.value = selectionAfterBatch(batchSelection.value, outcome)
+    const unknown = outcome.unresolved.length
+    batchNotice.value = `本次批量提交：成功 ${outcome.succeeded} 条，失败 ${outcome.failed} 条${unknown ? `，其中 ${unknown} 条结果未知需先恢复` : ''}。`
+    if (outcome.succeeded) {
+      notification.show('success', '批量提交完成', `已在 Auto Bangumi 创建 ${outcome.succeeded} 条外部订阅。`)
+    }
+    await loadList(true)
+  } catch (error) {
+    if (sequence !== batchSequence) return
+    const apiError = toApiError(error)
+    if (apiError.cancelled && !apiError.httpError) return
+    // Nothing was resolved: keep the selection and never resend on our own.
+    batchNotice.value = '批量提交请求未能确认送达，已保留当前选择；请核对连接后重新确认。'
+  } finally {
+    if (sequence === batchSequence) batchLoading.value = false
+  }
+}
+
+/**
+ * Route one submit result to its fixed channel (issue #86).
+ *
+ * A blocking connection/credential/version problem takes over the page as an
+ * actionable dialog with a settings deep link; success is a lightweight global
+ * notice; every other failure keeps its copy on the affected record, where the
+ * recovery controls already live. The server sends only a category code — all
+ * user-facing sentences are fixed here.
+ */
+async function presentWriteFeedback(session: TrackingWriteSession): Promise<void> {
+  if (session.state === 'ACTIVE') {
+    notification.show('success', '提交成功', '已在 Auto Bangumi 创建外部订阅。')
+    return
+  }
+  const category = session.failureCategory
+  if (!category || WRITE_FAILURE_PRESENTATIONS[category].channel !== 'dialog') return
+  const presentation = WRITE_FAILURE_PRESENTATIONS[category]
+  const openSettings = (await confirmDialog.value?.confirm({
+    title: presentation.title,
+    message: presentation.message,
+    confirmLabel: '前往设置',
+    cancelLabel: '关闭',
+  })) ?? false
+  if (openSettings) await router.push(routeLocation('settings'))
+}
+
 /**
  * Run one explicit submit-family external write (US-310, US-311).
  *
@@ -589,10 +840,11 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
     blockReplay(trackingId)
     return
   }
-  const config = savedState.value
-  const capabilities = savedState.value?.capabilities
-  // No page credential session means no external write at all.
-  if (!config || !capabilities) return
+  // Issue #86: a saved Auto Bangumi connection is all an external write needs.
+  // The server re-validates the connection, credentials, exact version and write
+  // capability inside the same request and fails closed, so a settings-page
+  // probe is never a precondition for submitting.
+  if (!savedRef.value) return
   const sameItemRecovery = recoverySession.value?.trackingId === trackingId
     && recoverySessionKeepsLock(recoverySession.value.state)
   const sameItemManagement = managementSession.value?.trackingId === trackingId
@@ -635,15 +887,17 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
     writePending.value = false
   }
   // Cancelling the impact confirmation sends zero requests.
-  if (!confirmed || !savedState.value) return
+  if (!confirmed || !savedRef.value) return
 
   // One opaque key per confirmation.  Only an indeterminate earlier result keeps
   // its locked intent, so a transport retry reuses the very same key (and the
   // very same revision binding) instead of risking a second external
-  // subscription; a definite failure always mints a fresh one.
-  const intent = locked ?? createTrackingActionIntent(payload.item, payload.action, undefined, savedState.value.capabilities)
+  // subscription; a definite failure always mints a fresh one.  Issue #86: the
+  // saved connection is enough to submit — the server performs the authoritative
+  // connection/authentication/version/capability check in the same request.
+  const intent = locked ?? createTrackingActionIntent(payload.item, payload.action)
   if (!intent) return
-  const requestConfig = locked ? writeConfigSnapshot : savedState.value
+  const requestConfig = locked ? writeConfigSnapshot : savedRef.value
   if (!requestConfig) {
     blockReplay(trackingId)
     return
@@ -676,6 +930,7 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
     writeSession.value = session
     if (!writeSessionKeepsIntent(session.state)) writeIntent = null
     await recheckAfterAction(trackingId)
+    await presentWriteFeedback(session)
   } catch (error) {
     if (sequence !== writeSequence) return
     const apiError = toApiError(error)
@@ -834,6 +1089,8 @@ async function runTrackingManagement(payload: {
   item: TrackingItem
   targetScope: TrackingManagementScope
   patch: unknown
+  /** Issue #91: local plan values raised with a confirmed subscription modify. */
+  localPlan?: unknown
 }): Promise<void> {
   const trackingId = payload.item.tracking_id
   if (managementPending.value || managementLoading.value || writePending.value || writeLoading.value
@@ -842,10 +1099,10 @@ async function runTrackingManagement(payload: {
     blockReplay(trackingId)
     return
   }
-  const config = savedState.value
-  const capabilities = savedState.value?.capabilities
-  // No page credential session means no external management write at all.
-  if (!config || !capabilities) return
+  // Issue #89: a saved Auto Bangumi connection is all an external management
+  // write needs. The server re-validates connection, credentials, exact version
+  // and write capability in the same request and fails closed.
+  if (!savedRef.value) return
   const requested = payload.action.code
   // Only the management actions this page can actually send are accepted;
   // DELETE_EXTERNAL waits for its own story and still sends zero requests.
@@ -870,11 +1127,11 @@ async function runTrackingManagement(payload: {
 
   // The page re-validates the emitted request against the current server
   // projection: the action and scope must still be offered for this revision,
-  // the live session must still prove the capability, the patch must belong to
-  // the chosen scope and the enable direction must still be the one the
-  // record's own status implies.
+  // the patch must belong to the chosen scope and the enable direction must
+  // still be the one the record's own status implies. The server validates the
+  // connection, credentials, version and write capability itself (issue #89).
   const projectedIntent = createTrackingManagementActionIntent(
-    payload.item, action, targetScope, payload.patch, capabilities,
+    payload.item, action, targetScope, payload.patch, payload.localPlan,
   )
   if (!projectedIntent) return
   // A locked intent still owns the single opaque key *and* the request it was
@@ -902,9 +1159,9 @@ async function runTrackingManagement(payload: {
     managementPending.value = false
   }
   // Cancelling the impact confirmation sends zero requests.
-  if (!confirmed || !savedState.value) return
+  if (!confirmed || !savedRef.value) return
 
-  const requestConfig = locked ? managementConfigSnapshot : savedState.value
+  const requestConfig = locked ? managementConfigSnapshot : savedRef.value
   if (!requestConfig) {
     blockReplay(trackingId)
     return
@@ -1010,19 +1267,22 @@ onBeforeUnmount(() => {
 
 <template>
   <section id="tracking-overview" class="tracking-overview" aria-labelledby="tracking-heading">
-    <PanelSection title="追番管理" class="tracking-header">
+    <PanelSection title="我的追番" class="tracking-header">
       <template #actions>
         <BaseButton id="tracking-probe-saved" variant="secondary" :disabled="!savedConnection?.connection_ref" @click="probeSavedConnection">测试已保存连接</BaseButton>
-        <BaseButton v-if="savedState" id="tracking-sync" variant="secondary" :loading="syncLoading" :disabled="syncLoading || syncPending || savedState.capabilities.probe_status !== 'VERIFIED'" @click="syncTracking">同步 Auto Bangumi</BaseButton>
+        <BaseButton v-if="savedRef" id="tracking-sync" variant="secondary" :loading="syncLoading" :disabled="syncLoading || syncPending" @click="syncTracking">同步 Auto Bangumi</BaseButton>
         <BaseButton id="tracking-refresh" variant="secondary" :loading="loading" @click="refreshTracking">刷新列表</BaseButton>
+        <BaseButton v-if="savedRef" id="tracking-batch-mode" variant="secondary" @click="toggleBatchMode">
+          {{ batchMode ? '退出批量提交模式' : '批量提交模式' }}
+        </BaseButton>
       </template>
-      <p id="tracking-heading" class="tracking-lede">查看本地追番状态。选择单条记录后，右侧将显示检查器入口。</p>
+      <p id="tracking-heading" class="tracking-lede">管理待提交任务和正在运行的追番。</p>
     </PanelSection>
 
     <section class="tracking-status-overview" aria-labelledby="tracking-status-heading">
       <h2 id="tracking-status-heading">状态总览</h2>
       <div class="tracking-status-cards">
-        <button v-for="group in TRACKING_STATUS_GROUPS" :key="group" type="button" class="tracking-status-card"
+        <button v-for="group in TRACKING_OVERVIEW_GROUPS" :key="group" type="button" class="tracking-status-card"
           :class="{ 'is-selected': statusFilter === group }" :aria-pressed="statusFilter === group"
           @click="statusFilter = statusFilter === group ? '' : group">
           <span>{{ statusLabels[group] }}</span><strong>{{ overview.byGroup[group] }}</strong>
@@ -1031,7 +1291,7 @@ onBeforeUnmount(() => {
       <p class="tracking-status-total" role="status">共 {{ overview.total }} 条追番记录</p>
     </section>
 
-    <section class="tracking-workspace" aria-label="追番记录与检查器">
+    <section class="tracking-workspace" aria-label="追番记录与追番详情">
       <PanelSection title="追番列表" class="tracking-list-panel">
         <template #actions><span class="tracking-count" aria-live="polite">显示 {{ filteredItems.length }} / {{ items.length }}</span></template>
         <div class="tracking-filters">
@@ -1046,13 +1306,41 @@ onBeforeUnmount(() => {
         <ErrorState v-else-if="failed" title="追番列表读取失败" message="暂时无法读取本地追番列表，请稍后重试。" retry-label="重试读取" @retry="loadList()" />
         <EmptyState v-else-if="!items.length" message="还没有本地追番记录。" />
         <EmptyState v-else-if="!filteredItems.length" message="没有符合当前搜索或状态筛选的记录。" />
+        <div v-if="batchMode" class="tracking-batch-toolbar" aria-label="批量提交">
+          <span id="tracking-batch-count" class="tracking-batch-count" role="status">
+            已选 {{ batchSummary.selected }} 条<template v-if="batchSummary.hidden">（其中 {{ batchSummary.hidden }} 条不在当前筛选内）</template>
+          </span>
+          <BaseButton id="tracking-batch-select-all" variant="secondary" @click="selectAllCurrent">全选当前结果</BaseButton>
+          <BaseButton id="tracking-batch-clear" variant="secondary" :disabled="!batchSummary.selected" @click="clearSelection">清除选择</BaseButton>
+          <BaseButton id="tracking-batch-submit" :loading="batchLoading" :disabled="batchLoading || batchPending || !batchSummary.selected" @click="runBatchSubmit">
+            提交所选 {{ batchSummary.selected }} 条
+          </BaseButton>
+        </div>
+        <p v-if="batchMode && batchSkippedNotice" id="tracking-batch-skipped" class="tracking-batch-skipped" role="status">{{ batchSkippedNotice }}</p>
         <div v-else id="tracking-list-container" ref="listContainer" class="tracking-list" tabindex="-1" aria-label="追番记录列表">
           <button v-for="item in filteredItems" :key="item.tracking_id" type="button" class="tracking-list-item"
-            :class="{ 'is-selected': selectedTrackingId === item.tracking_id }" :data-tracking-id="item.tracking_id"
+            :class="{ 'is-selected': selectedTrackingId === item.tracking_id, 'is-batch': batchMode }" :data-tracking-id="item.tracking_id"
             :aria-current="selectedTrackingId === item.tracking_id ? 'true' : undefined" @click="selectItem(item.tracking_id)">
+            <input
+              v-if="batchMode"
+              type="checkbox"
+              class="tracking-list-checkbox"
+              :checked="isBatchSelected(batchSelection, item.tracking_id)"
+              :disabled="Boolean(batchSkipReason(item))"
+              :aria-label="`选择提交 ${item.title || '未命名番剧'}`"
+              @click.stop
+              @change="toggleRow(item.tracking_id)"
+            >
             <span class="tracking-list-indicator" aria-hidden="true" />
-            <span class="tracking-list-copy"><strong>{{ item.title || '未命名番剧' }}</strong><span>{{ item.subtitle_group || '未设置字幕组' }}</span></span>
-            <span class="tracking-list-meta"><span>{{ item.status_label }}</span><small>{{ item.updated_episode_status === 'NOT_IMPLEMENTED' ? '更新集数待开发' : '更新信息不可用' }}</small></span>
+            <TrackingPoster :poster-path="item.poster_path" variant="list" />
+            <span class="tracking-list-copy">
+              <strong>{{ item.title || '未命名番剧' }}</strong>
+              <span>{{ item.season ? `第 ${item.season} 季` : '季度未设置' }}</span>
+            </span>
+            <span class="tracking-list-meta">
+              <span>{{ item.status_label }}</span>
+              <small>{{ formatTrackingUpdatedAt(item.updated_at) }}</small>
+            </span>
           </button>
         </div>
         <p v-if="selectedHidden" class="tracking-selection-note" role="status">当前选择被筛选条件隐藏，未自动切换记录。</p>
@@ -1065,12 +1353,15 @@ onBeforeUnmount(() => {
           :key="`${selectedItem.tracking_id}:${detailRevision}`"
           :tracking-id="selectedItem.tracking_id"
           :capabilities="savedState?.capabilities ?? null"
-          :credential-ready="Boolean(savedState)"
+          :connection-ready="Boolean(savedRef)"
           :write-session="writeSession"
           :recovery-session="recoverySession"
           :management-session="managementSession"
           :write-busy="inspectorIntentBusy"
           :intent-notice="selectedIntentNotice"
+          :plan-delete-session="planDeleteSession"
+          @reuse-requested="openReuseJourney"
+          @plan-delete-requested="runPlanDelete"
           @tracking-updated="applyReturnedTracking"
           @write-requested="runTrackingWrite"
           @recovery-requested="runTrackingRecovery"
@@ -1082,6 +1373,22 @@ onBeforeUnmount(() => {
         </template>
       </aside>
     </section>
+    <section
+      v-if="batchMode && (batchOutcome || batchNotice)"
+      id="tracking-batch-result"
+      class="tracking-batch-result"
+      aria-labelledby="tracking-batch-result-heading"
+      role="status"
+    >
+      <h2 id="tracking-batch-result-heading">批量提交结果</h2>
+      <p v-if="batchNotice" class="tracking-batch-verdict">{{ batchNotice }}</p>
+      <ul v-if="batchOutcome" class="tracking-batch-entries">
+        <li v-for="entry in batchOutcome.entries" :key="entry.trackingId" :class="entry.ok ? 'is-ok' : 'is-failed'">
+          <strong>{{ titleFor(entry.trackingId) }}</strong>：{{ entry.message }}
+        </li>
+      </ul>
+    </section>
+
     <section v-if="savedState" class="tracking-connection-status" aria-labelledby="tracking-connection-heading">
       <h2 id="tracking-connection-heading">Auto Bangumi 页面连接</h2>
       <p role="status">
@@ -1114,15 +1421,25 @@ onBeforeUnmount(() => {
 .tracking-status-card strong { font-size: 1.35rem; }
 .tracking-status-total, .tracking-count { margin: 0; color: var(--color-text-muted); }
 .tracking-compat-notice { margin: var(--space-3) 0 0; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-subtle); color: var(--color-text-muted); }
-.tracking-workspace { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(17rem, 1fr); gap: var(--space-5); align-items: start; }
+.tracking-workspace { display: grid; grid-template-columns: minmax(0, 3fr) minmax(18rem, 2fr); gap: var(--space-5); align-items: start; }
 .tracking-list-panel { min-width: 0; }
 .tracking-filters { display: grid; grid-template-columns: auto minmax(10rem, 1fr) auto minmax(8rem, .7fr) auto; gap: .65rem; align-items: center; margin-bottom: var(--space-4); }
 .tracking-filters label { font-size: .85rem; font-weight: 600; }
 .tracking-list { display: grid; gap: .55rem; }
-.tracking-list-item { display: grid; grid-template-columns: .35rem minmax(0, 1fr) auto; gap: .8rem; align-items: center; width: 100%; padding: .85rem .9rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text); text-align: left; cursor: pointer; }
+.tracking-list-item { display: grid; grid-template-columns: .35rem auto minmax(0, 1fr) auto; gap: .8rem; align-items: center; width: 100%; padding: .85rem .9rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text); text-align: left; cursor: pointer; }
 .tracking-list-item:hover, .tracking-list-item:focus-visible, .tracking-list-item.is-selected { border-color: var(--color-primary); background: var(--color-surface-subtle); }
 .tracking-list-item.is-selected .tracking-list-indicator { background: var(--color-primary); }
 .tracking-list-indicator { align-self: stretch; min-height: 2rem; border-radius: 99px; background: var(--color-border); }
+.tracking-list-item.is-batch { grid-template-columns: auto .35rem auto minmax(0, 1fr) auto; }
+.tracking-list-checkbox { inline-size: 1.05rem; block-size: 1.05rem; accent-color: var(--color-primary); }
+.tracking-batch-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-subtle); }
+.tracking-batch-count { margin-inline-end: auto; font-weight: 600; }
+.tracking-batch-skipped { margin: var(--space-2) 0 0; color: var(--color-text-muted); }
+.tracking-batch-result { display: grid; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); }
+.tracking-batch-result h2 { margin: 0; font-size: 1.05rem; }
+.tracking-batch-verdict { margin: 0; font-weight: 600; }
+.tracking-batch-entries { display: grid; gap: .3rem; margin: 0; padding-left: 1.2rem; }
+.tracking-batch-entries li.is-failed { color: var(--color-danger); }
 .tracking-list-copy, .tracking-list-meta { display: grid; gap: .25rem; min-width: 0; }
 .tracking-list-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tracking-list-copy span, .tracking-list-meta small { color: var(--color-text-muted); }

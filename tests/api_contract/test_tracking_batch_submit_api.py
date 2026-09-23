@@ -1,0 +1,280 @@
+from __future__ import annotations
+
+"""Issue #87 contract tests for the explicit batch submit endpoint.
+
+The batch is N *independent* reliable submissions: every entry keeps its own
+revision and idempotency key, one failure never rolls back a success, and a
+repeated request reuses the same operations.  These tests run against the real
+Flask app with an isolated temporary storage root and a programmable Auto
+Bangumi seam, so no external system is ever touched.
+"""
+
+from pathlib import Path
+from typing import Any
+
+import pytest
+from flask.testing import FlaskClient
+
+from apps.migu_orca_entry.controllers.entry_controller import generate_request
+from apps.migu_orca_web.api_contract import TrackingBatchSubmitResultDTO
+from apps.migu_orca_web.tracking_handoff import ensure_confirmed_request_tracking
+from request_engine.controllers.request_controller import accept_request
+from shared.models import EntryRequest
+from storage_engine.controllers.autobangumi_config_repository import (
+    AutoBangumiConfigRepository,
+    build_stored_autobangumi_config,
+)
+from storage_engine.controllers.request_repository import save_request_snapshot
+from storage_engine.controllers.storage_config import (
+    StorageConfig,
+    load_storage_config,
+)
+from storage_engine.controllers.tracking_repository import load_tracking_record
+from tracking_engine.models.tracking import (
+    TRACKING_ORIGIN_SAVE_CONFIRM,
+    TrackingRecord,
+)
+
+BATCH_ENDPOINT = "/api/v1/tracking/batch-submit"
+SUCCESS_RESULT = {"success": True, "ab_subscription_id": "ab-created", "error": None}
+AUTH_FAILURE = {"success": False, "ab_subscription_id": None, "error": {"error_type": "ab_auth_failed"}}
+UNKNOWN_RESULT = {"success": False, "ab_subscription_id": None, "error": {"error_type": "ab_timeout"}}
+
+
+def _config(tmp_path: Path) -> StorageConfig:
+    return load_storage_config(tmp_path / "storage")
+
+
+def _seed_records(tmp_path: Path, count: int) -> tuple[dict[str, Any], list[TrackingRecord]]:
+    """Seed one saved connection generation and ``count`` pending records."""
+    saved = AutoBangumiConfigRepository(tmp_path / "config").save(
+        build_stored_autobangumi_config(
+            {
+                "auth_mode": "password",
+                "base_url": "http://ab.invalid",
+                "username": "operator",
+                "password": "secret-password",
+            }
+        ),
+        expected_configuration_revision=0,
+    )
+    config = _config(tmp_path)
+    records: list[TrackingRecord] = []
+    for index in range(count):
+        request = accept_request(
+            {
+                **generate_request(EntryRequest(raw_title="芙莉莲"))["request"],
+                "request_id": f"request-{index}",
+            }
+        )
+        save_request_snapshot(config, request)
+        handoff = ensure_confirmed_request_tracking(
+            config=config,
+            request=request,
+            origin=TRACKING_ORIGIN_SAVE_CONFIRM,
+            now=f"2026-09-08T00:00:{index:02d}+00:00",
+        )
+        records.append(load_tracking_record(config, handoff.tracking_id))
+    connection = {
+        "connection_ref": str(saved.connection_ref),
+        "configuration_revision": saved.configuration_revision,
+    }
+    return connection, records
+
+
+def _batch_body(
+    connection: dict[str, Any],
+    records: list[TrackingRecord],
+    **overrides: Any,
+) -> dict[str, Any]:
+    return {
+        "items": [
+            {
+                "tracking_id": record.tracking_id,
+                "expected_revision": record.revision,
+                "idempotency_key": f"batch-key-{record.tracking_id}",
+            }
+            for record in records
+        ],
+        "confirm": True,
+        "storage_dir": "storage",
+        **connection,
+        **overrides,
+    }
+
+
+def _patch_submit_one(monkeypatch: pytest.MonkeyPatch, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Serve one queued Auto Bangumi result per external call, in order."""
+    queue = list(results)
+    calls: list[dict[str, Any]] = []
+
+    def submit_one(request: dict[str, Any], _config: Any) -> dict[str, Any]:
+        calls.append(request)
+        assert queue, "the batch issued more external calls than the test queued"
+        return queue.pop(0)
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.tracking_submission_service.compose_tracking_submit_one",
+        lambda: submit_one,
+    )
+    return calls
+
+
+def _post(client: FlaskClient, body: dict[str, Any]) -> Any:
+    return client.post(BATCH_ENDPOINT, json=body)
+
+
+# ---------------------------------------------------------------------------
+# Batch sizes
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("count", [1, 12, 36])
+def test_batch_submit_runs_every_selected_entry(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch, count: int
+) -> None:
+    connection, records = _seed_records(tmp_path, count)
+    calls = _patch_submit_one(monkeypatch, [SUCCESS_RESULT] * count)
+
+    response = _post(client, _batch_body(connection, records))
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    result = payload["result"]
+    TrackingBatchSubmitResultDTO.model_validate(result)
+    assert result["summary"] == {
+        "total": count, "succeeded": count, "failed": 0, "unknown": 0, "blocked": 0,
+    }
+    assert [item["tracking_id"] for item in result["items"]] == [
+        record.tracking_id for record in records
+    ]
+    assert all(item["ok"] is True for item in result["items"])
+    assert all(item["result"]["outcome"] == "ACTIVE" for item in result["items"])
+    assert len(calls) == count
+
+
+# ---------------------------------------------------------------------------
+# Per-entry independence
+# ---------------------------------------------------------------------------
+
+
+def test_batch_submit_partial_success_never_rolls_back_a_success(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connection, records = _seed_records(tmp_path, 3)
+    _patch_submit_one(monkeypatch, [SUCCESS_RESULT, AUTH_FAILURE, UNKNOWN_RESULT])
+
+    payload = _post(client, _batch_body(connection, records)).get_json()
+
+    result = payload["result"]
+    assert result["summary"] == {
+        "total": 3, "succeeded": 1, "failed": 1, "unknown": 1, "blocked": 0,
+    }
+    by_id = {item["tracking_id"]: item for item in result["items"]}
+    succeeded = by_id[records[0].tracking_id]
+    assert succeeded["ok"] is True
+    assert succeeded["result"]["failure_category"] is None
+    failed = by_id[records[1].tracking_id]
+    assert failed["ok"] is False
+    assert failed["result"]["outcome"] == "SUBMIT_FAILED"
+    assert failed["result"]["failure_category"] == "AUTHENTICATION"
+    unknown = by_id[records[2].tracking_id]
+    assert unknown["ok"] is False
+    assert unknown["result"]["outcome"] == "VERIFYING_EXTERNAL"
+    assert unknown["result"]["failure_category"] == "OUTCOME_UNKNOWN"
+
+    # The success stayed persisted even though a later entry failed.
+    config = _config(tmp_path)
+    assert load_tracking_record(config, records[0].tracking_id).status == "ACTIVE"
+    assert load_tracking_record(config, records[1].tracking_id).status == "SUBMIT_FAILED"
+    assert load_tracking_record(config, records[2].tracking_id).status == "VERIFYING_EXTERNAL"
+
+
+def test_batch_submit_reports_every_entry_when_all_fail(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connection, records = _seed_records(tmp_path, 2)
+    _patch_submit_one(monkeypatch, [AUTH_FAILURE, AUTH_FAILURE])
+
+    result = _post(client, _batch_body(connection, records)).get_json()["result"]
+
+    assert result["summary"] == {
+        "total": 2, "succeeded": 0, "failed": 2, "unknown": 0, "blocked": 0,
+    }
+    assert all(item["ok"] is False for item in result["items"])
+    assert all(item["result"]["failure_category"] == "AUTHENTICATION" for item in result["items"])
+
+
+def test_batch_submit_precondition_conflict_blocks_only_that_entry(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connection, records = _seed_records(tmp_path, 2)
+    calls = _patch_submit_one(monkeypatch, [SUCCESS_RESULT])
+    body = _batch_body(connection, records)
+    body["items"][1]["expected_revision"] = records[1].revision + 5
+
+    result = _post(client, body).get_json()["result"]
+
+    assert result["summary"] == {
+        "total": 2, "succeeded": 1, "failed": 0, "unknown": 0, "blocked": 1,
+    }
+    by_id = {item["tracking_id"]: item for item in result["items"]}
+    assert by_id[records[0].tracking_id]["ok"] is True
+    blocked = by_id[records[1].tracking_id]
+    assert blocked["ok"] is False
+    assert blocked["error_type"] == "tracking_revision_conflict"
+    assert blocked["result"] is None
+    # The refused entry never reached Auto Bangumi.
+    assert len(calls) == 1
+
+
+def test_batch_submit_replays_one_key_without_a_second_external_call(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connection, records = _seed_records(tmp_path, 1)
+    calls = _patch_submit_one(monkeypatch, [SUCCESS_RESULT])
+    body = _batch_body(connection, records)
+
+    first = _post(client, body).get_json()["result"]
+    second = _post(client, body).get_json()["result"]
+
+    assert first["summary"]["succeeded"] == 1
+    assert second["summary"]["succeeded"] == 1
+    assert len(calls) == 1
+    assert second["items"][0]["result"]["outcome"] == "ACTIVE"
+
+
+# ---------------------------------------------------------------------------
+# Strict payload
+# ---------------------------------------------------------------------------
+
+
+def test_batch_submit_rejects_an_empty_oversized_or_duplicated_batch(
+    tmp_path: Path, client: FlaskClient
+) -> None:
+    connection, records = _seed_records(tmp_path, 1)
+    body = _batch_body(connection, records)
+
+    for invalid in (
+        {**body, "items": []},
+        {**body, "items": body["items"] * 37},
+        {**body, "items": [body["items"][0], body["items"][0]]},
+        {**body, "confirm": False},
+        {**body, "unexpected": True},
+    ):
+        response = _post(client, invalid)
+        assert response.status_code == 400, invalid
+        assert response.get_json()["error_type"] == "data_validation_errors"
+
+
+def test_batch_submit_never_leaks_credentials_or_paths(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connection, records = _seed_records(tmp_path, 2)
+    _patch_submit_one(monkeypatch, [AUTH_FAILURE, UNKNOWN_RESULT])
+
+    response = _post(client, _batch_body(connection, records))
+
+    body_text = response.get_data(as_text=True)
+    for forbidden in ("secret-password", "operator", "ab.invalid", str(tmp_path)):
+        assert forbidden not in body_text
