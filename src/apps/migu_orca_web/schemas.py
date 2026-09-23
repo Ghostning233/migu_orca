@@ -409,6 +409,8 @@ class SavedTrackingSubmitInput(BaseModel):
     confirm: StrictBool
     connection_ref: UUID
     configuration_revision: StrictInt = Field(ge=0)
+    #: Issue #98: one operation-level submission mode; never a plan field.
+    submission_mode: Literal["CONTINUE_TRACKING", "DOWNLOAD_EXISTING"] = "CONTINUE_TRACKING"
     storage_dir: str | None = None
 
     @field_validator("tracking_id")

@@ -49,9 +49,20 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-TRACKING_OPERATION_SCHEMA_VERSION = 3
+TRACKING_OPERATION_CONNECTION_SCHEMA_VERSION = 3
+#: Issue #98: operations record which submission mode the user chose.
+TRACKING_OPERATION_SCHEMA_VERSION = 4
 TRACKING_OPERATION_LEGACY_SCHEMA_VERSION = 1
 TRACKING_OPERATION_MANAGEMENT_SCHEMA_VERSION = 2
+
+#: One operation-level submission mode (never a local plan field).
+TRACKING_SUBMISSION_MODE_CONTINUE = "CONTINUE_TRACKING"
+TRACKING_SUBMISSION_MODE_DOWNLOAD_EXISTING = "DOWNLOAD_EXISTING"
+TRACKING_SUBMISSION_MODES = (
+    TRACKING_SUBMISSION_MODE_CONTINUE,
+    TRACKING_SUBMISSION_MODE_DOWNLOAD_EXISTING,
+)
+TRACKING_SUBMISSION_MODES_SET = frozenset(TRACKING_SUBMISSION_MODES)
 
 # -- operation kinds ----------------------------------------------------------
 #: The only operation kind Stage 29 B-B produces.  Future B-C actions
@@ -167,6 +178,7 @@ _OPERATION_FIELDS = frozenset(
         "connection_ref",
     }
 )
+_OPERATION_SUBMISSION_FIELDS = frozenset(_OPERATION_FIELDS | {"submission_mode"})
 _OPERATION_BASE_FIELDS = frozenset(
     _OPERATION_FIELDS - {
         "target_scope",
@@ -235,6 +247,9 @@ class TrackingOperation:
     previous_tracking_status: str | None = None
     expected_external_fingerprint: str | None = None
     connection_ref: str | None = None
+    #: Issue #98: the operation-level submission mode.  A v1-v3 operation reads
+    #: back as the continue-tracking default.
+    submission_mode: str = TRACKING_SUBMISSION_MODE_CONTINUE
 
 
 def utc_now() -> str:
@@ -254,6 +269,7 @@ def create_tracking_operation(
     expected_external_fingerprint: str | None = None,
     connection_ref: str | UUID | None = None,
     attempt: int = 1,
+    submission_mode: str = TRACKING_SUBMISSION_MODE_CONTINUE,
     now: str | None = None,
 ) -> TrackingOperation:
     """Build a fresh ``PREPARED`` operation bound to ``idempotency_key``.
@@ -300,6 +316,7 @@ def create_tracking_operation(
         previous_tracking_status=previous_tracking_status,
         expected_external_fingerprint=expected_external_fingerprint,
         connection_ref=clean_connection_ref,
+        submission_mode=_validated_submission_mode(submission_mode),
     )
 
 
@@ -380,6 +397,8 @@ def operation_to_storage_dict(operation: TrackingOperation) -> dict[str, Any]:
         )
     if operation.connection_ref is not None:
         payload["connection_ref"] = _optional_connection_ref(operation.connection_ref)
+    if operation.submission_mode != TRACKING_SUBMISSION_MODE_CONTINUE:
+        payload["submission_mode"] = operation.submission_mode
     return payload
 
 
@@ -399,7 +418,8 @@ def operation_from_storage_dict(data: Any) -> TrackingOperation:
     allowed_fields = {
         TRACKING_OPERATION_LEGACY_SCHEMA_VERSION: _OPERATION_BASE_FIELDS,
         TRACKING_OPERATION_MANAGEMENT_SCHEMA_VERSION: _OPERATION_MANAGEMENT_FIELDS,
-        TRACKING_OPERATION_SCHEMA_VERSION: _OPERATION_FIELDS,
+        TRACKING_OPERATION_CONNECTION_SCHEMA_VERSION: _OPERATION_FIELDS,
+        TRACKING_OPERATION_SCHEMA_VERSION: _OPERATION_SUBMISSION_FIELDS,
     }.get(schema_version)
     unknown = sorted(
         set(data) - (_OPERATION_FIELDS if allowed_fields is None else allowed_fields)
@@ -410,6 +430,7 @@ def operation_from_storage_dict(data: Any) -> TrackingOperation:
     if schema_version not in {
         TRACKING_OPERATION_LEGACY_SCHEMA_VERSION,
         TRACKING_OPERATION_MANAGEMENT_SCHEMA_VERSION,
+        TRACKING_OPERATION_CONNECTION_SCHEMA_VERSION,
         TRACKING_OPERATION_SCHEMA_VERSION,
     }:
         raise ValueError(
@@ -460,6 +481,7 @@ def operation_from_storage_dict(data: Any) -> TrackingOperation:
     )
 
     return TrackingOperation(
+        submission_mode=_validated_submission_mode(data.get("submission_mode")),
         schema_version=schema_version,
         operation_id=operation_id,
         tracking_id=tracking_id,
@@ -501,6 +523,15 @@ def _require_non_empty_str(value: Any, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{name} must be a non-empty string")
     return value.strip()
+
+
+def _validated_submission_mode(value: Any) -> str:
+    """Return a known submission mode, defaulting only when it is absent."""
+    if value is None:
+        return TRACKING_SUBMISSION_MODE_CONTINUE
+    if value not in TRACKING_SUBMISSION_MODES_SET:
+        raise ValueError(f"invalid submission mode: {value!r}")
+    return value
 
 
 def _optional_clean_str(value: Any, name: str) -> str | None:
@@ -559,6 +590,9 @@ __all__ = [
     "TRACKING_OPERATION_KIND_DELETE_EXTERNAL",
     "TRACKING_OPERATION_KIND_REFRESH_RSS",
     "TRACKING_OPERATION_SCHEMA_VERSION",
+    "TRACKING_SUBMISSION_MODE_CONTINUE",
+    "TRACKING_SUBMISSION_MODE_DOWNLOAD_EXISTING",
+    "TRACKING_SUBMISSION_MODES",
     "TRACKING_OPERATION_MANAGEMENT_SCHEMA_VERSION",
     "TRACKING_OPERATION_LEGACY_SCHEMA_VERSION",
     "TRACKING_OPERATION_TARGET_SCOPE_SUBSCRIPTION",

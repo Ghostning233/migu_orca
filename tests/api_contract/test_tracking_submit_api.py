@@ -11,6 +11,7 @@ call time.  The autouse ``_web_storage_root`` fixture maps the relative
 payloads or URLs.
 """
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,7 @@ from storage_engine.controllers.autobangumi_config_repository import (
     AutoBangumiConfigRepository,
     build_stored_autobangumi_config,
 )
+from storage_engine.controllers.operation_repository import load_tracking_operation
 from storage_engine.controllers.request_repository import (
     load_request_snapshot,
     save_request_snapshot,
@@ -701,3 +703,49 @@ def test_submit_without_valid_resources_is_refused_before_any_external_call(
     issues = response.get_json().get("result", {}).get("issues", [])
     if response.status_code == 200:
         assert "NO_VALID_RESOURCES" in [issue.get("code") for issue in issues]
+
+# -- issue #98: the operation-level submission mode ---------------------------
+
+
+def test_submit_accepts_the_operation_level_submission_mode(
+    tmp_path: Path,
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC 1: the stable enum is accepted, defaults, and never reaches the plan.
+
+    The HTTP -> operation persistence of a non-default mode is still pending
+    (see issue #98); this case locks the payload contract and the default.
+    """
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    _patch_ab_factory(monkeypatch, FakeAutoBangumiClient())
+
+    response = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/submit",
+        json=_submit_body(record, submission_mode="DOWNLOAD_EXISTING"),
+    )
+
+    assert response.status_code == 200
+    result = response.get_json()["result"]
+    operation = load_tracking_operation(_config(tmp_path), result["operation_id"])
+    assert operation.submission_mode == "CONTINUE_TRACKING"
+    # The local plan snapshot never carries the submission mode.
+    snapshot = load_request_snapshot(_config(tmp_path), request["request_id"])
+    assert "submission_mode" not in json.dumps(snapshot, ensure_ascii=False)
+
+
+def test_submit_rejects_an_unknown_submission_mode(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    _patch_ab_factory(monkeypatch, FakeAutoBangumiClient())
+
+    response = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/submit",
+        json=_submit_body(record, submission_mode="SAFE_RETRY"),
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error_type"] == "data_validation_errors"
