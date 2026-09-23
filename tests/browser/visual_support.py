@@ -188,6 +188,7 @@ def collect_anchor_boxes(page: Page, selectors: dict[str, str]) -> dict[str, dic
                 const rect = element.getBoundingClientRect();
                 result[name] = {
                     x: rect.x, y: rect.y, width: rect.width, height: rect.height,
+                    right: rect.right,
                 };
             }
             return result;

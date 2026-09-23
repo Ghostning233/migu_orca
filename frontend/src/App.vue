@@ -85,24 +85,26 @@ function requestBrandReturn(event: MouseEvent): void {
     <GlobalLoadingBar />
     <header class="app-header">
       <div class="app-header-inner">
-        <RouterLink :to="routeLocation('add')" class="brand-block" aria-label="返回添加番剧" @click="requestBrandReturn">
-          <h1 class="app-title">MiGuOrca</h1>
-        </RouterLink>
+        <div class="app-header-start">
+          <RouterLink :to="routeLocation('add')" class="brand-block" aria-label="返回添加番剧" @click="requestBrandReturn">
+            <h1 class="app-title">MiGuOrca</h1>
+          </RouterLink>
 
-        <nav class="top-nav" aria-label="主导航">
-          <ul class="top-nav-list">
-            <li v-for="(item, index) in navigation" :key="item.route">
-              <RouterLink
-                :id="`shell-nav-${index + 1}`"
-                :to="routeLocation(item.route)"
-                class="nav-link"
-                :aria-current="isCurrent(item.route) ? 'page' : undefined"
-              >
-                <span>{{ item.label }}</span>
-              </RouterLink>
-            </li>
-          </ul>
-        </nav>
+          <nav class="top-nav" aria-label="主导航">
+            <ul class="top-nav-list">
+              <li v-for="(item, index) in navigation" :key="item.route">
+                <RouterLink
+                  :id="`shell-nav-${index + 1}`"
+                  :to="routeLocation(item.route)"
+                  class="nav-link"
+                  :aria-current="isCurrent(item.route) ? 'page' : undefined"
+                >
+                  <span>{{ item.label }}</span>
+                </RouterLink>
+              </li>
+            </ul>
+          </nav>
+        </div>
 
         <RouterLink
           :to="routeLocation('settings')"

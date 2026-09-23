@@ -14,6 +14,7 @@
 - 用户新一轮前端人工审核的问题与设计讨论：[前端审核问题记录](design/frontend-review-issues-2026-09-17.md)
 - Stage 41 添加页状态反馈与任务导向审核已完成（US-342～US-345）；执行证据见 [Stage 41 归档 progress](../scripts/ralph/archive/2026-09-18-stage41-add-anime-ux/progress.txt)。
 - 添加番剧、我的追番和设置的现行目标设计：[2026-09-23 新版设计图与交互基线](design/frontend-ux-redesign-2026-09-23.md)；此前六张添加页效果图已[归档](design/frontend-ux-review-mockups-2026-09-17.md)。
+- Issue #109 共用壳层的 1280／1440／1920 数值布局基线：[壳层数值基线](design/frontend-ux-shell-geometry-baseline.md)。
 - 已完成的 Stage 43～45 总体规划：[添加番剧视觉与信息层级收口](MiGuOrca_stage43_45_add_anime_visual_PRD.md)
 - Stage 46～48 的历史总体规划：[添加番剧页面像素级复刻总体 PRD](MiGuOrca_add_anime_pixel_parity_PRD.md)
 - Stage 46 像素基线、应用壳层与共享控件已由 PR #75 合并；其 3C 像素门禁裁决与执行记录见 [Stage 46 PRD](MiGuOrca_stage46_pixel_foundation_PRD.md)。

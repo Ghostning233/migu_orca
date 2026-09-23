@@ -103,6 +103,11 @@
    * numbers lose to the explicit Token V1 values (overall PRD 2.1). */
   --top-nav-height: 72px;
   --content-max: 1512px;
+  /* Token V1 §6.1 width tiers for the shared shell: compact 24px (<1440),
+   * standard 32px (1440–1679, the 1440×900 acceptance canvas) and wide 48px
+   * (≥1680). The header and the page container consume the same role so the
+   * brand, the page title and the content edge stay on one vertical axis. */
+  --content-padding-inline: var(--space-6);
   --size-shell-header: var(--top-nav-height);
   --size-content-max: var(--content-max);
   --size-control-min: var(--control-target-min);
@@ -154,6 +159,20 @@
   --z-modal: 60;
   --z-overlay: var(--z-modal);
   --z-skip-link: 200;
+}
+
+/* Token V1 §6.1 shell width tiers: standard desktop (1440–1679) and wide
+ * desktop (1680–1920) step the shared content padding up one Token level. */
+@media (min-width: 1440px) {
+  :root {
+    --content-padding-inline: var(--space-8);
+  }
+}
+
+@media (min-width: 1680px) {
+  :root {
+    --content-padding-inline: var(--space-12);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

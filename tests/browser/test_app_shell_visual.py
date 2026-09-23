@@ -1,15 +1,15 @@
-"""Stage 46 / US-361：共享应用壳层的真实 Chromium 门禁。
+"""共享应用壳层的真实 Chromium 门禁（Issue 109 数值基线）。
 
 三层证据：
 
-1. 图像：顶栏条带（``SHELL_REGION``）与归一化设计图的差异比例 <= 0.5%，掩码只
-   覆盖文字字形/胶囊内容/下划线；
-2. 锚点：顶栏高度、内容容器、品牌块、首项导航盒与归一化设计图测量目标相差
-   <= 2 CSS px；
-3. computed style：品牌/导航/下划线的颜色、字号、边框、阴影全部来自语义 token。
+1. 锚点：1280／1440／1920 下顶栏高度、内容容器盒、品牌左缘、连接胶囊右缘、
+   首项导航与胶囊的垂直居中全部由冻结 Token 决定，相差 <= 2 CSS px；
+2. computed style：品牌/导航/下划线的颜色、字号、边框、阴影与档位内边距
+   全部来自语义 token（24／32／48px）；
+3. 图像：顶栏条带（``SHELL_REGION``）与归一化设计图的差异比例只作诊断，
+   按像素门禁裁决 3C 不设硬阈值（位图仅作人工辅助）。
 
-另外覆盖 1280/1920/200% 缩放、键盘焦点、reduced-motion 与另外三个一级页面的
-定向不回归。
+另外覆盖 200% 缩放、键盘焦点、reduced-motion 与另外两个一级页面的定向不回归。
 """
 
 from __future__ import annotations
@@ -22,10 +22,13 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.browser.visual_manifest import (
+    CONTENT_MAX,
     PIXEL_GATE_RULING,
-    SHELL_ANCHORS,
     SHELL_DIAGNOSTIC_ANCHORS,
     SHELL_REGION,
+    SHELL_VIEWPORTS,
+    content_padding_inline,
+    shell_anchors_for,
 )
 from tests.browser.visual_support import (
     anchor_summary,
@@ -94,9 +97,11 @@ def _install_shell_routes(page: Page) -> None:
     )
 
 
-def _open_shell(page: Page, live_server_url: str, route: str = "/app/add") -> None:
+def _open_shell(page: Page, live_server_url: str, route: str = "/app/add", width: int | None = None) -> None:
     require_dist()
     prepare_canvas(page)
+    if width is not None:
+        page.set_viewport_size({"width": width, "height": 900})
     _install_shell_routes(page)
     page.goto(f"{live_server_url}{route}")
     page.wait_for_selector(".app-header", timeout=10_000)
@@ -105,7 +110,7 @@ def _open_shell(page: Page, live_server_url: str, route: str = "/app/add") -> No
 class TestAppShellVisual:
     """AC: 1440×900 下壳层结构、状态与无障碍语义与设计一致。"""
 
-    def test_header_uses_text_brand_four_nav_items_and_status_pill(
+    def test_header_uses_text_brand_three_nav_items_and_status_pill(
         self, page: Page, live_server_url: str
     ) -> None:
         _open_shell(page, live_server_url)
@@ -131,9 +136,13 @@ class TestAppShellVisual:
         assert "Auto Bangumi 连接状态" in aria and "未配置" in aria
         assert "endpoint" not in aria.lower()
 
-    def test_shell_anchors_are_within_two_css_px(self, page: Page, live_server_url: str) -> None:
-        _open_shell(page, live_server_url)
-        summary = anchor_summary(page, SHELL_ANCHORS)
+    @pytest.mark.parametrize("width", SHELL_VIEWPORTS)
+    def test_shell_anchors_are_within_two_css_px(
+        self, page: Page, live_server_url: str, width: int
+    ) -> None:
+        """Issue 109: 1280/1440/1920 下壳层锚点都由 Token 档位决定。"""
+        _open_shell(page, live_server_url, width=width)
+        summary = anchor_summary(page, shell_anchors_for(width))
         failures = {
             name: entry
             for name, entry in summary.items()
@@ -142,7 +151,57 @@ class TestAppShellVisual:
         assert not failures, json.dumps(failures, ensure_ascii=False, indent=2)
 
         diagnostic = anchor_summary(page, SHELL_DIAGNOSTIC_ANCHORS)
-        print("shell diagnostic anchors:", json.dumps(diagnostic, ensure_ascii=False))
+        print(f"shell diagnostic anchors @{width}:", json.dumps(diagnostic, ensure_ascii=False))
+
+    @pytest.mark.parametrize("width", SHELL_VIEWPORTS)
+    def test_shell_width_tier_padding_is_shared_by_header_and_page(
+        self, page: Page, live_server_url: str, width: int
+    ) -> None:
+        """Issue 109: 顶栏与页面容器共用 Token V1 §6.1 的档位内边距。"""
+        _open_shell(page, live_server_url, width=width)
+        expected_padding = content_padding_inline(width)
+        expected_width = min(float(width), CONTENT_MAX)
+        expected_left = (width - expected_width) / 2.0
+        metrics = page.evaluate(
+            """() => {
+                const headerInner = document.querySelector('.app-header-inner')
+                const main = document.querySelector('.app-main')
+                const mainStyle = getComputedStyle(main)
+                const headerStyle = getComputedStyle(headerInner)
+                return {
+                    headerPaddingLeft: parseFloat(headerStyle.paddingLeft),
+                    headerPaddingRight: parseFloat(headerStyle.paddingRight),
+                    mainPaddingLeft: parseFloat(mainStyle.paddingLeft),
+                    mainPaddingRight: parseFloat(mainStyle.paddingRight),
+                    mainBox: main.getBoundingClientRect().x,
+                    mainWidth: main.getBoundingClientRect().width,
+                    headerLeft: headerInner.getBoundingClientRect().x,
+                    headerWidth: headerInner.getBoundingClientRect().width,
+                    brandLeft: document.querySelector('.brand-block').getBoundingClientRect().x,
+                    statusRight: document.querySelector('.workspace-status').getBoundingClientRect().right,
+                    navLeft: document.querySelector('.top-nav').getBoundingClientRect().x,
+                    brandRight: document.querySelector('.brand-block').getBoundingClientRect().right,
+                    bodyScrollWidth: document.body.scrollWidth,
+                    viewportWidth: window.innerWidth,
+                }
+            }"""
+        )
+        # 档位内边距：24（<1440）/ 32（1440–1679）/ 48（≥1680），顶栏与页面一致。
+        assert metrics["headerPaddingLeft"] == expected_padding
+        assert metrics["headerPaddingRight"] == expected_padding
+        assert metrics["mainPaddingLeft"] == expected_padding
+        assert metrics["mainPaddingRight"] == expected_padding
+        # 内容容器在 1920 宽度下居中且不超过 --size-content-max。
+        assert abs(metrics["headerLeft"] - expected_left) <= 0.5
+        assert abs(metrics["headerWidth"] - expected_width) <= 0.5
+        assert abs(metrics["mainBox"] - expected_left) <= 0.5
+        assert abs(metrics["mainWidth"] - expected_width) <= 0.5
+        # 品牌与连接胶囊分别落在内容容器的两端，导航紧随品牌（左组）。
+        assert abs(metrics["brandLeft"] - (expected_left + expected_padding)) <= 0.5
+        assert abs(metrics["statusRight"] - (expected_left + expected_width - expected_padding)) <= 0.5
+        assert metrics["navLeft"] >= metrics["brandRight"] - 0.5
+        # 无水平溢出。
+        assert metrics["bodyScrollWidth"] <= metrics["viewportWidth"] + 1
 
     def test_shell_region_diagnostics_are_deterministic(
         self, page: Page, live_server_url: str, tmp_path: Path

@@ -12,6 +12,7 @@ from tests.browser.test_app_workbench import (
     _goto_workbench,
     _preview_request,
 )
+from tests.browser.visual_manifest import content_padding_inline
 
 pytestmark = pytest.mark.browser
 
@@ -110,7 +111,10 @@ class TestSingleCandidateGeometry:
             }"""
         )
         assert metrics["columns"] == 2
-        assert metrics["cardWidth"] == 600
+        # Issue 109（AC4）：1280 属紧凑桌面档位，页内边距为 24px（原写死 32px），
+        # 双列候选网格内容宽 = 1280 − 2×24，每列 = (1232 − --space-4 16) / 2。
+        content_width = 1280 - 2 * content_padding_inline(1280)
+        assert metrics["cardWidth"] == (content_width - 16) / 2
         assert metrics["bodyScrollWidth"] <= 1280
 
     def test_candidate_grid_stays_operable_at_two_hundred_percent_zoom(

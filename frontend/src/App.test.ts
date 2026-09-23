@@ -80,6 +80,33 @@ describe('App shell (US-260)', () => {
     expect(main.find('.shell-route').text()).toBe('工作台路由内容')
   })
 
+  it('groups the brand and primary navigation together on the header start side', async () => {
+    const router = makeRouter()
+    const wrapper = mount(App, {
+      global: {
+        plugins: [createPinia(), router],
+      },
+    })
+    await router.isReady()
+    await router.push('/add')
+
+    // Issue 109: the target design keeps brand + 3 nav entries as one left
+    // group and the connection status pill alone on the right edge.
+    const inner = wrapper.find('.app-header-inner')
+    expect(inner.exists()).toBe(true)
+    expect(inner.element.children).toHaveLength(2)
+
+    const start = inner.find('.app-header-start')
+    expect(start.exists()).toBe(true)
+    expect(start.find('.brand-block').exists()).toBe(true)
+    expect(start.findAll('.top-nav .nav-link')).toHaveLength(3)
+    expect(start.find('.workspace-status').exists()).toBe(false)
+
+    const status = inner.find('.workspace-status')
+    expect(status.exists()).toBe(true)
+    expect(status.attributes('href') ?? '').toContain('/settings')
+  })
+
   it('renders the Requests, Queue and Settings route views', async () => {
     const router = makeRouter()
     const wrapper = mount(App, {
