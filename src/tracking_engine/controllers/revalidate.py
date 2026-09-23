@@ -287,7 +287,7 @@ _ISSUE_META: dict[str, tuple[str, str | None, str]] = {
         "",
     ),
     REVALIDATE_ISSUE_NO_VALID_RESOURCES: (
-        "订阅方案没有可用的有效资源，无法提交追番",
+        "在现有筛选规则下未找到资源，请重新检查追番方案",
         "resources",
         "",
     ),

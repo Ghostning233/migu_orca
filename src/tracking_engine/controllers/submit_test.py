@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import pytest
 
+from ab_engine.models.management import ExternalRss, ExternalSubscription
 from tracking_engine.controllers.revalidate import REVALIDATABLE_STATUSES
 from tracking_engine.controllers.submit import (
     OPERATION_OUTCOME_TRACKING_STATUS,
     SUBMIT_FAILURE_CATEGORIES,
     SUBMIT_FROM_STATUSES,
     classify_external_submit_result,
+    confirm_subscription_outcome,
     external_submit_error_type,
     external_submit_result_id,
     submit_failure_category,
@@ -170,3 +172,105 @@ def test_unknown_operation_state_raises() -> None:
         tracking_status_for_operation_state("PREPARED")
     with pytest.raises(ValueError):
         tracking_status_for_operation_state("not-a-state")
+
+# -- issue #97: confirm a persistent-subscription write by exact read-back -----
+
+RSS_URL = "https://mikanani.me/RSS/Bangumi?bangumiId=1234&subgroupid=567"
+
+
+def _subscription(external_id: str = "sub-1", rss_ids: tuple[str, ...] = ("rss-1",)) -> ExternalSubscription:
+    return ExternalSubscription(external_id, "葬送的芙莉莲", 1, "喵萌奶茶屋", rss_ids=rss_ids)
+
+
+def _snapshot(rss_items, subscriptions):
+    return (None, list(subscriptions), list(rss_items))
+
+
+def test_confirm_read_back_proves_the_exact_controlled_subscription() -> None:
+    outcome = confirm_subscription_outcome(
+        ab_result={"success": True},
+        expected_rss_url=RSS_URL,
+        snapshot=_snapshot([ExternalRss("rss-1", "芙莉莲", RSS_URL)], [_subscription()]),
+    )
+
+    assert outcome.classification == TRACKING_OPERATION_STATE_SUCCEEDED
+    assert outcome.external_id == "sub-1"
+    assert outcome.resource_warning is False
+
+
+def test_confirm_read_back_overrides_a_non_success_write_with_a_safe_warning() -> None:
+    """Issue #97 AC 4: a non-success body plus exact read-back is still 追番中."""
+    outcome = confirm_subscription_outcome(
+        ab_result={"success": False, "error_type": "ab_http_error"},
+        expected_rss_url=RSS_URL,
+        snapshot=_snapshot([ExternalRss("rss-1", "芙莉莲", RSS_URL)], [_subscription()]),
+    )
+
+    assert outcome.classification == TRACKING_OPERATION_STATE_SUCCEEDED
+    assert outcome.external_id == "sub-1"
+    assert outcome.resource_warning is True
+
+
+def test_confirm_read_back_without_the_expected_rss_is_a_definite_failure() -> None:
+    outcome = confirm_subscription_outcome(
+        ab_result={"success": False},
+        expected_rss_url=RSS_URL,
+        snapshot=_snapshot([ExternalRss("rss-1", "别的", "https://mikanani.me/RSS/Other")], [_subscription()]),
+    )
+
+    assert outcome.classification == TRACKING_OPERATION_STATE_FAILED
+    assert outcome.external_id is None
+
+
+@pytest.mark.parametrize(
+    ("snapshot", "reason"),
+    [
+        (None, "回查不可读"),
+        (
+            _snapshot([ExternalRss("rss-1", "a", RSS_URL), ExternalRss("rss-2", "b", RSS_URL)], [_subscription()]),
+            "多个同 URL 的 RSS",
+        ),
+        (
+            _snapshot(
+                [ExternalRss("rss-1", "a", RSS_URL)],
+                [_subscription("sub-1"), _subscription("sub-2")],
+            ),
+            "多个归属订阅",
+        ),
+        (("not", "a", "snapshot"), "结构非法"),
+    ],
+)
+def test_confirm_read_back_stays_unresolved_when_it_cannot_prove(
+    snapshot, reason: str  # noqa: ARG001 - the reason documents each case
+) -> None:
+    outcome = confirm_subscription_outcome(
+        ab_result={"success": True},
+        expected_rss_url=RSS_URL,
+        snapshot=snapshot,
+    )
+
+    assert outcome.classification == TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN
+    assert outcome.external_id is None
+
+
+@pytest.mark.parametrize("expected", [None, "", "   "])
+def test_confirm_without_an_exact_identity_is_unresolved(expected) -> None:
+    outcome = confirm_subscription_outcome(
+        ab_result={"success": True},
+        expected_rss_url=expected,
+        snapshot=_snapshot([ExternalRss("rss-1", "a", RSS_URL)], [_subscription()]),
+    )
+
+    assert outcome.classification == TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN
+
+
+def test_confirm_matches_the_subscription_by_exact_rss_url_too() -> None:
+    owner = ExternalSubscription("sub-9", "葬送的芙莉莲", 1, "喵萌奶茶屋", rss_urls=(RSS_URL,))
+    outcome = confirm_subscription_outcome(
+        ab_result={"success": True},
+        expected_rss_url=RSS_URL,
+        snapshot=_snapshot([ExternalRss("rss-1", "a", RSS_URL)], [owner]),
+    )
+
+    assert outcome.classification == TRACKING_OPERATION_STATE_SUCCEEDED
+    assert outcome.external_id == "sub-9"

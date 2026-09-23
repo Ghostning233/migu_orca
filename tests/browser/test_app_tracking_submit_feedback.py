@@ -65,11 +65,12 @@ def _detail(item: dict[str, Any]) -> dict[str, Any]:
         "batch_id": None,
         "created_at": "2026-09-01T00:00:00Z",
         "last_synced_at": None,
-        "safe_info": None,
+        "safe_info": item.get("safe_info"),
         "current_operation": None,
         "revalidation_issues": [],
         "external_mapping": None,
-        "audit_events": [],
+        # A submit result may carry the audit note the detail must render.
+        "audit_events": item.get("audit_events", []),
         "warnings": [],
     }
 
@@ -147,8 +148,9 @@ def _open(page: Page, live_server_url: str, storage_dir: Path) -> None:
 
 
 def _confirm(page: Page) -> None:
-    page.wait_for_selector(".confirm-dialog", timeout=10_000)
-    page.locator(".confirm-dialog .primary-button").click()
+    """Issue #98: the submit confirmation is now the submission-mode choice."""
+    page.wait_for_selector("#tracking-mode-continue", timeout=10_000)
+    page.locator("#tracking-mode-continue").click()
 
 
 class TestSubmitFeedback:
@@ -216,3 +218,299 @@ class TestSubmitFeedback:
         assert page.locator(".confirm-dialog").count() == 0
         assert page.locator(".global-notification").count() == 0
         expect(page.locator("#tracking-submit-result")).to_contain_text("明确拒绝")
+
+class TestExactReadbackFeedback:
+    """Issue #97: the page shows the exact read-back outcomes, not the body."""
+
+    def test_zero_resources_keeps_the_plan_pending_with_the_exact_wording(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        item = _pending_item()
+        _install(
+            page,
+            item,
+            {
+                "tracking": {
+                    **item,
+                    "status": "NEEDS_RECONFIRM",
+                    "status_label": "需重新确认",
+                    "status_group": "ATTENTION",
+                },
+                "issues": [
+                    {
+                        "code": "NO_VALID_RESOURCES",
+                        "field": "resources",
+                        "message": "在现有筛选规则下未找到资源，请重新检查追番方案",
+                        "severity": "BLOCKING",
+                    }
+                ],
+            },
+        )
+
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-submit")
+        page.locator("#tracking-submit").click()
+        page.wait_for_selector("#tracking-mode-continue", timeout=10_000)
+        page.locator("#tracking-mode-continue").click()
+
+        # The exact, actionable wording is what the user reads; no success notice.
+        expect(page.locator("#app-main")).to_contain_text(
+            "在现有筛选规则下未找到资源，请重新检查追番方案"
+        )
+        assert page.locator(".global-notification").count() == 0
+
+    def test_confirmed_subscription_with_an_unconfirmed_body_stays_active(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        """AC 4: the read-back wins, and the record keeps a safe warning note."""
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        item = _pending_item()
+        warning = "订阅已建立，但 Auto Bangumi 的写响应未确认"
+        _install(
+            page,
+            item,
+            {
+                "tracking": {
+                    **item,
+                    "status": "ACTIVE",
+                    "status_label": "追番中",
+                    "status_group": "ACTIVE",
+                    "audit_events": [
+                        {
+                            "action": "SUBMIT_SUCCEEDED",
+                            "actor": "SYSTEM",
+                            "safe_message": warning,
+                            "reason_code": None,
+                            "created_at": "2026-09-14T00:00:00Z",
+                        }
+                    ],
+                },
+                "issues": [],
+            },
+        )
+
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-submit")
+        page.locator("#tracking-submit").click()
+        page.wait_for_selector("#tracking-mode-continue", timeout=10_000)
+        page.locator("#tracking-mode-continue").click()
+
+        page.wait_for_selector("#tracking-overview", timeout=10_000)
+        page.evaluate(
+            "() => document.querySelectorAll('.tracking-inspector-content details')"
+            ".forEach((el) => { el.open = true; })"
+        )
+        expect(page.locator("#app-main")).to_contain_text("追番中")
+        expect(page.locator("#app-main")).to_contain_text(warning)
+
+class TestSubmissionModeChoice:
+    """Issue #98: one stable entry button, then an explicit mode choice."""
+
+    def test_entry_opens_the_choice_without_a_request_and_cancel_sends_nothing(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        posts = _install(page, _pending_item(), {"tracking": _pending_item()})
+
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-submit")
+        # AC 2: the entry label is stable whatever the submission will become.
+        expect(page.locator("#tracking-submit")).to_have_text("提交方案")
+
+        page.locator("#tracking-submit").click()
+        page.wait_for_selector("#tracking-mode-cancel", timeout=10_000)
+        assert posts == [], "opening the dialog must not send anything"
+        expect(page.locator(".tracking-mode-dialog .confirm-dialog-title")).to_have_text("选择提交方式")
+        assert page.locator(".tracking-mode-dialog .confirm-dialog-actions button").all_inner_texts() == [
+            "取消", "下载现有资源", "持续追番",
+        ]
+
+        page.locator("#tracking-mode-cancel").click()
+        page.wait_for_timeout(200)
+        assert posts == [], "cancelling the choice must send nothing"
+        expect(page.locator("#tracking-submit")).to_have_text("提交方案")
+
+    @pytest.mark.parametrize(
+        ("button", "mode"),
+        [("#tracking-mode-download", "DOWNLOAD_EXISTING"), ("#tracking-mode-continue", "CONTINUE_TRACKING")],
+    )
+    def test_choosing_a_mode_submits_once_with_that_mode(
+        self, page: Page, live_server_url: str, storage_dir: Path, button: str, mode: str
+    ) -> None:
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        item = _pending_item()
+        posts = _install(
+            page,
+            item,
+            {
+                "tracking": {
+                    **item,
+                    "status": "ACTIVE",
+                    "status_label": "追番中",
+                    "status_group": "ACTIVE",
+                }
+            },
+        )
+
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-submit")
+        page.locator("#tracking-submit").click()
+        page.wait_for_selector(button, timeout=10_000)
+        # The mode choice replaces the second impact dialog for submit-family actions.
+        page.locator(button).click()
+        page.wait_for_timeout(400)
+
+        assert len(posts) == 1, "one choice must produce exactly one external request"
+        body = posts[0]
+        assert body["submission_mode"] == mode
+        assert body["confirm"] is True
+        # The dialog converged away once the write settled.
+        assert page.locator(".tracking-mode-dialog").count() == 0
+
+class TestAddedToDownloadLifecycle:
+    """Issue #99: a one-time acceptance is local history, not a subscription."""
+
+    def test_one_time_acceptance_lands_on_added_to_download(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        item = {
+            **_pending_item(),
+            "safe_info": {
+                "request_id": "request-plan", "status": "ACCEPTED", "raw_title": "安全标题",
+                "title": "葬送的芙莉莲", "aliases": [], "season": 1, "season_raw": None,
+                "season_evidence": None, "subtitle_groups": [], "selected_subtitle_group": "喵萌",
+                "mikan_collection": {"bangumi_id": "mikan-1234", "title": "葬送的芙莉莲", "season": 1},
+                "filter_rule": {"must_contain": "", "must_not_contain": "", "use_regex": False, "case_sensitive": False},
+                "resources": {"selected_subtitle_group": "喵萌", "valid_resource_count": 1,
+                              "invalid_resource_count": 0, "complete_resource_count": 1,
+                              "valid_file_names": ["第一集.mkv"], "excluded_file_names": []},
+                "folder_name": "安全文件夹", "storage_profile": "profile", "total_episodes": None,
+                "updated_episode": None, "updated_episode_status": "NOT_IMPLEMENTED",
+                "history_summary": [], "ab_status": None,
+            },
+        }
+        posts = _install(
+            page,
+            item,
+            {
+                "outcome": "ADDED_TO_DOWNLOAD",
+                "failure_category": None,
+                "tracking": {
+                    **item,
+                    "status": "ADDED_TO_DOWNLOAD",
+                    "status_label": "已加入下载",
+                    "status_group": "ACTIVE",
+                    # No submit-family action remains: history stays readable.
+                    "available_actions": [],
+                }
+            },
+        )
+
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-submit")
+        page.locator("#tracking-submit").click()
+        page.wait_for_selector("#tracking-mode-download", timeout=10_000)
+        page.locator("#tracking-mode-download").click()
+        page.wait_for_timeout(400)
+
+        assert len(posts) == 1 and posts[0]["submission_mode"] == "DOWNLOAD_EXISTING"
+        # The acceptance is stated without promising completed media.
+        expect(page.locator("#app-main")).to_contain_text("已加入下载")
+        expect(page.locator("#app-main")).to_contain_text("不代表资源已下载完成")
+        # AC 26: no in-place resubmit or retry for the completed record.
+        assert page.locator("#tracking-submit").count() == 0
+        assert page.locator("#tracking-retry").count() == 0
+        # AC 23/25: the local history can still be deleted or reused.
+        expect(page.locator("#tracking-delete-plan")).to_be_visible()
+        expect(page.locator("#tracking-reuse-plan")).to_be_visible()
+
+class TestFailureDiagnostics:
+    """Issue #101: layered, sanitized failure feedback for both modes."""
+
+    def _submit(self, page: Page, button: str) -> None:
+        page.wait_for_selector("#tracking-submit")
+        page.locator("#tracking-submit").click()
+        page.wait_for_selector(button, timeout=10_000)
+        page.locator(button).click()
+        page.wait_for_timeout(400)
+
+    def test_one_time_failure_keeps_only_the_retryable_sentence(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        item = _pending_item()
+        _install(
+            page,
+            item,
+            {
+                "outcome": "SUBMIT_FAILED",
+                "failure_category": "REJECTED",
+                "diagnostics": {"http_status": 502, "message_zh": "上游繁忙"},
+                "tracking": {
+                    **item,
+                    "status": "SUBMIT_FAILED",
+                    "status_label": "提交失败",
+                    "status_group": "ATTENTION",
+                },
+            },
+        )
+
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        self._submit(page, "#tracking-mode-download")
+
+        result = page.locator("#tracking-submit-result")
+        expect(result).to_contain_text("提交失败，可重新提交")
+        # AC 1: a one-time failure claims nothing about external side effects.
+        body = page.locator("#app-main").inner_text()
+        for forbidden in ("尚未创建", "可能部分成功", "可安全重试"):
+            assert forbidden not in body
+
+        # AC 3/5: the bounded reason lives in the collapsed diagnostics only.
+        page.evaluate(
+            "() => document.querySelectorAll('.tracking-inspector-content details')"
+            ".forEach((el) => { el.open = true; })"
+        )
+        diagnostics = page.locator("#tracking-write-diagnostics")
+        expect(diagnostics).to_contain_text("502")
+        expect(diagnostics).to_contain_text("上游繁忙")
+
+    def test_missing_upstream_reason_is_stated_honestly(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        item = _pending_item()
+        _install(
+            page,
+            item,
+            {
+                "outcome": "SUBMIT_FAILED",
+                "failure_category": "AUTHENTICATION",
+                # Auto Bangumi gave no usable reason at all.
+                "diagnostics": {},
+                "tracking": {
+                    **item,
+                    "status": "SUBMIT_FAILED",
+                    "status_label": "提交失败",
+                    "status_group": "ATTENTION",
+                },
+            },
+        )
+
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        self._submit(page, "#tracking-mode-continue")
+        page.evaluate(
+            "() => document.querySelectorAll('.tracking-inspector-content details')"
+            ".forEach((el) => { el.open = true; })"
+        )
+
+        expect(page.locator("#tracking-write-diagnostic-reason")).to_have_text("未提供具体原因")
+        assert "请检查方案内容" not in page.locator("#app-main").inner_text()

@@ -1055,6 +1055,12 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             "type": "object",
             "required": ["expected_revision", "idempotency_key", "confirm", "connection_ref", "configuration_revision"],
             "properties": {
+                "submission_mode": {
+                    "type": "string",
+                    "enum": ["CONTINUE_TRACKING", "DOWNLOAD_EXISTING"],
+                    "default": "CONTINUE_TRACKING",
+                    "description": "issue #98：本次操作的提交方式。持续追番建立受控外部订阅；下载现有资源只把当前资源交给 Auto Bangumi 加入下载。只作用于本次操作，不写入本地方案。",
+                },
                 "expected_revision": {
                     "type": "integer",
                     "minimum": 1,
@@ -1108,6 +1114,12 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             "type": "object",
             "required": ["expected_revision", "idempotency_key", "confirm", "connection_ref", "configuration_revision"],
             "properties": {
+                "submission_mode": {
+                    "type": "string",
+                    "enum": ["CONTINUE_TRACKING", "DOWNLOAD_EXISTING"],
+                    "default": "CONTINUE_TRACKING",
+                    "description": "issue #98：本次操作的提交方式。持续追番建立受控外部订阅；下载现有资源只把当前资源交给 Auto Bangumi 加入下载。只作用于本次操作，不写入本地方案。",
+                },
                 "expected_revision": {
                     "type": "integer",
                     "minimum": 1,

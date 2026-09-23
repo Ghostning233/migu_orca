@@ -11,6 +11,7 @@ import {
   canVerifyExternally,
   executableTrackingActions,
   MANAGEMENT_NEEDS_MANUAL_NOTICE,
+  formatSubmissionMode,
   managementSessionKeepsIntent,
   projectTrackingActionScopes,
   recoverySessionKeepsLock,
@@ -250,6 +251,19 @@ const thisManagementAction = computed(() => (
 ))
 
 /** This item's own conflicting action is in flight: all of them bump its revision. */
+/**
+ * Issue #101: the failure diagnostics of this item's last write, when there was
+ * one. An empty diagnostic object still renders, so the page can honestly say
+ * 未提供具体原因 instead of inventing a cause.
+ */
+const writeDiagnostics = computed(() => (
+  thisWrite.value && thisWrite.value.state !== 'IN_FLIGHT' && thisWrite.value.state !== 'ACTIVE'
+    ? thisWrite.value.diagnostics
+    : null
+))
+
+const submissionModeLabel = computed(() => formatSubmissionMode(detail.value?.submission_mode))
+
 const itemActionInFlight = computed(() => (
   writeInFlight.value || recoveryInFlight.value || managementInFlight.value
 ))
@@ -396,10 +410,20 @@ const UNDELETABLE_PLAN_STATUSES = new Set([
 const deletePlanOpen = ref(false)
 const deleteExternalChecked = ref(false)
 
+// Issue #96: a settled operation is history, not a delete lock. Only an
+// in-flight or unresolved current operation (or a status mid-external-action)
+// still blocks; an unrecognized state fails closed.
+const SETTLED_OPERATION_STATES = new Set(['SUCCEEDED', 'FAILED'])
+const hasUnresolvedOperation = computed(() => {
+  const operation = detail.value?.current_operation
+  if (!operation) return false
+  return !SETTLED_OPERATION_STATES.has(String(operation.state))
+})
+
 const canDeletePlan = computed(() => Boolean(
   detail.value
   && !UNDELETABLE_PLAN_STATUSES.has(detail.value.status)
-  && !detail.value.current_operation
+  && !hasUnresolvedOperation.value
 ))
 /** Only a controlled mapping makes the external option applicable at all. */
 const deletePlanHasExternal = computed(() => Boolean(detail.value?.external_mapping))
@@ -542,6 +566,7 @@ defineExpose({ reload: () => fetchDetail(true) })
           <div><dt>季度</dt><dd>{{ detail.season ?? '未设置' }}</dd></div>
           <div><dt>字幕组</dt><dd>{{ detail.subtitle_group || '未设置' }}</dd></div>
           <div><dt>本地状态</dt><dd>{{ detail.status_label }}</dd></div>
+          <div v-if="submissionModeLabel"><dt>提交方式</dt><dd>{{ submissionModeLabel }}</dd></div>
           <div><dt>有效资源</dt><dd>{{ detail.valid_resource_count }}</dd></div>
           <div><dt>总集数</dt><dd>{{ detail.total_episodes ?? '待获取' }}</dd></div>
           <div><dt>已更新集数</dt><dd>待开发</dd></div>
@@ -708,7 +733,7 @@ defineExpose({ reload: () => fetchDetail(true) })
             :loading="writeInFlight"
             :disabled="actionBusy"
             @click="requestWrite(submitAction)"
-          >{{ submitAction.label }}</BaseButton>
+          >提交方案</BaseButton>
         </template>
         <template v-else-if="retryAction">
           <p class="field-help">该记录上次提交明确失败。重试会使用已保存的 Auto Bangumi 连接，重新在 Auto Bangumi 创建外部订阅并可能触发下载；每次重试都需要单独确认。</p>
@@ -848,6 +873,27 @@ defineExpose({ reload: () => fetchDetail(true) })
       <details id="tracking-tech-diagnostics" class="tracking-inspector-disclosure">
         <summary>技术诊断</summary>
         <div class="tracking-inspector-disclosure-body">
+          <section
+            v-if="writeDiagnostics"
+            id="tracking-write-diagnostics"
+            class="tracking-inspector-section"
+            aria-labelledby="tracking-write-diagnostics-heading"
+          >
+            <h4 id="tracking-write-diagnostics-heading">提交失败诊断</h4>
+            <dl>
+              <div><dt>失败类别</dt><dd>{{ thisWrite?.failureCategory || '未提供' }}</dd></div>
+              <div><dt>HTTP 类别</dt><dd>{{ writeDiagnostics.httpStatus ?? '未提供' }}</dd></div>
+              <div>
+                <dt>Auto Bangumi 原因</dt>
+                <dd id="tracking-write-diagnostic-reason">
+                  {{ writeDiagnostics.messageZh || writeDiagnostics.messageEn || '未提供具体原因' }}
+                </dd>
+              </div>
+              <div v-if="writeDiagnostics.messageZh && writeDiagnostics.messageEn">
+                <dt>原因（EN）</dt><dd>{{ writeDiagnostics.messageEn }}</dd>
+              </div>
+            </dl>
+          </section>
           <section v-if="detail.external_mapping" class="tracking-inspector-section" aria-labelledby="tracking-external-heading">
             <h4 id="tracking-external-heading">外部安全摘要</h4>
             <dl>

@@ -186,6 +186,7 @@ function writeSession(overrides: Record<string, unknown> = {}): TrackingWriteSes
   return {
     trackingId: 'tracking-1', action: 'SUBMIT', state: 'ACTIVE',
     message: '提交成功：已在 Auto Bangumi 创建外部订阅。', issues: [], failureCategory: null,
+    diagnostics: { httpStatus: null, messageZh: null, messageEn: null },
     ...overrides,
   } as TrackingWriteSession
 }
@@ -884,5 +885,35 @@ describe('TrackingInspector unresolved-intent gate (issue #91 AC 6)', () => {
       writeSession: { trackingId: 'tracking-1', state: 'ACTIVE', action: 'SUBMIT', message: '', issues: [], failureCategory: null },
     })
     expect(settled.find('#tracking-apply-plan').attributes('disabled')).toBeUndefined()
+  })
+})
+
+describe('TrackingInspector settled-operation delete (issue #96)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  function withOperation(state: string, overrides: Record<string, unknown> = {}) {
+    return detail({
+      status: 'SUBMIT_FAILED',
+      status_label: '提交失败',
+      available_actions: [],
+      current_operation: { operation_id: 'op-1', state, operation: 'SUBMIT', attempt: 1 },
+      ...overrides,
+    })
+  }
+
+  it('offers the delete while only a settled operation remains', async () => {
+    for (const state of ['SUCCEEDED', 'FAILED']) {
+      apiGet.mockResolvedValue(withOperation(state) as never)
+      const wrapper = await mountInspector()
+      expect(wrapper.find('#tracking-delete-plan').exists()).toBe(true)
+    }
+  })
+
+  it('still blocks an in-flight or unresolved current operation', async () => {
+    for (const state of ['PREPARED', 'IN_PROGRESS', 'OUTCOME_UNKNOWN', 'RECOVERY_REQUIRED', 'UNKNOWN']) {
+      apiGet.mockResolvedValue(withOperation(state) as never)
+      const wrapper = await mountInspector()
+      expect(wrapper.find('#tracking-delete-plan').exists()).toBe(false)
+    }
   })
 })

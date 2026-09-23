@@ -14,6 +14,7 @@ from uuid import UUID
 import pytest
 
 from tracking_engine.models.operation import (
+    TRACKING_OPERATION_CONNECTION_SCHEMA_VERSION,
     TRACKING_OPERATION_KIND_DELETE_EXTERNAL,
     TRACKING_OPERATION_KIND_MODIFY,
     TRACKING_OPERATION_KIND_REFRESH_RSS,
@@ -29,6 +30,8 @@ from tracking_engine.models.operation import (
     TRACKING_OPERATION_STATE_SUCCEEDED,
     TRACKING_OPERATION_STATES,
     TRACKING_OPERATION_TERMINAL_STATES,
+    TRACKING_SUBMISSION_MODE_CONTINUE,
+    TRACKING_SUBMISSION_MODE_DOWNLOAD_EXISTING,
     TrackingOperation,
     create_tracking_operation,
     operation_from_storage_dict,
@@ -311,7 +314,7 @@ def test_storage_dict_round_trip_preserves_all_public_fields() -> None:
     }
 
 
-def test_v3_operation_round_trip_keeps_only_opaque_connection_ref() -> None:
+def test_current_operation_round_trip_keeps_only_opaque_connection_ref() -> None:
     connection_ref = "11111111-1111-4111-8111-111111111111"
     operation = create_tracking_operation(
         tracking_id=TRACKING_ID,
@@ -323,7 +326,9 @@ def test_v3_operation_round_trip_keeps_only_opaque_connection_ref() -> None:
     )
 
     payload = operation_to_storage_dict(operation)
-    assert payload["schema_version"] == 3
+    # Issue #98 raised the writer version; a default mode stays off the file.
+    assert payload["schema_version"] == TRACKING_OPERATION_SCHEMA_VERSION
+    assert "submission_mode" not in payload
     assert payload["connection_ref"] == connection_ref
     assert operation_from_storage_dict(payload) == operation
     assert "secret" not in str(payload)
@@ -470,3 +475,37 @@ def test_storage_dict_never_includes_sensitive_fields() -> None:
         "password",
     ):
         assert sensitive not in serialized
+
+def test_submission_mode_round_trips_and_defaults_for_old_versions() -> None:
+    """Issue #98 AC 1: the chosen mode is an operation fact, not a plan field."""
+    operation = create_tracking_operation(
+        tracking_id=TRACKING_ID,
+        idempotency_key=IDEMPOTENCY_KEY,
+        expected_revision=5,
+        request_fingerprint=FINGERPRINT,
+        submission_mode=TRACKING_SUBMISSION_MODE_DOWNLOAD_EXISTING,
+        now=NOW,
+    )
+
+    payload = operation_to_storage_dict(operation)
+    assert payload["submission_mode"] == TRACKING_SUBMISSION_MODE_DOWNLOAD_EXISTING
+    assert operation_from_storage_dict(payload).submission_mode == (
+        TRACKING_SUBMISSION_MODE_DOWNLOAD_EXISTING
+    )
+
+    # A v3 file predates the field and reads back as 持续追番.
+    legacy = {key: value for key, value in payload.items() if key != "submission_mode"}
+    legacy["schema_version"] = TRACKING_OPERATION_CONNECTION_SCHEMA_VERSION
+    assert operation_from_storage_dict(legacy).submission_mode == (
+        TRACKING_SUBMISSION_MODE_CONTINUE
+    )
+
+    with pytest.raises(ValueError):
+        create_tracking_operation(
+            tracking_id=TRACKING_ID,
+            idempotency_key=IDEMPOTENCY_KEY,
+            expected_revision=5,
+            request_fingerprint=FINGERPRINT,
+            submission_mode="SOMETHING_ELSE",
+            now=NOW,
+        )

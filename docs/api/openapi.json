@@ -8194,7 +8194,7 @@
                                 "anyOf": [
                                   {
                                     "additionalProperties": false,
-                                    "description": "Result of ``POST /api/v1/tracking/items/{tracking_id}/submit`` (US-225).\n\nA persisted business result is HTTP 200: ``outcome`` is the record's final\nstatus (``ACTIVE``/``SUBMIT_FAILED``/``VERIFYING_EXTERNAL``/\n``RECOVERY_REQUIRED``/``NEEDS_RECONFIRM``).  ``checked_revision`` is the\nrevision the client confirmed; ``next_revision`` is the record's revision\nafter the outcome persisted.  ``operation_id`` is set when a submit\noperation was created/reused; ``issues`` carry the fixed §11.5 codes when\nthe submit was blocked before any external call.  ``tracking`` is the safe\nsummary of the persisted record so the client can update the list item\nwithout a second read.",
+                                    "description": "Result of ``POST /api/v1/tracking/items/{tracking_id}/submit`` (US-225).\n\nA persisted business result is HTTP 200: ``outcome`` is the record's final\nstatus (``ACTIVE``/``SUBMIT_FAILED``/``VERIFYING_EXTERNAL``/\n``RECOVERY_REQUIRED``/``NEEDS_RECONFIRM``/``ADDED_TO_DOWNLOAD``).  ``checked_revision`` is the\nrevision the client confirmed; ``next_revision`` is the record's revision\nafter the outcome persisted.  ``operation_id`` is set when a submit\noperation was created/reused; ``issues`` carry the fixed §11.5 codes when\nthe submit was blocked before any external call.  ``tracking`` is the safe\nsummary of the persisted record so the client can update the list item\nwithout a second read.",
                                     "properties": {
                                       "tracking_id": {
                                         "title": "Tracking Id",
@@ -8206,7 +8206,8 @@
                                           "SUBMIT_FAILED",
                                           "VERIFYING_EXTERNAL",
                                           "RECOVERY_REQUIRED",
-                                          "NEEDS_RECONFIRM"
+                                          "NEEDS_RECONFIRM",
+                                          "ADDED_TO_DOWNLOAD"
                                         ],
                                         "title": "Outcome",
                                         "type": "string"
@@ -8234,6 +8235,50 @@
                                         ],
                                         "default": null,
                                         "title": "Operation Id"
+                                      },
+                                      "diagnostics": {
+                                        "additionalProperties": false,
+                                        "description": "Bounded, sanitized Auto Bangumi failure diagnostics (issue #101).\n\nEvery field is optional on purpose: when Auto Bangumi gives no usable\nreason the object is empty and the client states 未提供具体原因 rather than\ninventing one. Nothing raw, no full RSS URL, magnet, credential or path.",
+                                        "properties": {
+                                          "http_status": {
+                                            "anyOf": [
+                                              {
+                                                "type": "integer"
+                                              },
+                                              {
+                                                "type": "null"
+                                              }
+                                            ],
+                                            "default": null,
+                                            "title": "Http Status"
+                                          },
+                                          "message_zh": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string"
+                                              },
+                                              {
+                                                "type": "null"
+                                              }
+                                            ],
+                                            "default": null,
+                                            "title": "Message Zh"
+                                          },
+                                          "message_en": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string"
+                                              },
+                                              {
+                                                "type": "null"
+                                              }
+                                            ],
+                                            "default": null,
+                                            "title": "Message En"
+                                          }
+                                        },
+                                        "title": "TrackingSubmitDiagnosticsDTO",
+                                        "type": "object"
                                       },
                                       "failure_category": {
                                         "anyOf": [
@@ -8395,7 +8440,8 @@
                                               "UNKNOWN",
                                               "DISABLED",
                                               "EXTERNAL_DELETED",
-                                              "EXTERNAL_ONLY"
+                                              "EXTERNAL_ONLY",
+                                              "ADDED_TO_DOWNLOAD"
                                             ],
                                             "title": "Status",
                                             "type": "string"
@@ -8414,6 +8460,22 @@
                                             ],
                                             "title": "Status Group",
                                             "type": "string"
+                                          },
+                                          "submission_mode": {
+                                            "anyOf": [
+                                              {
+                                                "enum": [
+                                                  "CONTINUE_TRACKING",
+                                                  "DOWNLOAD_EXISTING"
+                                                ],
+                                                "type": "string"
+                                              },
+                                              {
+                                                "type": "null"
+                                              }
+                                            ],
+                                            "default": null,
+                                            "title": "Submission Mode"
                                           },
                                           "available_actions": {
                                             "items": {
@@ -8932,7 +8994,8 @@
                                   "UNKNOWN",
                                   "DISABLED",
                                   "EXTERNAL_DELETED",
-                                  "EXTERNAL_ONLY"
+                                  "EXTERNAL_ONLY",
+                                  "ADDED_TO_DOWNLOAD"
                                 ],
                                 "title": "Status",
                                 "type": "string"
@@ -8951,6 +9014,22 @@
                                 ],
                                 "title": "Status Group",
                                 "type": "string"
+                              },
+                              "submission_mode": {
+                                "anyOf": [
+                                  {
+                                    "enum": [
+                                      "CONTINUE_TRACKING",
+                                      "DOWNLOAD_EXISTING"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "default": null,
+                                "title": "Submission Mode"
                               },
                               "available_actions": {
                                 "items": {
@@ -9092,6 +9171,11 @@
                               "title": "Active",
                               "type": "integer"
                             },
+                            "added_to_download": {
+                              "default": 0,
+                              "title": "Added To Download",
+                              "type": "integer"
+                            },
                             "inactive": {
                               "title": "Inactive",
                               "type": "integer"
@@ -9148,6 +9232,7 @@
                         "status": "示例",
                         "status_label": "示例",
                         "status_group": "示例",
+                        "submission_mode": null,
                         "available_actions": [
                           {
                             "code": "示例",
@@ -9170,6 +9255,7 @@
                       "pending": 1,
                       "processing": 1,
                       "active": 1,
+                      "added_to_download": 0,
                       "inactive": 1,
                       "needs_attention": 1,
                       "unreadable": 1
@@ -9944,7 +10030,8 @@
                                   "UNKNOWN",
                                   "DISABLED",
                                   "EXTERNAL_DELETED",
-                                  "EXTERNAL_ONLY"
+                                  "EXTERNAL_ONLY",
+                                  "ADDED_TO_DOWNLOAD"
                                 ],
                                 "title": "Status",
                                 "type": "string"
@@ -9963,6 +10050,22 @@
                                 ],
                                 "title": "Status Group",
                                 "type": "string"
+                              },
+                              "submission_mode": {
+                                "anyOf": [
+                                  {
+                                    "enum": [
+                                      "CONTINUE_TRACKING",
+                                      "DOWNLOAD_EXISTING"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "default": null,
+                                "title": "Submission Mode"
                               },
                               "available_actions": {
                                 "items": {
@@ -10143,6 +10246,7 @@
                         "status": "示例",
                         "status_label": "示例",
                         "status_group": "示例",
+                        "submission_mode": null,
                         "available_actions": [
                           {
                             "code": "示例",
@@ -17019,7 +17123,8 @@
                             "UNKNOWN",
                             "DISABLED",
                             "EXTERNAL_DELETED",
-                            "EXTERNAL_ONLY"
+                            "EXTERNAL_ONLY",
+                            "ADDED_TO_DOWNLOAD"
                           ],
                           "title": "Status",
                           "type": "string"
@@ -17038,6 +17143,22 @@
                           ],
                           "title": "Status Group",
                           "type": "string"
+                        },
+                        "submission_mode": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "CONTINUE_TRACKING",
+                                "DOWNLOAD_EXISTING"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Submission Mode"
                         },
                         "available_actions": {
                           "items": {
@@ -18023,6 +18144,7 @@
                     "status": "示例",
                     "status_label": "示例",
                     "status_group": "示例",
+                    "submission_mode": null,
                     "available_actions": [
                       {
                         "code": "示例",
@@ -18411,7 +18533,8 @@
                                 "UNKNOWN",
                                 "DISABLED",
                                 "EXTERNAL_DELETED",
-                                "EXTERNAL_ONLY"
+                                "EXTERNAL_ONLY",
+                                "ADDED_TO_DOWNLOAD"
                               ],
                               "title": "Status",
                               "type": "string"
@@ -18430,6 +18553,22 @@
                               ],
                               "title": "Status Group",
                               "type": "string"
+                            },
+                            "submission_mode": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "CONTINUE_TRACKING",
+                                    "DOWNLOAD_EXISTING"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Submission Mode"
                             },
                             "available_actions": {
                               "items": {
@@ -18678,6 +18817,7 @@
                       "status": "示例",
                       "status_label": "示例",
                       "status_group": "示例",
+                      "submission_mode": null,
                       "available_actions": [
                         {
                           "code": "示例",
@@ -19435,7 +19575,8 @@
                                 "UNKNOWN",
                                 "DISABLED",
                                 "EXTERNAL_DELETED",
-                                "EXTERNAL_ONLY"
+                                "EXTERNAL_ONLY",
+                                "ADDED_TO_DOWNLOAD"
                               ],
                               "title": "Status",
                               "type": "string"
@@ -19454,6 +19595,22 @@
                               ],
                               "title": "Status Group",
                               "type": "string"
+                            },
+                            "submission_mode": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "CONTINUE_TRACKING",
+                                    "DOWNLOAD_EXISTING"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Submission Mode"
                             },
                             "available_actions": {
                               "items": {
@@ -19702,6 +19859,7 @@
                       "status": "示例",
                       "status_label": "示例",
                       "status_group": "示例",
+                      "submission_mode": null,
                       "available_actions": [
                         {
                           "code": "示例",
@@ -21862,7 +22020,8 @@
                                 "UNKNOWN",
                                 "DISABLED",
                                 "EXTERNAL_DELETED",
-                                "EXTERNAL_ONLY"
+                                "EXTERNAL_ONLY",
+                                "ADDED_TO_DOWNLOAD"
                               ],
                               "title": "Status",
                               "type": "string"
@@ -21881,6 +22040,22 @@
                               ],
                               "title": "Status Group",
                               "type": "string"
+                            },
+                            "submission_mode": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "CONTINUE_TRACKING",
+                                    "DOWNLOAD_EXISTING"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Submission Mode"
                             },
                             "available_actions": {
                               "items": {
@@ -22035,6 +22210,7 @@
                       "status": "示例",
                       "status_label": "示例",
                       "status_group": "示例",
+                      "submission_mode": null,
                       "available_actions": [
                         {
                           "code": "示例",
@@ -22492,7 +22668,8 @@
                                 "UNKNOWN",
                                 "DISABLED",
                                 "EXTERNAL_DELETED",
-                                "EXTERNAL_ONLY"
+                                "EXTERNAL_ONLY",
+                                "ADDED_TO_DOWNLOAD"
                               ],
                               "title": "Status",
                               "type": "string"
@@ -22511,6 +22688,22 @@
                               ],
                               "title": "Status Group",
                               "type": "string"
+                            },
+                            "submission_mode": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "CONTINUE_TRACKING",
+                                    "DOWNLOAD_EXISTING"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Submission Mode"
                             },
                             "available_actions": {
                               "items": {
@@ -22759,6 +22952,7 @@
                       "status": "示例",
                       "status_label": "示例",
                       "status_group": "示例",
+                      "submission_mode": null,
                       "available_actions": [
                         {
                           "code": "示例",
@@ -23044,7 +23238,7 @@
                     },
                     "result": {
                       "additionalProperties": false,
-                      "description": "Result of ``POST /api/v1/tracking/items/{tracking_id}/submit`` (US-225).\n\nA persisted business result is HTTP 200: ``outcome`` is the record's final\nstatus (``ACTIVE``/``SUBMIT_FAILED``/``VERIFYING_EXTERNAL``/\n``RECOVERY_REQUIRED``/``NEEDS_RECONFIRM``).  ``checked_revision`` is the\nrevision the client confirmed; ``next_revision`` is the record's revision\nafter the outcome persisted.  ``operation_id`` is set when a submit\noperation was created/reused; ``issues`` carry the fixed §11.5 codes when\nthe submit was blocked before any external call.  ``tracking`` is the safe\nsummary of the persisted record so the client can update the list item\nwithout a second read.",
+                      "description": "Result of ``POST /api/v1/tracking/items/{tracking_id}/submit`` (US-225).\n\nA persisted business result is HTTP 200: ``outcome`` is the record's final\nstatus (``ACTIVE``/``SUBMIT_FAILED``/``VERIFYING_EXTERNAL``/\n``RECOVERY_REQUIRED``/``NEEDS_RECONFIRM``/``ADDED_TO_DOWNLOAD``).  ``checked_revision`` is the\nrevision the client confirmed; ``next_revision`` is the record's revision\nafter the outcome persisted.  ``operation_id`` is set when a submit\noperation was created/reused; ``issues`` carry the fixed §11.5 codes when\nthe submit was blocked before any external call.  ``tracking`` is the safe\nsummary of the persisted record so the client can update the list item\nwithout a second read.",
                       "properties": {
                         "tracking_id": {
                           "title": "Tracking Id",
@@ -23056,7 +23250,8 @@
                             "SUBMIT_FAILED",
                             "VERIFYING_EXTERNAL",
                             "RECOVERY_REQUIRED",
-                            "NEEDS_RECONFIRM"
+                            "NEEDS_RECONFIRM",
+                            "ADDED_TO_DOWNLOAD"
                           ],
                           "title": "Outcome",
                           "type": "string"
@@ -23084,6 +23279,50 @@
                           ],
                           "default": null,
                           "title": "Operation Id"
+                        },
+                        "diagnostics": {
+                          "additionalProperties": false,
+                          "description": "Bounded, sanitized Auto Bangumi failure diagnostics (issue #101).\n\nEvery field is optional on purpose: when Auto Bangumi gives no usable\nreason the object is empty and the client states 未提供具体原因 rather than\ninventing one. Nothing raw, no full RSS URL, magnet, credential or path.",
+                          "properties": {
+                            "http_status": {
+                              "anyOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Http Status"
+                            },
+                            "message_zh": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Message Zh"
+                            },
+                            "message_en": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Message En"
+                            }
+                          },
+                          "title": "TrackingSubmitDiagnosticsDTO",
+                          "type": "object"
                         },
                         "failure_category": {
                           "anyOf": [
@@ -23245,7 +23484,8 @@
                                 "UNKNOWN",
                                 "DISABLED",
                                 "EXTERNAL_DELETED",
-                                "EXTERNAL_ONLY"
+                                "EXTERNAL_ONLY",
+                                "ADDED_TO_DOWNLOAD"
                               ],
                               "title": "Status",
                               "type": "string"
@@ -23264,6 +23504,22 @@
                               ],
                               "title": "Status Group",
                               "type": "string"
+                            },
+                            "submission_mode": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "CONTINUE_TRACKING",
+                                    "DOWNLOAD_EXISTING"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Submission Mode"
                             },
                             "available_actions": {
                               "items": {
@@ -23405,6 +23661,11 @@
                     "next_revision": 1,
                     "checked_at": "示例",
                     "operation_id": null,
+                    "diagnostics": {
+                      "http_status": null,
+                      "message_zh": null,
+                      "message_en": null
+                    },
                     "failure_category": null,
                     "issues": [
                       {
@@ -23424,6 +23685,7 @@
                       "status": "示例",
                       "status_label": "示例",
                       "status_group": "示例",
+                      "submission_mode": null,
                       "available_actions": [
                         {
                           "code": "示例",
@@ -23681,6 +23943,15 @@
                   "configuration_revision"
                 ],
                 "properties": {
+                  "submission_mode": {
+                    "type": "string",
+                    "enum": [
+                      "CONTINUE_TRACKING",
+                      "DOWNLOAD_EXISTING"
+                    ],
+                    "default": "CONTINUE_TRACKING",
+                    "description": "issue #98：本次操作的提交方式。持续追番建立受控外部订阅；下载现有资源只把当前资源交给 Auto Bangumi 加入下载。只作用于本次操作，不写入本地方案。"
+                  },
                   "expected_revision": {
                     "type": "integer",
                     "minimum": 1,
@@ -23707,6 +23978,7 @@
                 }
               },
               "example": {
+                "submission_mode": "CONTINUE_TRACKING",
                 "expected_revision": 1,
                 "idempotency_key": "示例",
                 "confirm": true
@@ -23919,7 +24191,8 @@
                                 "UNKNOWN",
                                 "DISABLED",
                                 "EXTERNAL_DELETED",
-                                "EXTERNAL_ONLY"
+                                "EXTERNAL_ONLY",
+                                "ADDED_TO_DOWNLOAD"
                               ],
                               "title": "Status",
                               "type": "string"
@@ -23938,6 +24211,22 @@
                               ],
                               "title": "Status Group",
                               "type": "string"
+                            },
+                            "submission_mode": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "CONTINUE_TRACKING",
+                                    "DOWNLOAD_EXISTING"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Submission Mode"
                             },
                             "available_actions": {
                               "items": {
@@ -24098,6 +24387,7 @@
                       "status": "示例",
                       "status_label": "示例",
                       "status_group": "示例",
+                      "submission_mode": null,
                       "available_actions": [
                         {
                           "code": "示例",
@@ -24522,7 +24812,8 @@
                                 "UNKNOWN",
                                 "DISABLED",
                                 "EXTERNAL_DELETED",
-                                "EXTERNAL_ONLY"
+                                "EXTERNAL_ONLY",
+                                "ADDED_TO_DOWNLOAD"
                               ],
                               "title": "Status",
                               "type": "string"
@@ -24541,6 +24832,22 @@
                               ],
                               "title": "Status Group",
                               "type": "string"
+                            },
+                            "submission_mode": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "CONTINUE_TRACKING",
+                                    "DOWNLOAD_EXISTING"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Submission Mode"
                             },
                             "available_actions": {
                               "items": {
@@ -24789,6 +25096,7 @@
                       "status": "示例",
                       "status_label": "示例",
                       "status_group": "示例",
+                      "submission_mode": null,
                       "available_actions": [
                         {
                           "code": "示例",
@@ -25080,7 +25388,7 @@
                     },
                     "result": {
                       "additionalProperties": false,
-                      "description": "Result of ``POST /api/v1/tracking/items/{tracking_id}/submit`` (US-225).\n\nA persisted business result is HTTP 200: ``outcome`` is the record's final\nstatus (``ACTIVE``/``SUBMIT_FAILED``/``VERIFYING_EXTERNAL``/\n``RECOVERY_REQUIRED``/``NEEDS_RECONFIRM``).  ``checked_revision`` is the\nrevision the client confirmed; ``next_revision`` is the record's revision\nafter the outcome persisted.  ``operation_id`` is set when a submit\noperation was created/reused; ``issues`` carry the fixed §11.5 codes when\nthe submit was blocked before any external call.  ``tracking`` is the safe\nsummary of the persisted record so the client can update the list item\nwithout a second read.",
+                      "description": "Result of ``POST /api/v1/tracking/items/{tracking_id}/submit`` (US-225).\n\nA persisted business result is HTTP 200: ``outcome`` is the record's final\nstatus (``ACTIVE``/``SUBMIT_FAILED``/``VERIFYING_EXTERNAL``/\n``RECOVERY_REQUIRED``/``NEEDS_RECONFIRM``/``ADDED_TO_DOWNLOAD``).  ``checked_revision`` is the\nrevision the client confirmed; ``next_revision`` is the record's revision\nafter the outcome persisted.  ``operation_id`` is set when a submit\noperation was created/reused; ``issues`` carry the fixed §11.5 codes when\nthe submit was blocked before any external call.  ``tracking`` is the safe\nsummary of the persisted record so the client can update the list item\nwithout a second read.",
                       "properties": {
                         "tracking_id": {
                           "title": "Tracking Id",
@@ -25092,7 +25400,8 @@
                             "SUBMIT_FAILED",
                             "VERIFYING_EXTERNAL",
                             "RECOVERY_REQUIRED",
-                            "NEEDS_RECONFIRM"
+                            "NEEDS_RECONFIRM",
+                            "ADDED_TO_DOWNLOAD"
                           ],
                           "title": "Outcome",
                           "type": "string"
@@ -25120,6 +25429,50 @@
                           ],
                           "default": null,
                           "title": "Operation Id"
+                        },
+                        "diagnostics": {
+                          "additionalProperties": false,
+                          "description": "Bounded, sanitized Auto Bangumi failure diagnostics (issue #101).\n\nEvery field is optional on purpose: when Auto Bangumi gives no usable\nreason the object is empty and the client states 未提供具体原因 rather than\ninventing one. Nothing raw, no full RSS URL, magnet, credential or path.",
+                          "properties": {
+                            "http_status": {
+                              "anyOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Http Status"
+                            },
+                            "message_zh": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Message Zh"
+                            },
+                            "message_en": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Message En"
+                            }
+                          },
+                          "title": "TrackingSubmitDiagnosticsDTO",
+                          "type": "object"
                         },
                         "failure_category": {
                           "anyOf": [
@@ -25281,7 +25634,8 @@
                                 "UNKNOWN",
                                 "DISABLED",
                                 "EXTERNAL_DELETED",
-                                "EXTERNAL_ONLY"
+                                "EXTERNAL_ONLY",
+                                "ADDED_TO_DOWNLOAD"
                               ],
                               "title": "Status",
                               "type": "string"
@@ -25300,6 +25654,22 @@
                               ],
                               "title": "Status Group",
                               "type": "string"
+                            },
+                            "submission_mode": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "CONTINUE_TRACKING",
+                                    "DOWNLOAD_EXISTING"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Submission Mode"
                             },
                             "available_actions": {
                               "items": {
@@ -25441,6 +25811,11 @@
                     "next_revision": 1,
                     "checked_at": "示例",
                     "operation_id": null,
+                    "diagnostics": {
+                      "http_status": null,
+                      "message_zh": null,
+                      "message_en": null
+                    },
                     "failure_category": null,
                     "issues": [
                       {
@@ -25460,6 +25835,7 @@
                       "status": "示例",
                       "status_label": "示例",
                       "status_group": "示例",
+                      "submission_mode": null,
                       "available_actions": [
                         {
                           "code": "示例",
@@ -25717,6 +26093,15 @@
                   "configuration_revision"
                 ],
                 "properties": {
+                  "submission_mode": {
+                    "type": "string",
+                    "enum": [
+                      "CONTINUE_TRACKING",
+                      "DOWNLOAD_EXISTING"
+                    ],
+                    "default": "CONTINUE_TRACKING",
+                    "description": "issue #98：本次操作的提交方式。持续追番建立受控外部订阅；下载现有资源只把当前资源交给 Auto Bangumi 加入下载。只作用于本次操作，不写入本地方案。"
+                  },
                   "expected_revision": {
                     "type": "integer",
                     "minimum": 1,
@@ -25751,6 +26136,7 @@
                 }
               },
               "example": {
+                "submission_mode": "CONTINUE_TRACKING",
                 "expected_revision": 1,
                 "idempotency_key": "示例",
                 "confirm": true,

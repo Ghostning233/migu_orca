@@ -47,6 +47,46 @@ from tracking_engine.models.tracking import (
 NOW = "2026-09-13T00:00:00+00:00"
 
 
+FIXTURE_RSS_URL = "https://example.invalid/rss/frieren-moe.xml"
+
+
+def _empty_readback():
+    """Issue #97 AC 5: a readable read-back that confirms no external object."""
+
+    def read_snapshot():
+        return (None, [], [])
+
+    return read_snapshot
+
+
+def _unreadable_readback():
+    """Issue #97 AC 6: a read-back that cannot prove anything."""
+
+    def read_snapshot():
+        return None
+
+    return read_snapshot
+
+
+def _matching_readback(external_id: str = "saved-subscription-1"):
+    """Issue #97: an exact read-back proving the controlled subscription."""
+
+    def read_snapshot():
+        from ab_engine.models.management import ExternalRss, ExternalSubscription
+
+        return (
+            None,
+            [
+                ExternalSubscription(
+                    external_id, "葬送的芙莉莲", 1, "喵萌", rss_urls=(FIXTURE_RSS_URL,)
+                )
+            ],
+            [ExternalRss("rss-1", "芙莉莲", FIXTURE_RSS_URL)],
+        )
+
+    return read_snapshot
+
+
 def test_saved_submit_input_rejects_legacy_secret_and_noncanonical_values() -> None:
     with pytest.raises(ValidationError):
         SavedTrackingSubmitInput(
@@ -172,6 +212,7 @@ def test_saved_submit_holds_snapshot_and_binds_operation_and_mapping(tmp_path: P
         repository=repository,
         payload=SavedTrackingSubmitInput.model_validate(_input(repository, record)),
         submit_one=submit_one,
+        readback_external=_matching_readback(),
         now=NOW,
     )
 
@@ -208,6 +249,7 @@ def test_saved_terminal_replay_after_config_delete_does_not_call_again(tmp_path:
         repository=repository,
         **payload,
         submit_one=lambda *_args: calls.append(1) or _success(),
+        readback_external=_matching_readback(),
         now=NOW,
     )
     repository.delete(expected_configuration_revision=1)
@@ -217,6 +259,7 @@ def test_saved_terminal_replay_after_config_delete_does_not_call_again(tmp_path:
         repository=repository,
         **payload,
         submit_one=lambda *_args: calls.append(1) or _success(),
+        readback_external=_matching_readback(),
         now=NOW,
     )
     assert first["outcome"] == replay["outcome"] == "ACTIVE"
@@ -236,6 +279,7 @@ def test_saved_terminal_replay_after_repository_rebuild_does_not_call_again(
         repository=repository,
         **payload,
         submit_one=lambda *_args: calls.append(1) or _success(),
+        readback_external=_matching_readback(),
         now=NOW,
     )
     rebuilt_repository = AutoBangumiConfigRepository(tmp_path / "ab-config")
@@ -244,6 +288,7 @@ def test_saved_terminal_replay_after_repository_rebuild_does_not_call_again(
         repository=rebuilt_repository,
         **payload,
         submit_one=lambda *_args: calls.append(1) or _success(),
+        readback_external=_matching_readback(),
         now=NOW,
     )
 
@@ -266,6 +311,7 @@ def test_saved_persist_failure_after_external_call_releases_lease_for_save(
         repository=repository,
         **_input(repository, record),
         submit_one=lambda *_args: calls.append(1) or _success(),
+        readback_external=_matching_readback(),
         persist_ab_result=persist_failure,
         now=NOW,
     )
@@ -301,6 +347,7 @@ def test_saved_needs_reconfirm_does_not_call_external(tmp_path: Path) -> None:
         repository=repository,
         **_input(repository, record),
         submit_one=lambda *_args: calls.append(1) or _success(),
+        readback_external=_matching_readback(),
         now=NOW,
     )
 
@@ -328,6 +375,7 @@ def test_saved_unknown_result_rejects_fresh_key_without_external_call(
             repository=repository,
             **_input(repository, current, idempotency_key="fresh-after-unknown"),
             submit_one=lambda *_args: calls.append(1) or _success(),
+        readback_external=_matching_readback(),
             now=NOW,
         )
 
@@ -362,6 +410,7 @@ def test_saved_old_unbound_operation_same_key_saved_ref_is_rejected(
             repository=repository,
             **payload,
             submit_one=lambda *_args: calls.append(1) or _success(),
+        readback_external=_matching_readback(),
             now=NOW,
         )
 
@@ -379,6 +428,7 @@ def test_saved_same_key_different_ref_is_rejected_without_external_call(tmp_path
         repository=repository,
         **payload,
         submit_one=lambda *_args: calls.append(1) or _success(),
+        readback_external=_matching_readback(),
         now=NOW,
     )
     replacement = repository.save(
@@ -402,6 +452,7 @@ def test_saved_same_key_different_ref_is_rejected_without_external_call(tmp_path
                 configuration_revision=replacement.configuration_revision,
             ),
             submit_one=lambda *_args: calls.append(1) or _success(),
+        readback_external=_matching_readback(),
             now=NOW,
         )
     assert error.value.error_type == "tracking_idempotency_conflict"
@@ -418,6 +469,7 @@ def test_saved_retry_failure_and_unknown_replay_keep_at_most_once_boundary(tmp_p
         repository=repository,
         **_input(repository, record),
         submit_one=lambda *_args: calls.append(1) or _failure(),
+        readback_external=_empty_readback(),
         now=NOW,
     )
     assert first["outcome"] == TRACKING_STATUS_SUBMIT_FAILED
@@ -432,6 +484,7 @@ def test_saved_retry_failure_and_unknown_replay_keep_at_most_once_boundary(tmp_p
         repository=repository,
         **retry_payload,
         submit_one=lambda *_args: calls.append(1) or _unknown(),
+        readback_external=_unreadable_readback(),
         now=NOW,
     )
     assert retry["outcome"] == TRACKING_STATUS_VERIFYING_EXTERNAL
@@ -441,6 +494,7 @@ def test_saved_retry_failure_and_unknown_replay_keep_at_most_once_boundary(tmp_p
         repository=repository,
         **retry_payload,
         submit_one=lambda *_args: calls.append(1) or _success(),
+        readback_external=_matching_readback(),
         now=NOW,
     )
     assert replay["outcome"] == TRACKING_STATUS_VERIFYING_EXTERNAL

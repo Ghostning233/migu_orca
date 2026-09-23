@@ -107,6 +107,7 @@ def bind_tracking_operation(
     expected_external_fingerprint: str | None = None,
     connection_ref: str | UUID | None = None,
     attempt: int = 1,
+    submission_mode: str | None = None,
     now: str | None = None,
 ) -> tuple[TrackingOperation, bool]:
     """Create a ``PREPARED`` operation for a key, or replay the bound one.
@@ -153,6 +154,7 @@ def bind_tracking_operation(
                 expected_revision=expected_revision,
                 request_fingerprint=request_fingerprint,
                 operation=operation,
+                submission_mode=submission_mode,
                 target_scope=target_scope,
                 previous_tracking_status=previous_tracking_status,
                 expected_external_fingerprint=expected_external_fingerprint,

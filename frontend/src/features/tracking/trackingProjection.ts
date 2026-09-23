@@ -76,9 +76,14 @@ export type TrackingStatusGroup = (typeof TRACKING_STATUS_GROUPS)[number]
  * deliberately has no category of its own — those rows stay visible in the list
  * and inside the server total.
  */
+/**
+ * Issue #99: the overview is fixed at five categories. 已加入下载 is not a status
+ * group of its own — it is counted separately from 追番中 — so this list is its
+ * own union rather than the server's status groups.
+ */
 export const TRACKING_OVERVIEW_GROUPS = [
-  'PENDING', 'ACTIVE', 'INACTIVE', 'ATTENTION',
-] as const satisfies readonly TrackingStatusGroup[]
+  'PENDING', 'ACTIVE', 'INACTIVE', 'ADDED_TO_DOWNLOAD', 'ATTENTION',
+] as const
 
 export type TrackingOverviewGroup = (typeof TRACKING_OVERVIEW_GROUPS)[number]
 
@@ -94,6 +99,8 @@ export interface TrackingListSummary {
   pending: number
   processing: number
   active: number
+  /** Issue #99: one-time acceptances, counted separately from 追番中. */
+  added_to_download: number
   inactive: number
   needs_attention: number
   unreadable: number
@@ -198,10 +205,23 @@ export function projectTrackingOverview(
       PENDING: _safeCount(summary?.pending),
       ACTIVE: _safeCount(summary?.active),
       INACTIVE: _safeCount(summary?.inactive),
+      ADDED_TO_DOWNLOAD: _safeCount(summary?.added_to_download),
       ATTENTION: _safeCount(summary?.needs_attention),
     },
     unreadable: _safeCount(summary?.unreadable),
   }
+}
+
+/**
+ * Issue #99 AC 6/7: the visible label for an operation-level submission mode.
+ *
+ * 待提交/需修改 carry no mode (the server sends ``null``), and any unknown or
+ * unreadable value fails closed to ``null`` so the page never fabricates one.
+ */
+export function formatSubmissionMode(value: unknown): string | null {
+  if (value === 'CONTINUE_TRACKING') return '持续追番'
+  if (value === 'DOWNLOAD_EXISTING') return '下载现有资源'
+  return null
 }
 
 function _safeCount(value: unknown): number {
@@ -550,6 +570,9 @@ export function isWriteActionCode(value: TrackingActionCode): value is TrackingW
  */
 export const SUBMIT_OUTCOMES = [
   'ACTIVE', 'SUBMIT_FAILED', 'NEEDS_RECONFIRM', 'VERIFYING_EXTERNAL', 'RECOVERY_REQUIRED',
+  // Issue #98/#99: a one-time "download existing resources" request Auto
+  // Bangumi accepted. It is local history, not an external subscription.
+  'ADDED_TO_DOWNLOAD',
 ] as const satisfies readonly TrackingSubmitResult['outcome'][]
 
 export type TrackingSubmitOutcome = (typeof SUBMIT_OUTCOMES)[number]
@@ -639,6 +662,34 @@ export interface TrackingWriteSession {
   readonly issues: TrackingRevalidateIssueView[]
   /** Published failure class of a failed/indeterminate result, when provided. */
   readonly failureCategory: WriteFailureCategory | null
+  /**
+   * Issue #101: the bounded, sanitized Auto Bangumi reason for a failure. Empty
+   * means Auto Bangumi gave none, and the page then says 未提供具体原因.
+   */
+  readonly diagnostics: TrackingWriteDiagnostics
+}
+
+export interface TrackingWriteDiagnostics {
+  readonly httpStatus: number | null
+  readonly messageZh: string | null
+  readonly messageEn: string | null
+}
+
+/** Issue #101 AC 1: a one-time failure never claims an external effect either way. */
+export const ONE_TIME_SUBMIT_FAILED_MESSAGE = '提交失败，可重新提交。'
+
+export function projectWriteDiagnostics(value: unknown): TrackingWriteDiagnostics {
+  const empty: TrackingWriteDiagnostics = { httpStatus: null, messageZh: null, messageEn: null }
+  if (!value || typeof value !== 'object') return empty
+  const source = value as Record<string, unknown>
+  const status = source.http_status
+  const zh = source.message_zh
+  const en = source.message_en
+  return {
+    httpStatus: typeof status === 'number' && Number.isInteger(status) ? status : null,
+    messageZh: typeof zh === 'string' && zh.trim() ? zh.trim() : null,
+    messageEn: typeof en === 'string' && en.trim() ? en.trim() : null,
+  }
 }
 
 /**
@@ -673,6 +724,8 @@ const WRITE_CONFLICT_MESSAGES: Record<TrackingWriteConflictType, string> = {
 const WRITE_MESSAGES: Record<TrackingWriteState, string> = {
   IN_FLIGHT: '正在提交到 Auto Bangumi，请稍候…',
   ACTIVE: '提交成功：已在 Auto Bangumi 创建外部订阅。',
+  // Issue #98/#99: a one-time acceptance — no subscription, no media promise.
+  ADDED_TO_DOWNLOAD: '已加入下载：Auto Bangumi 已接受本次下载现有资源的请求，不代表资源已下载完成。',
   SUBMIT_FAILED: '提交明确失败，尚未创建外部订阅；可在确认后显式重试。',
   NEEDS_RECONFIRM: '本地方案已变化，本次尚未创建外部订阅；请返回修改方案后重新确认。',
   VERIFYING_EXTERNAL: '外部提交结果未知，正在只读回查；请勿重复提交。',
@@ -701,13 +754,19 @@ export function createWriteSession(
   state: TrackingWriteState,
   issues: TrackingRevalidateIssueView[] = [],
   failureCategory: WriteFailureCategory | null = null,
+  submissionMode: 'CONTINUE_TRACKING' | 'DOWNLOAD_EXISTING' | null = null,
+  diagnostics: TrackingWriteDiagnostics = { httpStatus: null, messageZh: null, messageEn: null },
 ): TrackingWriteSession {
   // A published failure class owns the copy for its own channel; otherwise the
-  // fixed per-state sentence stays authoritative.
-  const message = failureCategory
-    ? WRITE_FAILURE_PRESENTATIONS[failureCategory].message
-    : WRITE_MESSAGES[state]
-  return { trackingId, action, state, message, issues, failureCategory }
+  // fixed per-state sentence stays authoritative. A one-time attempt has no
+  // external subscription to reason about, so its failure copy is the plain
+  // retryable sentence (issue #101 AC 1).
+  const message = state === 'SUBMIT_FAILED' && submissionMode === 'DOWNLOAD_EXISTING'
+    ? ONE_TIME_SUBMIT_FAILED_MESSAGE
+    : failureCategory
+      ? WRITE_FAILURE_PRESENTATIONS[failureCategory].message
+      : WRITE_MESSAGES[state]
+  return { trackingId, action, state, message, issues, failureCategory, diagnostics }
 }
 
 /** Fixed next step for one documented conflict; unknown types fail closed. */
@@ -730,6 +789,7 @@ export function createWriteConflictSession(
   return {
     trackingId, action, state: 'CONFLICT',
     message: writeConflictMessage(errorType), issues: [], failureCategory: null,
+    diagnostics: { httpStatus: null, messageZh: null, messageEn: null },
   }
 }
 
@@ -766,6 +826,7 @@ export function projectWriteOutcome(
   trackingId: string,
   action: TrackingActionCode,
   result: TrackingWriteResult,
+  submissionMode: 'CONTINUE_TRACKING' | 'DOWNLOAD_EXISTING' | null = null,
 ): TrackingWriteSession {
   const outcome: TrackingWriteState = isSubmitOutcome(result.outcome) ? result.outcome : 'UNKNOWN'
   return createWriteSession(
@@ -774,6 +835,8 @@ export function projectWriteOutcome(
     outcome,
     projectRevalidateIssues(result.issues),
     writeFailureCategory(result.failure_category),
+    submissionMode,
+    projectWriteDiagnostics((result as { diagnostics?: unknown }).diagnostics),
   )
 }
 

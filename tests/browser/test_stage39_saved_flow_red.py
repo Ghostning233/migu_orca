@@ -1351,7 +1351,8 @@ def test_submit_retry_singleflight_holds_unknown_lock_across_generation(page, li
     selector = "#tracking-submit" if code == "SUBMIT" else "#tracking-retry"
     page.wait_for_selector(selector)
     page.locator(selector).click()
-    page.locator(".confirm-dialog .primary-button").click()
+    page.wait_for_selector("#tracking-mode-continue", timeout=10_000)
+    page.locator("#tracking-mode-continue").click()
     page.locator(selector).dblclick(force=True)
     page.wait_for_timeout(500)
     assert len(posts) == 1
@@ -1427,8 +1428,8 @@ def test_submit_unknown_lock_survives_new_generation_refresh(page, live_server_u
     page.wait_for_selector("#tracking-submit")
     expect(page.locator("#tracking-submit")).to_be_enabled()
     page.locator("#tracking-submit").click()
-    page.wait_for_selector(".confirm-dialog", timeout=10_000)
-    page.locator(".confirm-dialog .primary-button").click()
+    page.wait_for_selector("#tracking-mode-continue", timeout=10_000)
+    page.locator("#tracking-mode-continue").click()
     page.wait_for_timeout(200)
     assert len(posts) == 1 and posts[0]["connection_ref"] == ref_a
 

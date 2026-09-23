@@ -910,9 +910,15 @@ class TrackingItemDTO(_StrictBase):
         "PENDING_SUBMIT", "REVALIDATING", "NEEDS_RECONFIRM", "SUBMITTING",
         "VERIFYING_EXTERNAL", "ACTIVE", "SUBMIT_FAILED", "RECOVERY_REQUIRED",
         "UNKNOWN", "DISABLED", "EXTERNAL_DELETED", "EXTERNAL_ONLY",
+        # Issue #98/#99: a one-time "download existing resources" acceptance.
+        "ADDED_TO_DOWNLOAD",
     ]
     status_label: str
     status_group: Literal["PENDING", "PROCESSING", "ACTIVE", "ATTENTION", "INACTIVE"]
+    #: Issue #99 AC 6/7: the operation-level submission mode of the last attempt.
+    #: ``None`` means "do not show a mode" — 待提交/需修改 never fabricate one, and
+    #: an unknown or unreadable value fails closed to ``None``.
+    submission_mode: Literal["CONTINUE_TRACKING", "DOWNLOAD_EXISTING"] | None = None
     available_actions: list[TrackingAvailableActionDTO] = Field(default_factory=list)
     valid_resource_count: int = 0
     updated_episode: None = None
@@ -933,6 +939,9 @@ class TrackingItemListSummaryDTO(_StrictBase):
     pending: int
     processing: int
     active: int
+    #: Issue #99: records whose one-time "download existing resources" request
+    #: Auto Bangumi accepted. They are local history, not external subscriptions.
+    added_to_download: int = 0
     inactive: int
     needs_attention: int
     unreadable: int
@@ -966,9 +975,15 @@ class TrackingDetailResultDTO(_StrictBase):
         "PENDING_SUBMIT", "REVALIDATING", "NEEDS_RECONFIRM", "SUBMITTING",
         "VERIFYING_EXTERNAL", "ACTIVE", "SUBMIT_FAILED", "RECOVERY_REQUIRED",
         "UNKNOWN", "DISABLED", "EXTERNAL_DELETED", "EXTERNAL_ONLY",
+        # Issue #98/#99: a one-time "download existing resources" acceptance.
+        "ADDED_TO_DOWNLOAD",
     ]
     status_label: str
     status_group: Literal["PENDING", "PROCESSING", "ACTIVE", "ATTENTION", "INACTIVE"]
+    #: Issue #99 AC 6/7: the operation-level submission mode of the last attempt.
+    #: ``None`` means "do not show a mode" — 待提交/需修改 never fabricate one, and
+    #: an unknown or unreadable value fails closed to ``None``.
+    submission_mode: Literal["CONTINUE_TRACKING", "DOWNLOAD_EXISTING"] | None = None
     available_actions: list[TrackingAvailableActionDTO] = Field(default_factory=list)
     valid_resource_count: int = 0
     updated_episode: None = None
@@ -1019,12 +1034,25 @@ class TrackingRevalidateResultDTO(_StrictBase):
     tracking: TrackingItemDTO
 
 
+class TrackingSubmitDiagnosticsDTO(_StrictBase):
+    """Bounded, sanitized Auto Bangumi failure diagnostics (issue #101).
+
+    Every field is optional on purpose: when Auto Bangumi gives no usable
+    reason the object is empty and the client states 未提供具体原因 rather than
+    inventing one. Nothing raw, no full RSS URL, magnet, credential or path.
+    """
+
+    http_status: int | None = None
+    message_zh: str | None = None
+    message_en: str | None = None
+
+
 class TrackingSubmitResultDTO(_StrictBase):
     """Result of ``POST /api/v1/tracking/items/{tracking_id}/submit`` (US-225).
 
     A persisted business result is HTTP 200: ``outcome`` is the record's final
     status (``ACTIVE``/``SUBMIT_FAILED``/``VERIFYING_EXTERNAL``/
-    ``RECOVERY_REQUIRED``/``NEEDS_RECONFIRM``).  ``checked_revision`` is the
+    ``RECOVERY_REQUIRED``/``NEEDS_RECONFIRM``/``ADDED_TO_DOWNLOAD``).  ``checked_revision`` is the
     revision the client confirmed; ``next_revision`` is the record's revision
     after the outcome persisted.  ``operation_id`` is set when a submit
     operation was created/reused; ``issues`` carry the fixed §11.5 codes when
@@ -1037,6 +1065,8 @@ class TrackingSubmitResultDTO(_StrictBase):
     outcome: Literal[
         "ACTIVE", "SUBMIT_FAILED", "VERIFYING_EXTERNAL",
         "RECOVERY_REQUIRED", "NEEDS_RECONFIRM",
+        # Issue #98: a one-time "download existing resources" acceptance.
+        "ADDED_TO_DOWNLOAD",
     ]
     checked_revision: int
     next_revision: int
@@ -1045,6 +1075,7 @@ class TrackingSubmitResultDTO(_StrictBase):
     #: Published, non-sensitive failure classification (issue #86). ``None`` on
     #: success; every other code maps to fixed client copy and a fixed display
     #: channel (blocking dialog vs. inline item message).
+    diagnostics: TrackingSubmitDiagnosticsDTO = Field(default_factory=TrackingSubmitDiagnosticsDTO)
     failure_category: Literal[
         "CONNECTION",
         "AUTHENTICATION",

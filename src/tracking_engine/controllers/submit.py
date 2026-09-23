@@ -28,6 +28,7 @@ upstream response, URL, magnet, credential or path is accepted or produced.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from tracking_engine.models.operation import (
@@ -38,6 +39,7 @@ from tracking_engine.models.operation import (
 )
 from tracking_engine.models.tracking import (
     TRACKING_STATUS_ACTIVE,
+    TRACKING_STATUS_ADDED_TO_DOWNLOAD,
     TRACKING_STATUS_NEEDS_RECONFIRM,
     TRACKING_STATUS_PENDING_SUBMIT,
     TRACKING_STATUS_RECOVERY_REQUIRED,
@@ -134,9 +136,31 @@ OPERATION_OUTCOME_TRACKING_STATUS: dict[str, str] = {
 SUBMIT_STARTED_MESSAGE = "正在提交到 Auto Bangumi"
 SUBMIT_ADOPTED_MESSAGE = "已确认最新方案并继续提交"
 SUBMIT_SUCCEEDED_MESSAGE = "已成功提交到 Auto Bangumi"
-SUBMIT_FAILED_MESSAGE = "Auto Bangumi 提交失败，可安全重试"
+#: Issue #98 AC 8: a failed one-time request is retryable by an explicit user
+#: action, but Auto Bangumi 3.1.18 cannot prove a safe retry, so the wording
+#: never promises one (ADR-0001).
+SUBMIT_FAILED_MESSAGE = "提交失败，可重新提交"
+#: A one-time "download existing resources" request Auto Bangumi accepted.
+ADDED_TO_DOWNLOAD_MESSAGE = "已加入下载"
+#: A write whose body was not a success, but whose exact read-back proved the
+#: controlled subscription exists: the record is 追番中 with this fixed, safe
+#: note about the current resources (issue #97).
+SUBMIT_SUCCEEDED_RESOURCE_WARNING_MESSAGE = "订阅已建立，但 Auto Bangumi 的写响应未确认；已按精确回查确认为追番中，请留当前资源处理情况"
 SUBMIT_OUTCOME_UNKNOWN_MESSAGE = "Auto Bangumi 结果未知，请先恢复核验"
 SUBMIT_PERSIST_FAILED_MESSAGE = "提交结果保存失败，请先恢复核验"
+
+
+def classify_existing_resource_result(result: Any) -> str:
+    """Classify one one-time "download existing resources" write (issue #98).
+
+    Auto Bangumi 3.1.18 returns no per-torrent result and no idempotency handle,
+    so HTTP 200 is 已加入下载 and every other response, timeout or connection
+    failure is the same retryable 提交失败. Nothing is read back: this mode never
+    creates a controlled external subscription.
+    """
+    if isinstance(result, dict) and result.get("success") is True:
+        return TRACKING_STATUS_ADDED_TO_DOWNLOAD
+    return TRACKING_STATUS_SUBMIT_FAILED
 
 
 def classify_external_submit_result(result: Any) -> str:
@@ -243,10 +267,92 @@ __all__ = [
     "SUBMIT_OUTCOME_UNKNOWN_MESSAGE",
     "SUBMIT_PERSIST_FAILED_MESSAGE",
     "SUBMIT_STARTED_MESSAGE",
+    "SUBMIT_SUCCEEDED_RESOURCE_WARNING_MESSAGE",
     "SUBMIT_SUCCEEDED_MESSAGE",
+    "ConfirmedSubscriptionOutcome",
+    "ADDED_TO_DOWNLOAD_MESSAGE",
+    "classify_existing_resource_result",
     "classify_external_submit_result",
+    "confirm_subscription_outcome",
     "external_submit_error_type",
     "external_submit_result_id",
     "submit_failure_category",
     "tracking_status_for_operation_state",
 ]
+
+
+@dataclass(frozen=True)
+class ConfirmedSubscriptionOutcome:
+    """The externally *confirmed* outcome of one persistent-subscription write.
+
+    ``classification`` is an operation terminal state; ``external_id`` is the
+    exact controlled subscription the read-back proved, and ``resource_warning``
+    is true when the write body disagreed with that proof.
+    """
+
+    classification: str
+    external_id: str | None
+    resource_warning: bool = False
+
+
+def confirm_subscription_outcome(
+    *,
+    ab_result: Any,
+    expected_rss_url: str | None,
+    snapshot: Any,
+) -> ConfirmedSubscriptionOutcome:
+    """Confirm one persistent-subscription write by exact read-back (issue #97).
+
+    The Auto Bangumi write body alone never establishes ownership: the caller
+    passes a read-only ``snapshot`` of ``(capabilities, subscriptions, rss)`` and
+    the exact server-private RSS identity from the saved plan. Only an exact RSS
+    URL match proves the controlled subscription, and an ambiguous or unreadable
+    read-back stays ``OUTCOME_UNKNOWN`` so it is never blindly retried.
+    """
+    if snapshot is None or not isinstance(expected_rss_url, str) or not expected_rss_url.strip():
+        # Without a readable snapshot or an exact identity there is no proof.
+        return ConfirmedSubscriptionOutcome(TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN, None)
+    try:
+        _capabilities, subscriptions, rss_items = snapshot
+    except (TypeError, ValueError):
+        return ConfirmedSubscriptionOutcome(TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN, None)
+    if not isinstance(subscriptions, (list, tuple)) or not isinstance(rss_items, (list, tuple)):
+        return ConfirmedSubscriptionOutcome(TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN, None)
+
+    wanted = expected_rss_url.strip()
+    matched_rss_ids = {
+        str(getattr(item, "external_id", "") or "")
+        for item in rss_items
+        if str(getattr(item, "url", "") or "").strip() == wanted
+    }
+    matched_rss_ids.discard("")
+    if len(matched_rss_ids) != 1:
+        # No exact RSS object, or several: nothing may be claimed.
+        if not matched_rss_ids:
+            return ConfirmedSubscriptionOutcome(TRACKING_OPERATION_STATE_FAILED, None)
+        return ConfirmedSubscriptionOutcome(TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN, None)
+
+    rss_id = next(iter(matched_rss_ids))
+    owners = [
+        subscription
+        for subscription in subscriptions
+        if rss_id in {
+            str(value) for value in getattr(subscription, "rss_ids", ()) or ()
+        }
+        or wanted in {
+            str(value).strip() for value in getattr(subscription, "rss_urls", ()) or ()
+        }
+    ]
+    if len(owners) != 1:
+        return ConfirmedSubscriptionOutcome(TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN, None)
+
+    owner = owners[0]
+    external_id = str(getattr(owner, "external_id", "") or "") or None
+    if external_id is None:
+        return ConfirmedSubscriptionOutcome(TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN, None)
+    body_success = isinstance(ab_result, dict) and ab_result.get("success") is True
+    return ConfirmedSubscriptionOutcome(
+        TRACKING_OPERATION_STATE_SUCCEEDED,
+        external_id,
+        resource_warning=not body_success,
+    )

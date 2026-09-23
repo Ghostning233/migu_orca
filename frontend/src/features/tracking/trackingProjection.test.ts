@@ -54,6 +54,9 @@ import {
   type TrackingRecoverResult,
   type TrackingRecoveryActionCode,
   type TrackingRecoveryConfirmation,
+  ONE_TIME_SUBMIT_FAILED_MESSAGE,
+  projectWriteDiagnostics,
+  formatSubmissionMode,
 } from './trackingProjection'
 
 type ItemAction = NonNullable<TrackingItem['available_actions']>[number]
@@ -62,7 +65,8 @@ function item(overrides: Partial<TrackingItem> = {}): TrackingItem {
   return {
     tracking_id: 'tracking-1', request_id: 'request-1', title: '葬送的芙莉莲', season: 1,
     subtitle_group: '喵萌奶茶屋', poster_path: null, status: 'ACTIVE', status_label: '追番中',
-    status_group: 'ACTIVE', available_actions: [], valid_resource_count: 2,
+    status_group: 'ACTIVE', submission_mode: null,
+    available_actions: [], valid_resource_count: 2,
     updated_episode: null, updated_episode_status: 'NOT_IMPLEMENTED', total_episodes: null,
     revision: 3, updated_at: '2026-09-13T00:00:00Z', ...overrides,
   }
@@ -90,18 +94,22 @@ function action(overrides: Partial<ItemAction> = {}): ItemAction {
 describe('tracking projection (US-304)', () => {
   it('projects the overview from the server summary, never from loaded rows', () => {
     const result = projectTrackingOverview({
-      total: 7, pending: 2, processing: 1, active: 3, inactive: 1,
-      needs_attention: 0, unreadable: 1,
+      total: 7, pending: 2, processing: 1, active: 3, added_to_download: 1,
+      inactive: 1, needs_attention: 0, unreadable: 1,
     })
     expect(result.total).toBe(7)
-    expect(result.byGroup).toEqual({ PENDING: 2, ACTIVE: 3, INACTIVE: 1, ATTENTION: 0 })
+    // Issue #99: 已加入下载 is the fifth fixed overview category, counted
+    // separately from 追番中 by the server.
+    expect(result.byGroup).toEqual({
+      PENDING: 2, ACTIVE: 3, INACTIVE: 1, ADDED_TO_DOWNLOAD: 1, ATTENTION: 0,
+    })
     expect(result.unreadable).toBe(1)
   })
 
   it('fails closed to zero for a missing or malformed summary', () => {
     expect(projectTrackingOverview(null)).toEqual({
       total: 0,
-      byGroup: { PENDING: 0, ACTIVE: 0, INACTIVE: 0, ATTENTION: 0 },
+      byGroup: { PENDING: 0, ACTIVE: 0, INACTIVE: 0, ADDED_TO_DOWNLOAD: 0, ATTENTION: 0 },
       unreadable: 0,
     })
     const malformed = projectTrackingOverview({
@@ -109,7 +117,9 @@ describe('tracking projection (US-304)', () => {
       processing: 0, unreadable: undefined,
     } as never)
     expect(malformed.total).toBe(0)
-    expect(malformed.byGroup).toEqual({ PENDING: 0, ACTIVE: 0, INACTIVE: 0, ATTENTION: 2 })
+    expect(malformed.byGroup).toEqual({
+      PENDING: 0, ACTIVE: 0, INACTIVE: 0, ADDED_TO_DOWNLOAD: 0, ATTENTION: 2,
+    })
     expect(malformed.unreadable).toBe(0)
   })
 
@@ -342,6 +352,8 @@ describe('tracking write session projection (US-310)', () => {
     expect(session).toEqual({
       trackingId: 'tracking-1', action: 'SUBMIT', state: 'IN_FLIGHT',
       message: writeSessionMessage('IN_FLIGHT'), issues: [], failureCategory: null,
+      // Issue #101: an empty diagnostics object means "no reason given".
+      diagnostics: { httpStatus: null, messageZh: null, messageEn: null },
     })
     expect(Object.keys(session)).not.toContain('idempotencyKey')
   })
@@ -660,5 +672,47 @@ describe('tracking management projection (US-313)', () => {
     expect(conflict.message).toContain('没有对应的外部对象')
     expect(managementSessionKeepsIntent(conflict)).toBe(false)
     expect(conflict.state).toBe('CONFLICT')
+  })
+})
+
+describe('submission mode display (issue #99 AC 6/7)', () => {
+  it('labels a real operation-level mode and fails closed for everything else', () => {
+    expect(formatSubmissionMode('CONTINUE_TRACKING')).toBe('持续追番')
+    expect(formatSubmissionMode('DOWNLOAD_EXISTING')).toBe('下载现有资源')
+    // 待提交/需修改 send null, and any unknown value must never be shown.
+    for (const value of [null, undefined, '', 'UNKNOWN', 'SUBMIT', 42, {}]) {
+      expect(formatSubmissionMode(value)).toBeNull()
+    }
+  })
+})
+
+describe('submission failure diagnostics (issue #101)', () => {
+  it('gives a one-time failure the plain retryable sentence only', () => {
+    const session = createWriteSession(
+      'tracking-1', 'SUBMIT', 'SUBMIT_FAILED', [], null, 'DOWNLOAD_EXISTING',
+    )
+    expect(session.message).toBe(ONE_TIME_SUBMIT_FAILED_MESSAGE)
+    for (const forbidden of ['尚未创建', '可能部分成功', '可安全重试', '外部订阅']) {
+      expect(session.message).not.toContain(forbidden)
+    }
+  })
+
+  it('keeps the actionable class copy for 持续追番', () => {
+    const session = createWriteSession(
+      'tracking-1', 'SUBMIT', 'SUBMIT_FAILED', [], 'AUTHENTICATION', 'CONTINUE_TRACKING',
+    )
+    expect(session.message).toContain('前往设置')
+  })
+
+  it('projects bounded diagnostics and fails closed on anything else', () => {
+    expect(projectWriteDiagnostics({
+      http_status: 503, message_zh: '上游繁忙', message_en: 'busy',
+    })).toEqual({ httpStatus: 503, messageZh: '上游繁忙', messageEn: 'busy' })
+    // Missing, mistyped or unknown shapes never invent a reason.
+    for (const value of [null, undefined, {}, { http_status: 'x' }, 'nope', { message_zh: '  ' }]) {
+      expect(projectWriteDiagnostics(value)).toEqual({
+        httpStatus: null, messageZh: null, messageEn: null,
+      })
+    }
   })
 })

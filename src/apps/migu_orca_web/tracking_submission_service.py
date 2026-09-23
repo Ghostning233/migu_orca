@@ -42,6 +42,8 @@ from dataclasses import replace
 from typing import Any
 from uuid import UUID
 
+from ab_engine.controllers.ab_http_client import UrlopenAutoBangumiHttpTransport
+from ab_engine.controllers.ab_management_client import create_legacy_31_management_client
 from ab_engine.controllers.tracking_submit_adapter import compose_tracking_submit_one
 from apps.migu_orca_web.save_confirm_service import compute_request_fingerprint
 from apps.migu_orca_web.schemas import (
@@ -83,6 +85,7 @@ from tracking_engine.controllers.revalidate import (
     classify_revalidation,
 )
 from tracking_engine.controllers.submit import (
+    ADDED_TO_DOWNLOAD_MESSAGE,
     SUBMIT_ADOPTED_MESSAGE,
     SUBMIT_FAILED_MESSAGE,
     SUBMIT_FROM_STATUSES,
@@ -90,7 +93,10 @@ from tracking_engine.controllers.submit import (
     SUBMIT_PERSIST_FAILED_MESSAGE,
     SUBMIT_STARTED_MESSAGE,
     SUBMIT_SUCCEEDED_MESSAGE,
+    SUBMIT_SUCCEEDED_RESOURCE_WARNING_MESSAGE,
+    classify_existing_resource_result,
     classify_external_submit_result,
+    confirm_subscription_outcome,
     external_submit_error_type,
     external_submit_result_id,
     submit_failure_category,
@@ -105,6 +111,7 @@ from tracking_engine.models.operation import (
     TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
     TRACKING_OPERATION_STATE_SUCCEEDED,
     TRACKING_OPERATION_TERMINAL_STATES,
+    TRACKING_SUBMISSION_MODE_DOWNLOAD_EXISTING,
     TrackingOperation,
     tracking_operation_id_for_idempotency_key,
     transition_tracking_operation,
@@ -119,6 +126,7 @@ from tracking_engine.models.tracking import (
     TRACKING_AUDIT_SUBMIT_STARTED,
     TRACKING_AUDIT_SUBMIT_SUCCEEDED,
     TRACKING_STATUS_ACTIVE,
+    TRACKING_STATUS_ADDED_TO_DOWNLOAD,
     TRACKING_STATUS_NEEDS_RECONFIRM,
     TRACKING_STATUS_PENDING_SUBMIT,
     TRACKING_STATUS_RECOVERY_REQUIRED,
@@ -150,6 +158,38 @@ _REPLAY_SAFE_MESSAGE: dict[str, str] = {
 }
 
 
+def compose_tracking_collect_one() -> Callable[..., Any]:
+    """Return the Auto Bangumi one-time collection seam (issue #98).
+
+    Auto Bangumi 3.1.18's exact “download the existing resources” endpoint is not
+    yet a verified contract in this repository, so the default implementation
+    fails closed with a stable error instead of writing to an unverified path.
+    Tests and the future verified adapter inject their own callable here.
+    """
+
+    def collect_one(_request: dict[str, Any], _config: Any) -> dict[str, Any]:
+        raise Stage1Error(
+            "ab_submit_unsupported",
+            "当前 Auto Bangumi 版本暂不支持“下载现有资源”",
+            "collect_existing_resources",
+        )
+
+    return collect_one
+
+
+def compose_tracking_readback_external(config: Any) -> Callable[[], Any]:
+    """Return a read-only exact read-back of the Auto Bangumi snapshot (#97).
+
+    The returned callable performs one management snapshot read
+    ``(capabilities, subscriptions, rss)`` and never writes. The caller keeps the
+    config lease alive for its duration, exactly like the submit seam.
+    """
+    client = create_legacy_31_management_client(
+        config, transport=UrlopenAutoBangumiHttpTransport()
+    )
+    return client.read_snapshot
+
+
 def run_tracking_submit(
     config: StorageConfig,
     *,
@@ -162,6 +202,9 @@ def run_tracking_submit(
     start_statuses: frozenset[str] | None = None,
     submit_one: SubmitOne | None = None,
     persist_ab_result: PersistAbResult | None = None,
+    readback_external: Callable[[], Any] | None = None,
+    submission_mode: str | None = None,
+    collect_one: Callable[..., Any] | None = None,
     now: str | None = None,
 ) -> dict[str, Any]:
     """Run the unified reliable submit for one tracking item (US-225).
@@ -259,6 +302,9 @@ def run_tracking_submit(
         operation=None,
         submit_one=submit_one,
         persist_ab_result=persist_ab_result,
+        readback_external=readback_external,
+        submission_mode=submission_mode,
+        collect_one=collect_one,
         timestamp=timestamp,
     )
 
@@ -274,6 +320,7 @@ def run_tracking_retry(
     connection_ref: str | UUID | None = None,
     submit_one: SubmitOne | None = None,
     persist_ab_result: PersistAbResult | None = None,
+    readback_external: Callable[[], Any] | None = None,
     now: str | None = None,
 ) -> dict[str, Any]:
     """Run the unified retry for one definitely-failed tracking item (US-226).
@@ -297,6 +344,7 @@ def run_tracking_retry(
         start_statuses=frozenset({TRACKING_STATUS_SUBMIT_FAILED}),
         submit_one=submit_one,
         persist_ab_result=persist_ab_result,
+        readback_external=readback_external,
         now=now,
     )
 
@@ -315,6 +363,7 @@ def run_saved_tracking_submit(
     submit_one: SubmitOne | None = None,
     persist_ab_result: PersistAbResult | None = None,
     now: str | None = None,
+    readback_external: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
     """Submit through one exact, server-owned saved AB configuration.
 
@@ -339,6 +388,8 @@ def run_saved_tracking_submit(
         start_statuses=None,
         submit_one=submit_one,
         persist_ab_result=persist_ab_result,
+        readback_external=readback_external,
+        submission_mode=getattr(payload, "submission_mode", None),
         now=now,
     )
 
@@ -357,6 +408,7 @@ def run_saved_tracking_retry(
     submit_one: SubmitOne | None = None,
     persist_ab_result: PersistAbResult | None = None,
     now: str | None = None,
+    readback_external: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
     """Retry only a definitely failed submit using the saved AB connection."""
     return _run_saved_tracking_submission(
@@ -374,6 +426,7 @@ def run_saved_tracking_retry(
         start_statuses=frozenset({TRACKING_STATUS_SUBMIT_FAILED}),
         submit_one=submit_one,
         persist_ab_result=persist_ab_result,
+        readback_external=readback_external,
         now=now,
     )
 
@@ -387,6 +440,8 @@ def _run_saved_tracking_submission(
     submit_one: SubmitOne | None,
     persist_ab_result: PersistAbResult | None,
     now: str | None,
+    readback_external: Callable[[], Any] | None = None,
+    submission_mode: str | None = None,
 ) -> dict[str, Any]:
     repository = repository or AutoBangumiConfigRepository()
     existing = _find_operation(config, payload.idempotency_key)
@@ -421,6 +476,11 @@ def _run_saved_tracking_submission(
                 "Auto Bangumi 配置未配置",
                 "tracking_saved_submit",
             )
+        # Issue #97: the write is confirmed by an exact read-back of the same
+        # Auto Bangumi instance; callers (and tests) may inject one seam.
+        readback_external = readback_external or compose_tracking_readback_external(
+            lease.record.config.to_runtime_config()
+        )
         return run_tracking_submit(
             config,
             tracking_id=payload.tracking_id,
@@ -432,6 +492,8 @@ def _run_saved_tracking_submission(
             start_statuses=start_statuses,
             submit_one=submit_one,
             persist_ab_result=persist_ab_result,
+            readback_external=readback_external,
+            submission_mode=submission_mode,
             now=now,
         )
 
@@ -466,6 +528,7 @@ def _resolve_existing_operation(
     submit_one: SubmitOne | None,
     persist_ab_result: PersistAbResult | None,
     timestamp: str,
+    readback_external: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
     """Decide how a same-key request proceeds from the stored operation state."""
     if operation.state in TRACKING_OPERATION_TERMINAL_STATES:
@@ -649,6 +712,9 @@ def _submit_through_external(
     submit_one: SubmitOne | None,
     persist_ab_result: PersistAbResult | None,
     timestamp: str,
+    readback_external: Callable[[], Any] | None = None,
+    submission_mode: str | None = None,
+    collect_one: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
     """Persist the SUBMITTING boundary, gate the external call and finalize."""
     if operation is None:
@@ -660,6 +726,7 @@ def _submit_through_external(
             expected_revision=expected_revision,
             request_fingerprint=fingerprint or "",
             connection_ref=connection_ref,
+            submission_mode=submission_mode,
             now=timestamp,
         )
         if not created:
@@ -734,7 +801,19 @@ def _submit_through_external(
         raise
     operation = in_flight
 
-    ab_result = _run_submit_one(submit_one, request, ab_config)
+    one_time = submission_mode == TRACKING_SUBMISSION_MODE_DOWNLOAD_EXISTING
+    if one_time:
+        try:
+            ab_result = _run_collect_one(collect_one, request, ab_config)
+        except Stage1Error as exc:
+            # Every failure of a one-time request is the same retryable 提交失败,
+            # exactly like a non-200 response (issue #98 AC 7).
+            ab_result = {
+                "success": False,
+                "error": {"error_type": exc.error_type, "message": exc.message},
+            }
+    else:
+        ab_result = _run_submit_one(submit_one, request, ab_config)
 
     persist = persist_ab_result or _default_persist_ab_result(config)
     try:
@@ -758,7 +837,24 @@ def _submit_through_external(
             timestamp=timestamp,
         )
 
-    classification = classify_external_submit_result(ab_result)
+    if one_time:
+        # ADR-0001: a one-time request has no idempotency handle upstream, so
+        # 200 is 已加入下载 and *every* other outcome — non-200, timeout or a
+        # broken connection — is the same retryable 提交失败. Nothing is claimed
+        # and nothing is read back.
+        one_time_status = classify_existing_resource_result(ab_result)
+        classification = (
+            TRACKING_OPERATION_STATE_SUCCEEDED
+            if one_time_status == TRACKING_STATUS_ADDED_TO_DOWNLOAD
+            else TRACKING_OPERATION_STATE_FAILED
+        )
+        confirmed_external_id, resource_warning = None, False
+    else:
+        classification, confirmed_external_id, resource_warning = _confirmed_submit_outcome(
+            ab_result=ab_result,
+            request=request,
+            readback_external=readback_external,
+        )
     return _finalize_external_outcome(
         config,
         record=record,
@@ -769,7 +865,78 @@ def _submit_through_external(
         expected_revision=expected_revision,
         request=request,
         timestamp=timestamp,
+        confirmed_external_id=confirmed_external_id,
+        resource_warning=resource_warning,
+        submission_mode=submission_mode,
     )
+
+
+def _run_collect_one(
+    collect_one: Callable[..., Any] | None,
+    request: dict[str, Any] | None,
+    ab_config: Any,
+) -> dict[str, Any]:
+    """Run the one-time collection seam (issue #98)."""
+    runner = collect_one or compose_tracking_collect_one()
+    return runner(request, ab_config)
+
+
+def _submit_diagnostics(ab_result: Any) -> dict[str, Any]:
+    """The bounded, already-sanitized upstream diagnostics (issue #101 AC 3/4).
+
+    The adapter only ever puts a whitelisted ``http_status`` and bounded
+    ``message_zh``/``message_en`` in ``details``; anything else is dropped here
+    too, so a missing reason stays missing rather than being invented.
+    """
+    error = ab_result.get("error") if isinstance(ab_result, dict) else None
+    details = error.get("details") if isinstance(error, dict) else None
+    if not isinstance(details, dict):
+        return {}
+    diagnostics: dict[str, Any] = {}
+    status = details.get("http_status")
+    if isinstance(status, int) and not isinstance(status, bool) and 100 <= status <= 599:
+        diagnostics["http_status"] = status
+    for key in ("message_zh", "message_en"):
+        value = details.get(key)
+        if isinstance(value, str) and value.strip():
+            diagnostics[key] = value.strip()[:200]
+    return diagnostics
+
+
+def _expected_rss_url(request: dict[str, Any] | None) -> str | None:
+    """The server-private exact RSS identity of the saved plan, if any."""
+    confirmable = request.get("confirmable_config") if isinstance(request, dict) else None
+    if not isinstance(confirmable, dict):
+        return None
+    value = confirmable.get("selected_rss_url")
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _confirmed_submit_outcome(
+    *,
+    ab_result: Any,
+    request: dict[str, Any] | None,
+    readback_external: Callable[[], Any] | None,
+) -> tuple[str, str | None, bool]:
+    """Decide the persistent-subscription outcome, never trusting the body alone.
+
+    With a read-back seam the result is only ever the exact snapshot match
+    (issue #97); without one (retry/legacy callers) the historical body
+    classification is kept so those paths do not silently change semantics.
+    """
+    if readback_external is None:
+        return classify_external_submit_result(ab_result), external_submit_result_id(ab_result), False
+    try:
+        snapshot = readback_external()
+    except Exception:
+        # An unreadable read-back proves nothing: stay unresolved (AC 6).
+        return TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN, None, False
+    confirmed = confirm_subscription_outcome(
+        ab_result=ab_result,
+        expected_rss_url=_expected_rss_url(request),
+        snapshot=snapshot,
+    )
+    return confirmed.classification, confirmed.external_id, confirmed.resource_warning
 
 
 def _finalize_external_outcome(
@@ -783,13 +950,29 @@ def _finalize_external_outcome(
     expected_revision: int,
     request: dict[str, Any] | None,
     timestamp: str,
+    confirmed_external_id: str | None = None,
+    resource_warning: bool = False,
+    submission_mode: str | None = None,
 ) -> dict[str, Any]:
     """Persist the TrackingRecord final status then the operation terminal state."""
-    if classification == TRACKING_OPERATION_STATE_SUCCEEDED:
+    one_time = submission_mode == TRACKING_SUBMISSION_MODE_DOWNLOAD_EXISTING
+    if classification == TRACKING_OPERATION_STATE_SUCCEEDED and one_time:
+        # Issue #98: a one-time acceptance is a local terminal fact. It claims no
+        # external object, so no external mapping is ever written.
+        outcome = TRACKING_STATUS_ADDED_TO_DOWNLOAD
+        audit_action = TRACKING_AUDIT_SUBMIT_SUCCEEDED
+        safe_message = ADDED_TO_DOWNLOAD_MESSAGE
+        external_id = None
+        op_error_type = None
+        reason_code = None
+        op_state = TRACKING_OPERATION_STATE_SUCCEEDED
+    elif classification == TRACKING_OPERATION_STATE_SUCCEEDED:
         outcome = TRACKING_STATUS_ACTIVE
         audit_action = TRACKING_AUDIT_SUBMIT_SUCCEEDED
-        safe_message = SUBMIT_SUCCEEDED_MESSAGE
-        external_id = external_submit_result_id(ab_result)
+        safe_message = (
+            SUBMIT_SUCCEEDED_RESOURCE_WARNING_MESSAGE if resource_warning else SUBMIT_SUCCEEDED_MESSAGE
+        )
+        external_id = confirmed_external_id or external_submit_result_id(ab_result)
         op_error_type = None
         reason_code = None
         op_state = TRACKING_OPERATION_STATE_SUCCEEDED
@@ -820,7 +1003,11 @@ def _finalize_external_outcome(
         safe_message=safe_message,
         now=timestamp,
     )
-    if classification == TRACKING_OPERATION_STATE_SUCCEEDED and connection_ref is not None:
+    if (
+        classification == TRACKING_OPERATION_STATE_SUCCEEDED
+        and not one_time
+        and connection_ref is not None
+    ):
         next_record = replace(
             next_record,
             external_mapping=_submit_external_mapping(
@@ -1191,6 +1378,7 @@ def _default_persist_ab_result(config: StorageConfig) -> PersistAbResult:
 def _submit_result_payload(
     *,
     record: TrackingRecord,
+    ab_result: Any = None,
     outcome: str,
     checked_revision: int,
     operation_id: str | None,
@@ -1219,6 +1407,8 @@ def _submit_result_payload(
         "checked_at": timestamp,
         "operation_id": operation_id,
         "failure_category": submit_failure_category(outcome=outcome, error_type=error_type),
+        # Issue #101: the bounded upstream reason, never the raw response.
+        "diagnostics": _submit_diagnostics(ab_result),
         "issues": [
             {
                 "code": issue.code,
@@ -1278,6 +1468,8 @@ __all__ = [
 #: outcome, and one request refused before any external call (issue #87).
 _BATCH_OUTCOME_BUCKETS = {
     TRACKING_STATUS_ACTIVE: "succeeded",
+    # Issue #98/#100: a one-time acceptance is as successful as 追番中.
+    TRACKING_STATUS_ADDED_TO_DOWNLOAD: "succeeded",
     TRACKING_STATUS_SUBMIT_FAILED: "failed",
     TRACKING_STATUS_NEEDS_RECONFIRM: "failed",
     TRACKING_STATUS_VERIFYING_EXTERNAL: "unknown",
@@ -1296,6 +1488,7 @@ def run_saved_tracking_batch_submit(
     payload: SavedTrackingBatchSubmitInput,
     repository: AutoBangumiConfigRepository | None = None,
     now: str | None = None,
+    readback_external: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
     """Run one explicit batch as N independent reliable submissions (issue #87).
 
@@ -1318,6 +1511,7 @@ def run_saved_tracking_batch_submit(
             # The single-entry contract takes the canonical string form.
             connection_ref=str(payload.connection_ref),
             configuration_revision=payload.configuration_revision,
+            submission_mode=payload.submission_mode,
             storage_dir=payload.storage_dir,
         )
         try:

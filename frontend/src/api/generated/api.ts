@@ -4865,7 +4865,7 @@ export interface operations {
                                      * Outcome
                                      * @enum {string}
                                      */
-                                    outcome: "ACTIVE" | "SUBMIT_FAILED" | "VERIFYING_EXTERNAL" | "RECOVERY_REQUIRED" | "NEEDS_RECONFIRM";
+                                    outcome: "ACTIVE" | "SUBMIT_FAILED" | "VERIFYING_EXTERNAL" | "RECOVERY_REQUIRED" | "NEEDS_RECONFIRM" | "ADDED_TO_DOWNLOAD";
                                     /** Checked Revision */
                                     checked_revision: number;
                                     /** Next Revision */
@@ -4877,6 +4877,31 @@ export interface operations {
                                      * @default null
                                      */
                                     operation_id: string | null;
+                                    /**
+                                     * TrackingSubmitDiagnosticsDTO
+                                     * @description Bounded, sanitized Auto Bangumi failure diagnostics (issue #101).
+                                     *
+                                     *     Every field is optional on purpose: when Auto Bangumi gives no usable
+                                     *     reason the object is empty and the client states 未提供具体原因 rather than
+                                     *     inventing one. Nothing raw, no full RSS URL, magnet, credential or path.
+                                     */
+                                    diagnostics?: {
+                                        /**
+                                         * Http Status
+                                         * @default null
+                                         */
+                                        http_status: number | null;
+                                        /**
+                                         * Message Zh
+                                         * @default null
+                                         */
+                                        message_zh: string | null;
+                                        /**
+                                         * Message En
+                                         * @default null
+                                         */
+                                        message_en: string | null;
+                                    };
                                     /**
                                      * Failure Category
                                      * @default null
@@ -4942,7 +4967,7 @@ export interface operations {
                                          * Status
                                          * @enum {string}
                                          */
-                                        status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY";
+                                        status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY" | "ADDED_TO_DOWNLOAD";
                                         /** Status Label */
                                         status_label: string;
                                         /**
@@ -4950,6 +4975,11 @@ export interface operations {
                                          * @enum {string}
                                          */
                                         status_group: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
+                                        /**
+                                         * Submission Mode
+                                         * @default null
+                                         */
+                                        submission_mode: ("CONTINUE_TRACKING" | "DOWNLOAD_EXISTING") | null;
                                         /** Available Actions */
                                         available_actions?: {
                                             /**
@@ -5133,6 +5163,7 @@ export interface operations {
                      *             "status": "示例",
                      *             "status_label": "示例",
                      *             "status_group": "示例",
+                     *             "submission_mode": null,
                      *             "available_actions": [
                      *               {
                      *                 "code": "示例",
@@ -5155,6 +5186,7 @@ export interface operations {
                      *           "pending": 1,
                      *           "processing": 1,
                      *           "active": 1,
+                     *           "added_to_download": 0,
                      *           "inactive": 1,
                      *           "needs_attention": 1,
                      *           "unreadable": 1
@@ -5204,7 +5236,7 @@ export interface operations {
                                  * Status
                                  * @enum {string}
                                  */
-                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY";
+                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY" | "ADDED_TO_DOWNLOAD";
                                 /** Status Label */
                                 status_label: string;
                                 /**
@@ -5212,6 +5244,11 @@ export interface operations {
                                  * @enum {string}
                                  */
                                 status_group: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
+                                /**
+                                 * Submission Mode
+                                 * @default null
+                                 */
+                                submission_mode: ("CONTINUE_TRACKING" | "DOWNLOAD_EXISTING") | null;
                                 /** Available Actions */
                                 available_actions?: {
                                     /**
@@ -5276,6 +5313,11 @@ export interface operations {
                                 processing: number;
                                 /** Active */
                                 active: number;
+                                /**
+                                 * Added To Download
+                                 * @default 0
+                                 */
+                                added_to_download: number;
                                 /** Inactive */
                                 inactive: number;
                                 /** Needs Attention */
@@ -5589,6 +5631,7 @@ export interface operations {
                      *             "status": "示例",
                      *             "status_label": "示例",
                      *             "status_group": "示例",
+                     *             "submission_mode": null,
                      *             "available_actions": [
                      *               {
                      *                 "code": "示例",
@@ -5763,7 +5806,7 @@ export interface operations {
                                  * Status
                                  * @enum {string}
                                  */
-                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY";
+                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY" | "ADDED_TO_DOWNLOAD";
                                 /** Status Label */
                                 status_label: string;
                                 /**
@@ -5771,6 +5814,11 @@ export interface operations {
                                  * @enum {string}
                                  */
                                 status_group: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
+                                /**
+                                 * Submission Mode
+                                 * @default null
+                                 */
+                                submission_mode: ("CONTINUE_TRACKING" | "DOWNLOAD_EXISTING") | null;
                                 /** Available Actions */
                                 available_actions?: {
                                     /**
@@ -9224,6 +9272,7 @@ export interface operations {
                      *         "status": "示例",
                      *         "status_label": "示例",
                      *         "status_group": "示例",
+                     *         "submission_mode": null,
                      *         "available_actions": [
                      *           {
                      *             "code": "示例",
@@ -9317,7 +9366,7 @@ export interface operations {
                              * Status
                              * @enum {string}
                              */
-                            status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY";
+                            status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY" | "ADDED_TO_DOWNLOAD";
                             /** Status Label */
                             status_label: string;
                             /**
@@ -9325,6 +9374,11 @@ export interface operations {
                              * @enum {string}
                              */
                             status_group: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
+                            /**
+                             * Submission Mode
+                             * @default null
+                             */
+                            submission_mode: ("CONTINUE_TRACKING" | "DOWNLOAD_EXISTING") | null;
                             /** Available Actions */
                             available_actions?: {
                                 /**
@@ -9910,6 +9964,7 @@ export interface operations {
                      *           "status": "示例",
                      *           "status_label": "示例",
                      *           "status_group": "示例",
+                     *           "submission_mode": null,
                      *           "available_actions": [
                      *             {
                      *               "code": "示例",
@@ -9997,7 +10052,7 @@ export interface operations {
                                  * Status
                                  * @enum {string}
                                  */
-                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY";
+                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY" | "ADDED_TO_DOWNLOAD";
                                 /** Status Label */
                                 status_label: string;
                                 /**
@@ -10005,6 +10060,11 @@ export interface operations {
                                  * @enum {string}
                                  */
                                 status_group: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
+                                /**
+                                 * Submission Mode
+                                 * @default null
+                                 */
+                                submission_mode: ("CONTINUE_TRACKING" | "DOWNLOAD_EXISTING") | null;
                                 /** Available Actions */
                                 available_actions?: {
                                     /**
@@ -10751,6 +10811,7 @@ export interface operations {
                      *           "status": "示例",
                      *           "status_label": "示例",
                      *           "status_group": "示例",
+                     *           "submission_mode": null,
                      *           "available_actions": [
                      *             {
                      *               "code": "示例",
@@ -10838,7 +10899,7 @@ export interface operations {
                                  * Status
                                  * @enum {string}
                                  */
-                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY";
+                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY" | "ADDED_TO_DOWNLOAD";
                                 /** Status Label */
                                 status_label: string;
                                 /**
@@ -10846,6 +10907,11 @@ export interface operations {
                                  * @enum {string}
                                  */
                                 status_group: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
+                                /**
+                                 * Submission Mode
+                                 * @default null
+                                 */
+                                submission_mode: ("CONTINUE_TRACKING" | "DOWNLOAD_EXISTING") | null;
                                 /** Available Actions */
                                 available_actions?: {
                                     /**
@@ -11110,6 +11176,7 @@ export interface operations {
                      *           "status": "示例",
                      *           "status_label": "示例",
                      *           "status_group": "示例",
+                     *           "submission_mode": null,
                      *           "available_actions": [
                      *             {
                      *               "code": "示例",
@@ -11217,7 +11284,7 @@ export interface operations {
                                  * Status
                                  * @enum {string}
                                  */
-                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY";
+                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY" | "ADDED_TO_DOWNLOAD";
                                 /** Status Label */
                                 status_label: string;
                                 /**
@@ -11225,6 +11292,11 @@ export interface operations {
                                  * @enum {string}
                                  */
                                 status_group: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
+                                /**
+                                 * Submission Mode
+                                 * @default null
+                                 */
+                                submission_mode: ("CONTINUE_TRACKING" | "DOWNLOAD_EXISTING") | null;
                                 /** Available Actions */
                                 available_actions?: {
                                     /**
@@ -11485,6 +11557,7 @@ export interface operations {
                      *           "status": "示例",
                      *           "status_label": "示例",
                      *           "status_group": "示例",
+                     *           "submission_mode": null,
                      *           "available_actions": [
                      *             {
                      *               "code": "示例",
@@ -11572,7 +11645,7 @@ export interface operations {
                                  * Status
                                  * @enum {string}
                                  */
-                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY";
+                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY" | "ADDED_TO_DOWNLOAD";
                                 /** Status Label */
                                 status_label: string;
                                 /**
@@ -11580,6 +11653,11 @@ export interface operations {
                                  * @enum {string}
                                  */
                                 status_group: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
+                                /**
+                                 * Submission Mode
+                                 * @default null
+                                 */
+                                submission_mode: ("CONTINUE_TRACKING" | "DOWNLOAD_EXISTING") | null;
                                 /** Available Actions */
                                 available_actions?: {
                                     /**
@@ -11790,12 +11868,19 @@ export interface operations {
             content: {
                 /**
                  * @example {
+                 *       "submission_mode": "CONTINUE_TRACKING",
                  *       "expected_revision": 1,
                  *       "idempotency_key": "示例",
                  *       "confirm": true
                  *     }
                  */
                 "application/json": {
+                    /**
+                     * @description issue #98：本次操作的提交方式。持续追番建立受控外部订阅；下载现有资源只把当前资源交给 Auto Bangumi 加入下载。只作用于本次操作，不写入本地方案。
+                     * @default CONTINUE_TRACKING
+                     * @enum {string}
+                     */
+                    submission_mode?: "CONTINUE_TRACKING" | "DOWNLOAD_EXISTING";
                     /** @description 客户端最后观察到的追番记录 revision（revision-aware 重试）。 */
                     expected_revision: number;
                     /** @description opaque 客户端重试操作 id；一次点击一个新 operation，同键网络重放复用原 operation。只进请求体与页面内存。 */
@@ -11827,6 +11912,11 @@ export interface operations {
                      *         "next_revision": 1,
                      *         "checked_at": "示例",
                      *         "operation_id": null,
+                     *         "diagnostics": {
+                     *           "http_status": null,
+                     *           "message_zh": null,
+                     *           "message_en": null
+                     *         },
                      *         "failure_category": null,
                      *         "issues": [
                      *           {
@@ -11846,6 +11936,7 @@ export interface operations {
                      *           "status": "示例",
                      *           "status_label": "示例",
                      *           "status_group": "示例",
+                     *           "submission_mode": null,
                      *           "available_actions": [
                      *             {
                      *               "code": "示例",
@@ -11874,7 +11965,7 @@ export interface operations {
                          *
                          *     A persisted business result is HTTP 200: ``outcome`` is the record's final
                          *     status (``ACTIVE``/``SUBMIT_FAILED``/``VERIFYING_EXTERNAL``/
-                         *     ``RECOVERY_REQUIRED``/``NEEDS_RECONFIRM``).  ``checked_revision`` is the
+                         *     ``RECOVERY_REQUIRED``/``NEEDS_RECONFIRM``/``ADDED_TO_DOWNLOAD``).  ``checked_revision`` is the
                          *     revision the client confirmed; ``next_revision`` is the record's revision
                          *     after the outcome persisted.  ``operation_id`` is set when a submit
                          *     operation was created/reused; ``issues`` carry the fixed §11.5 codes when
@@ -11889,7 +11980,7 @@ export interface operations {
                              * Outcome
                              * @enum {string}
                              */
-                            outcome: "ACTIVE" | "SUBMIT_FAILED" | "VERIFYING_EXTERNAL" | "RECOVERY_REQUIRED" | "NEEDS_RECONFIRM";
+                            outcome: "ACTIVE" | "SUBMIT_FAILED" | "VERIFYING_EXTERNAL" | "RECOVERY_REQUIRED" | "NEEDS_RECONFIRM" | "ADDED_TO_DOWNLOAD";
                             /** Checked Revision */
                             checked_revision: number;
                             /** Next Revision */
@@ -11901,6 +11992,31 @@ export interface operations {
                              * @default null
                              */
                             operation_id: string | null;
+                            /**
+                             * TrackingSubmitDiagnosticsDTO
+                             * @description Bounded, sanitized Auto Bangumi failure diagnostics (issue #101).
+                             *
+                             *     Every field is optional on purpose: when Auto Bangumi gives no usable
+                             *     reason the object is empty and the client states 未提供具体原因 rather than
+                             *     inventing one. Nothing raw, no full RSS URL, magnet, credential or path.
+                             */
+                            diagnostics?: {
+                                /**
+                                 * Http Status
+                                 * @default null
+                                 */
+                                http_status: number | null;
+                                /**
+                                 * Message Zh
+                                 * @default null
+                                 */
+                                message_zh: string | null;
+                                /**
+                                 * Message En
+                                 * @default null
+                                 */
+                                message_en: string | null;
+                            };
                             /**
                              * Failure Category
                              * @default null
@@ -11966,7 +12082,7 @@ export interface operations {
                                  * Status
                                  * @enum {string}
                                  */
-                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY";
+                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY" | "ADDED_TO_DOWNLOAD";
                                 /** Status Label */
                                 status_label: string;
                                 /**
@@ -11974,6 +12090,11 @@ export interface operations {
                                  * @enum {string}
                                  */
                                 status_group: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
+                                /**
+                                 * Submission Mode
+                                 * @default null
+                                 */
+                                submission_mode: ("CONTINUE_TRACKING" | "DOWNLOAD_EXISTING") | null;
                                 /** Available Actions */
                                 available_actions?: {
                                     /**
@@ -12230,6 +12351,7 @@ export interface operations {
                      *           "status": "示例",
                      *           "status_label": "示例",
                      *           "status_group": "示例",
+                     *           "submission_mode": null,
                      *           "available_actions": [
                      *             {
                      *               "code": "示例",
@@ -12343,7 +12465,7 @@ export interface operations {
                                  * Status
                                  * @enum {string}
                                  */
-                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY";
+                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY" | "ADDED_TO_DOWNLOAD";
                                 /** Status Label */
                                 status_label: string;
                                 /**
@@ -12351,6 +12473,11 @@ export interface operations {
                                  * @enum {string}
                                  */
                                 status_group: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
+                                /**
+                                 * Submission Mode
+                                 * @default null
+                                 */
+                                submission_mode: ("CONTINUE_TRACKING" | "DOWNLOAD_EXISTING") | null;
                                 /** Available Actions */
                                 available_actions?: {
                                     /**
@@ -12613,6 +12740,7 @@ export interface operations {
                      *           "status": "示例",
                      *           "status_label": "示例",
                      *           "status_group": "示例",
+                     *           "submission_mode": null,
                      *           "available_actions": [
                      *             {
                      *               "code": "示例",
@@ -12700,7 +12828,7 @@ export interface operations {
                                  * Status
                                  * @enum {string}
                                  */
-                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY";
+                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY" | "ADDED_TO_DOWNLOAD";
                                 /** Status Label */
                                 status_label: string;
                                 /**
@@ -12708,6 +12836,11 @@ export interface operations {
                                  * @enum {string}
                                  */
                                 status_group: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
+                                /**
+                                 * Submission Mode
+                                 * @default null
+                                 */
+                                submission_mode: ("CONTINUE_TRACKING" | "DOWNLOAD_EXISTING") | null;
                                 /** Available Actions */
                                 available_actions?: {
                                     /**
@@ -12918,6 +13051,7 @@ export interface operations {
             content: {
                 /**
                  * @example {
+                 *       "submission_mode": "CONTINUE_TRACKING",
                  *       "expected_revision": 1,
                  *       "idempotency_key": "示例",
                  *       "confirm": true,
@@ -12926,6 +13060,12 @@ export interface operations {
                  *     }
                  */
                 "application/json": {
+                    /**
+                     * @description issue #98：本次操作的提交方式。持续追番建立受控外部订阅；下载现有资源只把当前资源交给 Auto Bangumi 加入下载。只作用于本次操作，不写入本地方案。
+                     * @default CONTINUE_TRACKING
+                     * @enum {string}
+                     */
+                    submission_mode?: "CONTINUE_TRACKING" | "DOWNLOAD_EXISTING";
                     /** @description 客户端最后观察到的追番记录 revision（revision-aware 提交）。 */
                     expected_revision: number;
                     /** @description opaque 客户端提交操作 id；同键网络重放收敛到同一次外部调用。只进请求体与页面内存。 */
@@ -12960,6 +13100,11 @@ export interface operations {
                      *         "next_revision": 1,
                      *         "checked_at": "示例",
                      *         "operation_id": null,
+                     *         "diagnostics": {
+                     *           "http_status": null,
+                     *           "message_zh": null,
+                     *           "message_en": null
+                     *         },
                      *         "failure_category": null,
                      *         "issues": [
                      *           {
@@ -12979,6 +13124,7 @@ export interface operations {
                      *           "status": "示例",
                      *           "status_label": "示例",
                      *           "status_group": "示例",
+                     *           "submission_mode": null,
                      *           "available_actions": [
                      *             {
                      *               "code": "示例",
@@ -13007,7 +13153,7 @@ export interface operations {
                          *
                          *     A persisted business result is HTTP 200: ``outcome`` is the record's final
                          *     status (``ACTIVE``/``SUBMIT_FAILED``/``VERIFYING_EXTERNAL``/
-                         *     ``RECOVERY_REQUIRED``/``NEEDS_RECONFIRM``).  ``checked_revision`` is the
+                         *     ``RECOVERY_REQUIRED``/``NEEDS_RECONFIRM``/``ADDED_TO_DOWNLOAD``).  ``checked_revision`` is the
                          *     revision the client confirmed; ``next_revision`` is the record's revision
                          *     after the outcome persisted.  ``operation_id`` is set when a submit
                          *     operation was created/reused; ``issues`` carry the fixed §11.5 codes when
@@ -13022,7 +13168,7 @@ export interface operations {
                              * Outcome
                              * @enum {string}
                              */
-                            outcome: "ACTIVE" | "SUBMIT_FAILED" | "VERIFYING_EXTERNAL" | "RECOVERY_REQUIRED" | "NEEDS_RECONFIRM";
+                            outcome: "ACTIVE" | "SUBMIT_FAILED" | "VERIFYING_EXTERNAL" | "RECOVERY_REQUIRED" | "NEEDS_RECONFIRM" | "ADDED_TO_DOWNLOAD";
                             /** Checked Revision */
                             checked_revision: number;
                             /** Next Revision */
@@ -13034,6 +13180,31 @@ export interface operations {
                              * @default null
                              */
                             operation_id: string | null;
+                            /**
+                             * TrackingSubmitDiagnosticsDTO
+                             * @description Bounded, sanitized Auto Bangumi failure diagnostics (issue #101).
+                             *
+                             *     Every field is optional on purpose: when Auto Bangumi gives no usable
+                             *     reason the object is empty and the client states 未提供具体原因 rather than
+                             *     inventing one. Nothing raw, no full RSS URL, magnet, credential or path.
+                             */
+                            diagnostics?: {
+                                /**
+                                 * Http Status
+                                 * @default null
+                                 */
+                                http_status: number | null;
+                                /**
+                                 * Message Zh
+                                 * @default null
+                                 */
+                                message_zh: string | null;
+                                /**
+                                 * Message En
+                                 * @default null
+                                 */
+                                message_en: string | null;
+                            };
                             /**
                              * Failure Category
                              * @default null
@@ -13099,7 +13270,7 @@ export interface operations {
                                  * Status
                                  * @enum {string}
                                  */
-                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY";
+                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY" | "ADDED_TO_DOWNLOAD";
                                 /** Status Label */
                                 status_label: string;
                                 /**
@@ -13107,6 +13278,11 @@ export interface operations {
                                  * @enum {string}
                                  */
                                 status_group: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
+                                /**
+                                 * Submission Mode
+                                 * @default null
+                                 */
+                                submission_mode: ("CONTINUE_TRACKING" | "DOWNLOAD_EXISTING") | null;
                                 /** Available Actions */
                                 available_actions?: {
                                     /**

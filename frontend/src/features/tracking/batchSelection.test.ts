@@ -9,6 +9,7 @@ import {
   projectBatchOutcome,
   selectAllBatch,
   selectionAfterBatch,
+  skippedBatchEntries,
   toggleBatchSelection,
 } from './batchSelection'
 import type { TrackingItem } from './trackingProjection'
@@ -172,5 +173,32 @@ describe('batch selection rules (issue #87)', () => {
     })
 
     expect(selectionAfterBatch(selection, outcome).selected).toEqual(['auth'])
+  })
+})
+
+describe('skippedBatchEntries (issue #100 AC 5/6/9)', () => {
+  it('lists only the selected plans the local pre-check refuses', () => {
+    const submittable = {
+      tracking_id: 'tracking-a', status_group: 'PENDING',
+      available_actions: [{ code: 'SUBMIT', label: '提交方案', style: 'PRIMARY',
+        requires_confirmation: true, target_scopes: [] }],
+    } as never
+    const processing = {
+      tracking_id: 'tracking-b', title: '处理中番剧', status_group: 'PROCESSING',
+      available_actions: [],
+    } as never
+
+    const skipped = skippedBatchEntries(
+      { selected: ['tracking-a', 'tracking-b'] } as never,
+      [submittable, processing],
+    )
+
+    expect(skipped).toEqual([
+      { trackingId: 'tracking-b', title: '处理中番剧', reason: '正在处理中，请等待当前操作完成' },
+    ])
+    // A selection that is no longer in the list is reported, never dropped.
+    expect(skippedBatchEntries({ selected: ['tracking-gone'] } as never, [])).toEqual([
+      { trackingId: 'tracking-gone', title: '未命名番剧', reason: '不在当前列表中，请刷新后重试' },
+    ])
   })
 })

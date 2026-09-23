@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 from flask.testing import FlaskClient
 
+from ab_engine.models.management import ExternalRss, ExternalSubscription
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from apps.migu_orca_web.api_contract import TrackingBatchSubmitResultDTO
 from apps.migu_orca_web.tracking_handoff import ensure_confirmed_request_tracking
@@ -24,12 +25,18 @@ from storage_engine.controllers.autobangumi_config_repository import (
     AutoBangumiConfigRepository,
     build_stored_autobangumi_config,
 )
+from storage_engine.controllers.operation_repository import load_tracking_operation
 from storage_engine.controllers.request_repository import save_request_snapshot
 from storage_engine.controllers.storage_config import (
     StorageConfig,
     load_storage_config,
 )
 from storage_engine.controllers.tracking_repository import load_tracking_record
+from tracking_engine.controllers.submit import classify_external_submit_result
+from tracking_engine.models.operation import (
+    TRACKING_OPERATION_STATE_FAILED,
+    TRACKING_OPERATION_STATE_SUCCEEDED,
+)
 from tracking_engine.models.tracking import (
     TRACKING_ORIGIN_SAVE_CONFIRM,
     TrackingRecord,
@@ -107,16 +114,19 @@ def _patch_submit_one(monkeypatch: pytest.MonkeyPatch, results: list[dict[str, A
     """Serve one queued Auto Bangumi result per external call, in order."""
     queue = list(results)
     calls: list[dict[str, Any]] = []
+    state: dict[str, Any] = {"result": None}
 
     def submit_one(request: dict[str, Any], _config: Any) -> dict[str, Any]:
         calls.append(request)
         assert queue, "the batch issued more external calls than the test queued"
+        state["result"] = queue[0]
         return queue.pop(0)
 
     monkeypatch.setattr(
         "apps.migu_orca_web.tracking_submission_service.compose_tracking_submit_one",
         lambda: submit_one,
     )
+    _patch_readback(monkeypatch, state)
     return calls
 
 
@@ -278,3 +288,125 @@ def test_batch_submit_never_leaks_credentials_or_paths(
     body_text = response.get_data(as_text=True)
     for forbidden in ("secret-password", "operator", "ab.invalid", str(tmp_path)):
         assert forbidden not in body_text
+
+#: The plan fixture's exact RSS identity; a read-back that matched nothing is
+#: what a definite external failure looks like (issue #97 AC 5).
+FIXTURE_RSS_URL = "https://example.invalid/rss/frieren-moe.xml"
+
+
+def _patch_readback(
+    monkeypatch: pytest.MonkeyPatch,
+    state: dict[str, Any],
+    *,
+    rss_url: str = FIXTURE_RSS_URL,
+    external_id: str = "fake-ab-subscription",
+) -> None:
+    """Inject an exact read-back that follows the write result (issue #97).
+
+    A successful write reads back the exact RSS + owning subscription; a failed
+    write reads back nothing, which the server must treat as a definite failure.
+    """
+
+    def read_snapshot() -> Any:
+        classification = classify_external_submit_result(state.get("result"))
+        if classification != TRACKING_OPERATION_STATE_SUCCEEDED:
+            # A definite failure confirms there is no object; an unresolved write
+            # cannot be read at all, so it stays unresolved (issue #97 AC 5/6).
+            if classification == TRACKING_OPERATION_STATE_FAILED:
+                return (None, [], [])
+            return None
+        return (
+            None,
+            [ExternalSubscription(external_id, "葬送的芙莉莲", 1, "喵萌", rss_urls=(rss_url,))],
+            [ExternalRss("rss-1", "芙莉莲", rss_url)],
+        )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.tracking_submission_service.compose_tracking_readback_external",
+        lambda _config: read_snapshot,
+    )
+
+# -- issue #100: exactly one submission mode for the whole batch ---------------
+
+
+def _patch_collect(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+
+    def collect_one(request: dict[str, Any], _config: Any) -> dict[str, Any]:
+        calls.append(request)
+        return {"success": True, "ab_response": {"status": "ok"}}
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.tracking_submission_service.compose_tracking_collect_one",
+        lambda: collect_one,
+    )
+    return calls
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected_status"),
+    [("DOWNLOAD_EXISTING", "ADDED_TO_DOWNLOAD"), ("CONTINUE_TRACKING", "ACTIVE")],
+)
+def test_batch_applies_one_mode_to_every_entry(
+    tmp_path: Path,
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    expected_status: str,
+) -> None:
+    """AC 2: one mode for the batch; AC 6: never creates an RSS for a one-time run."""
+    connection, records = _seed_records(tmp_path, 2)
+    if mode == "DOWNLOAD_EXISTING":
+        calls = _patch_collect(monkeypatch)
+    else:
+        calls = _patch_submit_one(monkeypatch, [{"success": True, "ab_subscription_id": "sub-1"}] * 2)
+
+    response = _post(client, _batch_body(connection, records, submission_mode=mode))
+
+    assert response.status_code == 200
+    result = response.get_json()["result"]
+    assert result["summary"]["succeeded"] == 2 and result["summary"]["blocked"] == 0
+    assert all(item["ok"] is True for item in result["items"])
+    config = _config(tmp_path)
+    for record in records:
+        stored = load_tracking_record(config, record.tracking_id)
+        assert stored.status == expected_status
+        operation = load_tracking_operation(config, stored.current_operation_id)
+        assert operation.submission_mode == mode
+        # A one-time batch never claims a controlled external subscription.
+        assert (stored.external_mapping is None) == (mode == "DOWNLOAD_EXISTING")
+    assert len(calls) == 2
+
+
+def test_batch_rejects_a_per_entry_submission_mode(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC 2: per-entry overrides are refused outright — never partially applied."""
+    connection, records = _seed_records(tmp_path, 2)
+    calls = _patch_submit_one(monkeypatch, [{"success": True, "ab_subscription_id": "sub-1"}] * 2)
+    body = _batch_body(connection, records)
+    body["items"][0]["submission_mode"] = "DOWNLOAD_EXISTING"
+
+    response = _post(client, body)
+
+    assert response.status_code == 400
+    assert response.get_json()["error_type"] == "data_validation_errors"
+    assert calls == []
+    for record in records:
+        assert load_tracking_record(_config(tmp_path), record.tracking_id).status == "PENDING_SUBMIT"
+
+
+def test_batch_defaults_to_continue_tracking(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connection, records = _seed_records(tmp_path, 1)
+    _patch_submit_one(monkeypatch, [{"success": True, "ab_subscription_id": "sub-1"}])
+
+    response = _post(client, _batch_body(connection, records))
+
+    assert response.status_code == 200
+    config = _config(tmp_path)
+    stored = load_tracking_record(config, records[0].tracking_id)
+    assert load_tracking_operation(config, stored.current_operation_id).submission_mode == (
+        "CONTINUE_TRACKING"
+    )

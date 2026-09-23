@@ -29,6 +29,7 @@ import {
   createWriteConflictSession,
   createWriteSession,
   filterTrackingItems,
+  formatSubmissionMode,
   formatTrackingUpdatedAt,
   isDefiniteWriteRejection,
   isRecoveryActionCode,
@@ -46,6 +47,7 @@ import {
   recoverySessionKeepsLock,
   sortTrackingItems,
   TRACKING_OVERVIEW_GROUPS,
+  type TrackingOverviewGroup,
   TRACKING_RECOVER_ENDPOINT,
   TRACKING_STATUS_GROUPS,
   WRITE_ACTION_CONFIRMATIONS,
@@ -84,12 +86,15 @@ import {
   type TrackingManagementResult,
 } from './trackingManagement'
 import TrackingInspector from './TrackingInspector.vue'
+import TrackingSubmissionModeDialog, { type SubmissionMode } from './TrackingSubmissionModeDialog.vue'
 import TrackingPoster from './TrackingPoster.vue'
 import {
   EMPTY_BATCH_SELECTION,
   batchSelectionSummary,
   batchSkipReason,
   buildBatchSubmitBody,
+  skippedBatchEntries,
+  type SkippedBatchEntry,
   clearBatchSelection,
   isBatchSelected,
   projectBatchOutcome,
@@ -228,6 +233,20 @@ async function probeSavedConnection(): Promise<void> {
 const statusLabels: Record<TrackingStatusGroup, string> = {
   PENDING: '待提交', PROCESSING: '处理中', ACTIVE: '追番中',
   ATTENTION: '需处理', INACTIVE: '已停用',
+}
+/**
+ * Clicking an overview card filters the list by that server status group.
+ * 已加入下载 has no group of its own, so its card only reports the count.
+ */
+function selectOverviewGroup(group: TrackingOverviewGroup): void {
+  if (group === 'ADDED_TO_DOWNLOAD') return
+  statusFilter.value = statusFilter.value === group ? '' : group
+}
+
+/** Issue #99: the five fixed overview categories, including 已加入下载. */
+const overviewLabels: Record<TrackingOverviewGroup, string> = {
+  ...statusLabels,
+  ADDED_TO_DOWNLOAD: '已加入下载',
 }
 // Issue #85: the overview is the server's authoritative count projection, not a
 // recount of whichever rows this page happens to hold or filter.
@@ -624,6 +643,45 @@ async function recheckAfterAction(trackingId: string, refreshList = false): Prom
 // own revision and opaque key, and filtering never clears the selection.
 const TRACKING_BATCH_SUBMIT_ENDPOINT = '/api/v1/tracking/batch-submit'
 // Unified plan delete (issue #92): the page owns the single request and result.
+// Issue #98: the entry button opens a mode choice; only the choice writes.
+const submitModeOpen = ref(false)
+const submitModePending = ref<{ action: TrackingAction; item: TrackingItem } | null>(null)
+const submissionMode = ref<SubmissionMode | null>(null)
+
+const SUBMISSION_CHOICE_ACTIONS = new Set(['SUBMIT', 'RETRY'])
+
+function isSubmissionChoiceAction(code: string): boolean {
+  return SUBMISSION_CHOICE_ACTIONS.has(code)
+}
+
+function chooseSubmissionMode(mode: SubmissionMode): void {
+  const pending = submitModePending.value
+  // One choice, one request: a second click can neither pick another mode nor
+  // start a concurrent submission, because the dialog is gone immediately.
+  if (!pending || submissionMode.value) return
+  submissionMode.value = mode
+  submitModeOpen.value = false
+  void runTrackingWrite(pending)
+}
+
+function closeSubmissionModeChoice(): void {
+  submitModeOpen.value = false
+  submitModePending.value = null
+  submissionMode.value = null
+}
+
+function cancelSubmissionMode(): void {
+  // Cancelling sends nothing at all.
+  closeSubmissionModeChoice()
+}
+
+// The dialog stays open (all actions disabled, the chosen one loading) until the
+// page-level write settles, then closes on every path.
+watch(writeLoading, (loading) => {
+  if (loading) return
+  closeSubmissionModeChoice()
+})
+
 const planDeleteSession = ref<TrackingPlanDeleteSession | null>(null)
 let planDeleteSequence = 0
 
@@ -638,7 +696,9 @@ async function runPlanDelete(payload: {
   deleteExternal: boolean
 }): Promise<void> {
   const config = savedRef.value
-  if (!config?.connection_ref) return
+  // Issue #96: a purely local delete needs no Auto Bangumi connection at all;
+  // only the optional external delete requires the saved connection.
+  if (payload.deleteExternal && !config?.connection_ref) return
   const trackingId = payload.item.tracking_id
   const sequence = ++planDeleteSequence
   planDeleteSession.value = createPlanDeleteSession(trackingId, 'IN_FLIGHT')
@@ -652,8 +712,12 @@ async function runPlanDelete(payload: {
           confirm: true,
           delete_external: payload.deleteExternal,
           idempotency_key: makeOpaqueKey(),
-          connection_ref: config.connection_ref,
-          configuration_revision: config.configuration_revision,
+          ...(payload.deleteExternal && config
+            ? {
+                connection_ref: config.connection_ref,
+                configuration_revision: config.configuration_revision,
+              }
+            : {}),
           ...(storageDir ? { storage_dir: storageDir } : {}),
         },
       },
@@ -689,6 +753,7 @@ async function runPlanDelete(payload: {
 }
 
 const batchMode = ref(false)
+const batchSubmissionMode = ref<SubmissionMode | null>(null)
 const batchSelection = ref<TrackingBatchSelection>(EMPTY_BATCH_SELECTION)
 const batchPending = ref(false)
 const batchLoading = ref(false)
@@ -739,25 +804,58 @@ function titleFor(trackingId: string): string {
  * per-entry result converges the success list and leaves every failed or
  * unresolved row selected for the user's next explicit action.
  */
-async function runBatchSubmit(): Promise<void> {
+const batchModeOpen = ref(false)
+
+/**
+ * AC 9: the local pre-check result lives in its own dialog; external success,
+ * failure and unknown results stay in the batch result area.
+ */
+async function showSkippedPlans(title: string, skipped: readonly SkippedBatchEntry[]): Promise<void> {
+  if (!skipped.length) return
+  await confirmDialog.value?.confirm({
+    title,
+    message: '以下所选方案未通过本地预检，本次不会提交到 Auto Bangumi：',
+    items: skipped.map((entry) => `${entry.title}：${entry.reason}`),
+    itemsLabel: '未提交的方案',
+    confirmLabel: '知道了',
+    cancelLabel: '关闭',
+  })
+}
+
+
+/** Issue #100 AC 1: the entry opens one mode choice for the whole batch. */
+function runBatchSubmit(): void {
+  if (batchPending.value || batchLoading.value) return
+  if (!savedRef.value?.connection_ref) return
+  if (!batchSummary.value.selected) return
+  batchModeOpen.value = true
+}
+
+function chooseBatchSubmissionMode(mode: SubmissionMode): void {
+  const config = savedRef.value
+  if (!config?.connection_ref || batchSubmissionMode.value) return
+  batchSubmissionMode.value = mode
+  batchModeOpen.value = false
+  void performBatchSubmit()
+}
+
+function cancelBatchSubmissionMode(): void {
+  batchModeOpen.value = false
+}
+
+async function performBatchSubmit(): Promise<void> {
   if (batchPending.value || batchLoading.value) return
   const config = savedRef.value
   if (!config?.connection_ref) return
   if (!batchSummary.value.selected) return
-  batchPending.value = true
-  let confirmed = false
-  try {
-    confirmed = (await confirmDialog.value?.confirm({
-      title: `提交所选 ${batchSummary.value.selected} 条`,
-      message: `将在 Auto Bangumi 为所选 ${batchSummary.value.selected} 条追番分别创建外部订阅，并可能触发下载。每条独立成功或失败，单条失败不会回滚已成功的条目；是否继续？`,
-      confirmLabel: '确认批量提交',
-      cancelLabel: '取消',
-    })) ?? false
-  } finally {
-    batchPending.value = false
-  }
-  if (!confirmed) return
 
+  // One choice, one batch: the mode is spent here so a later batch cannot
+  // silently reuse it.
+  const submissionMode = batchSubmissionMode.value ?? undefined
+  batchSubmissionMode.value = null
+  // AC 5/6/9: the local pre-check result is stated before (and separately from)
+  // any external result, and a fully skipped batch sends nothing at all.
+  const skipped = skippedBatchEntries(batchSelection.value, items.value)
   const body = buildBatchSubmitBody(
     batchSelection.value,
     items.value,
@@ -766,8 +864,21 @@ async function runBatchSubmit(): Promise<void> {
       configuration_revision: config.configuration_revision,
     },
     storageQuery().storage_dir,
+    submissionMode,
   )
-  if (!body) return
+  if (!body) {
+    // AC 6: a fully skipped batch proves zero Auto Bangumi requests.
+    batchOutcome.value = null
+    batchNotice.value = '没有可提交的方案'
+    void showSkippedPlans('没有可提交的方案', skipped)
+    return
+  }
+  if (skipped.length) {
+    // AC 4: the information dialog never gates the run — the submittable plans
+    // start immediately, with no second confirmation.
+    batchNotice.value = '部分方案未提交'
+    void showSkippedPlans('部分方案未提交', skipped)
+  }
 
   const sequence = ++batchSequence
   batchLoading.value = true
@@ -872,17 +983,27 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
     blockIntent(trackingId)
     return
   }
+  // Issue #98 AC 2: the entry only opens the mode choice.
+  if (isSubmissionChoiceAction(requested) && submissionMode.value === null) {
+    submitModePending.value = payload
+    submitModeOpen.value = true
+    return
+  }
   const action: TrackingWriteActionCode = requested
 
   // The user is now replaying the one locked request (or starting a fresh one
   // once nothing is pending): the refusal notice has served its purpose.
   blockedIntentNotice.value = null
   writePending.value = true
-  let confirmed = false
+  // Choosing the submission mode is the impact confirmation for SUBMIT/RETRY;
+  // every other write action keeps the shared confirm dialog.
+  let confirmed = submissionMode.value !== null
   try {
-    confirmed = (await confirmDialog.value?.confirm({
-      ...WRITE_ACTION_CONFIRMATIONS[action], cancelLabel: '取消',
-    })) ?? false
+    if (!confirmed) {
+      confirmed = (await confirmDialog.value?.confirm({
+        ...WRITE_ACTION_CONFIRMATIONS[action], cancelLabel: '取消',
+      })) ?? false
+    }
   } finally {
     writePending.value = false
   }
@@ -903,6 +1024,9 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
     return
   }
   writeIntent = intent
+  // Captured before the request: the settle watch clears the ref, and the
+  // result copy still needs to know which mode this attempt used (issue #101).
+  const requestedMode = submissionMode.value
   if (!locked) writeConfigSnapshot = { ...requestConfig }
   const sequence = ++writeSequence
   const controller = new AbortController()
@@ -916,6 +1040,7 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
       expected_revision: intent.expectedRevision,
       idempotency_key: intent.idempotencyKey,
       confirm: true,
+      ...(submissionMode.value ? { submission_mode: submissionMode.value } : {}),
       connection_ref: requestConfig.connection_ref!,
       configuration_revision: requestConfig.configuration_revision,
       ...(storageDir ? { storage_dir: storageDir } : {}),
@@ -925,8 +1050,9 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
     })
     if (sequence !== writeSequence) return
     // The returned tracking converges the list row without a second list read.
+    closeSubmissionModeChoice()
     applyReturnedTracking(result.tracking)
-    const session = projectWriteOutcome(trackingId, action, result)
+    const session = projectWriteOutcome(trackingId, action, result, requestedMode)
     writeSession.value = session
     if (!writeSessionKeepsIntent(session.state)) writeIntent = null
     await recheckAfterAction(trackingId)
@@ -1282,10 +1408,18 @@ onBeforeUnmount(() => {
     <section class="tracking-status-overview" aria-labelledby="tracking-status-heading">
       <h2 id="tracking-status-heading">状态总览</h2>
       <div class="tracking-status-cards">
-        <button v-for="group in TRACKING_OVERVIEW_GROUPS" :key="group" type="button" class="tracking-status-card"
-          :class="{ 'is-selected': statusFilter === group }" :aria-pressed="statusFilter === group"
-          @click="statusFilter = statusFilter === group ? '' : group">
-          <span>{{ statusLabels[group] }}</span><strong>{{ overview.byGroup[group] }}</strong>
+        <button
+          v-for="group in TRACKING_OVERVIEW_GROUPS"
+          :key="group"
+          type="button"
+          class="tracking-status-card"
+          :id="`tracking-overview-${group.toLowerCase()}`"
+          :class="{ 'is-selected': statusFilter === group }"
+          :aria-pressed="statusFilter === group"
+          :disabled="group === 'ADDED_TO_DOWNLOAD'"
+          @click="selectOverviewGroup(group)"
+        >
+          <span>{{ overviewLabels[group] }}</span><strong>{{ overview.byGroup[group] }}</strong>
         </button>
       </div>
       <p class="tracking-status-total" role="status">共 {{ overview.total }} 条追番记录</p>
@@ -1313,7 +1447,7 @@ onBeforeUnmount(() => {
           <BaseButton id="tracking-batch-select-all" variant="secondary" @click="selectAllCurrent">全选当前结果</BaseButton>
           <BaseButton id="tracking-batch-clear" variant="secondary" :disabled="!batchSummary.selected" @click="clearSelection">清除选择</BaseButton>
           <BaseButton id="tracking-batch-submit" :loading="batchLoading" :disabled="batchLoading || batchPending || !batchSummary.selected" @click="runBatchSubmit">
-            提交所选 {{ batchSummary.selected }} 条
+            提交选中方案
           </BaseButton>
         </div>
         <p v-if="batchMode && batchSkippedNotice" id="tracking-batch-skipped" class="tracking-batch-skipped" role="status">{{ batchSkippedNotice }}</p>
@@ -1339,6 +1473,10 @@ onBeforeUnmount(() => {
             </span>
             <span class="tracking-list-meta">
               <span>{{ item.status_label }}</span>
+              <span
+                v-if="formatSubmissionMode(item.submission_mode)"
+                class="tracking-list-mode"
+              >{{ formatSubmissionMode(item.submission_mode) }}</span>
               <small>{{ formatTrackingUpdatedAt(item.updated_at) }}</small>
             </span>
           </button>
@@ -1381,7 +1519,7 @@ onBeforeUnmount(() => {
       role="status"
     >
       <h2 id="tracking-batch-result-heading">批量提交结果</h2>
-      <p v-if="batchNotice" class="tracking-batch-verdict">{{ batchNotice }}</p>
+      <p v-if="batchNotice" id="tracking-batch-notice" class="tracking-batch-verdict">{{ batchNotice }}</p>
       <ul v-if="batchOutcome" class="tracking-batch-entries">
         <li v-for="entry in batchOutcome.entries" :key="entry.trackingId" :class="entry.ok ? 'is-ok' : 'is-failed'">
           <strong>{{ titleFor(entry.trackingId) }}</strong>：{{ entry.message }}
@@ -1407,6 +1545,20 @@ onBeforeUnmount(() => {
     <p v-if="syncMessage" id="tracking-sync-status" class="tracking-sync-status" role="status">{{ syncMessage }}</p>
     <p v-if="syncSummary" class="tracking-sync-summary" role="status">本次安全同步摘要：检查 {{ syncSummary.checked }}，新增 {{ syncSummary.created }}，更新 {{ syncSummary.updated }}，未变化 {{ syncSummary.unchanged }}。</p>
     <ConfirmDialog ref="confirmDialog" />
+    <TrackingSubmissionModeDialog
+      :open="batchModeOpen"
+      :batch-count="batchSummary.selected"
+      :busy="batchLoading || batchPending"
+      @choose="chooseBatchSubmissionMode"
+      @cancel="cancelBatchSubmissionMode"
+    />
+    <TrackingSubmissionModeDialog
+      :open="submitModeOpen"
+      :pending-mode="submissionMode"
+      :busy="writeLoading || writePending || recoveryLoading || managementLoading"
+      @choose="chooseSubmissionMode"
+      @cancel="cancelSubmissionMode"
+    />
   </section>
 </template>
 

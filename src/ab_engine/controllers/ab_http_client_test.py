@@ -149,10 +149,16 @@ def test_submit_checks_connection_credentials_and_version_before_writing() -> No
     assert not any("rss/subscribe" in call["endpoint"] for call in unsupported.calls)
 
 
-def test_submit_classifies_a_duplicate_subscription_without_echoing_upstream_text() -> None:
+def test_submit_classifies_a_duplicate_subscription_with_bounded_upstream_reason() -> None:
+    """Issue #101 AC 3/4: the reason is kept for diagnostics, never wholesale.
+
+    The upstream ``msg`` reaches only the sanitized, bounded diagnostics; the
+    fixed error message, step and any secret stay untouched.
+    """
     canary = "订阅《番剧》已经存在，请勿重复添加"
+    secret = "secret-cookie"
     transport = _RecordingTransport([
-        {"access_token": "secret-cookie"},
+        {"access_token": secret},
         {"version": "3.1.18"},
         {"status": False, "msg": canary},
     ])
@@ -163,6 +169,9 @@ def test_submit_classifies_a_duplicate_subscription_without_echoing_upstream_tex
         ).create_subscription(_legacy_payload())
 
     assert failure.value.error_type == "ab_duplicate_subscription"
+    # The fixed, safe message never echoes upstream text.
     assert canary not in failure.value.message
-    assert canary not in str(failure.value.details or {})
     assert canary not in failure.value.failed_step
+    assert secret not in str(failure.value.details or {})
+    # The bounded reason is available to the diagnostics layer only.
+    assert failure.value.details == {"message_zh": canary}

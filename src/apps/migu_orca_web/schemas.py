@@ -409,6 +409,8 @@ class SavedTrackingSubmitInput(BaseModel):
     confirm: StrictBool
     connection_ref: UUID
     configuration_revision: StrictInt = Field(ge=0)
+    #: Issue #98: one operation-level submission mode; never a plan field.
+    submission_mode: Literal["CONTINUE_TRACKING", "DOWNLOAD_EXISTING"] = "CONTINUE_TRACKING"
     storage_dir: str | None = None
 
     @field_validator("tracking_id")
@@ -487,6 +489,10 @@ class SavedTrackingBatchSubmitInput(BaseModel):
         min_length=1, max_length=MAX_TRACKING_BATCH_SUBMIT_ITEMS
     )
     confirm: StrictBool
+    #: Issue #100: exactly one operation-level mode applies to the whole batch.
+    #: Mixed or per-entry modes are impossible by construction: the item model
+    #: forbids unknown fields, so a per-entry `submission_mode` is a 400.
+    submission_mode: Literal["CONTINUE_TRACKING", "DOWNLOAD_EXISTING"] = "CONTINUE_TRACKING"
     connection_ref: UUID
     configuration_revision: StrictInt = Field(ge=0)
     storage_dir: str | None = None
@@ -907,8 +913,9 @@ class SavedTrackingPlanDeleteInput(BaseModel):
     confirm: StrictBool
     delete_external: StrictBool = False
     idempotency_key: StrictStr
-    connection_ref: UUID
-    configuration_revision: StrictInt = Field(ge=0)
+    # Only a requested external delete needs the saved connection (issue #96).
+    connection_ref: UUID | None = None
+    configuration_revision: StrictInt | None = Field(default=None, ge=0)
     storage_dir: str | None = None
 
     @field_validator("tracking_id")
@@ -924,6 +931,8 @@ class SavedTrackingPlanDeleteInput(BaseModel):
     @field_validator("connection_ref", mode="before")
     @classmethod
     def _canonical_delete_ref(cls, value: Any) -> Any:
+        if value is None:
+            return None
         if not isinstance(value, str):
             raise ValueError("connection_ref 必须是规范 UUID")
         try:
@@ -938,6 +947,16 @@ class SavedTrackingPlanDeleteInput(BaseModel):
     def _require_delete_confirmation(self) -> SavedTrackingPlanDeleteInput:
         if self.confirm is not True:
             raise ValueError("confirm must be true")
+        return self
+
+    @model_validator(mode="after")
+    def _require_connection_for_external_delete(self) -> SavedTrackingPlanDeleteInput:
+        if self.delete_external and (
+            self.connection_ref is None or self.configuration_revision is None
+        ):
+            raise ValueError(
+                "删除受控外部订阅需要已保存连接的 connection_ref 与 configuration_revision"
+            )
         return self
 
 

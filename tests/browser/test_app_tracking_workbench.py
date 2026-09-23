@@ -116,6 +116,7 @@ def _mock_workbench(page: Page, items: list[dict[str, Any]]) -> None:
                             "active": 2,
                             "inactive": 1,
                             "needs_attention": 1,
+                            "added_to_download": 1,
                             "unreadable": 1,
                         },
                         "warnings": [],
@@ -163,12 +164,12 @@ class TestTrackingWorkbench:
         assert "我的追番" in header.inner_text()
         assert "管理待提交任务和正在运行的追番" in header.inner_text()
 
-        # Four fixed categories with the server's authoritative counts; the
-        # summary claims 9 records although only two rows are loaded.
+        # Issue #99: five fixed categories with the server's authoritative
+        # counts; the summary claims 9 records although only two rows are loaded.
         cards = page.locator(".tracking-status-card")
-        assert cards.count() == 4
+        assert cards.count() == 5
         assert ["".join(text.split()) for text in cards.all_inner_texts()] == [
-            "待提交4", "追番中2", "已停用1", "需处理1",
+            "待提交4", "追番中2", "已停用1", "已加入下载1", "需处理1",
         ]
         assert "共 9 条追番记录" in page.locator(".tracking-status-total").inner_text()
 
@@ -651,3 +652,138 @@ class TestPlanReuse:
         # The suggestion is in memory only: the URL carries no plan data.
         for forbidden in ("rss", "token", "password", "mikan-1234"):
             assert forbidden not in page.url
+
+    def test_settled_failed_record_can_delete_without_a_connection(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        """Issue #96: a finished operation is history, not a delete lock."""
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        item = {
+            **_item("tracking-a", "葬送的芙莉莲"),
+            "request_id": "request-plan",
+            "status": "SUBMIT_FAILED",
+            "status_label": "提交失败",
+            "status_group": "ATTENTION",
+            "available_actions": [],
+        }
+        deletes: list[dict[str, Any]] = []
+        state = {"deleted": False}
+
+        def handler(route: Any, request: Any) -> None:
+            path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+            if request.method == "GET" and path == "/settings/autobangumi":
+                # No Auto Bangumi connection is configured at all.
+                route.fulfill(json={"ok": True, "result": {
+                    "configured": False, "credential_present": False,
+                    "connection_ref": None, "configuration_revision": 0,
+                    "connection_status": "UNCONFIGURED",
+                }})
+                return
+            if request.method == "GET" and path == "/tracking/items":
+                items = [] if state["deleted"] else [item]
+                route.fulfill(json={"ok": True, "result": {
+                    "items": items, "summary": _summary(len(items), needs_attention=len(items)), "warnings": [],
+                }})
+                return
+            if request.method == "GET" and path == "/tracking/items/tracking-a":
+                route.fulfill(json={"ok": True, "result": {
+                    **item, "origin": "single", "batch_id": None, "created_at": "2026-09-01T00:00:00Z",
+                    "last_synced_at": None, "safe_info": None, "revalidation_issues": [],
+                    "external_mapping": None, "audit_events": [], "warnings": [],
+                    "current_operation": {
+                        "operation_id": "op-settled", "operation": "SUBMIT", "state": "FAILED", "attempt": 1,
+                    },
+                }})
+                return
+            if request.method == "POST" and path == "/tracking/items/tracking-a/delete-plan":
+                body = request.post_data_json or {}
+                deletes.append(body)
+                state["deleted"] = True
+                route.fulfill(json={"ok": True, "result": {
+                    "tracking_id": "tracking-a", "outcome": "DELETED", "external_deleted": False,
+                }})
+                return
+            route.continue_()
+
+        page.route("**/api/v1/**", handler)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-delete-plan")
+
+        page.locator("#tracking-delete-plan").click()
+        page.locator("#tracking-delete-plan-cancel").click()
+        page.wait_for_timeout(200)
+        assert deletes == []
+
+        page.locator("#tracking-delete-plan").click()
+        page.locator("#tracking-delete-plan-confirm").click()
+        page.wait_for_timeout(400)
+
+        assert len(deletes) == 1
+        body = deletes[0]
+        assert body["delete_external"] is False
+        # A purely local delete carries no connection material at all.
+        assert "connection_ref" not in body
+        assert "configuration_revision" not in body
+        expect(page.locator(".tracking-list-item")).to_have_count(0)
+
+class TestSubmissionModeLabels:
+    """Issue #99 AC 6/7: only a real attempt shows its mode, fail closed."""
+
+    def test_list_shows_the_mode_only_where_one_exists(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        pending = {
+            **_item("tracking-pending", "待提交番剧"),
+            "status": "PENDING_SUBMIT", "status_label": "待提交", "status_group": "PENDING",
+            "available_actions": [],
+            # 待提交 never fabricates a mode.
+            "submission_mode": None,
+        }
+        active = {
+            **_item("tracking-active", "追番中番剧"),
+            "status": "ACTIVE", "status_label": "追番中", "status_group": "ACTIVE",
+            "available_actions": [],
+            "submission_mode": "CONTINUE_TRACKING",
+        }
+
+        def handler(route: Any, request: Any) -> None:
+            path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+            if request.method == "GET" and path == "/settings/autobangumi":
+                route.fulfill(json={"ok": True, "result": {
+                    "configured": False, "credential_present": False,
+                    "connection_ref": None, "configuration_revision": 0,
+                    "connection_status": "UNCONFIGURED",
+                }})
+                return
+            if request.method == "GET" and path == "/tracking/items":
+                route.fulfill(json={"ok": True, "result": {
+                    "items": [pending, active],
+                    "summary": _summary(2, pending=1, active=1),
+                    "warnings": [],
+                }})
+                return
+            if request.method == "GET" and path.startswith("/tracking/items/"):
+                tracking_id = path.rsplit("/", 1)[-1]
+                item = pending if tracking_id == "tracking-pending" else active
+                route.fulfill(json={"ok": True, "result": {
+                    **item, "origin": "single", "batch_id": None,
+                    "created_at": "2026-09-01T00:00:00Z", "last_synced_at": None,
+                    "safe_info": None, "current_operation": None, "revalidation_issues": [],
+                    "external_mapping": None, "audit_events": [], "warnings": [],
+                }})
+                return
+            route.continue_()
+
+        page.route("**/api/v1/**", handler)
+        page.goto(f"{live_server_url}/app/tracking")
+        page.wait_for_selector(".tracking-list-item")
+
+        labels = page.locator(".tracking-list-mode")
+        assert labels.count() == 1
+        assert labels.first.inner_text().strip() == "持续追番"
+        # The 待提交 row carries no fabricated mode.
+        pending_row = page.locator('[data-tracking-id="tracking-pending"]')
+        assert pending_row.locator(".tracking-list-mode").count() == 0

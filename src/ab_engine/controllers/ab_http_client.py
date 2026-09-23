@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any, Literal, Protocol
@@ -322,11 +323,13 @@ class LegacyAutoBangumi31Client:
                 "ab_duplicate_subscription",
                 "Auto Bangumi 中已存在相同订阅",
                 "create_ab_subscription",
+                upstream_diagnostics(response),
             )
         raise Stage1Error(
             "ab_submit_failed",
             "Auto Bangumi 提交失败",
             "create_ab_subscription",
+            upstream_diagnostics(response),
         )
 
     def _pre_write_check(self) -> None:
@@ -569,6 +572,59 @@ _DUPLICATE_SUBSCRIPTION_MARKERS = (
     "already exists",
     "already subscribed",
 )
+
+
+#: Issue #101: the only upstream failure fields ever surfaced, bounded in length.
+_UPSTREAM_DIAGNOSTIC_FIELDS = ("msg_zh", "msg_en", "msg", "message", "detail")
+_DIAGNOSTIC_MAX_CHARS = 200
+#: Anything that could carry a secret, a full feed URL, a magnet or a local path.
+_DIAGNOSTIC_REDACTIONS = (
+    re.compile(r"https?://\S+", re.IGNORECASE),
+    re.compile(r"magnet:\S+", re.IGNORECASE),
+    re.compile(r"(?:/(?:home|users|var|tmp|mnt|opt)/\S+)", re.IGNORECASE),
+    re.compile(r"[A-Za-z]:\\\\\S+"),
+    re.compile(r"\b(?:password|passwd|token|secret|cookie|authorization)\b\s*[:=]?\s*\S*", re.IGNORECASE),
+    re.compile(r"\b[0-9a-fA-F]{32,}\b"),
+)
+
+
+def _safe_diagnostic_text(value: Any) -> str | None:
+    """One bounded, redacted upstream message or ``None`` (never raw text)."""
+    if not isinstance(value, str):
+        return None
+    text = " ".join(value.split())
+    if not text:
+        return None
+    for pattern in _DIAGNOSTIC_REDACTIONS:
+        text = pattern.sub("[已隐藏]", text)
+    text = text.strip()
+    if not text:
+        return None
+    return text[:_DIAGNOSTIC_MAX_CHARS]
+
+
+def upstream_diagnostics(response: Any) -> dict[str, Any]:
+    """Whitelisted, bounded diagnostics from one Auto Bangumi write response.
+
+    Only a stable HTTP category and the bounded ``msg_zh``/``msg_en`` (or their
+    documented aliases) ever leave the adapter; unknown fields, raw bodies,
+    URLs, magnets and local paths are dropped. A response without any usable
+    reason yields no reason at all, so the client can honestly say 未提供具体原因.
+    """
+    diagnostics: dict[str, Any] = {}
+    if not isinstance(response, Mapping):
+        return diagnostics
+    status = response.get("status_code", response.get("http_status"))
+    if isinstance(status, int) and not isinstance(status, bool) and 100 <= status <= 599:
+        diagnostics["http_status"] = status
+    elif isinstance(status, str) and status.isdigit() and 100 <= int(status) <= 599:
+        diagnostics["http_status"] = int(status)
+    for field in _UPSTREAM_DIAGNOSTIC_FIELDS:
+        safe = _safe_diagnostic_text(response.get(field))
+        if safe is not None:
+            key = "message_zh" if field in ("msg_zh", "msg", "message", "detail") else "message_en"
+            diagnostics.setdefault(key, safe)
+    return diagnostics
 
 
 def _looks_like_duplicate_subscription(response: Mapping[str, Any]) -> bool:
