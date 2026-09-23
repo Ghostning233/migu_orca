@@ -6,7 +6,7 @@
 | --- | --- |
 | 状态 | 历史规划；Stage 46、47 已完成，后续工作改由 GitHub Issues 规划 |
 | 日期 | 2026-09-20 |
-| 设计图来源 | `docs/design/assets/frontend-ux/review-2026-09-17/` 的六张 PNG |
+| 设计图来源 | `docs/design/assets/frontend-ux/archive/review-2026-09-17/` 的六张 PNG |
 | 标准桌面基线 | `1440 × 900` CSS 像素；源 PNG 为 `1586 × 992` 位图，不能直接等同 CSS viewport |
 | 前置基线 | Stage 45 已经 PR #74 合并；Stage 46 基于 merge `75e144194644b920c446080c7becaca4a14f3704` 准备 |
 | 代码落点 | `frontend/src/App.vue`、`styles/`、`features/workbench/` 及其 Vitest/Chromium 用例 |

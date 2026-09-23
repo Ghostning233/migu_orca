@@ -13,7 +13,7 @@
 - F5 悬浮提示的完成范围与验收：[Stage 42 PRD](MiGuOrca_stage42_global_notification_PRD.md)
 - 用户新一轮前端人工审核的问题与设计讨论：[前端审核问题记录](design/frontend-review-issues-2026-09-17.md)
 - Stage 41 添加页状态反馈与任务导向审核已完成（US-342～US-345）；执行证据见 [Stage 41 归档 progress](../scripts/ralph/archive/2026-09-18-stage41-add-anime-ux/progress.txt)。
-- 添加番剧单番与批量旅程已确认的六张效果图：[新版设计方向](design/frontend-ux-review-mockups-2026-09-17.md)
+- 添加番剧、我的追番和设置的现行目标设计：[2026-09-23 新版设计图与交互基线](design/frontend-ux-redesign-2026-09-23.md)；此前六张添加页效果图已[归档](design/frontend-ux-review-mockups-2026-09-17.md)。
 - 已完成的 Stage 43～45 总体规划：[添加番剧视觉与信息层级收口](MiGuOrca_stage43_45_add_anime_visual_PRD.md)
 - Stage 46～48 的历史总体规划：[添加番剧页面像素级复刻总体 PRD](MiGuOrca_add_anime_pixel_parity_PRD.md)
 - Stage 46 像素基线、应用壳层与共享控件已由 PR #75 合并；其 3C 像素门禁裁决与执行记录见 [Stage 46 PRD](MiGuOrca_stage46_pixel_foundation_PRD.md)。
@@ -42,11 +42,11 @@
   [前端体验重构：工作目标与协作流程](frontend-ux-refactor-work-goals.md)。
 - 页面体验设计与视觉评审已经作为独立工作完成。后续必须先完成后端支撑和前端分片 PRD、
   OpenAPI 边界及验收计划，再交由对应实现 Agent 分片开发。
-- 第一轮产品方向和混合低保真结构已经确认，详见
-  [桌面端低保真页面方案](design/frontend-ux-low-fidelity-options.md)；组件行为、状态矩阵和后端
-  依赖见[桌面端前端交互规格](design/frontend-ux-interaction-spec.md)。已经通过 Gate 3 的关键页面、
-  修正版和异常状态参考见[视觉方向 V1](design/frontend-ux-visual-direction-v1.md)，可编码的颜色、
-  字体、间距、组件状态和桌面布局基线见[前端设计 Token V1](design/frontend-ux-design-tokens-v1.md)。
+- 第一轮产品方向和混合低保真结构的历史记录，详见
+  [桌面端低保真页面方案](design/frontend-ux-low-fidelity-options.md)；当时的组件行为、状态矩阵和后端
+  依赖见[桌面端前端交互规格](design/frontend-ux-interaction-spec.md)。Gate 3 的历史页面图见
+  [视觉方向 V1](design/frontend-ux-visual-direction-v1.md)；颜色、字体、间距与组件状态参考见
+  [前端设计 Token V1](design/frontend-ux-design-tokens-v1.md)，实施前须与新版设计核对。
 - 候选开发边界见[前端体验重构：后端支撑 PRD](MiGuOrca_frontend_ux_backend_support_PRD.md)与
   [前端体验重构：前端分片实施 PRD](MiGuOrca_frontend_ux_implementation_PRD.md)。两份文档仍按
   工作包继续分包评审；其中 B-A 已完成并交付为[Stage 28：草案一致性与原子保存确认](MiGuOrca_stage28_draft_consistency_PRD.md)，

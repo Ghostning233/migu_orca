@@ -121,7 +121,7 @@ Stage 36 不在未保存批量草案上伪造该按钮或 DTO。正式 tracking 
 
 ### D36-09：效果图实现边界
 
-布局、密度、层级和部分成功状态以 `batch-review-12-v2.png`、`batch-partial-success-v1.png` 为方向，
+布局、密度、层级和部分成功状态以归档的 `docs/design/assets/frontend-ux/archive/batch-review-12-v2.png`、`docs/design/assets/frontend-ux/archive/batch-partial-success-v1.png` 为当时方向，
 不做逐像素复制。Stage 36 不显示效果图中的真实“全部信息”动作；该按钮随 F-E 的已保存 Request
 `SafeInfoDialog` 一并接入。此项是已知分阶段差异，不是实现缺口或 mock 占位授权。
 
@@ -237,7 +237,7 @@ git diff --check
   tracking 恢复和离开保护的 Vitest 与 Chromium 覆盖；AC-23～AC-25 由安全边界、旧链路引用搜索、
   queue 兼容和真实浏览器回归覆盖。完整 1/12/36、响应式/200% 与 reduced-motion 以 Chromium
   回归为证；效果图仅作方向参考。
-- 对照 `batch-review-12-v2.png` 与 `batch-partial-success-v1.png`：双栏比例、异常优先层级、固定
+- 对照归档的 `docs/design/assets/frontend-ux/archive/batch-review-12-v2.png` 与 `docs/design/assets/frontend-ux/archive/batch-partial-success-v1.png`：双栏比例、异常优先层级、固定
   操作栏和逐项部分成功方向已实现；“全部信息”仍明确留给 F-E 的已保存 Request SafeInfo。
 - 未修改 OpenAPI、generated client 或后端业务语义；未产生应提交的 dist、trace、截图或敏感测试产物。
 
