@@ -18,6 +18,7 @@ import pytest
 from flask.testing import FlaskClient
 
 from ab_engine.controllers.ab_client import FakeAutoBangumiClient
+from ab_engine.models.management import ExternalRss, ExternalSubscription
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from apps.migu_orca_web.api_contract import TrackingSubmitResultDTO
 from apps.migu_orca_web.tracking_handoff import ensure_confirmed_request_tracking
@@ -39,6 +40,11 @@ from storage_engine.controllers.storage_config import (
 from storage_engine.controllers.tracking_repository import (
     compare_and_swap_tracking_record,
     load_tracking_record,
+)
+from tracking_engine.controllers.submit import classify_external_submit_result
+from tracking_engine.models.operation import (
+    TRACKING_OPERATION_STATE_FAILED,
+    TRACKING_OPERATION_STATE_SUCCEEDED,
 )
 from tracking_engine.models.tracking import (
     TRACKING_AUDIT_SUBMIT_STARTED,
@@ -125,10 +131,23 @@ def _submit_body(record: TrackingRecord, **overrides: Any) -> dict[str, Any]:
 
 
 def _patch_ab_factory(monkeypatch: pytest.MonkeyPatch, client: FakeAutoBangumiClient):
+    state: dict[str, Any] = {"result": None}
+
     def submit_one(_request: dict[str, Any], _config: Any) -> dict[str, Any]:
-        client.create_subscription({"fixture": True})
-        return {"success": True, "ab_subscription_id": "fake-ab-subscription", "error": None}
+        try:
+            client.create_subscription({"fixture": True})
+        except Exception as exc:  # a pre-write/definite failure still gates read-back
+            state["result"] = {
+                "success": False,
+                "error": {"error_type": getattr(exc, "error_type", "ab_submit_failed")},
+            }
+            raise
+        result = {"success": True, "ab_subscription_id": "fake-ab-subscription", "error": None}
+        state["result"] = result
+        return result
+
     monkeypatch.setattr("apps.migu_orca_web.tracking_submission_service.compose_tracking_submit_one", lambda: submit_one)
+    _patch_readback(monkeypatch, state)
     return client
 
 
@@ -511,3 +530,174 @@ def test_submit_same_key_replay_reuses_operation_without_second_external_call(
     assert replay_result["outcome"] == TRACKING_STATUS_ACTIVE
     assert replay_result["operation_id"] == first.get_json()["result"]["operation_id"]
     assert len(fake.calls) == 1
+
+#: The plan fixture's exact RSS identity; a read-back that matched nothing is
+#: what a definite external failure looks like (issue #97 AC 5).
+FIXTURE_RSS_URL = "https://example.invalid/rss/frieren-moe.xml"
+
+
+def _patch_readback(
+    monkeypatch: pytest.MonkeyPatch,
+    state: dict[str, Any],
+    *,
+    rss_url: str = FIXTURE_RSS_URL,
+    external_id: str = "fake-ab-subscription",
+    mode: str = "auto",
+) -> None:
+    """Inject an exact read-back that follows the write result (issue #97).
+
+    A successful write reads back the exact RSS + owning subscription; a failed
+    write reads back nothing, which the server must treat as a definite failure.
+    """
+
+    def read_snapshot() -> Any:
+        if mode == "unreadable":
+            return None
+        if mode == "empty":
+            return (None, [], [])
+        if mode == "always_match":
+            return (
+                None,
+                [ExternalSubscription(external_id, "葬送的芙莉莲", 1, "喵萌", rss_urls=(rss_url,))],
+                [ExternalRss("rss-1", "芙莉莲", rss_url)],
+            )
+        classification = classify_external_submit_result(state.get("result"))
+        if classification != TRACKING_OPERATION_STATE_SUCCEEDED:
+            # A definite failure confirms there is no object; an unresolved write
+            # cannot be read at all, so it stays unresolved (issue #97 AC 5/6).
+            if classification == TRACKING_OPERATION_STATE_FAILED:
+                return (None, [], [])
+            return None
+        return (
+            None,
+            [ExternalSubscription(external_id, "葬送的芙莉莲", 1, "喵萌", rss_urls=(rss_url,))],
+            [ExternalRss("rss-1", "芙莉莲", rss_url)],
+        )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.tracking_submission_service.compose_tracking_readback_external",
+        lambda _config: read_snapshot,
+    )
+
+# -- issue #97: the write body alone never establishes ownership ---------------
+
+
+def _patch_result(monkeypatch: pytest.MonkeyPatch, result: dict[str, Any]) -> None:
+    monkeypatch.setattr(
+        "apps.migu_orca_web.tracking_submission_service.compose_tracking_submit_one",
+        lambda: (lambda _request, _config: result),
+    )
+
+
+def test_submit_non_success_write_confirmed_by_readback_is_active_with_warning(
+    tmp_path: Path,
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #97 AC 4: a rejected body plus an exact read-back is 追番中."""
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    _patch_result(
+        monkeypatch,
+        {"success": False, "error": {"error_type": "ab_submit_failed"}, "error_message": "upstream"},
+    )
+    _patch_readback(monkeypatch, {}, mode="always_match", external_id="sub-readback")
+
+    response = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/submit", json=_submit_body(record)
+    )
+
+    result = response.get_json()["result"]
+    assert result["tracking"]["status"] == TRACKING_STATUS_ACTIVE
+    stored = load_tracking_record(_config(tmp_path), record.tracking_id)
+    assert stored.external_mapping is not None
+    assert stored.external_mapping.get("subscription_id") == "sub-readback"
+    body_text = response.get_data(as_text=True)
+    for forbidden in ("upstream", "secret-token", "auto-bangumi.local", str(tmp_path)):
+        assert forbidden not in body_text
+    # The safe note about the unconfirmed write body is recorded.
+    assert any(
+        "写响应未确认" in str(event.get("safe_message", ""))
+        for event in stored.audit_events
+    )
+
+
+def test_submit_success_body_without_a_readback_object_is_a_definite_failure(
+    tmp_path: Path,
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #97 AC 3/5: a 200 body alone must not create the mapping."""
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    _patch_result(monkeypatch, {"success": True, "ab_subscription_id": "claimed-by-body"})
+    _patch_readback(monkeypatch, {}, mode="empty")
+
+    response = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/submit", json=_submit_body(record)
+    )
+
+    result = response.get_json()["result"]
+    assert result["tracking"]["status"] == TRACKING_STATUS_SUBMIT_FAILED
+    stored = load_tracking_record(_config(tmp_path), record.tracking_id)
+    assert stored.external_mapping is None
+
+
+def test_submit_success_body_with_an_unreadable_readback_stays_unresolved(
+    tmp_path: Path,
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #97 AC 6: an unreadable read-back is 结果待确认, never a retry."""
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    _patch_result(monkeypatch, {"success": True, "ab_subscription_id": "claimed-by-body"})
+    _patch_readback(monkeypatch, {}, mode="unreadable")
+
+    response = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/submit", json=_submit_body(record)
+    )
+
+    result = response.get_json()["result"]
+    assert result["tracking"]["status"] == TRACKING_STATUS_VERIFYING_EXTERNAL
+    stored = load_tracking_record(_config(tmp_path), record.tracking_id)
+    assert stored.external_mapping is None
+
+
+def test_submit_without_valid_resources_is_refused_before_any_external_call(
+    tmp_path: Path,
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #97 AC 1/2: zero resources fail before the AB write, without MiKan."""
+    request = _accepted_request(tmp_path)
+    config = _config(tmp_path)
+    snapshot = load_request_snapshot(config, request["request_id"])
+    for source in snapshot["source_info"]["rss_sources"]:
+        source["valid_seed_names"] = []
+    snapshot["confirmable_config"]["effective_seed_names"] = []
+    save_request_snapshot(config, snapshot)
+    record = _seed_tracking(tmp_path, request)
+    calls: list[dict[str, Any]] = []
+
+    def submit_one(_request: dict[str, Any], _config: Any) -> dict[str, Any]:
+        calls.append(_request)
+        return {"success": True, "ab_subscription_id": "never"}
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.tracking_submission_service.compose_tracking_submit_one",
+        lambda: submit_one,
+    )
+    _patch_readback(monkeypatch, {}, mode="always_match")
+
+    response = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/submit", json=_submit_body(record)
+    )
+
+    assert response.status_code in (200, 409)
+    assert calls == []
+    stored = load_tracking_record(_config(tmp_path), record.tracking_id)
+    assert stored.status != TRACKING_STATUS_ACTIVE
+    issues = response.get_json().get("result", {}).get("issues", [])
+    if response.status_code == 200:
+        assert "NO_VALID_RESOURCES" in [issue.get("code") for issue in issues]

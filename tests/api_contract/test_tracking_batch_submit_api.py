@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 from flask.testing import FlaskClient
 
+from ab_engine.models.management import ExternalRss, ExternalSubscription
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from apps.migu_orca_web.api_contract import TrackingBatchSubmitResultDTO
 from apps.migu_orca_web.tracking_handoff import ensure_confirmed_request_tracking
@@ -30,6 +31,11 @@ from storage_engine.controllers.storage_config import (
     load_storage_config,
 )
 from storage_engine.controllers.tracking_repository import load_tracking_record
+from tracking_engine.controllers.submit import classify_external_submit_result
+from tracking_engine.models.operation import (
+    TRACKING_OPERATION_STATE_FAILED,
+    TRACKING_OPERATION_STATE_SUCCEEDED,
+)
 from tracking_engine.models.tracking import (
     TRACKING_ORIGIN_SAVE_CONFIRM,
     TrackingRecord,
@@ -107,16 +113,19 @@ def _patch_submit_one(monkeypatch: pytest.MonkeyPatch, results: list[dict[str, A
     """Serve one queued Auto Bangumi result per external call, in order."""
     queue = list(results)
     calls: list[dict[str, Any]] = []
+    state: dict[str, Any] = {"result": None}
 
     def submit_one(request: dict[str, Any], _config: Any) -> dict[str, Any]:
         calls.append(request)
         assert queue, "the batch issued more external calls than the test queued"
+        state["result"] = queue[0]
         return queue.pop(0)
 
     monkeypatch.setattr(
         "apps.migu_orca_web.tracking_submission_service.compose_tracking_submit_one",
         lambda: submit_one,
     )
+    _patch_readback(monkeypatch, state)
     return calls
 
 
@@ -278,3 +287,40 @@ def test_batch_submit_never_leaks_credentials_or_paths(
     body_text = response.get_data(as_text=True)
     for forbidden in ("secret-password", "operator", "ab.invalid", str(tmp_path)):
         assert forbidden not in body_text
+
+#: The plan fixture's exact RSS identity; a read-back that matched nothing is
+#: what a definite external failure looks like (issue #97 AC 5).
+FIXTURE_RSS_URL = "https://example.invalid/rss/frieren-moe.xml"
+
+
+def _patch_readback(
+    monkeypatch: pytest.MonkeyPatch,
+    state: dict[str, Any],
+    *,
+    rss_url: str = FIXTURE_RSS_URL,
+    external_id: str = "fake-ab-subscription",
+) -> None:
+    """Inject an exact read-back that follows the write result (issue #97).
+
+    A successful write reads back the exact RSS + owning subscription; a failed
+    write reads back nothing, which the server must treat as a definite failure.
+    """
+
+    def read_snapshot() -> Any:
+        classification = classify_external_submit_result(state.get("result"))
+        if classification != TRACKING_OPERATION_STATE_SUCCEEDED:
+            # A definite failure confirms there is no object; an unresolved write
+            # cannot be read at all, so it stays unresolved (issue #97 AC 5/6).
+            if classification == TRACKING_OPERATION_STATE_FAILED:
+                return (None, [], [])
+            return None
+        return (
+            None,
+            [ExternalSubscription(external_id, "葬送的芙莉莲", 1, "喵萌", rss_urls=(rss_url,))],
+            [ExternalRss("rss-1", "芙莉莲", rss_url)],
+        )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.tracking_submission_service.compose_tracking_readback_external",
+        lambda _config: read_snapshot,
+    )
