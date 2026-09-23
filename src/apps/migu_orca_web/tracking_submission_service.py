@@ -180,6 +180,7 @@ def run_tracking_submit(
     submit_one: SubmitOne | None = None,
     persist_ab_result: PersistAbResult | None = None,
     readback_external: Callable[[], Any] | None = None,
+    submission_mode: str | None = None,
     now: str | None = None,
 ) -> dict[str, Any]:
     """Run the unified reliable submit for one tracking item (US-225).
@@ -278,6 +279,7 @@ def run_tracking_submit(
         submit_one=submit_one,
         persist_ab_result=persist_ab_result,
         readback_external=readback_external,
+        submission_mode=submission_mode,
         timestamp=timestamp,
     )
 
@@ -362,6 +364,7 @@ def run_saved_tracking_submit(
         submit_one=submit_one,
         persist_ab_result=persist_ab_result,
         readback_external=readback_external,
+        submission_mode=getattr(payload, "submission_mode", None),
         now=now,
     )
 
@@ -413,6 +416,7 @@ def _run_saved_tracking_submission(
     persist_ab_result: PersistAbResult | None,
     now: str | None,
     readback_external: Callable[[], Any] | None = None,
+    submission_mode: str | None = None,
 ) -> dict[str, Any]:
     repository = repository or AutoBangumiConfigRepository()
     existing = _find_operation(config, payload.idempotency_key)
@@ -464,6 +468,7 @@ def _run_saved_tracking_submission(
             submit_one=submit_one,
             persist_ab_result=persist_ab_result,
             readback_external=readback_external,
+            submission_mode=submission_mode,
             now=now,
         )
 
@@ -683,6 +688,7 @@ def _submit_through_external(
     persist_ab_result: PersistAbResult | None,
     timestamp: str,
     readback_external: Callable[[], Any] | None = None,
+    submission_mode: str | None = None,
 ) -> dict[str, Any]:
     """Persist the SUBMITTING boundary, gate the external call and finalize."""
     if operation is None:
@@ -694,6 +700,7 @@ def _submit_through_external(
             expected_revision=expected_revision,
             request_fingerprint=fingerprint or "",
             connection_ref=connection_ref,
+            submission_mode=submission_mode,
             now=timestamp,
         )
         if not created:

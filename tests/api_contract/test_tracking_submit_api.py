@@ -707,29 +707,32 @@ def test_submit_without_valid_resources_is_refused_before_any_external_call(
 # -- issue #98: the operation-level submission mode ---------------------------
 
 
-def test_submit_accepts_the_operation_level_submission_mode(
+@pytest.mark.parametrize(
+    ("body_mode", "expected"),
+    [(None, "CONTINUE_TRACKING"), ("DOWNLOAD_EXISTING", "DOWNLOAD_EXISTING")],
+)
+def test_submit_records_the_operation_level_submission_mode(
     tmp_path: Path,
     client: FlaskClient,
     monkeypatch: pytest.MonkeyPatch,
+    body_mode: str | None,
+    expected: str,
 ) -> None:
-    """AC 1: the stable enum is accepted, defaults, and never reaches the plan.
-
-    The HTTP -> operation persistence of a non-default mode is still pending
-    (see issue #98); this case locks the payload contract and the default.
-    """
+    """AC 1: the chosen mode is an operation fact, never a local plan field."""
     request = _accepted_request(tmp_path)
     record = _seed_tracking(tmp_path, request)
     _patch_ab_factory(monkeypatch, FakeAutoBangumiClient())
+    overrides = {"submission_mode": body_mode} if body_mode else {}
 
     response = client.post(
         f"/api/v1/tracking/items/{record.tracking_id}/submit",
-        json=_submit_body(record, submission_mode="DOWNLOAD_EXISTING"),
+        json=_submit_body(record, **overrides),
     )
 
     assert response.status_code == 200
     result = response.get_json()["result"]
     operation = load_tracking_operation(_config(tmp_path), result["operation_id"])
-    assert operation.submission_mode == "CONTINUE_TRACKING"
+    assert operation.submission_mode == expected
     # The local plan snapshot never carries the submission mode.
     snapshot = load_request_snapshot(_config(tmp_path), request["request_id"])
     assert "submission_mode" not in json.dumps(snapshot, ensure_ascii=False)

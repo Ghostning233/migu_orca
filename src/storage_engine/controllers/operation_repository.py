@@ -154,6 +154,7 @@ def bind_tracking_operation(
                 expected_revision=expected_revision,
                 request_fingerprint=request_fingerprint,
                 operation=operation,
+                submission_mode=submission_mode,
                 target_scope=target_scope,
                 previous_tracking_status=previous_tracking_status,
                 expected_external_fingerprint=expected_external_fingerprint,
