@@ -1,6 +1,6 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { nextTick } from 'vue'
 
@@ -32,6 +32,12 @@ vi.mock('@/api/client', () => ({
 }))
 
 const apiPost = vi.mocked(api.post)
+
+// 每个批量用例都把工作台挂到 document.body。视图只在 unmount 时 dispose
+// 每条的 1.5s 筛选防抖定时器；若用例结束仍挂着，前一个用例的定时器会在后续
+// 用例触发，并通过共享的 api mock 多发一次 preview-modify。用例后统一卸载，
+// 让定时器不能跨用例泄漏。
+enableAutoUnmount(afterEach)
 
 type ParseResult = NonNullable<
   operations['parseBatchTitles']['responses']['200']['content']['application/json']['result']
