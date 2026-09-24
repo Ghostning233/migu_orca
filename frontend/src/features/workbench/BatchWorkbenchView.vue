@@ -62,6 +62,7 @@ import {
   batchSaveErrorIsReplayed,
   batchSaveRecoveryAction,
   batchSaveRecoveryLabel,
+  readBatchParseItemEvent,
   batchSaveConfirmTrackingId,
   batchSelectedConfirmCopy,
   batchSelectedScopeText,
@@ -700,12 +701,9 @@ async function parseBatch(onProgress?: (progress: BatchParseProgress) => void): 
       timeoutMs: batchParseTimeoutMs(count),
       accept: 'text/event-stream',
       onEvent: (event) => {
-        if (event.event !== 'item') return
-        const completed = Number(event.data.completed)
-        const total = Number(event.data.total)
-        if (Number.isFinite(completed) && Number.isFinite(total)) {
-          onProgress?.({ completed, total })
-        }
+        // Issue 132：只消费合法的逐部完成事件；result／error 与不合形状的载荷不参与进度。
+        const progress = readBatchParseItemEvent(event)
+        if (progress) onProgress?.({ completed: progress.completed, total: progress.total })
       },
     })
     parseResult.value = result

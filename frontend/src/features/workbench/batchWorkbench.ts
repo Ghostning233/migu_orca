@@ -15,6 +15,7 @@
  * and they actively redact URL-looking values at display time. No value here
  * is ever persisted or logged.
  */
+import type { ApiStreamEvent } from '@/api/client'
 import type { operations } from '@/api/generated/api'
 import { isPublicRouteIdentifier } from '@/app/router/catalog'
 import { displayValue, type RequestSnapshot } from '@/features/requests/requestDetail'
@@ -27,6 +28,32 @@ export type BatchParseResult = NonNullable<
 
 /** One typed batch card (public parse item + client draft state). */
 export type BatchItem = NonNullable<BatchParseResult['items']>[number]
+
+/** Issue 132：批量解析逐部事件（item）的显式形状。 */
+export interface BatchParseProgressEvent {
+  completed: number
+  total: number
+  item: BatchItem
+}
+
+/**
+ * 只把合法的逐部完成事件投影成进度；其他事件名或不合形状的载荷返回 null。
+ *
+ * 传输层交付的是通用 SSE 帧，消费端必须在自己的形状上做一次显式收敛，不能让
+ * 一个宽泛对象同时代表 item／result／error（Issue 132）。
+ */
+export function readBatchParseItemEvent(
+  event: Pick<ApiStreamEvent, 'event' | 'data'>,
+): BatchParseProgressEvent | null {
+  if (event.event !== 'item') return null
+  const completed = Number(event.data.completed)
+  const total = Number(event.data.total)
+  const item = event.data.item
+  if (!Number.isInteger(completed) || completed < 1) return null
+  if (!Number.isInteger(total) || total < 1 || total > 36) return null
+  if (!item || typeof item !== 'object') return null
+  return { completed, total, item: item as BatchItem }
+}
 
 /** The typed Mikan candidate inside a batch card (strict whitelist). */
 export type BatchCandidate = NonNullable<BatchItem['candidates']>[number]

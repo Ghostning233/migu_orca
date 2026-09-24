@@ -15,7 +15,7 @@ export interface paths {
         put?: never;
         /**
          * 批量解析番剧名称
-         * @description Issue 112：`Accept: text/event-stream` 时同一操作改为 SSE 逐部进度流：每个 FOUND／EMPTY／FAILED 条目真正完成时推送一个 item 事件（completed/total/item），最后一个 result 事件给出与默认 JSON 表示完全一致的 {batch_id, raw_input, items}。没有持久任务、取消或续接语义：事件只存在于本次请求生命周期，刷新或关闭浏览器后需重新搜索，也不承诺服务端停止工作。输入错误在开始流之前仍以普通 JSON 失败 envelope 返回；中途失败以 error 事件结束，客户端不得把未收到 result 的批次当作已完成。
+         * @description Issue 112/129/132：只有显式 `Accept: text/event-stream` 时才把同一操作改为 SSE 逐部进度流（通配或未设置 Accept 仍是默认 JSON 表示）；每个 FOUND／EMPTY／FAILED 条目真正完成时推送一个 item 事件（completed/total/item），最后一个 result 事件给出与默认 JSON 表示完全一致的 {batch_id, raw_input, items}。没有持久任务、取消或续接语义：事件只存在于本次请求生命周期，刷新或关闭浏览器后需重新搜索，也不承诺服务端停止工作。输入错误在开始流之前仍以普通 JSON 失败 envelope 返回；中途失败以 error 事件结束，客户端不得把未收到 result 的批次当作已完成。
          */
         post: operations["parseBatchTitles"];
         delete?: never;
