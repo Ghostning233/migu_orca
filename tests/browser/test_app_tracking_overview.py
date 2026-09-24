@@ -125,6 +125,15 @@ def _open(page: Page, live_server_url: str, storage_dir, items: list[dict[str, A
     return live_items
 
 
+def _wait_for_loaded_detail(page: Page) -> None:
+    """Wait for the loaded safe detail, not just the loading container.
+
+    `.tracking-inspector-content` renders immediately with「正在读取安全详情…」,
+    so geometry assertions must wait for a marker that only exists after the
+    detail response has been rendered.
+    """
+    expect(page.locator(".tracking-inspector-summary")).to_contain_text("总集数")
+
 def test_long_list_scrolls_inside_while_overview_and_inspector_stay_put(
     page: Page, live_server_url: str, storage_dir
 ) -> None:
@@ -143,7 +152,7 @@ def test_long_list_scrolls_inside_while_overview_and_inspector_stay_put(
     assert grown_page_height == first_page_height
 
     page.locator(".tracking-list-item").first.click()
-    page.wait_for_selector(".tracking-inspector-content")
+    _wait_for_loaded_detail(page)
 
     geometry = page.evaluate(
         """() => {
@@ -209,13 +218,13 @@ def test_long_detail_scrolls_inside_without_moving_the_list(
     _open(page, live_server_url, storage_dir, items, audits=1)
 
     page.locator(".tracking-list-item").first.click()
-    page.wait_for_selector(".tracking-inspector-content")
+    _wait_for_loaded_detail(page)
     short_detail_height = page.evaluate("() => document.documentElement.scrollHeight")
 
     # 同一详情换成 40 条安全记录：整页高度不变，详情在栏内滚动。
     _open(page, live_server_url, storage_dir, items, audits=40)
     page.locator(".tracking-list-item").first.click()
-    page.wait_for_selector(".tracking-inspector-content")
+    _wait_for_loaded_detail(page)
 
     metrics = page.evaluate(
         """() => {
@@ -247,7 +256,7 @@ def test_unknown_episode_counts_never_infer_from_resources(
     _open(page, live_server_url, storage_dir, [_item(1, total_episodes=None)])
 
     page.locator(".tracking-list-item").first.click()
-    page.wait_for_selector(".tracking-inspector-content")
+    _wait_for_loaded_detail(page)
     rows = page.evaluate(
         """() => {
           const pairs = {}
@@ -274,7 +283,7 @@ def test_desktop_widths_keep_both_columns_reachable_without_overflow(
     page.set_viewport_size({"width": width, "height": 900})
     _open(page, live_server_url, storage_dir, items)
     page.locator(".tracking-list-item").first.click()
-    page.wait_for_selector(".tracking-inspector-content")
+    _wait_for_loaded_detail(page)
 
     metrics = page.evaluate(
         """() => {
