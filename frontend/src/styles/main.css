@@ -79,23 +79,30 @@ body {
   box-shadow: var(--shadow-shell);
 }
 
-/* Stage 46 (US-361): the shell keeps the frozen Token V1 geometry
- * (--size-shell-header / --size-content-max / --space-* padding). The measured
- * mockup numbers are recorded as diagnostics in tests/browser/visual_manifest.py
- * but do not override the tokens (overall PRD 2.1). */
+/* Issue 109: the shared shell header keeps brand + three primary navigation
+ * entries as one start-side group; the connection status pill alone sits on
+ * the end side. Header and page container consume the same width-tier padding
+ * token so brand, page title and content edge share one axis. */
 .app-header-inner {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3) var(--space-6);
+  gap: var(--space-3) var(--space-4);
   width: min(100%, var(--size-content-max));
   /* Exact frozen shell height: the row is a fixed 72px band and its content is
      vertically centred, so the header never grows with font metrics. */
   height: var(--size-shell-header);
   margin-inline: auto;
   padding-block: 0;
-  padding-inline: var(--space-5);
+  padding-inline: var(--content-padding-inline);
+}
+
+.app-header-start {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4) var(--space-10);
+  min-width: 0;
 }
 
 .brand-block {
@@ -173,6 +180,8 @@ body {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  /* End side of the header row: the start group (brand + nav) stays left. */
+  margin-inline-start: auto;
   min-height: var(--control-height-sm);
   padding-inline: var(--space-3);
   border: var(--border-default);
@@ -214,8 +223,9 @@ body {
   flex: 1;
   width: min(100%, var(--size-content-max));
   margin-inline: auto;
-  /* Stage 47: 页内边距取 Token 档位（1440-1679 -> 32px 水平）与 --space-6 垂直。 */
-  padding: var(--space-6) var(--space-8);
+  /* Issue 109: 页内边距取 Token V1 §6.1 宽度档位（24/32/48px），与顶部
+     导航共用同一 --content-padding-inline，垂直保持 --space-6。 */
+  padding: var(--space-6) var(--content-padding-inline);
 }
 
 /* Shared primitives -------------------------------------------------------- */
@@ -350,6 +360,7 @@ textarea:focus-visible {
     padding-block: var(--space-3);
   }
 
+  .app-header-start,
   .top-nav,
   .top-nav-list {
     width: 100%;

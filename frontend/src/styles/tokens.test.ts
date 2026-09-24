@@ -57,6 +57,26 @@ describe('Stage 33 semantic design tokens (US-258)', () => {
     }
   })
 
+  it('follows the Token V1 6.1 width tiers for shell content padding', () => {
+    // 1280–1439 (compact) keeps the base value; 1440–1679 (standard, the
+    // 1440x900 acceptance canvas) and 1680–1920 (wide) step up one Token level.
+    expect(tokens).toContain('--content-padding-inline: var(--space-6)')
+    expect(tokens).toMatch(
+      /@media \(min-width: 1440px\)[\s\S]*?--content-padding-inline:\s*var\(--space-8\)/,
+    )
+    expect(tokens).toMatch(
+      /@media \(min-width: 1680px\)[\s\S]*?--content-padding-inline:\s*var\(--space-12\)/,
+    )
+  })
+
+  it('applies the tiered content padding to the shared page container', () => {
+    const pageContainer = globalStyles.match(/\.app-main\s*\{[^}]*\}/)?.[0] ?? ''
+    expect(pageContainer).toMatch(/padding:\s*var\(--space-6\)\s+var\(--content-padding-inline\)/)
+
+    const headerContent = globalStyles.match(/\.app-header-inner\s*\{[^}]*\}/)?.[0] ?? ''
+    expect(headerContent).toContain('padding-inline: var(--content-padding-inline)')
+  })
+
   it('provides a reduced-motion override for motion and scrolling', () => {
     expect(tokens).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*--motion-duration-standard: 0ms/)
     expect(tokens).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*--motion-distance: 0px/)

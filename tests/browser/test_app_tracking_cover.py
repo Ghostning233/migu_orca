@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from playwright.sync_api import Page
+from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import set_storage_preferences
 
@@ -206,10 +206,11 @@ class TestTrackingCover:
         )
         assert page.locator(".tracking-list-item .tracking-poster img").count() == 0
 
-        # Selection still works after the cover request failed.
+        # Selection still works after the cover request failed. Safe-detail
+        # loading is asynchronous: wait for the loaded text, not just the
+        # container, so this cannot race the mocked detail response.
         page.locator(".tracking-list-item").first.click()
-        page.wait_for_selector(".tracking-inspector-content")
-        assert "葬送的芙莉莲" in page.locator(".tracking-inspector-content").inner_text()
+        expect(page.locator(".tracking-inspector-content")).to_contain_text("葬送的芙莉莲")
 
     def test_upstream_cover_address_is_never_requested_or_rendered(
         self, page: Page, live_server_url: str, storage_dir: Path

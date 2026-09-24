@@ -1,9 +1,12 @@
-"""Stage 46：从归一化设计图测量壳层锚点的可复现工具。
+"""从归一化设计图测量壳层锚点的可复现工具。
 
-``tests/browser/visual_manifest.py`` 里的目标坐标全部由本工具从六张
-``1586x992`` 源 PNG 归一化到 ``1440x900`` 后测得；运行方式::
+``tests/browser/visual_manifest.py`` 里的设计图对照坐标由本工具测得；运行方式::
 
     UV_CACHE_DIR=.uv-cache uv run python -m tests.visual.measure
+
+- 归档的六张 ``1586x992`` 源 PNG（旧基线，Stage 46 追溯）归一化到 ``1440x900``；
+- 现行设计图 ``redesign-2026-09-23/添加番剧－单番－搜索首屏.png`` 由
+  :func:`measure_redesign_shell` 测量，为 Issue 109 的壳层数值基线提供位图对照。
 
 工具只读取设计资产、不写任何文件，输出可直接对照的 JSON。
 测量是「背景色差」驱动的：像素与画布背景色 ``(254, 253, 251)`` 的任一 RGB
@@ -30,6 +33,11 @@ DESIGN_FILES: tuple[str, ...] = (
     "05-batch-candidates-loading.png",
     "06-batch-draft-review.png",
 )
+
+REDESIGN_DIR = REPO_ROOT / "docs/design/assets/frontend-ux/redesign-2026-09-23"
+REDESIGN_SHELL_FILE = "添加番剧－单番－搜索首屏.png"
+"""现行设计图（Issue 109 壳层数值基线的位图对照来源）。"""
+
 
 BACKGROUND = (254, 253, 251)
 STRONG_DELTA = 30
@@ -137,11 +145,70 @@ def _sample_underline_color(pixels: object, underline: Band | None) -> list[int]
     return [round(sum(pixel[channel] for pixel in samples) / count) for channel in range(3)]
 
 
+def _first_surface_drop(pixels: object, x: int, *, scan_rows: int = 200, run: int = 3) -> int | None:
+    """返回顶栏白色表面带结束后的第一个行号（连续 ``run`` 行不再是近白）。
+
+    设计图的页眉是接近纯白的表面，正文画布是暖白；单行插值噪声不算结束，
+    必须连续 ``run`` 行低于阈值才认定为页面画布起点。
+    """
+    below = 0
+    for y in range(scan_rows):
+        pixel = pixels[x, y]  # type: ignore[index]
+        if max(pixel) < 253:
+            below += 1
+            if below >= run:
+                return y - run + 1
+        else:
+            below = 0
+    return None
+
+
+def measure_redesign_shell() -> dict[str, object]:
+    """测量现行设计图（Issue 109）的共享壳层，供数值基线人工对照。
+
+    只读设计资产、不写文件。输出与 ``visual_manifest.REDESIGN_SHELL_MEASUREMENTS``
+    必须一致（由 ``tests/visual/test_shell_baseline.py`` 复现核对）。
+    """
+    image = read_image(REDESIGN_DIR / REDESIGN_SHELL_FILE, error_code="reference_unreadable")
+    normalized = normalize_reference(image)
+    pixels = normalized.load()
+    width, _height = normalized.size
+
+    text_rows = bands(_row_counts(normalized, 0, HEADER_SCAN_ROWS, STRONG_DELTA), 2)
+    header_text = next((band for band in text_rows if band.start > 10 and band.peak > 100), None)
+    underline = next(
+        (band for band in text_rows if header_text is not None and band.start > header_text.end),
+        None,
+    )
+    columns = (
+        bands(_column_counts(normalized, header_text.start, header_text.end + 1, STRONG_DELTA), 2)
+        if header_text
+        else []
+    )
+    soft_columns = bands(_column_counts(normalized, 10, 80, SOFT_DELTA), 20)
+    status_surface = next((band for band in soft_columns if band.start > 1100), None)
+    brand_end = max((band.end for band in columns if band.end <= 240), default=None)
+    nav_first = next((band for band in columns if band.start > 240), None)
+    surface_end = _first_surface_drop(pixels, width // 2)
+    source = (REDESIGN_DIR / REDESIGN_SHELL_FILE).relative_to(REPO_ROOT).as_posix()
+
+    return {
+        "source": f"{source} ({image.size[0]}x{image.size[1]} PNG, LANCZOS -> 1440x900)",
+        "header_band_rows": (0, surface_end - 1) if surface_end else None,
+        "header_text_rows": (header_text.start, header_text.end) if header_text else None,
+        "underline_rows": (underline.start, underline.end) if underline else None,
+        "brand_text_x": (columns[0].start, brand_end) if columns and brand_end is not None else None,
+        "nav_first_text_x": (nav_first.start, nav_first.end) if nav_first else None,
+        "status_surface_x": (status_surface.start, status_surface.end) if status_surface else None,
+    }
+
+
 def measure_all() -> dict[str, object]:
     report: dict[str, object] = {
         "canvas": {"width": CANVAS_SIZE[0], "height": CANVAS_SIZE[1]},
         "source": "docs/design/assets/frontend-ux/archive/review-2026-09-17 (1586x992 PNG, LANCZOS -> 1440x900)",
         "files": {},
+        "redesign": measure_redesign_shell(),
     }
     for name in DESIGN_FILES:
         image = read_image(REFERENCE_DIR / name, error_code="reference_unreadable")
