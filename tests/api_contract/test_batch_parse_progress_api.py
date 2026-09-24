@@ -274,3 +274,77 @@ def test_progress_stream_disconnect_does_not_break_later_requests(
     payload = sync.get_json()
     assert payload["ok"] is True
     assert [item["raw_title"] for item in payload["result"]["items"]] == ["萌王S4"]
+
+
+# ---------------------------------------------------------------------------
+# Issue 129: default JSON vs explicit SSE negotiation
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {},  # 未设置 Accept
+        {"Accept": "*/*"},  # 通配（浏览器/常见客户端默认）
+        {"Accept": "application/json"},
+        {"Accept": "application/json, text/plain, */*"},
+        {"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"},
+    ],
+)
+def test_batch_parse_default_representations_stay_json(
+    client: FlaskClient, monkeypatch: pytest.MonkeyPatch, headers: dict[str, str]
+) -> None:
+    """#129：未显式请求事件流时不误选 SSE，仍返回原有 JSON envelope。"""
+    _empty_search(monkeypatch)
+
+    response = client.post(
+        "/api/v1/batches/parse", json={"raw_input": "萌王S4\n路哥S4"}, headers=headers
+    )
+
+    assert response.status_code == 200
+    assert response.headers["Content-Type"].startswith("application/json")
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert set(payload["result"]) == {"batch_id", "raw_input", "items"}
+    assert [item["raw_title"] for item in payload["result"]["items"]] == ["萌王S4", "路哥S4"]
+    assert "event:" not in response.get_data(as_text=True)
+
+
+@pytest.mark.parametrize(
+    "accept",
+    ["text/event-stream", "text/event-stream, application/json", "application/json;q=0.1, text/event-stream"],
+)
+def test_batch_parse_explicit_event_stream_selection_streams(
+    client: FlaskClient, monkeypatch: pytest.MonkeyPatch, accept: str
+) -> None:
+    """#129：显式选择 text/event-stream 时仍返回逐部事件与同形最终结果。"""
+    _empty_search(monkeypatch)
+
+    response = client.post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "萌王S4\n路哥S4"},
+        headers={"Accept": accept},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["Content-Type"].startswith("text/event-stream")
+    events = _sse_events(response.get_data(as_text=True))
+    assert [name for name, _ in events] == ["item", "item", "result"]
+    assert [data["completed"] for name, data in events if name == "item"] == [1, 2]
+    result = next(data for name, data in events if name == "result")["result"]
+    assert [item["raw_title"] for item in result["items"]] == ["萌王S4", "路哥S4"]
+
+
+def test_batch_parse_rejects_event_stream_with_zero_quality(
+    client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#129：显式拒绝事件流（q=0）时回到默认 JSON。"""
+    _empty_search(monkeypatch)
+
+    response = client.post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "萌王S4"},
+        headers={"Accept": "text/event-stream;q=0, application/json"},
+    )
+
+    assert response.headers["Content-Type"].startswith("application/json")
+    assert response.get_json()["ok"] is True
