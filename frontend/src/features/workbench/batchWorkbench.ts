@@ -48,6 +48,7 @@ export const BATCH_STATUS_LABELS: Record<string, string> = {
   ACCEPTED: '已接受',
   CONFIRMED: '已确认待提交',
   SAVED_PENDING_CONFIRM: '已保存待确认',
+  SAVED_PENDING_LOCATE: '已保存，待定位',
   RESPONSE_UNKNOWN: '结果待核验',
 }
 
@@ -257,6 +258,9 @@ export function batchCardNextStep(guidance: BatchCardGuidance): string {
   if (guidance.generating) return '等待当前候选的订阅草案生成完成。'
   if (guidance.resultUnknown || status === 'RESPONSE_UNKNOWN') {
     return '用「使用相同操作重试」或「重试定位」核验本条结果。'
+  }
+  if (status === 'SAVED_PENDING_LOCATE') {
+    return '草案已保存，确认状态尚未定位；核验前请勿重新添加同一部，也不要重新生成草案。'
   }
   if (guidance.savedPendingConfirm || status === 'SAVED_PENDING_CONFIRM') {
     return '点「重试确认」完成确认；不会重复保存。'
@@ -643,6 +647,7 @@ export type BatchSaveRecoveryAction =
   | 'REGENERATE_DRAFT'
   | 'RETRY_SAVE'
   | 'VERIFY_RESULT'
+  | 'LOCATE_SAVED'
   | 'NONE'
 
 export interface BatchSaveRecoveryInput {
@@ -656,14 +661,20 @@ export interface BatchSaveRecoveryInput {
 const DRAFT_INVALID_ERROR_TYPES = [
   'draft_expired',
   'draft_evicted',
-  'draft_replayed',
   'draft_revision_conflict',
 ] as const
+
+/** Issue 130：草案已经被保存过（不是失效），只能标记待定位。 */
+export function batchSaveErrorIsReplayed(errorType: string | null | undefined): boolean {
+  return String(errorType ?? '') === 'draft_replayed'
+}
 
 /**
  * 把条目状态与最近一次失败原因投影成唯一恢复动作。
  *
  * - 已保存但确认未完成：只允许「重试确认」，不会重复保存；
+ * - 草案已被保存（``draft_replayed``）：只标记「已保存，待定位」，不给重新生成
+ *   或新键重试，避免产生重复本地方案；
  * - 草案失效／版本冲突：只允许「重新生成草案」；
  * - 响应未知：只允许核验（重试定位）或按冻结请求同键重放；
  * - 其他可再次保存的普通失败：只允许「重试保存」（新的明确操作 → 新幂等键）。
@@ -673,6 +684,7 @@ const DRAFT_INVALID_ERROR_TYPES = [
 export function batchSaveRecoveryAction(input: BatchSaveRecoveryInput): BatchSaveRecoveryAction {
   const status = String(input.status ?? '')
   const errorType = String(input.errorType ?? '')
+  if (batchSaveErrorIsReplayed(errorType)) return 'LOCATE_SAVED'
   if (status === 'RESPONSE_UNKNOWN') return 'VERIFY_RESULT'
   if (status === 'SAVED_PENDING_CONFIRM') return 'RETRY_CONFIRM'
   if (status === 'CONFIRMED') return input.trackingLocated ? 'NONE' : 'VERIFY_RESULT'
@@ -688,6 +700,7 @@ export function batchSaveRecoveryLabel(action: BatchSaveRecoveryAction): string 
     REGENERATE_DRAFT: '重新生成草案',
     RETRY_SAVE: '重试保存',
     VERIFY_RESULT: '重试定位',
+    LOCATE_SAVED: '已保存，待定位',
     NONE: '',
   }[action]
 }

@@ -1075,6 +1075,48 @@ describe('BatchWorkbenchView outcome recovery (US-357)', () => {
     await flushPromises()
   }
 
+  it('freezes a replayed draft as already-saved and keeps the rest of the batch moving', async () => {
+    apiPost.mockResolvedValueOnce(parseResult({ items: drafts(3) }))
+    const { wrapper } = await mountBatch()
+    await parse(wrapper, '条目1\n条目2\n条目3')
+
+    apiPost.mockResolvedValueOnce(
+      saveConfirmResult({
+        results: [
+          result('item-1', 'CONFIRMED'),
+          result('item-2', 'FAILED', { error_type: 'draft_replayed' }),
+          result('item-3', 'FAILED', { error_type: 'draft_expired' }),
+        ],
+        summary: { requested: 3, confirmed: 1, failed: 2 },
+      }),
+    )
+    await confirmSelected(wrapper, ['item-1', 'item-2', 'item-3'])
+    await flushPromises()
+
+    // Issue 130：草案已被保存，只标记「已保存，待定位」，不给重新生成或新键重试。
+    const replayed = wrapper.find('.batch-draft-card[data-item-id="item-2"]')
+    expect(replayed.find('.batch-card-status').text()).toContain('已保存，待定位')
+    const note = replayed.find('#batch-replayed-item-2')
+    expect(note.exists()).toBe(true)
+    expect(note.text()).toContain('已保存，待定位')
+    expect(note.text()).toContain('刷新会丢失当前批量现场')
+    expect(note.text()).toContain('请勿重新添加同一部')
+    expect(replayed.find('#batch-regenerate-draft-item-2').exists()).toBe(false)
+    expect(replayed.find('#batch-retry-save-item-2').exists()).toBe(false)
+    expect(replayed.find('input[type="checkbox"]').attributes('disabled')).toBeDefined()
+    // 不是「结果待核验」：已保存是确定事实。
+    expect(replayed.text()).not.toContain('结果待核验')
+
+    // 成功项不回滚并保持成功；同批另一条失败仍按自己的原因给出重新生成草案。
+    expect(
+      wrapper.find('.batch-draft-card[data-item-id="item-1"] .batch-card-status').text(),
+    ).toContain('已确认待提交')
+    expect(wrapper.find('#batch-regenerate-draft-item-3').text()).toBe('重新生成草案')
+
+    // 冻结条目不能再参与保存：可确认数归零，主入口不可用。
+    expect(wrapper.find('#batch-accept-submit').attributes('disabled')).toBeDefined()
+  })
+
   it('shows exactly one recovery action per real failure reason after a partial success', async () => {
     apiPost.mockResolvedValueOnce(parseResult({ items: drafts(3) }))
     const { wrapper } = await mountBatch()

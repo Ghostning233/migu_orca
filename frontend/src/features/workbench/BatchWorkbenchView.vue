@@ -59,6 +59,7 @@ import {
   batchSaveConfirmRecoveryAllowed,
   batchSaveConfirmSucceeded,
   batchSaveErrorInvalidatesDraft,
+  batchSaveErrorIsReplayed,
   batchSaveRecoveryAction,
   batchSaveRecoveryLabel,
   batchSaveConfirmTrackingId,
@@ -1003,7 +1004,22 @@ function applySaveConfirmResult(result: BatchSaveConfirmResult): {
           ...saveFailureTypes.value,
           [row.item_id ?? '']: String(item.error_type ?? '') || 'save_confirm_failed',
         }
-        if (batchSaveConfirmRecoveryAllowed(item)) {
+        if (batchSaveErrorIsReplayed(item.error_type)) {
+          // Issue 130：草案已经被保存；冻结该条目等待核验，不提供重新生成或新键重试。
+          draftSessions.get(row.item_id ?? '')?.invalidate()
+          draftSessions.delete(row.item_id ?? '')
+          const selected = new Set(selectedItemIds.value)
+          selected.delete(row.item_id ?? '')
+          selectedItemIds.value = selected
+          updated = {
+            ...row,
+            status: 'SAVED_PENDING_LOCATE',
+            preview_request: null,
+            draft_id: null,
+            draft_revision: null,
+            request_id: null,
+          }
+        } else if (batchSaveConfirmRecoveryAllowed(item)) {
           updated = { ...row, status: 'SAVED_PENDING_CONFIRM', draft_id: null, draft_revision: null, request_id: item.request_id }
           draftSessions.get(row.item_id ?? '')?.invalidate()
           draftSessions.delete(row.item_id ?? '')
@@ -1250,10 +1266,22 @@ async function submitBatchSaveConfirm(rows: BatchItem[], itemIds: string[] | nul
         const nextFailures = { ...saveFailureTypes.value }
         for (const row of rows) nextFailures[row.item_id ?? ''] = safeType
         saveFailureTypes.value = nextFailures
+        if (batchSaveErrorIsReplayed(safeType)) {
+          // Issue 130：单条重试撞上已保存草案：同样冻结为待定位，不引导重复保存。
+          const selected = new Set(selectedItemIds.value)
+          rows.forEach((row) => selected.delete(row.item_id ?? ''))
+          selectedItemIds.value = selected
+          rows.forEach((row) => {
+            draftSessions.get(row.item_id ?? '')?.invalidate()
+            draftSessions.delete(row.item_id ?? '')
+          })
+        }
         items.value = items.value.map((item) => rows.some((row) => row.item_id === item.item_id)
-          ? batchSaveErrorInvalidatesDraft(safeType)
-            ? { ...item, status: (item.candidates?.length ?? 0) > 0 ? 'FOUND' : 'EMPTY', preview_request: null, draft_id: null, draft_revision: null }
-            : { ...item, status: 'DRAFT' }
+          ? batchSaveErrorIsReplayed(safeType)
+            ? { ...item, status: 'SAVED_PENDING_LOCATE', preview_request: null, draft_id: null, draft_revision: null, request_id: null }
+            : batchSaveErrorInvalidatesDraft(safeType)
+              ? { ...item, status: (item.candidates?.length ?? 0) > 0 ? 'FOUND' : 'EMPTY', preview_request: null, draft_id: null, draft_revision: null }
+              : { ...item, status: 'DRAFT' }
           : item)
       }
       saveOperation.value = null
@@ -1683,7 +1711,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                 状态
                 <select id="batch-review-status" v-model="reviewStatus">
                   <option value="">全部状态</option>
-                  <option v-for="status in ['FAILED', 'EMPTY', 'FOUND', 'DRAFT', 'SAVED_PENDING_CONFIRM', 'CONFIRMED']" :key="status" :value="status">
+                  <option v-for="status in ['FAILED', 'EMPTY', 'FOUND', 'DRAFT', 'SAVED_PENDING_LOCATE', 'SAVED_PENDING_CONFIRM', 'CONFIRMED']" :key="status" :value="status">
                     {{ batchStatusLabel(status) }}
                   </option>
                 </select>
@@ -1753,7 +1781,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                 />
               </div>
               <button
-                v-if="!['CONFIRMED', 'SAVED_PENDING_CONFIRM'].includes(String(item.status ?? ''))"
+                v-if="!['CONFIRMED', 'SAVED_PENDING_LOCATE', 'SAVED_PENDING_CONFIRM'].includes(String(item.status ?? ''))"
                 type="button"
                 class="icon-button batch-card-delete"
                 :aria-label="`删除 ${item.raw_title ?? '批量条目'}`"
@@ -1834,10 +1862,19 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                   已勾选，但当前不可确认：{{ itemBlockers(item.item_id ?? '')[0] ?? '暂不可确认' }}；解决后仍会参与保存确认。
                 </p>
                 <p
-                  v-else-if="!['CONFIRMED', 'SAVED_PENDING_CONFIRM', 'FAILED', 'EMPTY'].includes(String(item.status ?? '')) && !itemConfirmability(item.item_id ?? '').confirmable"
+                  v-else-if="!['CONFIRMED', 'SAVED_PENDING_LOCATE', 'SAVED_PENDING_CONFIRM', 'FAILED', 'EMPTY'].includes(String(item.status ?? '')) && !itemConfirmability(item.item_id ?? '').confirmable"
                   class="batch-card-selection-help"
                 >
                   {{ itemBlockers(item.item_id ?? '')[0] ?? '当前条目暂不可加入批量确认。' }}
+                </p>
+
+                <p
+                  v-if="String(item.status ?? '') === 'SAVED_PENDING_LOCATE'"
+                  :id="`batch-replayed-${item.item_id}`"
+                  class="batch-card-reason"
+                  role="status"
+                >
+                  已保存，待定位：草案已经保存，确认状态尚未定位。刷新会丢失当前批量现场，核验前请勿重新添加同一部。
                 </p>
 
                 <p class="batch-card-next-step">下一步：{{ cardNextStep(item) }}</p>
