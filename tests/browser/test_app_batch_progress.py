@@ -162,7 +162,7 @@ def test_real_stream_shows_intermediate_progress_before_the_batch_finishes(
     里 sleep，也不一次送完全部事件）：第一部事件先到达，断言进度与「仍在首屏、
     无可审核条目」；释放第二部后才出现终态结果与切屏焦点。
     """
-    from apps.migu_orca_web import routes_batches
+    from apps.migu_orca_web import services
 
     second_release = threading.Event()
     second_started = threading.Event()
@@ -174,7 +174,8 @@ def test_real_stream_shows_intermediate_progress_before_the_batch_finishes(
             second_release.wait(timeout=15)
         return []
 
-    monkeypatch.setattr(routes_batches, "_search_batch_item_candidates", gated_search)
+    # Issue 133：批量解析编排在服务层，seam 也在服务层模块命名空间。
+    monkeypatch.setattr(services, "_search_batch_item_candidates", gated_search)
 
     try:
         set_storage_preferences(page, storage_dir)

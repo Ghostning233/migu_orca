@@ -51,7 +51,7 @@ def _batch_raw_input(line_count: int) -> str:
 
 def _empty_search(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
+        "apps.migu_orca_web.services._search_batch_item_candidates",
         lambda search_queries, mikan_config: [],
     )
 
@@ -140,7 +140,7 @@ def test_progress_stream_advances_for_found_empty_and_failed(
         ]
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.routes_batches._search_batch_item_candidates", _search
+        "apps.migu_orca_web.services._search_batch_item_candidates", _search
     )
 
     events = _stream(client, "找到一部\n空候选一部\n失败一部")
@@ -198,9 +198,9 @@ def test_progress_stream_error_frame_is_sanitized_and_never_sends_result(
     calls = {"count": 0}
     original = None
 
-    from apps.migu_orca_web import routes_batches
+    from apps.migu_orca_web import services
 
-    original = routes_batches._serialize_batch_parse_result
+    original = services._serialize_batch_parse_result
 
     def _fail_on_second(*args: Any, **kwargs: Any) -> Any:
         calls["count"] += 1
@@ -209,7 +209,7 @@ def test_progress_stream_error_frame_is_sanitized_and_never_sends_result(
         return original(*args, **kwargs)
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.routes_batches._serialize_batch_parse_result", _fail_on_second
+        "apps.migu_orca_web.services._serialize_batch_parse_result", _fail_on_second
     )
 
     events = _stream(client, "第一部\n第二部\n第三部")

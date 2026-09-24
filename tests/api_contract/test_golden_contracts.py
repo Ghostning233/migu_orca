@@ -1093,7 +1093,7 @@ def test_golden_batch_parse_success(
     client: FlaskClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
+        "apps.migu_orca_web.services._search_batch_item_candidates",
         lambda queries, config: [],
     )
 
@@ -1137,7 +1137,7 @@ def test_golden_batch_parse_accepts_up_to_thirty_six_lines(
 ) -> None:
     """US-215: 1/12/36 non-empty lines are parsed normally (no early reject)."""
     monkeypatch.setattr(
-        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
+        "apps.migu_orca_web.services._search_batch_item_candidates",
         lambda queries, config: [],
     )
 
@@ -1162,12 +1162,12 @@ def test_golden_batch_parse_rejects_thirty_seven_lines_before_any_seam(
     proves the over-limit batch is refused before any of them runs.
     """
     for target in (
-        "apps.migu_orca_web.routes_batches.create_batch_draft",
-        "apps.migu_orca_web.routes_batches._batch_title_parsing_provider",
-        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
-        "apps.migu_orca_web.routes_batches._load_preferences_for_batch",
-        "apps.migu_orca_web.routes_batches._load_corrections_for_batch",
-        "apps.migu_orca_web.routes_batches.load_storage_config",
+        "apps.migu_orca_web.services.create_batch_draft",
+        "apps.migu_orca_web.services._batch_title_parsing_provider",
+        "apps.migu_orca_web.services._search_batch_item_candidates",
+        "apps.migu_orca_web.services._load_preferences_for_batch",
+        "apps.migu_orca_web.services._load_corrections_for_batch",
+        "apps.migu_orca_web.services.load_storage_config",
     ):
         def _must_not_run(
             *args: object,
@@ -1212,7 +1212,7 @@ def test_golden_batch_parse_failed_item_error_sanitized(
         )
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
+        "apps.migu_orca_web.services._search_batch_item_candidates",
         fail_search,
     )
 
