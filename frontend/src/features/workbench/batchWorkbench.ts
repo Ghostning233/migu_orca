@@ -637,6 +637,66 @@ export function batchSaveConfirmTrackingId(results: readonly BatchSaveConfirmIte
   return result?.tracking_id ?? null
 }
 
+/** Issue 114: 每条失败只能得到一种最小安全恢复动作。 */
+export type BatchSaveRecoveryAction =
+  | 'RETRY_CONFIRM'
+  | 'REGENERATE_DRAFT'
+  | 'RETRY_SAVE'
+  | 'VERIFY_RESULT'
+  | 'NONE'
+
+export interface BatchSaveRecoveryInput {
+  status?: string | null
+  /** 最近一次保存确认针对该条目的失败类型（若有）。 */
+  errorType?: string | null
+  /** 已确认条目是否已经定位到真实追番记录。 */
+  trackingLocated?: boolean
+}
+
+const DRAFT_INVALID_ERROR_TYPES = [
+  'draft_expired',
+  'draft_evicted',
+  'draft_replayed',
+  'draft_revision_conflict',
+] as const
+
+/**
+ * 把条目状态与最近一次失败原因投影成唯一恢复动作。
+ *
+ * - 已保存但确认未完成：只允许「重试确认」，不会重复保存；
+ * - 草案失效／版本冲突：只允许「重新生成草案」；
+ * - 响应未知：只允许核验（重试定位）或按冻结请求同键重放；
+ * - 其他可再次保存的普通失败：只允许「重试保存」（新的明确操作 → 新幂等键）。
+ *
+ * 未知输入 fail closed：返回 NONE，不给出可能造成重复外部写的动作。
+ */
+export function batchSaveRecoveryAction(input: BatchSaveRecoveryInput): BatchSaveRecoveryAction {
+  const status = String(input.status ?? '')
+  const errorType = String(input.errorType ?? '')
+  if (status === 'RESPONSE_UNKNOWN') return 'VERIFY_RESULT'
+  if (status === 'SAVED_PENDING_CONFIRM') return 'RETRY_CONFIRM'
+  if (status === 'CONFIRMED') return input.trackingLocated ? 'NONE' : 'VERIFY_RESULT'
+  if ((DRAFT_INVALID_ERROR_TYPES as readonly string[]).includes(errorType)) return 'REGENERATE_DRAFT'
+  if (status === 'DRAFT' && errorType) return 'RETRY_SAVE'
+  return 'NONE'
+}
+
+/** 恢复动作的固定中文文案；空动作没有按钮文案。 */
+export function batchSaveRecoveryLabel(action: BatchSaveRecoveryAction): string {
+  return {
+    RETRY_CONFIRM: '重试确认',
+    REGENERATE_DRAFT: '重新生成草案',
+    RETRY_SAVE: '重试保存',
+    VERIFY_RESULT: '重试定位',
+    NONE: '',
+  }[action]
+}
+
+/** True when the failure type means the draft can never be replayed as-is. */
+export function batchSaveErrorInvalidatesDraft(errorType: string | null | undefined): boolean {
+  return (DRAFT_INVALID_ERROR_TYPES as readonly string[]).includes(String(errorType ?? ''))
+}
+
 export function batchSaveConfirmErrorLabel(item: BatchSaveConfirmItem): string {
   const labels: Record<string, string> = {
     draft_expired: '订阅草案已失效，请重新生成。',

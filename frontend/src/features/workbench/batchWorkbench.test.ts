@@ -20,6 +20,9 @@ import {
   batchStatusLabel,
   batchSaveConfirmErrorLabel,
   batchSaveConfirmRecoveryAllowed,
+  batchSaveErrorInvalidatesDraft,
+  batchSaveRecoveryAction,
+  batchSaveRecoveryLabel,
   batchSaveConfirmSucceeded,
   batchSaveConfirmOutcomeSummary,
   batchSaveConfirmNextFocus,
@@ -482,5 +485,51 @@ describe('batch confirm disabled reasons (US-356)', () => {
     expect(batchConfirmDisabledReason({ saving: true, pendingVerification: false })).toContain('正在保存确认')
     expect(batchConfirmDisabledReason({ saving: false, pendingVerification: true })).toContain('待核验')
     expect(batchConfirmDisabledReason({ saving: true, pendingVerification: true })).toContain('待核验')
+  })
+})
+
+describe('batch save recovery actions (Issue 114)', () => {
+  it('projects one exact recovery action per real outcome', () => {
+    // 已保存但确认未完成：只允许重试确认。
+    expect(batchSaveRecoveryAction({ status: 'SAVED_PENDING_CONFIRM' })).toBe('RETRY_CONFIRM')
+    // 响应未知：先核验，不给普通重试保存。
+    expect(batchSaveRecoveryAction({ status: 'RESPONSE_UNKNOWN' })).toBe('VERIFY_RESULT')
+    // 草案失效／版本冲突：重新生成草案。
+    for (const errorType of ['draft_expired', 'draft_evicted', 'draft_replayed', 'draft_revision_conflict']) {
+      expect(batchSaveRecoveryAction({ status: 'FOUND', errorType })).toBe('REGENERATE_DRAFT')
+    }
+    // 可再次保存的普通失败：重试保存。
+    expect(batchSaveRecoveryAction({ status: 'DRAFT', errorType: 'save_confirm_failed' })).toBe('RETRY_SAVE')
+    expect(batchSaveRecoveryAction({ status: 'DRAFT', errorType: 'storage_error' })).toBe('RETRY_SAVE')
+  })
+
+  it('fails closed when the outcome is unknown or already terminal', () => {
+    expect(batchSaveRecoveryAction({ status: 'DRAFT' })).toBe('NONE')
+    expect(batchSaveRecoveryAction({ status: '' })).toBe('NONE')
+    // 已确认但还没定位到追番记录：只允许重试定位；定位到之后没有恢复动作。
+    expect(batchSaveRecoveryAction({ status: 'CONFIRMED', trackingLocated: false })).toBe('VERIFY_RESULT')
+    expect(batchSaveRecoveryAction({ status: 'CONFIRMED', trackingLocated: true })).toBe('NONE')
+  })
+
+  it('gives each action its fixed Chinese label, with no unified retry copy', () => {
+    expect(batchSaveRecoveryLabel('RETRY_CONFIRM')).toBe('重试确认')
+    expect(batchSaveRecoveryLabel('REGENERATE_DRAFT')).toBe('重新生成草案')
+    expect(batchSaveRecoveryLabel('RETRY_SAVE')).toBe('重试保存')
+    expect(batchSaveRecoveryLabel('VERIFY_RESULT')).toBe('重试定位')
+    expect(batchSaveRecoveryLabel('NONE')).toBe('')
+    const labels = new Set([
+      batchSaveRecoveryLabel('RETRY_CONFIRM'),
+      batchSaveRecoveryLabel('REGENERATE_DRAFT'),
+      batchSaveRecoveryLabel('RETRY_SAVE'),
+    ])
+    expect(labels.size).toBe(3)
+    expect([...labels].some((label) => label.includes('重试失败'))).toBe(false)
+  })
+
+  it('flags only the draft-invalidating failures', () => {
+    expect(batchSaveErrorInvalidatesDraft('draft_expired')).toBe(true)
+    expect(batchSaveErrorInvalidatesDraft('draft_revision_conflict')).toBe(true)
+    expect(batchSaveErrorInvalidatesDraft('save_confirm_failed')).toBe(false)
+    expect(batchSaveErrorInvalidatesDraft(null)).toBe(false)
   })
 })
