@@ -184,6 +184,42 @@ describe('BatchWorkbenchView parse (US-205)', () => {
     expect((wrapper.find('#batch-raw-input').element as HTMLTextAreaElement).value).toBe(rawInput)
   })
 
+  it('requests the SSE progress representation and forwards only real completions', async () => {
+    type Progress = { completed: number; total: number }
+    const progress: Progress[] = []
+    apiPost.mockImplementationOnce(async (_path, options) => {
+      options?.onEvent?.({ event: 'item', data: { completed: 1, total: 2, item: {} } })
+      options?.onEvent?.({ event: 'item', data: { completed: 2, total: 2, item: {} } })
+      return parseResult({
+        items: [
+          batchItem({ item_id: 'item-a', status: 'FOUND' }),
+          batchItem({ item_id: 'item-b', status: 'FOUND' }),
+        ],
+      }) as never
+    })
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('甲\n乙')
+
+    await (
+      wrapper.vm as unknown as {
+        parseBatch: (onProgress?: (value: Progress) => void) => Promise<void>
+      }
+    ).parseBatch((value) => progress.push(value))
+    await flushPromises()
+
+    // Issue 112：进度只来自服务端逐部完成事件，且请求显式协商 SSE。
+    expect(progress).toEqual([
+      { completed: 1, total: 2 },
+      { completed: 2, total: 2 },
+    ])
+    const parseOptions = apiPost.mock.calls[0]?.[1] as { accept?: string; timeoutMs?: number }
+    expect(parseOptions.accept).toBe('text/event-stream')
+    // 端点级有界预算，而不是全局 15s 普通请求超时。
+    expect(parseOptions.timeoutMs).toBeGreaterThan(30000)
+    // 整批完成后才发出 parse-settled（用于切屏）。
+    expect(wrapper.emitted('parse-settled')).toHaveLength(1)
+  })
+
   it('parses multi-line input into independent cards with statuses', async () => {
     apiPost.mockResolvedValue(
       parseResult({
@@ -200,10 +236,15 @@ describe('BatchWorkbenchView parse (US-205)', () => {
     await wrapper.find('#batch-parse-submit').trigger('click')
     await flushPromises()
 
-    expect(apiPost).toHaveBeenCalledWith('/api/v1/batches/parse', {
-      body: { raw_input: '萌王S4\n路哥S4\n杖剑谭S2', storage_dir: null },
-      timeoutMs: 420000,
-    })
+    expect(apiPost).toHaveBeenCalledWith(
+      '/api/v1/batches/parse',
+      expect.objectContaining({
+        body: { raw_input: '萌王S4\n路哥S4\n杖剑谭S2', storage_dir: null },
+        timeoutMs: 420000,
+        // Issue 112：请求逐部进度流（SSE）；模拟传输不会收到任何事件。
+        accept: 'text/event-stream',
+      }),
+    )
     const cards = wrapper.findAll('.batch-draft-card')
     expect(cards).toHaveLength(3)
     expect(wrapper.find('.batch-draft-card[data-item-id="item-found"]').text()).toContain('找到候选')

@@ -58,7 +58,22 @@
 「重新选择合集」（`#single-review-back-candidates`）确认后回到同屏候选状态并保留搜索结果。
 长草案不撑长整页：整页高度等于视口，滚动发生在内容面板内部。
 
-## 4. 与现行设计图的差异（仅记录）
+## 4. 批量首屏与逐部进度（Issue 112）
+
+| 量 | 值 | 来源 |
+| --- | --- | --- |
+| 进度分段 | 每部一段，`flex: 1 1 --space-3`、高 `--space-2`、`--radius-pill` | Token |
+| 已完成段 | `--color-primary` 底 | Token |
+| 未完成段 | `--color-surface-subtle` 底 + `--color-border` 边 | Token |
+| 进度文本 | 「正在逐部搜索：已完成 X / N 部」，`role="status"`、`aria-live="polite"` | 可访问状态 |
+| 续接说明 | 「进度只保留在当前页面：刷新或关闭后需要重新搜索；服务端请求不因此被取消。」 | Issue 112 AC4 |
+
+进度只由服务端逐部完成事件推进（FOUND／EMPTY／FAILED 都算完成），不做时间估算；
+搜索期间停留在批量首屏且不出现可审核条目，整批拿到稳定结果后才把工作台带入视野并移焦点。
+契约形态：同一 `POST /api/v1/batches/parse` 在 `Accept: text/event-stream` 时返回
+`item`／`result`／`error` 事件；没有持久任务、取消或续接入口。
+
+## 5. 与现行设计图的差异（仅记录）
 
 | 量 | 设计图实测（归一化 1440） | 本基线 |
 | --- | --- | --- |
@@ -66,11 +81,13 @@
 | 卡片宽度 | 图 02 四张铺满内容宽 | 332px × 4 = 1328，居中留白 |
 | 图 03 尺寸标注 | 仅示意，未按比例 | 以本表实现测量为准 |
 
-## 5. 验证命令
+## 6. 验证命令
 
 ```bash
 cd frontend && npm run typecheck && npm run lint && npm run test:unit -- --run
 UV_CACHE_DIR=.uv-cache uv run pytest tests/browser/test_app_single_candidate_geometry.py -q
 UV_CACHE_DIR=.uv-cache uv run pytest tests/browser/test_app_single_two_screen.py -q
 UV_CACHE_DIR=.uv-cache uv run pytest tests/browser/test_app_single_draft_screen.py -q
+UV_CACHE_DIR=.uv-cache uv run pytest tests/browser/test_app_batch_progress.py -q
+UV_CACHE_DIR=.uv-cache uv run pytest tests/api_contract/test_batch_parse_progress_api.py -q
 ```

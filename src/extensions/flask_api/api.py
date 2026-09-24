@@ -188,6 +188,28 @@ def ok_response(result: Any) -> Response:
     return jsonify({"ok": True, "result": result})
 
 
+def failed_envelope(
+    error_type: str,
+    error_message: str,
+    error_data: dict[str, Any] | list[Any] | None = None,
+) -> dict[str, Any]:
+    """Build the shared failed API envelope as a dict.
+
+    The JSON response helper and the SSE error frame (Issue 112) must emit the
+    exact same sanitized shape; this is the single construction point so a
+    streamed failure can never drift from the JSON contract.
+    """
+
+    body: dict[str, Any] = {
+        "ok": False,
+        "error_type": error_type,
+        "error_message": _sanitize_string(error_message),
+    }
+    if error_data is not None:
+        body["error_data"] = sanitize_error_data(error_data)
+    return body
+
+
 def failed_response(
     error_type: str,
     error_message: str,
@@ -202,13 +224,7 @@ def failed_response(
     always carries the mapped status code.
     """
 
-    body: dict[str, Any] = {
-        "ok": False,
-        "error_type": error_type,
-        "error_message": _sanitize_string(error_message),
-    }
-    if error_data is not None:
-        body["error_data"] = sanitize_error_data(error_data)
+    body = failed_envelope(error_type, error_message, error_data)
     response = jsonify(body)
     response.status_code = status if status is not None else _error_http_status(error_type)
     return response
