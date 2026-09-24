@@ -2033,7 +2033,7 @@ def test_batch_parse_api_returns_per_item_parsed_metadata(
         return []
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
+        "apps.migu_orca_web.services._search_batch_item_candidates",
         _search_candidates,
     )
     raw_input = "\n萌王S4\n  \n路哥S4\n邻家天使S2\n"
@@ -2156,7 +2156,7 @@ def test_batch_parse_api_accepts_boundary_batch_sizes(
 ) -> None:
     """US-215: 1/12/36 non-empty lines are all accepted and parsed."""
     monkeypatch.setattr(
-        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
+        "apps.migu_orca_web.services._search_batch_item_candidates",
         lambda search_queries, mikan_config: [],
     )
 
@@ -2188,18 +2188,18 @@ def test_batch_parse_api_rejects_over_limit_before_any_seam(
         return _tracked
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.routes_batches.create_batch_draft", _mark("create_batch_draft")
+        "apps.migu_orca_web.services.create_batch_draft", _mark("create_batch_draft")
     )
     monkeypatch.setattr(
-        "apps.migu_orca_web.routes_batches._batch_title_parsing_provider",
+        "apps.migu_orca_web.services._batch_title_parsing_provider",
         _mark("_batch_title_parsing_provider"),
     )
     monkeypatch.setattr(
-        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
+        "apps.migu_orca_web.services._search_batch_item_candidates",
         _mark("_search_batch_item_candidates"),
     )
     monkeypatch.setattr(
-        "apps.migu_orca_web.routes_batches.load_storage_config", _mark("load_storage_config")
+        "apps.migu_orca_web.services.load_storage_config", _mark("load_storage_config")
     )
 
     response = _client().post(
@@ -2232,11 +2232,11 @@ def test_batch_parse_api_marks_single_provider_failure_without_blocking_others(
         return FakeAnimeTitleParsingProvider(fail_titles={"杖剑谭S2"})
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.routes_batches._batch_title_parsing_provider",
+        "apps.migu_orca_web.services._batch_title_parsing_provider",
         provider,
     )
     monkeypatch.setattr(
-        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
+        "apps.migu_orca_web.services._search_batch_item_candidates",
         lambda search_queries, mikan_config: [],
     )
 
@@ -2276,7 +2276,7 @@ def test_batch_parse_api_failed_item_error_does_not_leak_sensitive_values(
             )
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.routes_batches._batch_title_parsing_provider",
+        "apps.migu_orca_web.services._batch_title_parsing_provider",
         lambda: SensitiveProvider(),
     )
 
@@ -2308,7 +2308,7 @@ def test_batch_parse_api_applies_saved_preferences_from_storage_dir(
     tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(
-        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
+        "apps.migu_orca_web.services._search_batch_item_candidates",
         lambda search_queries, mikan_config: [],
     )
     storage_dir = tmp_path / "migu-state"
@@ -2362,7 +2362,7 @@ def test_batch_parse_api_empty_result_has_no_preview_request(
 ) -> None:
     """An empty MiKan result cannot create an editable draft skeleton."""
     monkeypatch.setattr(
-        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
+        "apps.migu_orca_web.services._search_batch_item_candidates",
         lambda search_queries, mikan_config: [],
     )
     storage_dir = tmp_path / "migu-state"
@@ -2402,7 +2402,7 @@ def test_batch_parse_api_empty_result_has_no_preview_without_preferences(
 ) -> None:
     """Missing preferences do not turn an empty result into a draft."""
     monkeypatch.setattr(
-        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
+        "apps.migu_orca_web.services._search_batch_item_candidates",
         lambda search_queries, mikan_config: [],
     )
     storage_dir = tmp_path / "migu-state"
@@ -2423,11 +2423,11 @@ def test_batch_parse_api_failed_item_has_no_preview_request(
 ) -> None:
     """A FAILED item (parse/search failure) has no editable preview_request."""
     monkeypatch.setattr(
-        "apps.migu_orca_web.routes_batches._batch_title_parsing_provider",
+        "apps.migu_orca_web.services._batch_title_parsing_provider",
         lambda: FakeAnimeTitleParsingProvider(fail_titles={"萌王S4"}),
     )
     monkeypatch.setattr(
-        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
+        "apps.migu_orca_web.services._search_batch_item_candidates",
         lambda search_queries, mikan_config: [],
     )
     storage_dir = tmp_path / "migu-state"
@@ -2447,7 +2447,7 @@ def test_batch_parse_api_falls_back_when_preference_file_is_damaged(
     tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(
-        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
+        "apps.migu_orca_web.services._search_batch_item_candidates",
         lambda search_queries, mikan_config: [],
     )
     storage_dir = tmp_path / "migu-state"
@@ -2482,11 +2482,11 @@ def test_batch_parse_api_failed_item_keeps_applied_preferences_config(
         return FakeAnimeTitleParsingProvider(fail_titles={"杖剑谭S2"})
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.routes_batches._batch_title_parsing_provider",
+        "apps.migu_orca_web.services._batch_title_parsing_provider",
         provider,
     )
     monkeypatch.setattr(
-        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
+        "apps.migu_orca_web.services._search_batch_item_candidates",
         lambda search_queries, mikan_config: [],
     )
     storage_dir = tmp_path / "migu-state"
@@ -2523,7 +2523,7 @@ def test_batch_parse_api_preference_response_never_leaks_sensitive_values(
     tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(
-        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
+        "apps.migu_orca_web.services._search_batch_item_candidates",
         lambda search_queries, mikan_config: [],
     )
     storage_dir = tmp_path / "migu-state"
@@ -3180,7 +3180,7 @@ def test_batch_parse_api_falls_back_to_original_queries_when_corrections_file_da
         "{not valid json", encoding="utf-8"
     )
     monkeypatch.setattr(
-        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
+        "apps.migu_orca_web.services._search_batch_item_candidates",
         lambda search_queries, mikan_config: [],
     )
 
@@ -3220,7 +3220,7 @@ def test_batch_parse_api_does_not_leak_poisoned_corrections(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
+        "apps.migu_orca_web.services._search_batch_item_candidates",
         lambda search_queries, mikan_config: [],
     )
 
@@ -3260,7 +3260,7 @@ def test_batch_parse_api_failed_search_keeps_enhanced_queries_for_review(
         lambda config: client,
     )
     monkeypatch.setattr(
-        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
+        "apps.migu_orca_web.services._search_batch_item_candidates",
         _raise,
     )
 
