@@ -130,8 +130,8 @@ describe('SettingsView storage panel (US-201)', () => {
 
     // The unsafe value is dropped; storage falls back to the server root.
     expect(localStorage.getItem('miguOrca.web.storageDir')).toBeNull()
-    expect(wrapper.find('#storage-preferences-form .status-alert').text()).toContain('偏好已保存')
-    expect(wrapper.find('#storage-preferences-form .status-alert').text()).toContain('已忽略不安全的 storage profile')
+    expect(wrapper.find('#storage-preferences-form .status-alert').text()).toContain('数据档案已保存')
+    expect(wrapper.find('#storage-preferences-form .status-alert').text()).toContain('已忽略不安全的数据档案')
   })
 
   it('clears both localStorage keys via 清除偏好', async () => {
@@ -144,7 +144,7 @@ describe('SettingsView storage panel (US-201)', () => {
 
     expect(localStorage.getItem('miguOrca.web.storageDir')).toBeNull()
     expect(localStorage.getItem('miguOrca.web.saveRequest')).toBeNull()
-    expect(wrapper.find('#storage-preferences-form .status-alert').text()).toContain('偏好已清除')
+    expect(wrapper.find('#storage-preferences-form .status-alert').text()).toContain('已清除选择')
   })
 })
 

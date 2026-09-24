@@ -17,6 +17,7 @@
 - Issue #109 共用壳层的 1280／1440／1920 数值布局基线：[壳层数值基线](design/frontend-ux-shell-geometry-baseline.md)。
 - 添加番剧页面族（搜索首屏／候选工作台）的数值布局基线：[添加番剧数值基线](design/frontend-ux-add-anime-geometry-baseline.md)。
 - 我的追番页面族（状态总览／列表／详情）的数值布局基线：[我的追番数值基线](design/frontend-ux-tracking-geometry-baseline.md)。
+- 设置页面（默认偏好／MiGuOrca 本地数据／Auto Bangumi 连接）的数值布局基线：[设置数值基线](design/frontend-ux-settings-geometry-baseline.md)。
 - 已完成的 Stage 43～45 总体规划：[添加番剧视觉与信息层级收口](MiGuOrca_stage43_45_add_anime_visual_PRD.md)
 - Stage 46～48 的历史总体规划：[添加番剧页面像素级复刻总体 PRD](MiGuOrca_add_anime_pixel_parity_PRD.md)
 - Stage 46 像素基线、应用壳层与共享控件已由 PR #75 合并；其 3C 像素门禁裁决与执行记录见 [Stage 46 PRD](MiGuOrca_stage46_pixel_foundation_PRD.md)。
