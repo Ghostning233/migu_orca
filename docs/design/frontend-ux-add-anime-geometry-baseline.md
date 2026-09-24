@@ -73,7 +73,21 @@
 契约形态：同一 `POST /api/v1/batches/parse` 在 `Accept: text/event-stream` 时返回
 `item`／`result`／`error` 事件；没有持久任务、取消或续接入口。
 
-## 5. 与现行设计图的差异（仅记录）
+## 5. 批量双栏工作台（Issue 113）
+
+| 量 | 值 | 来源 |
+| --- | --- | --- |
+| 工作台屏 | 第二屏，`min-height: 100%`；标题留在屏内顶部 | 同 `.add-screen` |
+| 双栏 | `minmax(260px, 36%)` / `minmax(0, 64%)`，间距 `--space-4` | 既有批量几何 |
+| 列高 | `--batch-column-max-height: clamp(572px, calc(100vh - 320px), 640px)` | 下限 572 = 3×184（紧凑卡实测高）+ 20 间距，保证 US-355「同屏三张完整卡」；320 为标题/筛选/操作栏的固定 chrome 余量；上限沿用原 640 |
+| 左右滚动 | `max-height: var(--batch-column-max-height)`、`overflow-y: auto`、`overscroll-behavior: contain` | 两栏各自内部滚动 |
+| 固定操作栏 | `position: sticky; bottom: 0`；布局 `padding-bottom` 与滚动区 `scroll-padding-bottom` 预留其真实高度 | 不遮末项、不随栏滚动 |
+| 切屏边界 | 仅模块外空白区或返回操作切屏；栏内滚到边界不触发 | Issue 113 AC2 |
+
+1／12／36 部都不分页、不虚拟滚动；当前查看（单选高亮）与勾选保存（复选框）继续使用不同控件；
+候选阶段只显示真实候选信息，草案阶段才显示资源数与可修改字段。
+
+## 6. 与现行设计图的差异（仅记录）
 
 | 量 | 设计图实测（归一化 1440） | 本基线 |
 | --- | --- | --- |
@@ -81,7 +95,7 @@
 | 卡片宽度 | 图 02 四张铺满内容宽 | 332px × 4 = 1328，居中留白 |
 | 图 03 尺寸标注 | 仅示意，未按比例 | 以本表实现测量为准 |
 
-## 6. 验证命令
+## 7. 验证命令
 
 ```bash
 cd frontend && npm run typecheck && npm run lint && npm run test:unit -- --run
@@ -89,5 +103,6 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/browser/test_app_single_candidate_geo
 UV_CACHE_DIR=.uv-cache uv run pytest tests/browser/test_app_single_two_screen.py -q
 UV_CACHE_DIR=.uv-cache uv run pytest tests/browser/test_app_single_draft_screen.py -q
 UV_CACHE_DIR=.uv-cache uv run pytest tests/browser/test_app_batch_progress.py -q
+UV_CACHE_DIR=.uv-cache uv run pytest tests/browser/test_app_batch_two_column.py -q
 UV_CACHE_DIR=.uv-cache uv run pytest tests/api_contract/test_batch_parse_progress_api.py -q
 ```
