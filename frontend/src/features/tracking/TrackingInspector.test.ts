@@ -70,7 +70,7 @@ describe('TrackingInspector secure detail (US-306)', () => {
     }))
     expect(wrapper.text()).toContain('有效资源')
     expect(wrapper.text()).toContain('已更新集数')
-    expect(wrapper.text()).toContain('待开发')
+    expect(wrapper.text()).toContain('未知')
     // Issue #93: the retired 追番方案 page is gone; reuse travels through the
     // add journey instead of a link back to the old page.
     expect(wrapper.find('.tracking-plan-link').exists()).toBe(false)
