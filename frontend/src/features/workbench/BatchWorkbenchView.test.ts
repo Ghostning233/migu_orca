@@ -1075,6 +1075,84 @@ describe('BatchWorkbenchView outcome recovery (US-357)', () => {
     await flushPromises()
   }
 
+  it('shows exactly one recovery action per real failure reason after a partial success', async () => {
+    apiPost.mockResolvedValueOnce(parseResult({ items: drafts(3) }))
+    const { wrapper } = await mountBatch()
+    await parse(wrapper, '条目1\n条目2\n条目3')
+
+    // 一次 HTTP 200 的部分成功：成功一项，草案失效一项，普通可重试失败一项。
+    apiPost.mockResolvedValueOnce(
+      saveConfirmResult({
+        results: [
+          result('item-1', 'CONFIRMED'),
+          result('item-2', 'FAILED', { error_type: 'draft_expired' }),
+          result('item-3', 'FAILED', { error_type: 'idempotency_conflict' }),
+        ],
+        summary: { requested: 3, confirmed: 1, failed: 2 },
+      }),
+    )
+    await confirmSelected(wrapper, ['item-1', 'item-2', 'item-3'])
+    await flushPromises()
+
+    // 成功项保持成功、取消勾选、不再参与保存。
+    expect(
+      (wrapper.find('.batch-draft-card[data-item-id="item-1"] input[type="checkbox"]').element as HTMLInputElement).checked,
+    ).toBe(false)
+    expect(wrapper.find('#batch-retry-save-item-1').exists()).toBe(false)
+    expect(wrapper.find('#batch-regenerate-draft-item-1').exists()).toBe(false)
+
+    // 草案失效 → 重新生成草案；普通失败 → 重试保存。
+    expect(wrapper.find('#batch-regenerate-draft-item-2').text()).toBe('重新生成草案')
+    expect(wrapper.find('#batch-retry-save-item-2').exists()).toBe(false)
+    expect(wrapper.find('#batch-retry-save-item-3').text()).toBe('重试保存')
+    expect(wrapper.find('#batch-regenerate-draft-item-3').exists()).toBe(false)
+
+    // 不以统一「重试失败项」覆盖所有情况。
+    expect(wrapper.text()).not.toContain('重试失败')
+
+    // 「重试保存」是一次新的明确操作：新的幂等键，不复用失败那次。
+    const saveCalls = () =>
+      apiPost.mock.calls.filter(([path]) => path === '/api/v1/batches/{batch_id}/save-confirm')
+    const firstKey = (saveCalls()[0]?.[1] as { body: { items: Array<{ idempotency_key: string }> } }).body.items[2]
+      ?.idempotency_key
+    apiPost.mockResolvedValueOnce(
+      saveConfirmResult({
+        results: [result('item-3', 'CONFIRMED')],
+        summary: { requested: 1, confirmed: 1, failed: 0 },
+      }),
+    )
+    await wrapper.find('#batch-retry-save-item-3').trigger('click')
+    await flushPromises()
+    const retryBody = (saveCalls()[1]?.[1] as { body: { items: Array<{ idempotency_key: string }> } }).body
+    expect(retryBody.items).toHaveLength(1)
+    expect(retryBody.items[0]?.idempotency_key).toBeTruthy()
+    expect(retryBody.items[0]?.idempotency_key).not.toBe(firstKey)
+  })
+
+  it('routes draft invalidation to the real collection picker without replaying the old binding', async () => {
+    apiPost.mockResolvedValueOnce(parseResult({ items: drafts(1) }))
+    const { wrapper } = await mountBatch()
+    await parse(wrapper, '条目1')
+    apiPost.mockResolvedValueOnce(
+      saveConfirmResult({
+        results: [result('item-1', 'FAILED', { error_type: 'draft_revision_conflict' })],
+        summary: { requested: 1, confirmed: 0, failed: 1 },
+      }),
+    )
+    await confirmSelected(wrapper, ['item-1'])
+    await flushPromises()
+
+    await wrapper.find('#batch-regenerate-draft-item-1').trigger('click')
+    await flushPromises()
+
+    // 回到该条目的真实合集选择，并就地说明下一步；没有自动重放旧草案绑定。
+    expect(wrapper.find('#batch-detail-pane').exists()).toBe(true)
+    expect(wrapper.text()).toContain('重新选择真实 MiKan 合集生成草案')
+    expect(
+      apiPost.mock.calls.filter(([path]) => path === '/api/v1/batches/{batch_id}/save-confirm'),
+    ).toHaveLength(1)
+  })
+
   it('keeps a persistent result-and-remaining summary and removes successes from the confirmable set', async () => {
     apiPost
       .mockResolvedValueOnce(parseResult({ items: drafts(3) }))

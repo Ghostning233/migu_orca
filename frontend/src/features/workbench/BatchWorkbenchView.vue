@@ -58,6 +58,9 @@ import {
   batchSaveConfirmOutcomeSummaryText,
   batchSaveConfirmRecoveryAllowed,
   batchSaveConfirmSucceeded,
+  batchSaveErrorInvalidatesDraft,
+  batchSaveRecoveryAction,
+  batchSaveRecoveryLabel,
   batchSaveConfirmTrackingId,
   batchSelectedConfirmCopy,
   batchSelectedScopeText,
@@ -86,6 +89,7 @@ import {
   type BatchItem,
   type BatchParseResult,
 } from '@/features/workbench/batchWorkbench'
+import type { BatchSaveRecoveryAction } from '@/features/workbench/batchWorkbench'
 import { displayValue, type RequestSnapshot } from '@/features/requests/requestDetail'
 import { selectedCollectionSummary, type PreviewEditState, type SelectedCollectionSummary } from '@/features/workbench/candidateSearch'
 import { currentStorageDir, storageQuery } from '@/features/requests/requestStorage'
@@ -184,6 +188,8 @@ type FrozenBatchSaveOperation = {
 const saveOperation = ref<FrozenBatchSaveOperation | null>(null)
 const recoveryLoadingItemIds = ref<Set<string>>(new Set())
 const recoveryFeedback = ref<Record<string, string>>({})
+// Issue 114：每条最近一次保存确认的失败类型，用来投影唯一恢复动作。
+const saveFailureTypes = ref<Record<string, string>>({})
 
 function batchItemRequestId(item: BatchItem): string {
   const value = (item as Record<string, unknown>).request_id
@@ -499,6 +505,48 @@ function cardNextStep(item: BatchItem): string {
     trackingLocated: Boolean(batchItemTrackingId(item)),
     generating: Boolean(generatingCandidateIdFor(item.item_id ?? '')),
   })
+}
+
+/** Issue 114：一条失败条目只投影出一种恢复动作。 */
+function recoveryActionFor(item: BatchItem): BatchSaveRecoveryAction {
+  const itemId = item.item_id ?? ''
+  return batchSaveRecoveryAction({
+    status: String(item.status ?? ''),
+    errorType: saveFailureTypes.value[itemId] ?? null,
+    trackingLocated: Boolean(batchItemTrackingId(item)),
+  })
+}
+
+function recoveryLabelFor(item: BatchItem): string {
+  return batchSaveRecoveryLabel(recoveryActionFor(item))
+}
+
+function clearSaveFailure(itemId: string): void {
+  if (!saveFailureTypes.value[itemId]) return
+  const next = { ...saveFailureTypes.value }
+  delete next[itemId]
+  saveFailureTypes.value = next
+}
+
+/** 草案失效／版本冲突后的最小安全动作：回到真实合集选择，不自动重放旧绑定。 */
+function regenerateDraftFor(item: BatchItem): void {
+  const itemId = item.item_id ?? ''
+  clearSaveFailure(itemId)
+  acceptFeedback.value = { ...acceptFeedback.value, [itemId]: '' }
+  setRecoveryFeedback(
+    itemId,
+    '草案已失效或版本已变化；请在右栏重新选择真实 MiKan 合集生成草案，不会重复保存。',
+  )
+  selectCurrentItem(item)
+}
+
+/** 普通可重试失败的「重试保存」：一次新的明确操作 → 新的幂等键。 */
+async function retrySaveItem(item: BatchItem): Promise<void> {
+  const itemId = item.item_id ?? ''
+  if (!itemId) return
+  clearSaveFailure(itemId)
+  acceptFeedback.value = { ...acceptFeedback.value, [itemId]: '' }
+  await submitBatchSaveConfirm([item], [itemId])
 }
 
 function cardAuxiliaryFacts(item: BatchItem): BatchCardFact[] {
@@ -947,13 +995,19 @@ function applySaveConfirmResult(result: BatchSaveConfirmResult): {
         const selected = new Set(selectedItemIds.value)
         selected.delete(row.item_id ?? '')
         selectedItemIds.value = selected
+        clearSaveFailure(row.item_id ?? '')
       } else {
         feedback[row.item_id ?? ''] = batchSaveConfirmErrorLabel(item)
+        // Issue 114：记住真实失败原因，卡片据此只显示一种恢复动作。
+        saveFailureTypes.value = {
+          ...saveFailureTypes.value,
+          [row.item_id ?? '']: String(item.error_type ?? '') || 'save_confirm_failed',
+        }
         if (batchSaveConfirmRecoveryAllowed(item)) {
           updated = { ...row, status: 'SAVED_PENDING_CONFIRM', draft_id: null, draft_revision: null, request_id: item.request_id }
           draftSessions.get(row.item_id ?? '')?.invalidate()
           draftSessions.delete(row.item_id ?? '')
-        } else if (['draft_expired', 'draft_evicted', 'draft_replayed', 'draft_revision_conflict'].includes(String(item.error_type ?? ''))) {
+        } else if (batchSaveErrorInvalidatesDraft(item.error_type)) {
           draftSessions.get(row.item_id ?? '')?.invalidate()
           draftSessions.delete(row.item_id ?? '')
           updated = {
@@ -1113,6 +1167,7 @@ async function submitBatchSaveConfirm(rows: BatchItem[], itemIds: string[] | nul
   // request is in flight or awaiting verification.
   saveSummary.value = null
   saveInFlight.value = true
+  for (const row of rows) clearSaveFailure(row.item_id ?? '')
   savingItemIds.value = new Set(rows.map((row) => row.item_id ?? '').filter(Boolean))
   // Undefined means this response still has work (or did not settle). Null is
   // a completed batch whose tracking handoff has no usable public id.
@@ -1192,8 +1247,11 @@ async function submitBatchSaveConfirm(rows: BatchItem[], itemIds: string[] | nul
       if (!validSavedFailure) rows.forEach((row) => journey.dispatch({ type: 'save_failed', itemId: row.item_id ?? '', error }))
       if (!validSavedFailure) {
         const safeType = toSafeBatchError(error).type
+        const nextFailures = { ...saveFailureTypes.value }
+        for (const row of rows) nextFailures[row.item_id ?? ''] = safeType
+        saveFailureTypes.value = nextFailures
         items.value = items.value.map((item) => rows.some((row) => row.item_id === item.item_id)
-          ? ['draft_expired', 'draft_evicted', 'draft_replayed', 'draft_revision_conflict'].includes(safeType)
+          ? batchSaveErrorInvalidatesDraft(safeType)
             ? { ...item, status: (item.candidates?.length ?? 0) > 0 ? 'FOUND' : 'EMPTY', preview_request: null, draft_id: null, draft_revision: null }
             : { ...item, status: 'DRAFT' }
           : item)
@@ -1805,14 +1863,29 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                 </div>
 
                 <div class="batch-card-actions">
+                  <!-- Issue 114：每条只呈现与真实原因匹配的一种恢复动作。 -->
                   <BaseButton
-                    v-if="String(item.status ?? '') === 'SAVED_PENDING_CONFIRM'"
+                    v-if="recoveryActionFor(item) === 'RETRY_CONFIRM'"
                     :id="`batch-retry-accept-${item.item_id}`"
                     variant="primary"
                     :loading="recoveryLoadingItemIds.has(item.item_id ?? '')"
                     :disabled="recoveryLoadingItemIds.has(item.item_id ?? '') || !batchItemRequestId(item)"
                     @click.stop="retrySavedConfirmation(item)"
-                  >重试确认</BaseButton>
+                  >{{ recoveryLabelFor(item) }}</BaseButton>
+                  <BaseButton
+                    v-else-if="recoveryActionFor(item) === 'REGENERATE_DRAFT'"
+                    :id="`batch-regenerate-draft-${item.item_id}`"
+                    variant="secondary"
+                    :disabled="savingItemIds.has(item.item_id ?? '') || operationLocks(item.item_id ?? '')"
+                    @click.stop="regenerateDraftFor(item)"
+                  >{{ recoveryLabelFor(item) }}</BaseButton>
+                  <BaseButton
+                    v-else-if="recoveryActionFor(item) === 'RETRY_SAVE'"
+                    :id="`batch-retry-save-${item.item_id}`"
+                    variant="secondary"
+                    :disabled="savingItemIds.has(item.item_id ?? '') || operationLocks(item.item_id ?? '')"
+                    @click.stop="retrySaveItem(item)"
+                  >{{ recoveryLabelFor(item) }}</BaseButton>
                   <BaseButton
                     v-if="String(item.status ?? '') === 'CONFIRMED' && batchItemTrackingId(item)"
                     :id="`batch-open-tracking-${item.item_id}`"
@@ -1820,13 +1893,13 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                     @click.stop="router.replace(routeLocation('tracking', { tracking_id: batchItemTrackingId(item) }))"
                   >打开追番记录</BaseButton>
                   <BaseButton
-                    v-if="['CONFIRMED', 'RESPONSE_UNKNOWN'].includes(String(item.status ?? '')) && !batchItemTrackingId(item)"
+                    v-else-if="recoveryActionFor(item) === 'VERIFY_RESULT' && !batchItemTrackingId(item)"
                     :id="`batch-retry-locate-${item.item_id}`"
                     variant="secondary"
                     :loading="recoveryLoadingItemIds.has(item.item_id ?? '')"
                     :disabled="recoveryLoadingItemIds.has(item.item_id ?? '') || !batchItemRequestId(item)"
                     @click.stop="retryBatchTrackingLocation(item)"
-                  >重试定位</BaseButton>
+                  >{{ recoveryLabelFor(item) }}</BaseButton>
                   <BaseButton
                     v-if="canChooseBatchCandidate(item)"
                     :class="{ 'batch-card-expand': true }"
