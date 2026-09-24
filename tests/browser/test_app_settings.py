@@ -67,8 +67,8 @@ class TestAppSettingsStoragePanel:
 
         alert = page.locator("#storage-preferences-form .status-alert-success")
         expect(alert).to_be_visible()
-        expect(alert).to_contain_text("偏好已保存")
-        expect(alert).to_contain_text("已忽略不安全的 storage profile")
+        expect(alert).to_contain_text("数据档案已保存")
+        expect(alert).to_contain_text("已忽略不安全的数据档案")
         # The unsafe absolute path never reaches localStorage.
         stored = page.evaluate("() => localStorage.getItem('miguOrca.web.storageDir')")
         assert stored is None
@@ -82,7 +82,7 @@ class TestAppSettingsStoragePanel:
 
         page.locator("#storage-preferences-clear").click()
         expect(page.locator("#storage-preferences-form .status-alert-info")).to_contain_text(
-            "偏好已清除"
+            "已清除选择"
         )
         stored = page.evaluate(
             "() => ({dir: localStorage.getItem('miguOrca.web.storageDir'), "

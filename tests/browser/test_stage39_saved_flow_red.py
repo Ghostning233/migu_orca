@@ -590,12 +590,14 @@ def test_saved_summary_survives_refresh_and_navigation_without_settings_probe(pa
 
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/settings")
-    assert page.locator("#settings-ab-delete").is_enabled()
+    # 已保存连接摘要是异步读取的：用自动重试断言等待按钮真正可用，
+    # 而不是在摘要返回前读一次 is_enabled()。
+    expect(page.locator("#settings-ab-delete")).to_be_enabled()
     page.reload()
-    assert page.locator("#settings-ab-delete").is_enabled()
+    expect(page.locator("#settings-ab-delete")).to_be_enabled()
     page.goto(f"{live_server_url}/app/tracking")
     page.wait_for_selector("#tracking-probe-saved")
-    assert page.locator("#tracking-probe-saved").is_enabled()
+    expect(page.locator("#tracking-probe-saved")).to_be_enabled()
     assert secret not in page.locator("body").inner_text()
     assert secret not in page.evaluate(
         "() => location.href + JSON.stringify(history.state) + JSON.stringify(localStorage) + JSON.stringify(sessionStorage)"

@@ -65,12 +65,13 @@ const storageStatus = ref<{ kind: 'success' | 'error' | 'info' | 'empty'; messag
 function restoreStoragePreferences(): void {
   storageForm.value = loadStoragePreferences()
   const text = storageForm.value.storageDir
-    ? `storage profile：${storageForm.value.storageDir}`
-    : '默认服务器 storage 根目录'
-  storageStatus.value = { kind: 'empty', message: `已读取浏览器偏好。当前使用${text}。` }
+    ? `数据档案 ${storageForm.value.storageDir}`
+    : '服务器默认数据档案'
+  storageStatus.value = { kind: 'empty', message: `已读取浏览器选择。当前浏览器使用${text}。` }
 }
 
 function persistStoragePreferences(): void {
+  const previousDir = loadStoragePreferences().storageDir
   const rawDir = storageForm.value.storageDir
   const safeDir = sanitizeStorageProfile(rawDir)
   saveStoragePreferences({ storageDir: safeDir })
@@ -78,9 +79,17 @@ function persistStoragePreferences(): void {
   storageForm.value.storageDir = safeDir
   const migrationNote =
     safeDir !== rawDir.trim() && rawDir.trim() !== ''
-      ? '（已忽略不安全的 storage profile，改用服务器默认根目录）'
+      ? '（已忽略不安全的数据档案，改用服务器默认根目录）'
       : ''
-  storageStatus.value = { kind: 'success', message: `偏好已保存。${migrationNote}` }
+  // Issue 117：切换档案只改变当前浏览器选用的 profile，不迁移任何历史数据。
+  const switchNote =
+    safeDir !== previousDir
+      ? '切换数据档案不会移动原有数据；可切回原档案查看。'
+      : ''
+  storageStatus.value = {
+    kind: 'success',
+    message: `数据档案已保存。${switchNote}${migrationNote}`,
+  }
 }
 
 function clearStorage(): void {
@@ -89,7 +98,7 @@ function clearStorage(): void {
   storageForm.value = { storageDir: '' }
   storageStatus.value = {
     kind: 'info',
-    message: '偏好已清除；订阅方案工作台将使用服务器默认 storage 根目录。',
+    message: '已清除选择；当前浏览器将使用服务器默认数据档案，原有数据不会被移动。',
   }
 }
 
@@ -414,44 +423,16 @@ onMounted(() => {
       配置与连接测试集中在 Settings；敏感外部系统配置保持显式输入，不写入浏览器存储、URL 或本地订阅方案 JSON。
     </p>
 
-    <!-- 1. Storage 偏好 -->
-    <PanelSection title="Storage 偏好">
-      <form id="storage-preferences-form" class="settings-form" @submit.prevent="persistStoragePreferences">
-        <p class="field-help">
-          非敏感浏览器偏好；仅写入当前浏览器 localStorage，不保存外部系统配置或凭据。
-        </p>
-
-        <FormField
-          label="默认 storage profile"
-          inputId="settings-storage-dir"
-          help="留空时订阅方案工作台使用服务器默认 storage 根目录。只能填写服务器允许根目录下的相对目录名（profile），不能填写绝对路径；不安全的旧值会自动回退到默认根目录。"
-        >
-          <BaseInput
-            id="settings-storage-dir"
-            v-model="storageForm.storageDir"
-            name="storage_dir"
-            type="text"
-            placeholder="例如 backups（相对服务器 storage 根目录）"
-            autocomplete="off"
-          />
-        </FormField>
-
-        <StatusAlert :kind="storageStatus.kind" :message="storageStatus.message" />
-
-        <div class="settings-actions">
-          <BaseButton id="storage-preferences-save" type="submit" variant="primary">保存偏好</BaseButton>
-          <BaseButton id="storage-preferences-clear" variant="danger" @click="clearStorage">清除偏好</BaseButton>
-        </div>
-      </form>
-    </PanelSection>
-
-    <!-- 2. 偏好默认值 -->
-    <PanelSection title="偏好默认值">
+    <!-- 1. 默认偏好（字幕组 / 过滤规则 / 命名方式） -->
+    <PanelSection title="默认偏好">
       <form id="preference-settings-form" class="settings-form" @submit.prevent="savePreferences">
         <p class="field-help">
-          这些偏好只保存非敏感用户选择，用于为批量订阅草案提供默认值。不会保存 endpoint、token、cookie、
+          设置新建番剧时的默认选项；只保存非敏感用户选择，不会保存 endpoint、token、cookie、
           Authorization 头或任何原始外部响应。
         </p>
+
+        <h3 class="settings-group-title">字幕组</h3>
+        <p class="field-help">设置偏好的字幕组及排除规则。</p>
 
         <FormField
           label="偏好字幕组（每行一个）"
@@ -495,6 +476,9 @@ onMounted(() => {
           />
         </FormField>
 
+        <h3 class="settings-group-title">过滤规则</h3>
+        <p class="field-help">新建方案时的默认包含与排除规则。</p>
+
         <FormField label="默认包含规则" inputId="preference-filter-must-contain">
           <BaseInput
             id="preference-filter-must-contain"
@@ -529,6 +513,9 @@ onMounted(() => {
         />
         <p class="field-help">作为批量草案的默认筛选规则；默认按字面文本匹配且不区分大小写。</p>
 
+        <h3 class="settings-group-title">命名方式</h3>
+        <p class="field-help">新建方案时的默认目录命名方式。</p>
+
         <FormField
           label="命名策略"
           inputId="preference-naming-strategy"
@@ -562,12 +549,13 @@ onMounted(() => {
           v-model:checked="preferenceForm.search.reuse_explicit_corrections"
           label="复用已保存的搜索词修正"
         />
+        <p class="field-help">搜索词修正只影响批量搜索的默认解析，不改变过滤规则或命名方式。</p>
 
         <StatusAlert :kind="preferenceStatus.kind" :message="preferenceStatus.message" />
 
         <div class="settings-actions">
           <BaseButton id="preference-settings-save" type="submit" variant="primary" :loading="preferenceLoading">
-            保存偏好默认值
+            保存默认偏好
           </BaseButton>
           <BaseButton id="preference-settings-reset" variant="danger" :disabled="preferenceLoading" @click="resetPreferences">
             恢复默认
@@ -576,8 +564,40 @@ onMounted(() => {
       </form>
     </PanelSection>
 
-    <!-- 4. Auto Bangumi -->
-    <PanelSection title="Auto Bangumi">
+    <!-- 2. MiGuOrca 本地数据（当前浏览器选用的业务数据档案） -->
+    <PanelSection title="MiGuOrca 本地数据">
+      <form id="storage-preferences-form" class="settings-form" @submit.prevent="persistStoragePreferences">
+        <p class="field-help">
+          这里的数据档案是当前浏览器选用的 MiGuOrca 业务数据 profile（方案、追番记录等），
+          不是下载媒体的位置。选择只写入当前浏览器 localStorage，不保存外部系统配置或凭据。
+        </p>
+
+        <FormField
+          label="当前浏览器使用的数据档案"
+          inputId="settings-storage-dir"
+          help="留空时使用服务器默认的数据 profile。只能填写服务器允许根目录下的相对目录名（profile），不能填写绝对路径；切换数据档案不会移动原有数据，可切回原档案查看。不安全的旧值会自动回退到默认根目录。"
+        >
+          <BaseInput
+            id="settings-storage-dir"
+            v-model="storageForm.storageDir"
+            name="storage_dir"
+            type="text"
+            placeholder="例如 backups（相对服务器数据根目录）"
+            autocomplete="off"
+          />
+        </FormField>
+
+        <StatusAlert :kind="storageStatus.kind" :message="storageStatus.message" />
+
+        <div class="settings-actions">
+          <BaseButton id="storage-preferences-save" type="submit" variant="primary">保存数据档案</BaseButton>
+          <BaseButton id="storage-preferences-clear" variant="danger" @click="clearStorage">清除选择</BaseButton>
+        </div>
+      </form>
+    </PanelSection>
+
+    <!-- 3. Auto Bangumi 连接 -->
+    <PanelSection title="Auto Bangumi 连接">
       <div id="settings-ab-context" class="settings-ab-context">
         <p class="field-help">已保存连接：{{ savedConnection?.credential_present ? '已配置' : '未配置' }}；配置版本 {{ savedConnection?.configuration_revision ?? 0 }}。</p>
       </div>
@@ -678,17 +698,6 @@ onMounted(() => {
       </form>
     </PanelSection>
 
-    <PanelSection title="高级诊断">
-      <details id="settings-advanced-diagnostics">
-        <summary>显示安全诊断信息</summary>
-        <p class="field-help">仅显示当前客户端支持的安全能力说明；不会显示地址、外部 ID、原始响应或日志。</p>
-        <dl class="settings-diagnostics">
-          <dt>客户端版本</dt><dd>MiGuOrca 桌面工作台</dd>
-          <dt>连接能力</dt><dd>仅在用户显式探测后更新；已配置不代表持续在线。</dd>
-        </dl>
-      </details>
-    </PanelSection>
-
     <ConfirmDialog ref="confirmDialog" />
   </div>
 </template>
@@ -697,6 +706,13 @@ onMounted(() => {
 .settings-view {
   display: grid;
   gap: 1.25rem;
+}
+
+/* Issue 117：默认偏好按字幕组 / 过滤规则 / 命名方式分段。 */
+.settings-group-title {
+  margin: var(--space-4) 0 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
 }
 
 .settings-title {

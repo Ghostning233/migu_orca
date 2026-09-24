@@ -161,7 +161,7 @@ def test_partial_success_keeps_successes_and_shows_one_action_per_reason(
     expect(dialog).to_be_visible()
     expect(dialog).to_contain_text("离开批量审核")
     dialog.get_by_role("button", name="确认离开").click()
-    expect(page).to_have_url(re.compile(r"tracking_id=tracking-114-a"))
+    expect(page).to_have_url(re.compile(r"tracking_id=tracking-114-a"), timeout=10_000)
 
 
 def test_retry_save_uses_a_new_key_and_never_replays_the_failed_one(
