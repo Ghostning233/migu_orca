@@ -162,24 +162,25 @@ function onPosterError(): void {
   --candidate-poster-size: 120px;
   --candidate-card-gap: var(--space-4);
   position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, var(--candidate-poster-size)) minmax(0, 1fr);
-  column-gap: var(--candidate-card-gap);
-  align-items: start;
-  min-height: 196px;
-  height: 196px;
+  /* Issue 110：单番候选改为竖排卡片（封面在上、信息与主操作在下），
+   * 以便 1～4 项同排居中展示；批量紧凑态在下方单独覆盖。 */
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  height: auto;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   /* The 1px border is included in the 16px baseline inset. */
   padding: calc(var(--space-4) - var(--control-border-width));
-  padding-bottom: 0;
-  background: var(--color-bg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
 }
 
 .candidate-card-poster,
 .candidate-poster {
-  width: var(--candidate-poster-size);
-  height: 160px;
+  width: 100%;
+  /* 单番候选封面按设计图的横向比例；具体高度由宽度和比例决定。 */
+  aspect-ratio: 16 / 9;
 }
 
 .candidate-poster {
@@ -190,11 +191,11 @@ function onPosterError(): void {
 
 .candidate-card-content {
   min-width: 0;
-  height: 180px;
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   align-items: stretch;
-  gap: var(--space-1);
+  gap: var(--space-2);
 }
 
 .candidate-title {
@@ -296,26 +297,8 @@ function onPosterError(): void {
 }
 
 .candidate-card:not(.is-compact) .candidate-advanced {
-  position: absolute;
-  top: calc(var(--space-4) + 160px);
-  left: var(--space-4);
-  z-index: 1;
-  width: var(--candidate-poster-size);
-  background: var(--color-bg);
-}
-
-.candidate-card:not(.is-compact):has(.candidate-advanced[open]) {
-  height: auto;
-  padding-bottom: calc(var(--space-4) - var(--control-border-width));
-}
-
-.candidate-card:not(.is-compact):has(.candidate-advanced[open]) .candidate-card-content {
-  height: auto;
-}
-
-.candidate-card:not(.is-compact):has(.candidate-advanced[open]) .candidate-advanced {
-  position: static;
-  width: auto;
+  width: 100%;
+  background: var(--color-surface);
 }
 
 .candidate-card.is-compact {
@@ -344,6 +327,7 @@ function onPosterError(): void {
   width: min(8rem, 100%);
   max-width: 8rem;
   height: 8rem;
+  aspect-ratio: auto;
   border-radius: 4px;
 }
 

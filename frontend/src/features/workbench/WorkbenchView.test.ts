@@ -1,6 +1,6 @@
-import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia } from 'pinia'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { nextTick } from 'vue'
 
@@ -32,6 +32,11 @@ vi.mock('@/api/client', () => ({
 }))
 
 const apiPost = vi.mocked(api.post)
+
+// Issue 110：每个用例都把工作台挂到 document.body。视图用 document.querySelector
+// 聚焦全局唯一的结果标题／重试按钮，若旧用例的 DOM 仍在文档里，焦点会落到旧节点。
+// 用例后统一卸载，保证这些全局查询只命中当前用例。
+enableAutoUnmount(afterEach)
 const apiGet = vi.mocked(api.get)
 
 type CandidateResult = NonNullable<
@@ -233,7 +238,7 @@ describe('WorkbenchView single search (US-204)', () => {
     expect(wrapper.text()).not.toContain('外部提交')
   })
 
-  it('collapses a found search into a summary with a focused edit action', async () => {
+  it('keeps the search input and returns to the first screen without clearing candidates', async () => {
     apiPost.mockResolvedValue(candidateResult())
     const { wrapper } = await mountWorkbench()
 
@@ -241,12 +246,17 @@ describe('WorkbenchView single search (US-204)', () => {
     await wrapper.find('#mikan-candidate-search-submit').trigger('click')
     await flushPromises()
 
-    expect(wrapper.find('#mikan-candidate-query').exists()).toBe(false)
-    expect(wrapper.find('.search-summary-actions').text()).toContain('搜索摘要')
-    expect(wrapper.find('#mikan-edit-search').exists()).toBe(true)
-    await wrapper.find('#mikan-edit-search').trigger('click')
-    await nextTick()
-    expect(document.activeElement).toBe(wrapper.find('#mikan-candidate-query').element)
+    // Issue 110：第一屏常驻，候选工作台是第二屏；输入不被移除。
+    expect(wrapper.find('#mikan-candidate-query').exists()).toBe(true)
+    expect(wrapper.find('#candidate-search-heading').text()).toBe('选择真实合集')
+    expect(wrapper.find('.candidate-search-summary').text()).toContain('已搜索「芙莉莲」')
+    expect(wrapper.findAll('.candidate-card')).toHaveLength(1)
+
+    await wrapper.find('#mikan-back-to-search').trigger('click')
+    await flushPromises()
+    // 「返回搜索首屏」只滚动与聚焦，不清空下方未保存的候选现场。
+    expect(wrapper.findAll('.candidate-card')).toHaveLength(1)
+    expect((wrapper.find('#mikan-candidate-query').element as HTMLInputElement).value).toBe('芙莉莲')
   })
 
   it('offers the direct-collection rescue only after a search found no candidates', async () => {
@@ -273,7 +283,7 @@ describe('WorkbenchView single search (US-204)', () => {
     wrapper.unmount()
   })
 
-  it('focuses the title input on entry and moves focus to the first candidate', async () => {
+  it('focuses the title input on entry and moves focus to the result heading', async () => {
     apiPost.mockResolvedValue(candidateResult())
     const { wrapper } = await mountWorkbench()
 
@@ -284,7 +294,40 @@ describe('WorkbenchView single search (US-204)', () => {
     await wrapper.find('#mikan-candidate-search-submit').trigger('click')
     await flushPromises()
 
-    expect(document.activeElement).toBe(wrapper.find('.candidate-select').element)
+    // Issue 110：成功后自动进入第二屏，焦点落在结果标题而不是某张候选卡。
+    expect(document.activeElement).toBe(wrapper.find('#candidate-search-heading').element)
+  })
+
+  it('keeps the first screen with an in-place retry when the search fails', async () => {
+    apiPost.mockRejectedValueOnce({ type: 'mikan_http_failed', message: '原始错误' })
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+
+    // 失败留在搜索首屏：候选屏不出现，输入保留，重试按钮就地可用。
+    expect(wrapper.find('#candidate-search-heading').exists()).toBe(false)
+    expect(wrapper.find('#mikan-candidate-query').exists()).toBe(true)
+    expect(wrapper.find('#mikan-search-feedback-action').text()).toContain('重试搜索')
+    // 就地重试可用，但失败不抢键盘焦点（Stage 42 无障碍保证）。
+    expect(document.activeElement).not.toBe(wrapper.find('#mikan-search-feedback-action').element)
+  })
+
+  it('keeps the first screen and offers a re-search plus collapsed rescue when nothing matched', async () => {
+    apiPost.mockResolvedValueOnce(candidateResult({ candidates: [] }))
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('ghost')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#candidate-search-heading').exists()).toBe(false)
+    expect(wrapper.find('#mikan-candidate-search-result .empty-state').text()).toContain('核对番剧名称或季度')
+    expect(wrapper.find('#mikan-search-feedback-action').text()).toContain('重新搜索')
+    // 直连救援入口默认收起。
+    expect(wrapper.find('#mikan-fallback-enabled').exists()).toBe(true)
+    expect(wrapper.find('#mikan-fallback-form').exists()).toBe(false)
   })
 
   it('searches candidates through the shared transport and renders cards', async () => {
@@ -312,6 +355,52 @@ describe('WorkbenchView single search (US-204)', () => {
     expect(advanced.attributes('open')).toBeUndefined()
     expect(advanced.text()).toContain('2353')
     expect(advanced.text()).toContain('芙莉莲')
+  })
+
+  it('shows only the first four candidates with a short truncation note', async () => {
+    apiPost.mockResolvedValueOnce(
+      candidateResult({
+        candidates: Array.from({ length: 5 }, (_, index) =>
+          candidate({
+            bangumi_id: String(3000 + index),
+            title: `候选 ${index + 1}`,
+            mikan_url: `https://mikan.example/Home/Bangumi/${3000 + index}`,
+          }),
+        ),
+      }),
+    )
+    const { wrapper } = await mountWorkbench()
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-form').trigger('submit')
+    await flushPromises()
+
+    // Issue 110: 单番候选最多同排展示四项，不自动选择，也不虚构第五项。
+    expect(wrapper.findAll('.candidate-card')).toHaveLength(4)
+    const note = wrapper.find('#candidate-truncation-note')
+    expect(note.exists()).toBe(true)
+    expect(note.text()).toContain('仅显示前 4 个')
+    expect(wrapper.findAll('.candidate-select')).toHaveLength(4)
+  })
+
+  it('shows every candidate and no truncation note at four or fewer', async () => {
+    apiPost.mockResolvedValueOnce(
+      candidateResult({
+        candidates: Array.from({ length: 4 }, (_, index) =>
+          candidate({
+            bangumi_id: String(4000 + index),
+            title: `候选 ${index + 1}`,
+            mikan_url: `https://mikan.example/Home/Bangumi/${4000 + index}`,
+          }),
+        ),
+      }),
+    )
+    const { wrapper } = await mountWorkbench()
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.findAll('.candidate-card')).toHaveLength(4)
+    expect(wrapper.find('#candidate-truncation-note').exists()).toBe(false)
   })
 
   it('never auto-selects a candidate even when only one matches', async () => {
@@ -437,7 +526,7 @@ describe('WorkbenchView single search (US-204)', () => {
     expect(apiGet.mock.calls.some(([url]) => String(url).includes('safe-info'))).toBe(false)
   })
 
-  it('clears stale candidates when the search title is edited', async () => {
+  it('keeps candidates while editing the title and confirms a replacing re-search', async () => {
     apiPost.mockResolvedValue(candidateResult())
     const { wrapper } = await mountWorkbench()
 
@@ -446,16 +535,23 @@ describe('WorkbenchView single search (US-204)', () => {
     await flushPromises()
     expect(wrapper.findAll('.candidate-card')).toHaveLength(1)
 
-    await wrapper.find('#mikan-edit-search').trigger('click')
+    await wrapper.find('#mikan-back-to-search').trigger('click')
     await nextTick()
     await wrapper.find('#mikan-candidate-query').setValue('无职转生')
     await nextTick()
 
-    expect(wrapper.findAll('.candidate-card')).toHaveLength(0)
-    // F4/US-345: leaving the results no longer reveals an empty-result panel;
-    // the page returns to the name input until a new search is started.
-    expect(wrapper.find('#mikan-candidate-search-result').exists()).toBe(false)
-    expect(wrapper.find('#mikan-fallback-enabled').exists()).toBe(false)
+    // Issue 110：编辑输入不再静默清空第二屏现场。
+    expect(wrapper.findAll('.candidate-card')).toHaveLength(1)
+
+    // 重新搜索若会替换未保存工作，先给简短确认；取消则保持现场。
+    await wrapper.find('#mikan-candidate-search-form').trigger('submit')
+    await flushPromises()
+    const dialog = wrapper.find('.confirm-dialog')
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.text()).toContain('重新搜索会清除')
+    await dialog.find('.secondary-button').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.candidate-card')).toHaveLength(1)
     expect((wrapper.find('#mikan-candidate-query').element as HTMLInputElement).value).toBe('无职转生')
   })
 
@@ -1340,9 +1436,12 @@ describe('WorkbenchView candidate loading feedback (US-343)', () => {
     await flushPromises()
     expect(wrapper.find('.candidate-card').text()).toContain('生成订阅草案失败')
 
-    await wrapper.find('#mikan-edit-search').trigger('click')
+    await wrapper.find('#mikan-back-to-search').trigger('click')
     await wrapper.find('#mikan-candidate-query').setValue('无职转生')
-    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await wrapper.find('#mikan-candidate-search-form').trigger('submit')
+    await flushPromises()
+    // Issue 110：已有候选时重新搜索先确认，再替换结果并清掉旧失败。
+    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
     await flushPromises()
 
     expect(wrapper.findAll('.candidate-card')).toHaveLength(1)

@@ -331,9 +331,10 @@ class TestSingleHomeGeometry:
         page.click("#anime-mode-single")
         # 单番的搜索结果在切回后仍然保留（未被切换清除）。
         expect(page.locator(".candidate-card")).to_have_count(1)
-        # 回到输入态后，单番输入也没有被清除。
-        page.click("#mikan-edit-search")
+        # 回到搜索首屏后，单番输入与候选都没有被清除。
+        page.click("#mikan-back-to-search")
         expect(page.locator("#mikan-candidate-query")).to_have_value("葬送的芙莉莲")
+        expect(page.locator(".candidate-card")).to_have_count(1)
         # 批量输入同样保留。
         page.click("#anime-mode-batch")
         assert page.input_value("#batch-raw-input") == "萌王S4"

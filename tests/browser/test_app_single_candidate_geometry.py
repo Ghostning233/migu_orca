@@ -60,7 +60,7 @@ def _open_candidates(page: Page, live_server_url: str) -> None:
 
 
 class TestSingleCandidateGeometry:
-    def test_candidate_grid_matches_approved_desktop_geometry(
+    def test_candidate_screen_matches_approved_desktop_geometry(
         self, page: Page, live_server_url: str
     ) -> None:
         page.set_viewport_size({"width": 1440, "height": 900})
@@ -73,27 +73,42 @@ class TestSingleCandidateGeometry:
                 return {x: rect.x, y: rect.y, width: rect.width, height: rect.height}
               }
               return {
-                summary: read('.candidate-search-summary-row'),
-                grid: read('.candidate-collection-list'),
+                screen: read('.candidate-workbench-screen'),
+                heading: read('#candidate-search-heading'),
                 first: read('.candidate-card:nth-child(1)'),
                 second: read('.candidate-card:nth-child(2)'),
                 third: read('.candidate-card:nth-child(3)'),
                 poster: read('.candidate-card:nth-child(1) .candidate-poster'),
-                edit: read('#mikan-edit-search'),
+                back: read('#mikan-back-to-search'),
               }
             }"""
         )
 
-        assert boxes["summary"] == {"x": 32, "y": 96, "width": 1376, "height": 44}
-        assert boxes["grid"] == {"x": 32, "y": 160, "width": 1376, "height": 196}
-        assert boxes["first"] == {"x": 32, "y": 160, "width": 448, "height": 196}
-        assert boxes["second"] == {"x": 496, "y": 160, "width": 448, "height": 196}
-        assert boxes["third"] == {"x": 960, "y": 160, "width": 448, "height": 196}
-        assert boxes["poster"] == {"x": 48, "y": 176, "width": 120, "height": 160}
-        assert boxes["edit"]["width"] == 176
-        assert boxes["edit"]["height"] == 44
+        # Issue 110：候选工作台是第二屏，与页面内容容器同宽同轴。
+        assert boxes["screen"]["x"] == 32
+        assert boxes["screen"]["width"] == 1376
+        # 结果标题在第二屏内水平居中。
+        assert abs((boxes["heading"]["x"] + boxes["heading"]["width"] / 2) - 720) <= 2
+        # 1～4 项同排：卡宽 = (1376 − 3×--space-4) / 4 = 332，行内容居中。
+        assert boxes["first"]["width"] == 332
+        assert boxes["second"]["width"] == 332
+        assert boxes["third"]["width"] == 332
+        assert boxes["first"]["y"] == boxes["second"]["y"] == boxes["third"]["y"]
+        assert boxes["second"]["x"] - boxes["first"]["x"] == 348
+        assert boxes["first"]["x"] - boxes["screen"]["x"] == 174
+        assert (
+            boxes["screen"]["x"]
+            + boxes["screen"]["width"]
+            - (boxes["third"]["x"] + boxes["third"]["width"])
+            == 174
+        )
+        # 封面按 16:9 撑满卡片内容宽（332 − 2×15 内边距 − 2×1 边框 = 300）。
+        assert boxes["poster"]["width"] == 300
+        assert abs(boxes["poster"]["height"] - 300 * 9 / 16) <= 0.5
+        # 返回搜索首屏是标准 44px 控件。
+        assert boxes["back"]["height"] == 44
 
-    def test_candidate_grid_reflows_to_two_columns_at_1280(
+    def test_candidate_row_keeps_one_centered_row_at_1280(
         self, page: Page, live_server_url: str
     ) -> None:
         page.set_viewport_size({"width": 1280, "height": 720})
@@ -101,23 +116,28 @@ class TestSingleCandidateGeometry:
 
         metrics = page.evaluate(
             """() => {
-              const grid = document.querySelector('.candidate-collection-list')
-              const card = document.querySelector('.candidate-card')
+              const cards = Array.from(document.querySelectorAll('.candidate-card')).map(
+                (el) => el.getBoundingClientRect())
               return {
-                columns: getComputedStyle(grid).gridTemplateColumns.split(' ').length,
-                cardWidth: card.getBoundingClientRect().width,
+                cardWidths: cards.map((box) => box.width),
+                cardTops: cards.map((box) => box.top),
+                firstLeft: cards[0].x,
+                lastRight: cards[cards.length - 1].x + cards[cards.length - 1].width,
                 bodyScrollWidth: document.body.scrollWidth,
               }
             }"""
         )
-        assert metrics["columns"] == 2
-        # Issue 109（AC4）：1280 属紧凑桌面档位，页内边距为 24px（原写死 32px），
-        # 双列候选网格内容宽 = 1280 − 2×24，每列 = (1232 − --space-4 16) / 2。
-        content_width = 1280 - 2 * content_padding_inline(1280)
-        assert metrics["cardWidth"] == (content_width - 16) / 2
+        # Issue 110：1280 档内容宽 1232，三张 332px 卡片仍在同一行居中。
+        assert metrics["cardWidths"] == [332, 332, 332]
+        assert len(set(metrics["cardTops"])) == 1
+        expected_left = content_padding_inline(1280) + (
+            1280 - 2 * content_padding_inline(1280) - (3 * 332 + 2 * 16)
+        ) / 2
+        assert abs(metrics["firstLeft"] - expected_left) <= 0.5
+        assert abs(expected_left - (1280 - metrics["lastRight"])) <= 0.5
         assert metrics["bodyScrollWidth"] <= 1280
 
-    def test_candidate_grid_stays_operable_at_two_hundred_percent_zoom(
+    def test_candidate_row_stays_operable_at_two_hundred_percent_zoom(
         self, page: Page, live_server_url: str
     ) -> None:
         # A 720 CSS-pixel viewport models the 1440px desktop at 200% browser zoom.
@@ -126,16 +146,18 @@ class TestSingleCandidateGeometry:
 
         metrics = page.evaluate(
             """() => {
-              const grid = document.querySelector('.candidate-collection-list')
+              const cards = Array.from(document.querySelectorAll('.candidate-card')).map(
+                (el) => el.getBoundingClientRect())
               return {
-                columns: getComputedStyle(grid).gridTemplateColumns.split(' ').length,
+                widths: cards.map((box) => box.width),
                 bodyScrollWidth: document.body.scrollWidth,
-                cards: document.querySelectorAll('.candidate-card').length,
+                cards: cards.length,
               }
             }"""
         )
-        assert metrics["columns"] == 1
+        # Issue 110：极窄视口下卡片保持可用下限并换行，不横向溢出。
         assert metrics["cards"] == 3
+        assert all(width >= 240 for width in metrics["widths"])
         assert metrics["bodyScrollWidth"] <= 720
 
     def test_long_title_keeps_full_accessible_name_and_hides_canary(

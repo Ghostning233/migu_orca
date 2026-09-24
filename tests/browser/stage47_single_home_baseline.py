@@ -48,7 +48,7 @@ HOME_SELECTORS: dict[str, str] = {name: selector for name, (selector, _, _) in H
 """所有基线选择器，供实现与门禁共用。"""
 
 FORBIDDEN_INITIAL_SELECTORS: tuple[str, ...] = (
-    ".search-results-panel",
+    ".candidate-workbench-screen",
     "#mikan-candidate-search-result",
     ".candidate-card",
     ".candidate-fallback-rescue",
@@ -56,4 +56,4 @@ FORBIDDEN_INITIAL_SELECTORS: tuple[str, ...] = (
     "#detail-preview-edit-form",
     "#batch-parse-form",
 )
-"""单番初始态不得存在的结构：结果区、候选卡、救援面板、有效资源数与草案/批量区。"""
+"""单番初始态不得存在的结构：候选工作台屏、就地反馈、候选卡、救援面板与草案/批量区。"""

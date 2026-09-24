@@ -195,7 +195,7 @@ class SingleAnimeVisualScenario:
         """图 01：单番初始态。"""
         self.page.goto(f"{self.base_url}/app/add")
         self.page.wait_for_selector("#mikan-candidate-search-form", timeout=10_000)
-        expect(self.page.locator(".search-results-panel")).to_have_count(0)
+        expect(self.page.locator(".candidate-workbench-screen")).to_have_count(0)
 
     def search_candidates(self) -> None:
         """输入固定标题并等待三条真实候选渲染。"""

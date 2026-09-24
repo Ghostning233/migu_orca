@@ -4,7 +4,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 状态 | **已获批（2026-09-21）**；G-47-01 视为满足，本文件是 Stage 47 的正式测量基线 |
+| 状态 | **已获批（2026-09-21）**；G-47-01 视为满足，本文件是 Stage 47 的正式测量基线。图 01～03 中「搜索摘要行 / 三列候选网格」的布局已被 Issue #110 的[添加番剧数值基线](frontend-ux-add-anime-geometry-baseline.md)取代，其余（英雄区几何、控件与间距阶梯）继续有效 |
 | 依据 | `docs/MiGuOrca_stage47_single_anime_pixel_PRD.md` 的 G-47-01；`docs/design/frontend-ux-design-tokens-v1.md`（冻结 Token V1） |
 | 前置 | Stage 46 PR #75 merge `be2f1cf`；Stage 46 裁决 3C（现有六张 PNG 不作硬门禁基线） |
 | 本提案不做的事 | 不改生产 CSS、不改 Vitest/Playwright fixture、不改 Ralph 状态或任何业务代码；不修改冻结 Token |

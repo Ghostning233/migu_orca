@@ -164,10 +164,11 @@ class TestAppWorkbenchSingleSearch:
 
         page.fill("#mikan-candidate-query", "芙莉莲")
         page.click("#mikan-candidate-search-submit")
-        expect(page.locator(".search-summary-actions")).to_contain_text("搜索摘要")
-        expect(page.locator("#mikan-edit-search")).to_be_visible()
-        expect(page.locator("#mikan-candidate-query")).to_have_count(0)
-        page.click("#mikan-edit-search")
+        # Issue 110：候选工作台是下方第二屏，首屏输入常驻。
+        expect(page.locator(".candidate-search-summary")).to_contain_text("已搜索「芙莉莲」")
+        expect(page.locator("#mikan-back-to-search")).to_be_visible()
+        expect(page.locator("#mikan-candidate-query")).to_have_count(1)
+        page.click("#mikan-back-to-search")
         expect(page.locator("#mikan-candidate-query")).to_be_focused()
 
     def test_shell_focuses_single_anime_input_on_entry(self, page: Page, live_server_url: str) -> None:
@@ -219,7 +220,7 @@ class TestAppWorkbenchSingleSearch:
         page.click("#mikan-candidate-search-submit")
 
         expect(page.locator(".candidate-card")).to_have_count(2)
-        text = page.locator("#mikan-candidate-search-result").inner_text()
+        text = page.locator(".candidate-workbench-screen").inner_text()
         assert "葬送的芙莉莲" in text
         assert "咒术回战 第三季" in text
         # F4/US-345: 默认层只放公开决策证据（封面/标题/季度证据/总集数与选择
@@ -285,9 +286,12 @@ class TestAppWorkbenchSingleSearch:
                 body=_candidate_result_json("ghost", []),
             ),
         )
-        page.click("#mikan-edit-search")
+        page.click("#mikan-back-to-search")
         page.fill("#mikan-candidate-query", "ghost")
         page.click("#mikan-candidate-search-submit")
+        # Issue 110：已有候选时重新搜索先确认，再替换现场。
+        expect(page.locator(".confirm-dialog")).to_be_visible()
+        page.locator(".confirm-dialog .primary-button").click()
         expect(page.locator("#mikan-candidate-search-result")).to_contain_text("未找到候选合集")
         expect(page.locator("#mikan-fallback-enabled")).to_be_visible()
         expect(page.locator("#mikan-fallback-form")).to_be_hidden()
@@ -464,11 +468,11 @@ class TestAppWorkbenchSingleSearch:
         page.fill("#mikan-candidate-query", "无职转生s4")
         page.click("#mikan-candidate-search-submit")
 
-        summary = page.locator("#mikan-candidate-search-result .title-parse-summary")
+        summary = page.locator(".candidate-workbench-screen .title-parse-summary")
         # F4/US-345: 解析诊断默认折叠（不在默认层），展开后仍完整可读。
         assert summary.evaluate("el => el.open") is False
         expect(summary.locator("summary")).to_contain_text("标题解析摘要")
-        assert "识别标题" not in page.locator("#mikan-candidate-search-result").inner_text()
+        assert "识别标题" not in page.locator(".candidate-workbench-screen").inner_text()
         summary.locator("summary").click()
         expect(summary).to_contain_text("识别标题")
         expect(summary).to_contain_text("无职转生 第四季")
@@ -1187,7 +1191,7 @@ class TestAppWorkbenchCandidateSelectionAndDraft:
         # Candidate list is preserved; the collapsed search summary exposes
         # an explicit edit action before the input is shown again.
         expect(page.locator(".candidate-card")).to_have_count(1)
-        page.locator("#mikan-edit-search").click()
+        page.locator("#mikan-back-to-search").click()
         assert page.locator("#mikan-candidate-query").input_value() == "芙莉莲"
 
 
