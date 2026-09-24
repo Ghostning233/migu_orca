@@ -303,8 +303,19 @@ def _sse_frame(event: str, data: dict[str, object]) -> str:
 
 
 def _accepts_event_stream() -> bool:
-    """True when the client asked for the streaming representation."""
-    return request.accept_mimetypes["text/event-stream"] > 0
+    """True only when the client explicitly asked for the streaming representation.
+
+    Issue 129: ``request.accept_mimetypes["text/event-stream"]`` also matches a
+    wildcard ``Accept`` (``*/*``, ``application/json, */*``, the browser Accept
+    header), which would silently turn the default JSON response into SSE for
+    ordinary clients. Only an explicit ``text/event-stream`` media range with a
+    non-zero quality selects the stream; no Accept header, a wildcard, or an
+    explicit JSON-only request keeps the buffered JSON representation.
+    """
+    for mimetype, quality in request.accept_mimetypes:
+        if mimetype == "text/event-stream":
+            return quality > 0
+    return False
 
 
 def _batch_parse_event_stream(

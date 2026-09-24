@@ -16,6 +16,7 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import preview_result_json, set_storage_preferences
+from tests.browser.screen_support import wait_for_screen_scroll
 from tests.browser.test_app_workbench import (
     _candidate,
     _candidate_result_json,
@@ -25,9 +26,6 @@ from tests.browser.test_app_workbench import (
 )
 
 pytestmark = pytest.mark.browser
-
-SCREENS = ".add-anime-screens"
-
 
 def _mock_candidates(page: Page) -> None:
     page.route(
@@ -111,9 +109,7 @@ def test_long_draft_scrolls_inside_the_second_screen(
     page: Page, live_server_url: str, storage_dir
 ) -> None:
     _open_draft(page, live_server_url, storage_dir, viewport=(1440, 620))
-    page.wait_for_function(
-        "() => document.querySelector('.add-anime-screens').scrollTop > 100"
-    )
+    wait_for_screen_scroll(page)
 
     styles = page.evaluate(
         """() => {

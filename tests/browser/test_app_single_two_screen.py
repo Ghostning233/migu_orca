@@ -18,6 +18,7 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import set_storage_preferences
+from tests.browser.screen_support import wait_for_screen_scroll
 from tests.browser.test_app_workbench import (
     _candidate,
     _candidate_result_json,
@@ -25,9 +26,6 @@ from tests.browser.test_app_workbench import (
 )
 
 pytestmark = pytest.mark.browser
-
-SCREENS = ".add-anime-screens"
-
 
 def _mock_candidates(page: Page, count: int = 2) -> None:
     candidates = [
@@ -70,9 +68,7 @@ def test_success_enters_the_second_screen_and_focuses_the_result_heading(
     expect(page.locator(".candidate-card")).to_have_count(2)
     # 成功后自动滚到第二屏，并把键盘焦点移到结果标题。
     expect(page.locator("#candidate-search-heading")).to_be_focused()
-    page.wait_for_function(
-        "() => document.querySelector('.add-anime-screens').scrollTop > 100"
-    )
+    wait_for_screen_scroll(page)
     geometry = page.evaluate(
         """() => {
           const screens = document.querySelector('.add-anime-screens')
@@ -98,9 +94,7 @@ def test_return_to_search_keeps_the_unsaved_candidate_work(
     _open(page, live_server_url, storage_dir)
     _search(page)
     expect(page.locator(".candidate-card")).to_have_count(3)
-    page.wait_for_function(
-        "() => document.querySelector('.add-anime-screens').scrollTop > 100"
-    )
+    wait_for_screen_scroll(page)
 
     page.click("#mikan-back-to-search")
     # 回到首屏：输入聚焦、候选与输入内容都保留。
@@ -119,9 +113,7 @@ def test_inner_module_scroll_never_switches_screens(
     _open(page, live_server_url, storage_dir)
     _search(page)
     expect(page.locator(".candidate-card")).to_have_count(4)
-    page.wait_for_function(
-        "() => document.querySelector('.add-anime-screens').scrollTop > 100"
-    )
+    wait_for_screen_scroll(page)
 
     styles = page.evaluate(
         """() => {
