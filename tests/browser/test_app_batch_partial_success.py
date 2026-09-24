@@ -24,6 +24,8 @@ from tests.browser.test_app_batch_workbench import (
     _preview_request,
     _route_parse,
 )
+from tests.browser.test_app_tracking_workbench import _item as _tracking_item
+from tests.browser.test_app_tracking_workbench import _mock_workbench
 
 pytestmark = pytest.mark.browser
 
@@ -101,9 +103,30 @@ def _save_confirm_body() -> str:
     )
 
 
+def _mock_tracking_target(page: Page) -> None:
+    """Provide the tracking record the confirmed item hands off to.
+
+    Without it the tracking page cannot resolve `tracking_id` and safely
+    clears the query, which would make the handoff assertion race the cleanup.
+    """
+    _mock_workbench(
+        page,
+        [
+            _tracking_item(
+                "tracking-114-a",
+                "甲 第一季",
+                status="PENDING_SUBMIT",
+                status_label="待提交",
+                status_group="PENDING",
+            )
+        ],
+    )
+
+
 def _open_partial_success(page: Page, live_server_url: str, storage_dir) -> None:
     items = _draft_items()
     _route_parse(page, items)
+    _mock_tracking_target(page)
     page.route(
         "**/api/v1/batches/*/save-confirm",
         lambda route: route.fulfill(
