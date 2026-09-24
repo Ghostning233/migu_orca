@@ -2195,23 +2195,26 @@ class TestAppBatchConfirmScope:
         assert focused["ringBottom"] <= focused["toolbarTop"] + 0.5, focused
         assert focused["top"] >= 0, focused
 
-        # 滚到页面末尾：右栏最后的字段/错误也在固定栏之上。
-        max_scroll = page.evaluate("() => document.documentElement.scrollHeight - window.innerHeight")
-        page.evaluate("(y) => window.scrollTo(0, y)", max_scroll)
+        # Issue 113：右栏改为自身内部滚动；滚到底后末字段仍在栏内，
+        # 且整栏停在为固定操作栏预留的空间之上（不被遮挡）。
         bottom = page.evaluate(
             """() => {
-                const toolbar = document.querySelector('#batch-accept-toolbar').getBoundingClientRect()
                 const pane = document.querySelector('#batch-detail-pane')
+                pane.scrollTop = pane.scrollHeight
+                const paneBox = pane.getBoundingClientRect()
+                const layout = document.querySelector('.batch-review-layout')
                 const rects = Array.from(pane.querySelectorAll('input, select, textarea, p, button'))
                     .map((el) => el.getBoundingClientRect().bottom)
                 return {
                     lastPaneBottom: rects.length ? Math.max(...rects) : null,
-                    toolbarTop: toolbar.top,
+                    paneBottom: paneBox.bottom,
+                    reserved: parseFloat(getComputedStyle(layout).paddingBottom) || 0,
                 }
             }"""
         )
         assert bottom["lastPaneBottom"] is not None
-        assert bottom["lastPaneBottom"] <= bottom["toolbarTop"] + 0.5, bottom
+        assert bottom["lastPaneBottom"] <= bottom["paneBottom"] + 0.5, bottom
+        assert bottom["reserved"] >= geometry["measured"] - 1, bottom
 
     @pytest.mark.parametrize(
         "width,height,zoom",

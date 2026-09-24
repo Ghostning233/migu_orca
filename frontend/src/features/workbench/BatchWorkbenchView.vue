@@ -1639,6 +1639,9 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
               </BaseButton>
             </div>
             <p class="batch-review-count" role="status">共 {{ items.length }} 部，当前显示 {{ visibleItems.length }} 部{{ exceptionSorted ? '；已按异常排序' : '' }}</p>
+            <p id="batch-parse-progress" class="batch-parse-progress" role="status">
+              解析完成：{{ items.length }} / {{ parseCount }} 部；异常条目已置顶，条目顺序已固定。
+            </p>
             <div class="batch-review-navigation">
               <BaseButton
                 id="batch-next-exception"
@@ -1950,10 +1953,6 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
           </aside>
         </div>
 
-        <p id="batch-parse-progress" class="batch-parse-progress" role="status">
-          解析完成：{{ items.length }} / {{ parseCount }} 部；异常条目已置顶，条目顺序已固定。
-        </p>
-
         <div id="batch-accept-toolbar" :ref="setAcceptToolbarElement" class="batch-accept-toolbar">
           <CheckboxRow
             id="batch-select-all-checkbox"
@@ -2085,9 +2084,14 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
    entry stay outside it (always reachable), and the horizontal padding leaves
    room for the 3px focus ring so card focus is never clipped. */
 .batch-card-grid-wrapper {
-  max-height: 640px;
+  max-height: var(--batch-column-max-height, 640px);
+  overscroll-behavior: contain;
   overflow-y: auto;
   padding: 6px;
+  /* 固定操作栏不遮末项：滚动区为操作栏预留真实高度，并让 scrollIntoView
+     与键盘聚焦把目标滚到操作栏之上。 */
+  padding-bottom: calc(6px + var(--batch-accept-toolbar-height, 0px));
+  scroll-padding-bottom: var(--batch-accept-toolbar-height, 0px);
 }
 
 .batch-review-controls {
@@ -2157,18 +2161,27 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   overflow-wrap: anywhere;
 }
 
+/* Issue 113：工作台是第二屏；标题留在屏内顶部，底部操作栏固定在屏内。
+ * 左右两栏各自拥有由视口推导的可用高度与可见内部滚动条，滚到边界不带动
+ * 整页切屏；三张紧凑卡（US-355 硬性回归）仍必须同屏可见。 */
+.batch-workbench-panel {
+  margin-bottom: 0;
+}
+
 .batch-review-layout {
+  --batch-column-max-height: clamp(572px, calc(100vh - 320px), 640px);
   align-items: start;
   display: grid;
   gap: 1rem;
   grid-template-columns: minmax(260px, 36%) minmax(0, 64%);
-  /* US-356: 固定操作栏的真实多行高度作为底部滚动空间预留，末卡、字段与错误
-     可以滚到固定栏之上，不被遮挡。 */
+  /* 固定操作栏的真实多行高度作为底部滚动空间预留，末卡、字段与错误可以滚到
+     固定栏之上，不被遮挡。 */
   padding-bottom: var(--batch-accept-toolbar-height, 0px);
 }
 
 .batch-review-list-column {
   display: grid;
+  min-height: 0;
   min-width: 0;
 }
 
@@ -2176,9 +2189,13 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: 6px;
+  max-height: var(--batch-column-max-height);
   min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 1rem;
   position: sticky;
+  scroll-padding-bottom: var(--batch-accept-toolbar-height, 0px);
   top: 1rem;
 }
 
@@ -2497,6 +2514,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   bottom: 0;
   box-shadow: 0 -4px 12px color-mix(in srgb, var(--color-text) 10%, transparent);
   padding: 0.7rem;
+  /* Issue 113：操作栏固定在工作台屏底部，不随两栏内部滚动。 */
   position: sticky;
   z-index: 2;
 }

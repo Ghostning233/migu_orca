@@ -140,7 +140,7 @@ async function submitBatchSearch(): Promise<void> {
   }
 }
 
-/** Issue 112：整批完成、拿到稳定结果后才把工作台带入视野并聚焦。 */
+/** Issue 112/113：整批完成、拿到稳定结果后才切到第二屏并移焦点。 */
 function onBatchParseSettled(): void {
   batchSearchSettled.value = true
   void nextTick(() => {
@@ -148,6 +148,10 @@ function onBatchParseSettled(): void {
       behavior: prefersReducedMotion() ? 'auto' : 'smooth',
       block: 'start',
     })
+    // 这一屏刚由 v-show 显示；隐藏时无法聚焦，因此在这里把焦点落到工作台标题。
+    document
+      .querySelector<HTMLElement>('#panel-section-批量工作台')
+      ?.focus({ preventScroll: true })
   })
 }
 
@@ -721,28 +725,27 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
     />
   </div>
 
-  <!-- ── 批量：搜索首屏标题、模式切换与步骤预告 ─────────────────── -->
-  <template v-if="mode === 'batch'">
-    <h1 id="workbench-heading" class="workbench-title">添加番剧</h1>
-    <AnimeModeSwitch :model-value="mode" :disabled="singleBusy" @update:model-value="changeMode" />
-    <p v-if="reuseSource" id="reuse-handoff-summary" class="field-help" role="status">
-      已载入复制方案起点：{{ reuseSource.title }}（公开合集编号 {{ reuseSource.mikanBangumiId }}）。请重新搜索并选择真实合集。
-    </p>
-    <ol class="journey-steps" aria-label="添加番剧步骤">
-      <li class="is-current">输入名称</li>
-      <li>选择真实合集</li>
-      <li>审核并保存确认</li>
-    </ol>
-  </template>
+  <!-- ── 批量：搜索首屏 + 批量工作台两屏（Issue 113） ─────────────── -->
+  <div v-show="mode === 'batch'" class="add-anime-screens batch-screens">
+    <!-- 首屏只在批量模式下挂载：单番容器已提供自己的标题、模式切换与步骤，
+         两者同时存在会产生重复的 id 与导航语义。 -->
+    <section v-if="mode === 'batch'" class="add-screen batch-search-screen">
+      <h1 id="workbench-heading" class="workbench-title">添加番剧</h1>
+      <AnimeModeSwitch :model-value="mode" :disabled="singleBusy" @update:model-value="changeMode" />
+      <p v-if="reuseSource" id="reuse-handoff-summary" class="field-help" role="status">
+        已载入复制方案起点：{{ reuseSource.title }}（公开合集编号 {{ reuseSource.mikanBangumiId }}）。请重新搜索并选择真实合集。
+      </p>
+      <ol class="journey-steps" aria-label="添加番剧步骤">
+        <li class="is-current">输入名称</li>
+        <li>选择真实合集</li>
+        <li>审核并保存确认</li>
+      </ol>
 
-  <!-- ── batch workbench (US-205) ────────────────────────────────── -->
-  <template v-if="batchMounted">
-    <form
-      v-show="mode === 'batch'"
-      id="batch-parse-form"
-      class="batch-parse-form"
-      @submit.prevent="submitBatchSearch"
-    >
+      <form
+        id="batch-parse-form"
+        class="batch-parse-form"
+        @submit.prevent="submitBatchSearch"
+      >
       <label for="batch-raw-input">批量番剧名称</label>
       <AnimeTitleInput
         ref="batchInput"
@@ -779,10 +782,17 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
           搜索候选合集
         </BaseButton>
       </div>
-    </form>
-    <div ref="batchWorkbenchScreen" class="batch-workbench-screen">
+      </form>
+    </section>
+
+    <!-- 第二屏：批量双栏工作台。整批完成、拿到稳定结果后才显示并切入。 -->
+    <section
+      v-if="batchMounted"
+      v-show="batchSearchSettled"
+      ref="batchWorkbenchScreen"
+      class="add-screen batch-workbench-screen"
+    >
       <BatchWorkbenchView
-        v-show="mode === 'batch'"
         ref="batchWorkbench"
         class="batch-workbench-section"
         v-model:raw-input="batchQuery"
@@ -790,8 +800,8 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
         @restore-search-focus="batchInput?.focusInput()"
         @parse-settled="onBatchParseSettled"
       />
-    </div>
-  </template>
+    </section>
+  </div>
 
   <!-- Issue 110：重新搜索会替换未保存现场时的简短确认。 -->
   <ConfirmDialog ref="confirmDialog" />
@@ -1077,8 +1087,22 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
   gap: 0.25rem;
 }
 
-.batch-workbench-section {
-  margin-top: 1.25rem;
+.batch-search-screen {
+  /* Issue 113：批量搜索首屏独占一屏，内容在 720px 容器内居中。 */
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  justify-content: center;
+  width: min(100%, 720px);
+  margin-inline: auto;
+}
+
+.batch-workbench-screen {
+  /* Issue 113：工作台屏至少一屏高；双栏各自内部滚动，屏高由内容与固定操作栏
+     共同决定，不靠整页高度容纳长列表或长草案。 */
+  height: auto;
+  min-height: 100%;
+  width: 100%;
 }
 
 /* Issue 112：批量逐部进度——分段只按真实完成数点亮。 */
