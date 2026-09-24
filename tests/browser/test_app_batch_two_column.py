@@ -14,6 +14,7 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import set_storage_preferences
+from tests.browser.screen_support import wait_for_screen_scroll
 from tests.browser.test_app_batch_workbench import (
     _batch_item,
     _candidate,
@@ -25,9 +26,6 @@ from tests.browser.test_app_batch_workbench import (
 
 pytestmark = pytest.mark.browser
 
-SCREENS = ".add-anime-screens"
-
-
 def _parse(page: Page, live_server_url: str, items: list[dict], storage_dir) -> None:
     _route_parse(page, items)
     set_storage_preferences(page, storage_dir)
@@ -37,7 +35,7 @@ def _parse(page: Page, live_server_url: str, items: list[dict], storage_dir) -> 
     page.click("#batch-parse-submit")
     expect(page.locator(".batch-draft-card")).to_have_count(len(items))
     # 等切屏滚动稳定，避免把动画中间态当成布局结果。
-    page.wait_for_function("() => document.querySelector('.add-anime-screens').scrollTop > 100")
+    wait_for_screen_scroll(page)
 
 
 def _draft_items(count: int) -> list[dict]:
