@@ -44,7 +44,7 @@ function safeReason(value: string): string {
       <div class="detail-row"><dt>有效资源数</dt><dd>{{ props.effectiveSeeds.length }}</dd></div>
       <div class="detail-row"><dt>完整资源数</dt><dd>{{ completeTotal() }}</dd></div>
       <div class="detail-row"><dt>排除资源数</dt><dd>{{ props.excludedSeeds.length }}</dd></div>
-      <div class="detail-row"><dt>已更新集数</dt><dd>待开发 / 不可用</dd></div>
+      <div class="detail-row"><dt>已更新集数</dt><dd>未知</dd></div>
     </dl>
 
     <details class="seed-details seed-group effective-seed-group" open>

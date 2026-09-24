@@ -268,9 +268,9 @@ def test_unknown_episode_counts_never_infer_from_resources(
           return pairs
         }"""
     )
-    # 无可信服务端值：总集数显示「未知」；「已更新集数」仍是待开发占位（冻结规则）。
+    # 无可信服务端值：两个集数字段都显示「未知」（Issue #131），不从资源数推断。
     assert rows["总集数"] == "未知"
-    assert rows["已更新集数"] == "待开发"
+    assert rows["已更新集数"] == "未知"
     # 有效资源数 7 只作为资源计数呈现，绝不被当成集数。
     assert rows["有效资源"] == "7"
 
