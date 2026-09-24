@@ -677,17 +677,20 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 
     <!-- ── 第二屏：草案审核 ───────────────────────────────────────── -->
     <section v-if="showDraftScreen" ref="workbenchScreen" class="add-screen candidate-workbench-screen draft-screen">
-      <SingleAnimeReviewPanel
-        :key="draftId"
-        :request="draftRequest!"
-        :draft-id="draftId"
-        :draft-revision="draftRevision"
-        :reuse-suggestion="reuseSuggestion"
-        :selected-collection="selectedCollection"
-        @changed="onDraftChanged"
-        @discard="discardDraft"
-        @change-mode="changeMode"
-      />
+      <!-- Issue 111：长草案只在第二屏的内容面板内滚动，不撑长整页。 -->
+      <div class="draft-scroll-panel">
+        <SingleAnimeReviewPanel
+          :key="draftId"
+          :request="draftRequest!"
+          :draft-id="draftId"
+          :draft-revision="draftRevision"
+          :reuse-suggestion="reuseSuggestion"
+          :selected-collection="selectedCollection"
+          @changed="onDraftChanged"
+          @discard="discardDraft"
+          @change-mode="changeMode"
+        />
+      </div>
     </section>
 
     <LoadingState
@@ -769,8 +772,7 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 }
 
 .add-screen.draft-screen {
-  height: auto;
-  min-height: 100%;
+  height: 100%;
 }
 
 /* US-363: 单番搜索首页英雄区（Stage 47 几何基线）。
@@ -924,8 +926,13 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
   gap: 0;
 }
 
-.candidate-workbench-screen.draft-screen .candidate-list-wrapper {
-  overflow: visible;
+/* Issue 111：草案内容面板内部滚动，滚到边界不带动整页切屏。 */
+.candidate-workbench-screen.draft-screen .draft-scroll-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .batch-parse-form,
 .candidate-fallback-form {

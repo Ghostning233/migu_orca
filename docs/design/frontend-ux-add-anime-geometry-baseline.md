@@ -44,7 +44,21 @@
 
 1280 档内容宽 1232，三张 332px 卡片仍同排居中；1920 档内容宽 1416，四张卡片保持 332px 居中不拉伸。
 
-## 3. 与现行设计图的差异（仅记录）
+## 3. 草案审核屏（Issue 111）
+
+| 量 | 值 | 来源 |
+| --- | --- | --- |
+| 屏高 | 与第二屏一致（780） | 同 `.add-screen` |
+| 内容面板 | `.draft-scroll-panel`：`flex: 1`、`overflow-y: auto`、`overscroll-behavior: contain` | 长草案在面板内滚动 |
+| 面板几何 | 身份区 `x 32`、`y 96`、宽 1376；左栏 480、右栏 872、间距 24 | Stage 47 获批审核几何，Issue 111 保留 |
+| 屏内边距 | 草案屏 `padding-block: 0` | 不改变既有审核锚点 |
+| 主操作 | 「保存并确认」`#single-review-save-button` | 既有契约 |
+
+选择候选只把第二屏从候选状态切换为草案状态，不新开路由或第三屏；草案资源数只在草案阶段出现；
+「重新选择合集」（`#single-review-back-candidates`）确认后回到同屏候选状态并保留搜索结果。
+长草案不撑长整页：整页高度等于视口，滚动发生在内容面板内部。
+
+## 4. 与现行设计图的差异（仅记录）
 
 | 量 | 设计图实测（归一化 1440） | 本基线 |
 | --- | --- | --- |
@@ -52,10 +66,11 @@
 | 卡片宽度 | 图 02 四张铺满内容宽 | 332px × 4 = 1328，居中留白 |
 | 图 03 尺寸标注 | 仅示意，未按比例 | 以本表实现测量为准 |
 
-## 4. 验证命令
+## 5. 验证命令
 
 ```bash
 cd frontend && npm run typecheck && npm run lint && npm run test:unit -- --run
 UV_CACHE_DIR=.uv-cache uv run pytest tests/browser/test_app_single_candidate_geometry.py -q
 UV_CACHE_DIR=.uv-cache uv run pytest tests/browser/test_app_single_two_screen.py -q
+UV_CACHE_DIR=.uv-cache uv run pytest tests/browser/test_app_single_draft_screen.py -q
 ```
