@@ -9,7 +9,12 @@ seams built in ``services.py``. US-216 adds the batch save-confirm partial-
 success endpoint on top of the single save-confirm service.
 """
 
+import json
+from collections.abc import Iterator
 from dataclasses import replace
+from typing import Any
+
+from flask import Response, request, stream_with_context
 
 from apps.migu_orca_web.blueprints import api_blueprint
 from apps.migu_orca_web.routes_requests import _run_draft_save_confirm
@@ -67,6 +72,7 @@ from batch_engine.models import (
     MAX_BATCH_ITEMS,
 )
 from extensions.flask_api import class_route
+from extensions.flask_api.api import failed_envelope
 from extensions.flask_api.views import PostView
 from mikan_engine.controllers.mikan_config import default_mikan_config
 from shared.errors import Stage1Error
@@ -75,166 +81,132 @@ from storage_engine.controllers.storage_config import StorageConfig, load_storag
 from tracking_engine.models.tracking import TRACKING_ORIGIN_SAVE_CONFIRM
 
 
-@class_route(api_blueprint, "/api/v1/batches/parse", methods=["POST"])
-class BatchParseView(PostView):
-    request_validator_model = BatchParsePayload
+def _validate_batch_raw_input(raw_input: str) -> None:
+    """US-215: 1..36 normalized non-empty lines.
 
-    def save(self) -> dict[str, object]:
-        assert isinstance(self.request_validator_model, BatchParsePayload)
-        raw_input = self.request_validator_model.raw_input
-        # US-215: count normalized non-empty lines via the same splitter the
-        # engine uses. A 37+ line batch is rejected here — before the title
-        # parser, MiKan search or any persistence seam — with only the
-        # field/limit/actual summary (never echoing the raw batch input).
-        non_empty_lines = split_batch_raw_input(raw_input)
-        if not non_empty_lines:
-            raise Stage1Error(
-                "validation_error",
-                "请至少输入一个番剧名称",
-                "batch_parse",
-                {"field": "raw_input"},
-            )
-        if len(non_empty_lines) > MAX_BATCH_ITEMS:
-            raise Stage1Error(
-                "batch_limit_exceeded",
-                f"单批最多支持 {MAX_BATCH_ITEMS} 部，当前输入 {len(non_empty_lines)} 部",
-                "batch_parse",
-                {
-                    "field": "raw_input",
-                    "limit": MAX_BATCH_ITEMS,
-                    "actual": len(non_empty_lines),
-                },
-            )
-        batch = create_batch_draft(raw_input)
-
-        mikan_config = default_mikan_config()
-        config = load_storage_config(
-            _storage_dir(self.request_validator_model.storage_dir)
+    The same splitter the engine uses counts the lines, so a 37+ batch is
+    rejected before the title parser, MiKan search or any persistence seam —
+    with only the field/limit/actual summary (never echoing the raw input).
+    Both the synchronous and the streaming view call this before doing work.
+    """
+    non_empty_lines = split_batch_raw_input(raw_input)
+    if not non_empty_lines:
+        raise Stage1Error(
+            "validation_error",
+            "请至少输入一个番剧名称",
+            "batch_parse",
+            {"field": "raw_input"},
         )
-        preferences = _load_preferences_for_batch(config)
-        corrections = _load_corrections_for_batch(config)
-        # Keep the explicit provider seam used by batch tests. Saved corrections
-        # are part of the same rule-provider query plan rather than a second
-        # search fallback implementation.
-        provider = (
-            RuleAnimeTitleParsingProvider(corrections=corrections)
-            if corrections
-            else _batch_title_parsing_provider()
+    if len(non_empty_lines) > MAX_BATCH_ITEMS:
+        raise Stage1Error(
+            "batch_limit_exceeded",
+            f"单批最多支持 {MAX_BATCH_ITEMS} 部，当前输入 {len(non_empty_lines)} 部",
+            "batch_parse",
+            {
+                "field": "raw_input",
+                "limit": MAX_BATCH_ITEMS,
+                "actual": len(non_empty_lines),
+            },
         )
-        serialized_items: list[dict[str, object]] = []
-        for item in batch.items:
-            try:
-                parse_result = parse_anime_title(item.raw_title, provider)
-            except Stage1Error as exc:
-                failed_batch = update_batch_item_status(
-                    batch,
-                    item.item_id,
-                    BATCH_ITEM_STATUS_FAILED,
-                )
-                failed_item = next(
-                    updated
-                    for updated in failed_batch.items
-                    if updated.item_id == item.item_id
-                )
-                applied_obj, warnings = _preference_application_for_item(
-                    item.raw_title, None, preferences
-                )
-                applied, hits, warnings = _serialize_preference_application(
-                    applied_obj, warnings
-                )
-                review = build_review_metadata(
-                    raw_title=item.raw_title,
-                    parse_result=None,
-                    candidates=[],
-                    preference_warnings=warnings,
-                    status=BATCH_ITEM_STATUS_FAILED,
-                )
-                serialized_items.append(
-                    _serialize_failed_batch_item(
-                        failed_item,
-                        exc,
-                        applied_preferences=applied,
-                        preference_hits=hits,
-                        preference_warnings=warnings,
-                        review_hints=review.review_hints,
-                        enhanced_search_queries=_enhanced_entries_for_item(
-                            item.raw_title, None, corrections
-                        ),
-                    )
-                )
-                continue
 
-            enhanced_queries = _enhanced_entries_for_item(
-                item.raw_title, parse_result, corrections
-            )
-            searched = _search_candidates_from_parse_result(
-                parse_result,
-                mikan_config,
-                search_one=lambda query: _search_batch_item_candidates([query], mikan_config),
-            )
-            if searched.status == BATCH_ITEM_STATUS_FAILED:
-                exc = searched.error or Stage1Error(
-                    "mikan_search_failed", "MiKan 候选搜索失败", "mikan_search"
-                )
-                failed_batch = update_batch_item_status(
-                    batch,
-                    item.item_id,
-                    BATCH_ITEM_STATUS_FAILED,
-                )
-                failed_item = next(
-                    updated
-                    for updated in failed_batch.items
-                    if updated.item_id == item.item_id
-                )
-                applied_obj, warnings = _preference_application_for_item(
-                    item.raw_title, parse_result, preferences
-                )
-                applied, hits, warnings = _serialize_preference_application(
-                    applied_obj, warnings
-                )
-                review = build_review_metadata(
-                    raw_title=item.raw_title,
-                    parse_result=parse_result,
-                    candidates=[],
-                    preference_warnings=warnings,
-                    search_failed=True,
-                    status=BATCH_ITEM_STATUS_FAILED,
-                )
-                serialized_items.append(
-                    _serialize_batch_parse_result(
-                        failed_item,
-                        parse_result,
-                        candidates=[],
-                        error=exc,
-                        applied_preferences=applied,
-                        preference_hits=hits,
-                        preference_warnings=warnings,
-                        needs_user_review=review.needs_user_review,
-                        review_hints=review.review_hints,
-                        enhanced_search_queries=enhanced_queries,
-                        attempted_queries=_serialize_attempted_queries(parse_result, searched),
-                    )
-                )
-                continue
 
-            candidates = [
-                _with_candidate_season_evidence(candidate, parse_result)
-                for candidate in searched.candidates
-            ]
+def _item_event(
+    item: dict[str, object], completed: int, total: int
+) -> dict[str, object]:
+    return {"kind": "item", "completed": completed, "total": total, "item": item}
 
-            candidate_status = (
-                BATCH_ITEM_STATUS_FOUND
-                if candidates
-                else BATCH_ITEM_STATUS_EMPTY
-            )
-            searched_batch = update_batch_item_status(
+
+def iter_batch_parse_events(
+    raw_input: str, storage_dir: str | None
+) -> Iterator[dict[str, object]]:
+    """Issue 112: 逐部完成事件 + 最终批次结果。
+
+    FOUND、EMPTY、FAILED 都在该部真正完成时产出一个 ``item`` 事件并让
+    ``completed`` 前进一格；最后的 ``result`` 事件给出与同步端点完全一致的
+    批次结果。事件只存在于本次请求的生命周期内：没有持久任务、没有取消、
+    刷新或关闭后不续接。
+    """
+    _validate_batch_raw_input(raw_input)
+    batch = create_batch_draft(raw_input)
+    total = len(batch.items)
+
+    mikan_config = default_mikan_config()
+    config = load_storage_config(
+        _storage_dir(storage_dir)
+    )
+    preferences = _load_preferences_for_batch(config)
+    corrections = _load_corrections_for_batch(config)
+    # Keep the explicit provider seam used by batch tests. Saved corrections
+    # are part of the same rule-provider query plan rather than a second
+    # search fallback implementation.
+    provider = (
+        RuleAnimeTitleParsingProvider(corrections=corrections)
+        if corrections
+        else _batch_title_parsing_provider()
+    )
+    serialized_items: list[dict[str, object]] = []
+    for item in batch.items:
+        try:
+            parse_result = parse_anime_title(item.raw_title, provider)
+        except Stage1Error as exc:
+            failed_batch = update_batch_item_status(
                 batch,
                 item.item_id,
-                candidate_status,
+                BATCH_ITEM_STATUS_FAILED,
             )
-            searched_item = next(
+            failed_item = next(
                 updated
-                for updated in searched_batch.items
+                for updated in failed_batch.items
+                if updated.item_id == item.item_id
+            )
+            applied_obj, warnings = _preference_application_for_item(
+                item.raw_title, None, preferences
+            )
+            applied, hits, warnings = _serialize_preference_application(
+                applied_obj, warnings
+            )
+            review = build_review_metadata(
+                raw_title=item.raw_title,
+                parse_result=None,
+                candidates=[],
+                preference_warnings=warnings,
+                status=BATCH_ITEM_STATUS_FAILED,
+            )
+            serialized = _serialize_failed_batch_item(
+                failed_item,
+                exc,
+                applied_preferences=applied,
+                preference_hits=hits,
+                preference_warnings=warnings,
+                review_hints=review.review_hints,
+                enhanced_search_queries=_enhanced_entries_for_item(
+                    item.raw_title, None, corrections
+                ),
+            )
+            serialized_items.append(serialized)
+            yield _item_event(serialized, len(serialized_items), total)
+            continue
+
+        enhanced_queries = _enhanced_entries_for_item(
+            item.raw_title, parse_result, corrections
+        )
+        searched = _search_candidates_from_parse_result(
+            parse_result,
+            mikan_config,
+            search_one=lambda query: _search_batch_item_candidates([query], mikan_config),
+        )
+        if searched.status == BATCH_ITEM_STATUS_FAILED:
+            exc = searched.error or Stage1Error(
+                "mikan_search_failed", "MiKan 候选搜索失败", "mikan_search"
+            )
+            failed_batch = update_batch_item_status(
+                batch,
+                item.item_id,
+                BATCH_ITEM_STATUS_FAILED,
+            )
+            failed_item = next(
+                updated
+                for updated in failed_batch.items
                 if updated.item_id == item.item_id
             )
             applied_obj, warnings = _preference_application_for_item(
@@ -246,30 +218,173 @@ class BatchParseView(PostView):
             review = build_review_metadata(
                 raw_title=item.raw_title,
                 parse_result=parse_result,
-                candidates=candidates,
+                candidates=[],
                 preference_warnings=warnings,
-                status=candidate_status,
+                search_failed=True,
+                status=BATCH_ITEM_STATUS_FAILED,
             )
-            serialized_items.append(
-                _serialize_batch_parse_result(
-                    searched_item,
-                    parse_result,
-                    candidates=candidates,
-                    applied_preferences=applied,
-                    preference_hits=hits,
-                    preference_warnings=warnings,
-                    needs_user_review=review.needs_user_review,
-                    review_hints=review.review_hints,
-                    enhanced_search_queries=enhanced_queries,
-                    attempted_queries=_serialize_attempted_queries(parse_result, searched),
-                )
+            serialized = _serialize_batch_parse_result(
+                failed_item,
+                parse_result,
+                candidates=[],
+                error=exc,
+                applied_preferences=applied,
+                preference_hits=hits,
+                preference_warnings=warnings,
+                needs_user_review=review.needs_user_review,
+                review_hints=review.review_hints,
+                enhanced_search_queries=enhanced_queries,
+                attempted_queries=_serialize_attempted_queries(parse_result, searched),
             )
+            serialized_items.append(serialized)
+            yield _item_event(serialized, len(serialized_items), total)
+            continue
 
-        return {
+        candidates = [
+            _with_candidate_season_evidence(candidate, parse_result)
+            for candidate in searched.candidates
+        ]
+
+        candidate_status = (
+            BATCH_ITEM_STATUS_FOUND
+            if candidates
+            else BATCH_ITEM_STATUS_EMPTY
+        )
+        searched_batch = update_batch_item_status(
+            batch,
+            item.item_id,
+            candidate_status,
+        )
+        searched_item = next(
+            updated
+            for updated in searched_batch.items
+            if updated.item_id == item.item_id
+        )
+        applied_obj, warnings = _preference_application_for_item(
+            item.raw_title, parse_result, preferences
+        )
+        applied, hits, warnings = _serialize_preference_application(
+            applied_obj, warnings
+        )
+        review = build_review_metadata(
+            raw_title=item.raw_title,
+            parse_result=parse_result,
+            candidates=candidates,
+            preference_warnings=warnings,
+            status=candidate_status,
+        )
+        serialized = _serialize_batch_parse_result(
+            searched_item,
+            parse_result,
+            candidates=candidates,
+            applied_preferences=applied,
+            preference_hits=hits,
+            preference_warnings=warnings,
+            needs_user_review=review.needs_user_review,
+            review_hints=review.review_hints,
+            enhanced_search_queries=enhanced_queries,
+            attempted_queries=_serialize_attempted_queries(parse_result, searched),
+        )
+        serialized_items.append(serialized)
+        yield _item_event(serialized, len(serialized_items), total)
+
+    yield {
+        "kind": "result",
+        "result": {
             "batch_id": batch.batch_id,
             "raw_input": batch.raw_input,
             "items": serialized_items,
-        }
+        },
+    }
+
+
+def _sse_frame(event: str, data: dict[str, object]) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _accepts_event_stream() -> bool:
+    """True when the client asked for the streaming representation."""
+    return request.accept_mimetypes["text/event-stream"] > 0
+
+
+def _batch_parse_event_stream(
+    raw_input: str, storage_dir: str | None
+) -> Iterator[str]:
+    """SSE framing for the per-item progress contract (Issue 112)."""
+    try:
+        for event in iter_batch_parse_events(raw_input, storage_dir):
+            if event.get("kind") == "item":
+                yield _sse_frame(
+                    "item",
+                    {
+                        "completed": event["completed"],
+                        "total": event["total"],
+                        "item": event["item"],
+                    },
+                )
+            else:
+                yield _sse_frame("result", {"ok": True, "result": event["result"]})
+    except Stage1Error as exc:
+        error_data: dict[str, object] = {"failed_step": exc.failed_step}
+        if exc.details:
+            error_data["details"] = exc.details
+        yield _sse_frame(
+            "error",
+            failed_envelope(exc.error_type, exc.message, error_data),
+        )
+    except Exception:
+        # Never emit a traceback or upstream detail; the frame carries only the
+        # shared sanitized internal-error envelope.
+        yield _sse_frame(
+            "error",
+            failed_envelope("internal_server_error", "A server error occurred."),
+        )
+
+
+@class_route(api_blueprint, "/api/v1/batches/parse", methods=["POST"])
+class BatchParseView(PostView):
+    """批量解析。默认返回缓冲 JSON；``Accept: text/event-stream`` 时改为逐部进度流。
+
+    同一个操作、同一份输入与同一份最终批次结果：流式表示只是把每部完成的
+    进度提前推送，不引入第二套契约、持久任务或取消/续接语义。
+    """
+
+    request_validator_model = BatchParsePayload
+
+    def post(self, *args: Any, **kwargs: Any) -> Any:
+        if not _accepts_event_stream():
+            return super().post(*args, **kwargs)
+        self._validate_request_data(kwargs)
+        payload = self.request_validator_model
+        assert isinstance(payload, BatchParsePayload)
+        # 输入错误在开始流之前以普通 JSON envelope 返回。
+        _validate_batch_raw_input(payload.raw_input)
+        _storage_dir(payload.storage_dir)
+        return Response(
+            stream_with_context(
+                _batch_parse_event_stream(payload.raw_input, payload.storage_dir)
+            ),
+            mimetype="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, BatchParsePayload)
+        result: dict[str, object] | None = None
+        for event in iter_batch_parse_events(
+            self.request_validator_model.raw_input,
+            self.request_validator_model.storage_dir,
+        ):
+            if event.get("kind") != "result":
+                continue
+            payload = event.get("result")
+            assert isinstance(payload, dict)
+            result = payload
+        assert result is not None
+        return result
 
 
 def _batch_item_save_confirm_error(

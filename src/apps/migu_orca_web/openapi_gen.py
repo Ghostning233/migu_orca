@@ -1367,6 +1367,26 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             },
         },
         "success": BatchParseResultDTO,
+        "extra_success_content": {
+            "text/event-stream": {
+                "schema": {"type": "string"},
+                "example": (
+                    "event: item\ndata: {\"completed\": 1, \"total\": 12, \"item\": {\"item_id\": \"item-1\","
+                    " \"raw_title\": \"示例\", \"status\": \"FOUND\"}}\n\n"
+                    "event: result\ndata: {\"ok\": true, \"result\": {\"batch_id\": \"batch-1\","
+                    " \"raw_input\": \"示例\", \"items\": []}}\n\n"
+                ),
+            }
+        },
+        "description": (
+            "Issue 112：`Accept: text/event-stream` 时同一操作改为 SSE 逐部进度流："
+            "每个 FOUND／EMPTY／FAILED 条目真正完成时推送一个 item 事件"
+            "（completed/total/item），最后一个 result 事件给出与默认 JSON 表示完全"
+            "一致的 {batch_id, raw_input, items}。没有持久任务、取消或续接语义：事件只"
+            "存在于本次请求生命周期，刷新或关闭浏览器后需重新搜索，也不承诺服务端停止"
+            "工作。输入错误在开始流之前仍以普通 JSON 失败 envelope 返回；中途失败以 "
+            "error 事件结束，客户端不得把未收到 result 的批次当作已完成。"
+        ),
         "errors": {
             "400": {
                 "validation_error": "请至少输入一个番剧名称",
@@ -1533,8 +1553,14 @@ def _operation(entry: dict[str, Any], method: str, path: str) -> dict[str, Any]:
         },
     }
     op["x-lifecycle"] = lifecycle_for(method, path.replace("{", "<").replace("}", ">"))
-    if entry.get("binary"):
+    if entry.get("responses"):
+        # Explicit 200 response (e.g. the binary poster endpoint).
         op["responses"] = entry["responses"]
+    extra_content = entry.get("extra_success_content")
+    if extra_content:
+        # Additional representations of the same successful operation (Issue
+        # 112: the batch parse SSE progress stream).
+        op["responses"]["200"]["content"].update(extra_content)
     parameters = list(entry.get("parameters", []))
     if parameters:
         op["parameters"] = parameters

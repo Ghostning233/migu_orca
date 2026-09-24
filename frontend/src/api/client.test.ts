@@ -251,3 +251,108 @@ describe('default timeout constant (US-199)', () => {
     expect(DEFAULT_TIMEOUT_MS).toBe(15_000)
   })
 })
+
+// Issue 112: the batch parse progress stream. The client consumes
+// `text/event-stream` frames as they arrive and only treats the final `result`
+// frame as success; a partial stream is never a completed batch.
+function sseResponse(chunks: string[]) {
+  const encoder = new TextEncoder()
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(encoder.encode(chunk))
+      controller.close()
+    },
+  })
+  return new Response(stream, {
+    status: 200,
+    headers: { 'Content-Type': 'text/event-stream' },
+  })
+}
+
+const itemFrame = (completed: number, total: number) =>
+  `event: item\ndata: ${JSON.stringify({ completed, total, item: { item_id: `item-${completed}` } })}\n\n`
+
+const resultFrame = (result: unknown) =>
+  `event: result\ndata: ${JSON.stringify({ ok: true, result })}\n\n`
+
+const errorFrame = (errorType: string, message: string) =>
+  `event: error\ndata: ${JSON.stringify({ ok: false, error_type: errorType, error_message: message })}\n\n`
+
+describe('apiRequest event-stream consumption (Issue 112)', () => {
+  it('forwards item frames and resolves the final result frame', async () => {
+    fetchMock.mockResolvedValue(
+      sseResponse([itemFrame(1, 3), itemFrame(2, 3), itemFrame(3, 3), resultFrame({ batch_id: 'batch-1', items: [] })]),
+    )
+    const frames: Array<{ event: string; data: Record<string, unknown> }> = []
+
+    const result = await apiRequest<{ batch_id: string }>('POST', '/api/v1/batches/parse', {
+      body: { raw_input: '甲\n乙\n丙' },
+      accept: 'text/event-stream',
+      onEvent: (event) => frames.push(event),
+    })
+
+    expect(result).toEqual({ batch_id: 'batch-1', items: [] })
+    expect(frames.filter((frame) => frame.event === 'item').map((frame) => frame.data.completed)).toEqual([1, 2, 3])
+    const [, init] = fetchMock.mock.calls[0] ?? []
+    expect((init?.headers as Record<string, string>)['Accept']).toBe('text/event-stream')
+  })
+
+  it('reassembles a frame split across chunk boundaries', async () => {
+    fetchMock.mockResolvedValue(
+      sseResponse(['event: it', 'em\ndata: {"completed":1,"total":1,"item":{}}\n', '\nevent: result\ndata: {"ok":true,"result":{"batch_id":"b"}}\n\n']),
+    )
+    const frames: string[] = []
+
+    const result = await apiRequest<{ batch_id: string }>('POST', '/api/v1/batches/parse', {
+      accept: 'text/event-stream',
+      onEvent: (event) => frames.push(event.event),
+    })
+
+    expect(result).toEqual({ batch_id: 'b' })
+    expect(frames).toEqual(['item', 'result'])
+  })
+
+  it('rejects with the envelope error carried by an error frame', async () => {
+    fetchMock.mockResolvedValue(
+      sseResponse([itemFrame(1, 2), errorFrame('internal_server_error', 'A server error occurred.')]),
+    )
+
+    const error = await apiRequest('POST', '/api/v1/batches/parse', {
+      accept: 'text/event-stream',
+      onEvent: () => {},
+    }).catch((caught: unknown) => caught)
+
+    expect(isApiError(error)).toBe(true)
+    if (isApiError(error)) {
+      expect(error.type).toBe('internal_server_error')
+      expect(error.message).toBe('A server error occurred.')
+    }
+  })
+
+  it('never treats a stream without a result frame as success', async () => {
+    fetchMock.mockResolvedValue(sseResponse([itemFrame(1, 2)]))
+
+    const error = await apiRequest('POST', '/api/v1/batches/parse', {
+      accept: 'text/event-stream',
+      onEvent: () => {},
+    }).catch((caught: unknown) => caught)
+
+    expect(isApiError(error)).toBe(true)
+    if (isApiError(error)) {
+      expect(error.type).toBe('stream_incomplete')
+    }
+  })
+
+  it('still accepts a plain JSON envelope when the server buffers the response', async () => {
+    // Fixtures and older deployments may answer the same operation with the
+    // buffered JSON representation; it carries the same final batch result.
+    fetchMock.mockResolvedValue(jsonResponse({ ok: true, result: { batch_id: 'batch-json', items: [] } }))
+
+    const result = await apiRequest<{ batch_id: string }>('POST', '/api/v1/batches/parse', {
+      accept: 'text/event-stream',
+      onEvent: () => {},
+    })
+
+    expect(result).toEqual({ batch_id: 'batch-json', items: [] })
+  })
+})

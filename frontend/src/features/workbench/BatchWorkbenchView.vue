@@ -114,7 +114,15 @@ const props = withDefaults(defineProps<{ rawInput?: string; hideInput?: boolean 
 const emit = defineEmits<{
   (event: 'update:rawInput', value: string): void
   (event: 'restore-search-focus'): void
+  /** Issue 112: the whole batch finished and a stable result is on screen. */
+  (event: 'parse-settled'): void
 }>()
+
+/** Issue 112: one real per-item completion, as reported by the server stream. */
+export interface BatchParseProgress {
+  completed: number
+  total: number
+}
 
 // The selected candidate is a display-only, in-memory projection. It is set
 // only from the candidate the user clicked and is never reconstructed from a
@@ -597,7 +605,7 @@ function syncBatchIdToUrl(batchIdValue: string): void {
   }
 }
 
-async function parseBatch(): Promise<void> {
+async function parseBatch(onProgress?: (progress: BatchParseProgress) => void): Promise<void> {
   if (parseLoading.value) return
   if (saveOperation.value || savingItemIds.value.size > 0 || saveInFlight.value || draftCreateItemIds.value.size > 0) {
     notification.error('批量审核处理中', '批量保存结果待核验，请先完成当前操作。')
@@ -635,9 +643,21 @@ async function parseBatch(): Promise<void> {
   loadingMessage.value = `正在逐项搜索 ${count} 个批量条目的 MiKan 候选；整体结果将在批量完成后统一展示，较大的批量可能需要数分钟，请耐心等待。`
   try {
     const payload = buildBatchParsePayload(rawInput.value, currentStorageDir())
+    // Issue 112: the same endpoint answers with an SSE progress stream when the
+    // client asks for it. `onEvent` only fires on real per-item completions —
+    // progress is never estimated from elapsed time.
     const result = await api.post<BatchParseResult>('/api/v1/batches/parse', {
       body: payload,
       timeoutMs: batchParseTimeoutMs(count),
+      accept: 'text/event-stream',
+      onEvent: (event) => {
+        if (event.event !== 'item') return
+        const completed = Number(event.data.completed)
+        const total = Number(event.data.total)
+        if (Number.isFinite(completed) && Number.isFinite(total)) {
+          onProgress?.({ completed, total })
+        }
+      },
     })
     parseResult.value = result
     previousRawInput.value = rawInput.value
@@ -661,6 +681,8 @@ async function parseBatch(): Promise<void> {
     notification.success('批量搜索完成', `已返回 ${items.value.length} 个条目的候选搜索状态。`)
     await nextTick()
     document.querySelector<HTMLElement>('#panel-section-批量工作台')?.focus()
+    // 整批完成、拿到稳定结果后才切到工作台。
+    emit('parse-settled')
   } catch (error) {
     void error
     journey.dispatch({ type: 'parse_failed', error })
@@ -1542,7 +1564,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 
 <template>
   <PanelSection title="批量工作台" class="batch-workbench-panel">
-    <form v-if="!props.hideInput" id="batch-parse-form" class="batch-parse-form" @submit.prevent="parseBatch">
+    <form v-if="!props.hideInput" id="batch-parse-form" class="batch-parse-form" @submit.prevent="parseBatch()">
       <label v-if="!props.hideInput" for="batch-raw-input">批量番剧名称</label>
       <AnimeTitleInput
         ref="inputControl"

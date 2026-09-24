@@ -64,6 +64,10 @@ export interface ApiRequestOptions {
   timeoutMs?: number
   /** True for the binary poster endpoint (no JSON envelope parsing). */
   binary?: boolean
+  /** Explicit `Accept` header (Issue 112: `text/event-stream`). */
+  accept?: string
+  /** Per-frame callback when the server answers with an SSE stream. */
+  onEvent?: (event: ApiStreamEvent) => void
 }
 
 const errorTypeFrom = (status: number, cancelled: boolean, network: boolean): string => {
@@ -181,7 +185,7 @@ function envelopeError(
  * for the poster endpoint). Throws an `ApiError` on failure.
  */
 export async function apiRequest<T = unknown>(method: HttpMethod, path: ApiPath, options: ApiRequestOptions = {}): Promise<T> {
-  const { path: pathParams = {}, query, body, signal, timeoutMs = DEFAULT_TIMEOUT_MS, binary = false } = options
+  const { path: pathParams = {}, query, body, signal, timeoutMs = DEFAULT_TIMEOUT_MS, binary = false, accept, onEvent } = options
 
   const url = interpolatePath(path, pathParams)
   const queryString = buildQuery(query ?? {})
@@ -189,6 +193,9 @@ export async function apiRequest<T = unknown>(method: HttpMethod, path: ApiPath,
   const headers: Record<string, string> = {}
   if (body !== undefined && !binary) {
     headers['Content-Type'] = 'application/json'
+  }
+  if (accept) {
+    headers['Accept'] = accept
   }
 
   const controller = new AbortController()
@@ -218,6 +225,11 @@ export async function apiRequest<T = unknown>(method: HttpMethod, path: ApiPath,
     }
 
     const contentType = response.headers.get('content-type') || ''
+    if (contentType.includes('text/event-stream') && response.body) {
+      // Issue 112: the batch parse progress stream. Frames resolve to the
+      // final `result` payload; a stream without one is never a success.
+      return (await consumeEventStream<T>(response, onEvent)) as T
+    }
     let payload: { ok?: unknown; result?: unknown; error_type?: unknown; error_message?: unknown; error_data?: unknown } | null = null
     if (contentType.includes('application/json')) {
       payload = await safeJson(response)
@@ -229,44 +241,54 @@ export async function apiRequest<T = unknown>(method: HttpMethod, path: ApiPath,
     }
     return payload.result as T
   } catch (error) {
-    if (isApiError(error)) {
-      // Already-normalized transport error (envelope failure, non-JSON body,
-      // aborted/network/timeout) — rethrow as-is.
-      throw error
-    }
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      // Timeout and explicit cancellation share the abort path; the caller
-      // distinguishes via signal state if needed.
-      const cancelled = Boolean(signal?.aborted)
-      throw {
-        type: cancelled ? 'request_cancelled' : 'request_timeout',
-        message: cancelled ? '请求已取消' : '请求超时，请稍后重试',
-        status: 0,
-        details: null,
-        cancelled,
-        network: false,
-        nonJson: false,
-        httpError: false,
-      } satisfies ApiError
-    }
-    if (error instanceof TypeError) {
-      // fetch rejects with TypeError on network failures (offline/DNS/refused).
-      throw {
-        type: 'network_error',
-        message: '网络请求失败，请检查网络后重试',
-        status: 0,
-        details: null,
-        cancelled: false,
-        network: true,
-        nonJson: false,
-        httpError: false,
-      } satisfies ApiError
-    }
-    throw toApiError(error)
+    throw transportError(error, signal)
   } finally {
     clearTimeout(timeoutId)
     signal?.removeEventListener('abort', cancel)
   }
+}
+
+/**
+ * Normalize any transport failure into the shared `ApiError` shape.
+ *
+ * Shared by the buffered request and the SSE stream so a timeout, an explicit
+ * cancellation and a network failure always classify identically.
+ */
+function transportError(error: unknown, signal?: AbortSignal): ApiError {
+  if (isApiError(error)) {
+    // Already-normalized transport error (envelope failure, non-JSON body,
+    // aborted/network/timeout) — rethrow as-is.
+    return error
+  }
+  if (error instanceof DOMException && error.name === 'AbortError') {
+    // Timeout and explicit cancellation share the abort path; the caller
+    // distinguishes via signal state if needed.
+    const cancelled = Boolean(signal?.aborted)
+    return {
+      type: cancelled ? 'request_cancelled' : 'request_timeout',
+      message: cancelled ? '请求已取消' : '请求超时，请稍后重试',
+      status: 0,
+      details: null,
+      cancelled,
+      network: false,
+      nonJson: false,
+      httpError: false,
+    }
+  }
+  if (error instanceof TypeError) {
+    // fetch rejects with TypeError on network failures (offline/DNS/refused).
+    return {
+      type: 'network_error',
+      message: '网络请求失败，请检查网络后重试',
+      status: 0,
+      details: null,
+      cancelled: false,
+      network: true,
+      nonJson: false,
+      httpError: false,
+    }
+  }
+  return toApiError(error)
 }
 
 /** Parse JSON safely; returns null for non-JSON/unparseable bodies. */
@@ -307,4 +329,88 @@ export const api = {
       path: { ...(options?.path ?? {}), key },
       binary: true,
     }),
+}
+
+/** One server-sent event frame (Issue 112). */
+export interface ApiStreamEvent {
+  /** SSE event name (`item`, `result`, `error`). */
+  event: string
+  /** Parsed JSON payload of the frame. */
+  data: Record<string, unknown>
+}
+
+/** Parse one SSE block into an event name and JSON payload (null if unusable). */
+function parseSseFrame(block: string): ApiStreamEvent | null {
+  let name = ''
+  const dataLines: string[] = []
+  for (const line of block.split('\n')) {
+    if (line.startsWith('event:')) name = line.slice(6).trim()
+    else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim())
+  }
+  if (!name || !dataLines.length) return null
+  try {
+    const parsed: unknown = JSON.parse(dataLines.join('\n'))
+    if (!parsed || typeof parsed !== 'object') return null
+    return { event: name, data: parsed as Record<string, unknown> }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Consume a `text/event-stream` response (Issue 112).
+ *
+ * Resolves with the `result` payload of the final `result` frame. An `error`
+ * frame, or a stream that ends without a `result`, rejects with the normalized
+ * failure shape, so a partial batch is never mistaken for a completed one.
+ * Frames reach `onEvent` as soon as the server flushes them: progress is never
+ * estimated from elapsed time.
+ */
+async function consumeEventStream<T>(
+  response: Response,
+  onEvent?: (event: ApiStreamEvent) => void,
+): Promise<T> {
+  const reader = response.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let result: unknown
+  let sawResult = false
+  let streamError: ApiError | null = null
+
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let boundary = buffer.indexOf('\n\n')
+    while (boundary >= 0) {
+      const block = buffer.slice(0, boundary)
+      buffer = buffer.slice(boundary + 2)
+      const frame = parseSseFrame(block)
+      if (frame) {
+        onEvent?.(frame)
+        if (frame.event === 'result') {
+          result = frame.data.result
+          sawResult = true
+        } else if (frame.event === 'error') {
+          streamError = envelopeError(response.status, frame.data)
+        }
+      }
+      boundary = buffer.indexOf('\n\n')
+    }
+  }
+
+  if (streamError) throw streamError
+  if (!sawResult) {
+    throw {
+      type: 'stream_incomplete',
+      message: '批量进度流提前结束，请重新搜索',
+      status: 0,
+      details: null,
+      cancelled: false,
+      network: false,
+      nonJson: false,
+      httpError: false,
+    } satisfies ApiError
+  }
+  return result as T
 }

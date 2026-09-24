@@ -81,6 +81,11 @@ const singleSearchForm = ref<InstanceType<typeof SingleAnimeSearchForm> | null>(
 const batchInput = ref<InstanceType<typeof AnimeTitleInput> | null>(null)
 const batchWorkbench = ref<InstanceType<typeof BatchWorkbenchView> | null>(null)
 const batchSearchSubmitting = ref(false)
+// Issue 112：逐部进度只来自服务端真实完成事件；搜索期间留在首屏，
+// 整批拿到稳定结果后才切到工作台。
+const batchProgress = ref<{ completed: number; total: number } | null>(null)
+const batchSearchSettled = ref(false)
+const batchWorkbenchScreen = ref<HTMLElement | null>(null)
 const selections = ref<Record<AnimeMode, { start: number; end: number }>>({
   single: { start: 0, end: 0 },
   batch: { start: 0, end: 0 },
@@ -122,11 +127,28 @@ const batchSearchDisabled = computed(() => batchSearchSubmitting.value || Boolea
 async function submitBatchSearch(): Promise<void> {
   if (batchSearchDisabled.value) return
   batchSearchSubmitting.value = true
+  batchSearchSettled.value = false
+  // 进度条按输入部数分段，从 0 开始；只有真实完成事件才会推进。
+  batchProgress.value = { completed: 0, total: batchCount.value }
   try {
-    await batchWorkbench.value?.parseBatch()
+    await batchWorkbench.value?.parseBatch((progress) => {
+      batchProgress.value = progress
+    })
   } finally {
     batchSearchSubmitting.value = false
+    batchProgress.value = null
   }
+}
+
+/** Issue 112：整批完成、拿到稳定结果后才把工作台带入视野并聚焦。 */
+function onBatchParseSettled(): void {
+  batchSearchSettled.value = true
+  void nextTick(() => {
+    batchWorkbenchScreen.value?.scrollIntoView?.({
+      behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+      block: 'start',
+    })
+  })
 }
 
 /** A started search that is no longer in flight and produced no candidates. */
@@ -735,20 +757,40 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
         当前 {{ batchCount }} 部；可输入 1～36 部。{{ batchValidationError || '输入有效，可以开始搜索。' }}
       </p>
       <p v-if="batchValidationError" id="batch-input-validation" class="field-error" role="alert">{{ batchValidationError }}</p>
+      <!-- Issue 112：按实际完成部数推进的分段进度；不做时间估算。 -->
+      <div v-if="batchProgress" id="batch-search-progress" class="batch-search-progress">
+        <p class="batch-progress-label" role="status" aria-live="polite">
+          正在逐部搜索：已完成 {{ batchProgress.completed }} / {{ batchProgress.total }} 部
+        </p>
+        <ol class="batch-progress-track" aria-hidden="true">
+          <li
+            v-for="index in batchProgress.total"
+            :key="index"
+            class="batch-progress-segment"
+            :class="{ 'is-complete': index <= batchProgress.completed }"
+          ></li>
+        </ol>
+        <p class="field-help" id="batch-progress-note">
+          进度只保留在当前页面：刷新或关闭后需要重新搜索；服务端请求不因此被取消。
+        </p>
+      </div>
       <div class="notification-actions">
         <BaseButton id="batch-parse-submit" type="submit" variant="primary" size="lg" :loading="batchSearchSubmitting" :disabled="batchSearchDisabled">
           搜索候选合集
         </BaseButton>
       </div>
     </form>
-    <BatchWorkbenchView
-      v-show="mode === 'batch'"
-      ref="batchWorkbench"
-      class="batch-workbench-section"
-      v-model:raw-input="batchQuery"
-      hide-input
-      @restore-search-focus="batchInput?.focusInput()"
-    />
+    <div ref="batchWorkbenchScreen" class="batch-workbench-screen">
+      <BatchWorkbenchView
+        v-show="mode === 'batch'"
+        ref="batchWorkbench"
+        class="batch-workbench-section"
+        v-model:raw-input="batchQuery"
+        hide-input
+        @restore-search-focus="batchInput?.focusInput()"
+        @parse-settled="onBatchParseSettled"
+      />
+    </div>
   </template>
 
   <!-- Issue 110：重新搜索会替换未保存现场时的简短确认。 -->
@@ -1037,6 +1079,43 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 
 .batch-workbench-section {
   margin-top: 1.25rem;
+}
+
+/* Issue 112：批量逐部进度——分段只按真实完成数点亮。 */
+.batch-search-progress {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.batch-progress-label {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+}
+
+.batch-progress-track {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.batch-progress-segment {
+  flex: 1 1 var(--space-3);
+  min-width: var(--space-3);
+  height: var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border);
+}
+
+.batch-progress-segment.is-complete {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
 }
 
 .notification-actions {
