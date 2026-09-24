@@ -230,3 +230,95 @@ def test_retry_save_uses_a_new_key_and_never_replays_the_failed_one(
     assert [item["item_id"] for item in retry_items] == ["item-3"]
     assert retry_items[0]["idempotency_key"]
     assert retry_items[0]["idempotency_key"] != first_keys["item-3"]
+
+
+def _replayed_body() -> str:
+    return json.dumps(
+        {
+            "ok": True,
+            "result": {
+                "batch_id": "batch-114",
+                "results": [
+                    {
+                        "item_id": "item-1",
+                        "outcome": "CONFIRMED",
+                        "request_id": "req-114-a",
+                        "status": "CONFIRMED",
+                        "error_type": None,
+                        "error_message": None,
+                        "tracking_id": "tracking-114-a",
+                        "tracking_ready": True,
+                    },
+                    {
+                        "item_id": "item-2",
+                        "outcome": "failed",
+                        "request_id": None,
+                        "status": None,
+                        "error_type": "draft_replayed",
+                        "error_message": CANARY,
+                        "tracking_id": None,
+                        "tracking_ready": None,
+                    },
+                    {
+                        "item_id": "item-3",
+                        "outcome": "failed",
+                        "request_id": None,
+                        "status": None,
+                        "error_type": "idempotency_conflict",
+                        "error_message": CANARY,
+                        "tracking_id": None,
+                        "tracking_ready": None,
+                    },
+                ],
+                "summary": {"requested": 3, "confirmed": 1, "failed": 2},
+            },
+        },
+        ensure_ascii=False,
+    )
+
+
+def test_replayed_draft_is_marked_already_saved_and_never_offers_regeneration(
+    page: Page, live_server_url: str, storage_dir
+) -> None:
+    """Issue 130：draft_replayed 条目标记为已保存待定位，不给重复保存入口。"""
+    items = _draft_items()
+    _route_parse(page, items)
+    page.route(
+        "**/api/v1/batches/*/save-confirm",
+        lambda route: route.fulfill(
+            status=200, content_type="application/json", body=_replayed_body()
+        ),
+    )
+    set_storage_preferences(page, storage_dir)
+    _goto_batch(page, live_server_url)
+    page.set_viewport_size({"width": 1440, "height": 900})
+    page.fill("#batch-raw-input", "甲S1\n乙S1\n丙S1")
+    page.click("#batch-parse-submit")
+    expect(page.locator(".batch-draft-card")).to_have_count(3)
+    for item_id in ("item-1", "item-2", "item-3"):
+        page.locator(
+            f'.batch-draft-card[data-item-id="{item_id}"] input[type="checkbox"]'
+        ).set_checked(True)
+    page.click("#batch-accept-submit")
+    page.locator(".confirm-dialog .primary-button").click()
+    expect(page.locator("#batch-save-summary")).to_be_visible()
+
+    replayed = page.locator('.batch-draft-card[data-item-id="item-2"]')
+    expect(replayed.locator(".batch-card-status")).to_contain_text("已保存，待定位")
+    expect(replayed.locator("#batch-replayed-item-2")).to_contain_text("已保存，待定位")
+    expect(replayed.locator("#batch-replayed-item-2")).to_contain_text("请勿重新添加同一部")
+    # 不再提供任何重复保存或重新生成入口。
+    expect(replayed.locator("#batch-regenerate-draft-item-2")).to_have_count(0)
+    expect(replayed.locator("#batch-retry-save-item-2")).to_have_count(0)
+    expect(replayed.locator("#batch-retry-accept-item-2")).to_have_count(0)
+    expect(replayed.locator('input[type="checkbox"]')).to_be_disabled()
+    expect(replayed.locator('input[type="checkbox"]')).not_to_be_checked()
+
+    # 成功项保持成功，另一条普通失败仍按自己的原因处理。
+    expect(page.locator('.batch-draft-card[data-item-id="item-1"] .batch-card-status')).to_contain_text(
+        "已确认"
+    )
+    expect(page.locator("#batch-retry-save-item-3")).to_have_text("重试保存")
+    # 冻结条目与成功项都不再参与保存：待保存范围只剩那条可重试的失败项。
+    expect(page.locator("#batch-accept-submit")).to_contain_text("保存并确认 1 部")
+    assert CANARY not in page.locator("body").inner_text()

@@ -494,8 +494,8 @@ describe('batch save recovery actions (Issue 114)', () => {
     expect(batchSaveRecoveryAction({ status: 'SAVED_PENDING_CONFIRM' })).toBe('RETRY_CONFIRM')
     // 响应未知：先核验，不给普通重试保存。
     expect(batchSaveRecoveryAction({ status: 'RESPONSE_UNKNOWN' })).toBe('VERIFY_RESULT')
-    // 草案失效／版本冲突：重新生成草案。
-    for (const errorType of ['draft_expired', 'draft_evicted', 'draft_replayed', 'draft_revision_conflict']) {
+    // 草案失效／版本冲突：重新生成草案（draft_replayed 是「已保存」，不在此列）。
+    for (const errorType of ['draft_expired', 'draft_evicted', 'draft_revision_conflict']) {
       expect(batchSaveRecoveryAction({ status: 'FOUND', errorType })).toBe('REGENERATE_DRAFT')
     }
     // 可再次保存的普通失败：重试保存。
@@ -531,5 +531,20 @@ describe('batch save recovery actions (Issue 114)', () => {
     expect(batchSaveErrorInvalidatesDraft('draft_revision_conflict')).toBe(true)
     expect(batchSaveErrorInvalidatesDraft('save_confirm_failed')).toBe(false)
     expect(batchSaveErrorInvalidatesDraft(null)).toBe(false)
+    // Issue 130：draft_replayed 表示草案已经保存，不是失效，绝不能引导重新生成。
+    expect(batchSaveErrorInvalidatesDraft('draft_replayed')).toBe(false)
+  })
+
+  it('freezes a replayed draft as already saved without a retry entry (Issue 130)', () => {
+    // 已保存是确定事实；待核验的是确认与定位状态。
+    expect(batchSaveRecoveryAction({ status: 'FOUND', errorType: 'draft_replayed' })).toBe('LOCATE_SAVED')
+    expect(batchSaveRecoveryAction({ status: 'DRAFT', errorType: 'draft_replayed' })).toBe('LOCATE_SAVED')
+    expect(batchSaveRecoveryLabel('LOCATE_SAVED')).toBe('已保存，待定位')
+    // 它不给「重新生成草案」「重试保存」，也不伪装成普通未知结果。
+    expect(batchSaveRecoveryAction({ status: 'FOUND', errorType: 'draft_replayed' })).not.toBe(
+      'REGENERATE_DRAFT',
+    )
+    expect(batchSaveRecoveryAction({ status: 'FOUND', errorType: 'draft_replayed' })).not.toBe('RETRY_SAVE')
+    expect(batchSaveRecoveryAction({ status: 'RESPONSE_UNKNOWN' })).toBe('VERIFY_RESULT')
   })
 })

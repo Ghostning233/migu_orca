@@ -1502,6 +1502,43 @@ def test_golden_batch_save_confirm_same_key_retry_replays_same_request(
     assert len(list((tmp_path / "storage" / "requests").glob("*.json"))) == 1
 
 
+def test_golden_batch_save_confirm_different_key_replay_is_per_item_draft_replayed(
+    client: FlaskClient, tmp_path: Path
+) -> None:
+    """Issue 130: 已保存草案配新幂等键只得到逐条 draft_replayed。
+
+    同一绑定用同一幂等键重放取回原结果；同一草案换新键不得再保存一次，也不得
+    返回一个可以被前端当作「可重新生成」的误导性失败。逐条结果里没有可安全
+    关联的公开方案标识，且磁盘上仍只有一份方案。
+    """
+    (item,) = _issue_batch_drafts(client, ["芙莉莲"])
+    first = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={"batch_id": "batch-1", "items": [item], "storage_dir": "storage"},
+    )
+    assert first.status_code == 200
+    first_request_id = first.get_json()["result"]["results"][0]["request_id"]
+
+    replayed_item = {**item, "idempotency_key": f"{item['idempotency_key']}-other"}
+    replayed = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={"batch_id": "batch-1", "items": [replayed_item], "storage_dir": "storage"},
+    )
+    assert replayed.status_code == 200
+    payload = replayed.get_json()
+    row = payload["result"]["results"][0]
+    assert row["outcome"] == "failed"
+    assert row["error_type"] == "draft_replayed"
+    # 没有可安全定位的方案标识，也不泄露已消费的草案能力。
+    assert not row["request_id"]
+    assert str(item["draft_id"]) not in str(payload)
+    assert first_request_id not in str(payload)
+    # 幂等键只进请求体，绝不回显。
+    assert str(replayed_item["idempotency_key"]) not in str(payload)
+    # 仍然只有一份本地方案。
+    assert len(list((tmp_path / "storage" / "requests").glob("*.json"))) == 1
+
+
 def test_golden_batch_save_confirm_confirm_failure_is_per_item_sanitized(
     monkeypatch: pytest.MonkeyPatch,
     client: FlaskClient,
