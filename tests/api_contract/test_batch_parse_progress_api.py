@@ -348,3 +348,38 @@ def test_batch_parse_rejects_event_stream_with_zero_quality(
 
     assert response.headers["Content-Type"].startswith("application/json")
     assert response.get_json()["ok"] is True
+
+
+# ---------------------------------------------------------------------------
+# Issue 132: explicit SSE event shapes in the formal contract
+# ---------------------------------------------------------------------------
+
+def test_openapi_documents_the_three_sse_event_shapes() -> None:
+    """正式契约明确 item／result／error 三类事件形状，且 item 与 JSON 表示同源。"""
+    from apps.migu_orca_web.openapi_gen import generate_openapi
+
+    spec = generate_openapi()
+    content = spec["paths"]["/api/v1/batches/parse"]["post"]["responses"]["200"]["content"]
+    assert set(content) == {"application/json", "text/event-stream"}
+
+    stream = content["text/event-stream"]
+    assert stream["schema"]["type"] == "string"
+    events = stream["x-sse-events"]
+    assert set(events) == {"item", "result", "error"}
+
+    # item：逐部完成事件，形状固定且不允许额外字段。
+    assert events["item"]["required"] == ["completed", "total", "item"]
+    assert events["item"]["additionalProperties"] is False
+    assert events["item"]["properties"]["total"]["maximum"] == 36
+    assert events["item"]["properties"]["completed"]["minimum"] == 1
+
+    # result／error：终态与失败帧分别有固定必填字段。
+    assert events["result"]["required"] == ["ok", "result"]
+    assert events["result"]["properties"]["ok"]["const"] is True
+    assert events["error"]["required"] == ["ok", "error_type", "error_message"]
+    assert events["error"]["properties"]["ok"]["const"] is False
+
+    # item 载荷与默认 JSON 表示的同一条目 schema 完全一致，避免两套形状漂移。
+    json_item = content["application/json"]["schema"]["properties"]["result"]["properties"]["items"]["items"]
+    assert events["item"]["properties"]["item"] == json_item
+    assert events["result"]["properties"]["result"] == content["application/json"]["schema"]["properties"]["result"]

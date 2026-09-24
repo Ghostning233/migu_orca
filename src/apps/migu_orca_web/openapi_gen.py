@@ -1367,19 +1367,10 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             },
         },
         "success": BatchParseResultDTO,
-        "extra_success_content": {
-            "text/event-stream": {
-                "schema": {"type": "string"},
-                "example": (
-                    "event: item\ndata: {\"completed\": 1, \"total\": 12, \"item\": {\"item_id\": \"item-1\","
-                    " \"raw_title\": \"示例\", \"status\": \"FOUND\"}}\n\n"
-                    "event: result\ndata: {\"ok\": true, \"result\": {\"batch_id\": \"batch-1\","
-                    " \"raw_input\": \"示例\", \"items\": []}}\n\n"
-                ),
-            }
-        },
+        "sse_progress": True,
         "description": (
-            "Issue 112：`Accept: text/event-stream` 时同一操作改为 SSE 逐部进度流："
+            "Issue 112/129/132：只有显式 `Accept: text/event-stream` 时才把同一操作改为 SSE 逐部进度流"
+            "（通配或未设置 Accept 仍是默认 JSON 表示）；"
             "每个 FOUND／EMPTY／FAILED 条目真正完成时推送一个 item 事件"
             "（completed/total/item），最后一个 result 事件给出与默认 JSON 表示完全"
             "一致的 {batch_id, raw_input, items}。没有持久任务、取消或续接语义：事件只"
@@ -1512,6 +1503,76 @@ def _path_sort_key(path: str) -> tuple[int, str]:
     return (1 if has_params else 0, path)
 
 
+def _sse_progress_content(entry: dict[str, Any]) -> dict[str, Any]:
+    """Explicit shapes for the batch parse SSE frames (Issue 132).
+
+    The item payload is the *same* schema the JSON envelope uses for one batch
+    item, so the streaming and buffered representations cannot drift; the
+    result payload reuses the buffered result schema. ``x-sse-events`` is the
+    machine-readable part of the contract (SSE frames themselves are a string
+    stream), so the generated client and its consumers can distinguish
+    ``item`` / ``result`` / ``error`` instead of guessing from a wide object.
+    """
+    envelope = _envelope(entry.get("success"))
+    result_schema = envelope["properties"]["result"]
+    item_schema = result_schema["properties"]["items"]["items"]
+    return {
+        "text/event-stream": {
+            "schema": {
+                "type": "string",
+                "description": "SSE 帧流：每帧由 `event: <item|result|error>` 与 `data: <JSON>` 两行组成，以空行结束；载荷形状见 x-sse-events。",
+            },
+            "x-sse-events": {
+                "item": {
+                    "type": "object",
+                    "required": ["completed", "total", "item"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "completed": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "已真正完成的部数；FOUND／EMPTY／FAILED 都算该部完成。",
+                        },
+                        "total": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 36,
+                            "description": "本次批量输入的非空行数（1～36）。",
+                        },
+                        "item": item_schema,
+                    },
+                },
+                "result": {
+                    "type": "object",
+                    "required": ["ok", "result"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "ok": {"type": "boolean", "const": True},
+                        "result": result_schema,
+                    },
+                },
+                "error": {
+                    "type": "object",
+                    "required": ["ok", "error_type", "error_message"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "ok": {"type": "boolean", "const": False},
+                        "error_type": {"type": "string"},
+                        "error_message": {"type": "string"},
+                        "error_data": {"type": "object"},
+                    },
+                },
+            },
+            "example": (
+                "event: item\ndata: {\"completed\": 1, \"total\": 12, \"item\": {\"item_id\": \"item-1\","
+                " \"raw_title\": \"示例\", \"status\": \"FOUND\"}}\n\n"
+                "event: result\ndata: {\"ok\": true, \"result\": {\"batch_id\": \"batch-1\","
+                " \"raw_input\": \"示例\", \"items\": []}}\n\n"
+            ),
+        }
+    }
+
+
 def _operation_id(method: str, path: str) -> str:
     """Derive a stable, unique camelCase operationId from method + path.
 
@@ -1557,6 +1618,8 @@ def _operation(entry: dict[str, Any], method: str, path: str) -> dict[str, Any]:
         # Explicit 200 response (e.g. the binary poster endpoint).
         op["responses"] = entry["responses"]
     extra_content = entry.get("extra_success_content")
+    if entry.get("sse_progress"):
+        extra_content = _sse_progress_content(entry)
     if extra_content:
         # Additional representations of the same successful operation (Issue
         # 112: the batch parse SSE progress stream).

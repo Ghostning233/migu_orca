@@ -23,6 +23,7 @@ import {
   batchSaveErrorInvalidatesDraft,
   batchSaveRecoveryAction,
   batchSaveRecoveryLabel,
+  readBatchParseItemEvent,
   batchSaveConfirmSucceeded,
   batchSaveConfirmOutcomeSummary,
   batchSaveConfirmNextFocus,
@@ -531,5 +532,53 @@ describe('batch save recovery actions (Issue 114)', () => {
     expect(batchSaveErrorInvalidatesDraft('draft_revision_conflict')).toBe(true)
     expect(batchSaveErrorInvalidatesDraft('save_confirm_failed')).toBe(false)
     expect(batchSaveErrorInvalidatesDraft(null)).toBe(false)
+  })
+})
+
+describe('batch parse progress event adapter (Issue 132)', () => {
+  it('narrows only a well-formed item event into progress', () => {
+    const progress = readBatchParseItemEvent({
+      event: 'item',
+      data: { completed: 2, total: 3, item: { item_id: 'item-2', raw_title: '乙' } },
+    })
+    expect(progress).toEqual({
+      completed: 2,
+      total: 3,
+      item: { item_id: 'item-2', raw_title: '乙' },
+    })
+  })
+
+  it('never treats result or error frames as per-item progress', () => {
+    expect(
+      readBatchParseItemEvent({
+        event: 'result',
+        data: { ok: true, result: { batch_id: 'batch-1', items: [] } },
+      }),
+    ).toBeNull()
+    expect(
+      readBatchParseItemEvent({
+        event: 'error',
+        data: { ok: false, error_type: 'internal_server_error', error_message: 'x' },
+      }),
+    ).toBeNull()
+  })
+
+  it('fails closed on malformed or out-of-range item payloads', () => {
+    expect(readBatchParseItemEvent({ event: 'item', data: {} })).toBeNull()
+    expect(
+      readBatchParseItemEvent({ event: 'item', data: { completed: 0, total: 3, item: {} } }),
+    ).toBeNull()
+    expect(
+      readBatchParseItemEvent({ event: 'item', data: { completed: 1.5, total: 3, item: {} } }),
+    ).toBeNull()
+    expect(
+      readBatchParseItemEvent({ event: 'item', data: { completed: 1, total: 37, item: {} } }),
+    ).toBeNull()
+    expect(
+      readBatchParseItemEvent({ event: 'item', data: { completed: 1, total: 3, item: null } }),
+    ).toBeNull()
+    expect(
+      readBatchParseItemEvent({ event: 'item', data: { completed: '一', total: 3, item: {} } }),
+    ).toBeNull()
   })
 })

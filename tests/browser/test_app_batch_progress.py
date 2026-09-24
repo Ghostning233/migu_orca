@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from typing import Any
 
 import pytest
@@ -147,3 +148,57 @@ def test_partial_stream_never_enters_the_workbench(
     expect(page.locator("#batch-search-progress")).to_have_count(0)
     # 半批数据不渲染，也不泄露候选地址等原始值。
     assert "mikan.example" not in page.locator("body").inner_text()
+
+
+def test_real_stream_shows_intermediate_progress_before_the_batch_finishes(
+    page: Page,
+    live_server_url: str,
+    storage_dir,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue 132：真实端点上第一部完成、第二部仍在搜索时就显示 1/2。
+
+    用服务端搜索 seam 上的 `threading.Event` 分阶段释放（不是在 route handler
+    里 sleep，也不一次送完全部事件）：第一部事件先到达，断言进度与「仍在首屏、
+    无可审核条目」；释放第二部后才出现终态结果与切屏焦点。
+    """
+    from apps.migu_orca_web import routes_batches
+
+    second_release = threading.Event()
+    second_started = threading.Event()
+
+    def gated_search(search_queries: list[str], mikan_config: Any) -> list[dict[str, object]]:
+        query = search_queries[0] if search_queries else ""
+        if "乙" in query:
+            second_started.set()
+            second_release.wait(timeout=15)
+        return []
+
+    monkeypatch.setattr(routes_batches, "_search_batch_item_candidates", gated_search)
+
+    try:
+        set_storage_preferences(page, storage_dir)
+        page.set_viewport_size({"width": 1440, "height": 900})
+        page.goto(f"{live_server_url}/app/add")
+        page.wait_for_selector("#anime-mode-switch", timeout=10_000)
+        page.click("#anime-mode-batch")
+        page.wait_for_selector("#batch-parse-form", timeout=10_000)
+        page.fill("#batch-raw-input", "甲\n乙")
+        page.click("#batch-parse-submit")
+
+        # 第一部真实完成：进度推进到 1/2，但仍留在搜索首屏且没有可审核条目。
+        progress = page.locator("#batch-search-progress")
+        expect(progress).to_contain_text("已完成 1 / 2 部", timeout=15_000)
+        expect(page.locator(".batch-progress-segment.is-complete")).to_have_count(1)
+        expect(page.locator(".batch-draft-card")).to_have_count(0)
+        expect(page.locator("#panel-section-批量工作台")).not_to_be_in_viewport()
+        assert page.evaluate("() => document.querySelector('.add-anime-screens').scrollTop") <= 100
+        assert second_started.is_set(), "第二部搜索尚未开始"
+
+        # 释放第二部：终态 result 到达后才切屏。
+        second_release.set()
+        expect(page.locator(".batch-draft-card")).to_have_count(2, timeout=15_000)
+        expect(progress).to_have_count(0)
+        expect(page.locator("#panel-section-批量工作台")).to_be_focused()
+    finally:
+        second_release.set()
