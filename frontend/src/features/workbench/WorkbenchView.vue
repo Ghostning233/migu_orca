@@ -31,10 +31,10 @@ import { useNotificationStore } from '@/app/stores/notification'
 import BaseButton from '@/components/forms/BaseButton.vue'
 import BaseInput from '@/components/forms/BaseInput.vue'
 import CheckboxRow from '@/components/forms/CheckboxRow.vue'
+import ConfirmDialog from '@/components/feedback/ConfirmDialog.vue'
 import EmptyState from '@/components/feedback/EmptyState.vue'
 import ErrorState from '@/components/feedback/ErrorState.vue'
 import LoadingState from '@/components/feedback/LoadingState.vue'
-import PanelSection from '@/components/layout/PanelSection.vue'
 
 import CandidateCollectionList from '@/features/workbench/CandidateCollectionList.vue'
 import SingleAnimeReviewPanel from '@/features/workbench/SingleAnimeReviewPanel.vue'
@@ -107,8 +107,6 @@ const searchResult = computed({
     modeSession.value[mode.value].result = value
   },
 })
-const lastSearchQuery = ref('')
-
 /**
  * F4: the initial page is a name input plus the mode switch — no empty result
  * panel before a search. The results panel (and the direct-collection rescue
@@ -166,12 +164,18 @@ watch(
   { immediate: true },
 )
 
-const showSingleHome = computed(
-  () => mode.value === 'single' && !hasResults.value && !draftRequest.value,
+// Issue 110: 单番是同一页面的上下两屏。搜索首屏常驻，候选工作台是第二屏；
+// 「返回搜索首屏」只滚动与聚焦，绝不清空下方未保存的候选现场。
+const showSingleJourney = computed(() => mode.value === 'single')
+const showCandidateScreen = computed(
+  () => mode.value === 'single' && hasResults.value && !draftRequest.value,
 )
-const showLegacyWorkbench = computed(
-  () => mode.value === 'batch',
+const showDraftScreen = computed(
+  () => mode.value === 'single' && Boolean(draftRequest.value && draftId.value),
 )
+const heroScreen = ref<HTMLElement | null>(null)
+const workbenchScreen = ref<HTMLElement | null>(null)
+const confirmDialog = ref<InstanceType<typeof ConfirmDialog> | null>(null)
 // US-343: which candidate owns the in-flight generation, and the sanitized
 // failure that stays beside a candidate after its generation failed.
 const generatingCandidateId = ref<string | null>(null)
@@ -210,27 +214,46 @@ function resetCandidateGenerationState(): void {
   candidateErrors.value = {}
 }
 
-function editSearch(): void {
-  searchResult.value = null
-  lastSearchQuery.value = ''
-  searchError.value = ''
-  selectedCandidate.value = null
-  resetCandidateGenerationState()
+/** Issue 110: 已有候选或未保存草案时，重新搜索会替换现场，需要先确认。 */
+const hasUnsavedSingleWork = computed(() => hasResults.value || draftRequest.value !== null)
+
+/** 尊重缩减动态效果：不做平滑滚动。 */
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  )
+}
+
+function scrollScreenIntoView(element: HTMLElement | null): void {
+  if (!element || typeof element.scrollIntoView !== 'function') return
+  element.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' })
+}
+
+/** 明确按钮或模块外空白滚动都只是回到首屏，不清空第二屏现场。 */
+function backToSearch(): void {
+  scrollScreenIntoView(heroScreen.value)
   void nextTick(() => singleSearchForm.value?.focusInput())
 }
 
-watch(query, (value) => {
-  const normalized = value.trim()
-  if (!searchResult.value || normalized === lastSearchQuery.value) return
-  // A result belongs to the exact title that produced it. Keep the user's
-  // edited input, but remove stale candidates and their one-time confirmations.
-  searchResult.value = null
-  lastSearchQuery.value = ''
-  searchError.value = ''
-  seasonConfirmations.value = {}
-  selectedCandidate.value = null
-  resetCandidateGenerationState()
-})
+/** 搜索入口：先确认是否会替换未保存工作，再真正发起搜索。 */
+async function requestSearch(): Promise<void> {
+  if (singleBusy.value) return
+  if (hasUnsavedSingleWork.value) {
+    const confirmed = await confirmDialog.value?.confirm({
+      title: '重新搜索会清除下方未保存内容',
+      message: '下方未保存的候选或草案修改会被清除，确定重新搜索吗？',
+      confirmLabel: '重新搜索',
+      cancelLabel: '留在此页',
+    })
+    if (!confirmed) return
+  }
+  await searchCandidates()
+}
+
+// Issue 110: 编辑输入不再静默清空第二屏。结果只属于产生它的那次搜索；
+// 真正替换未保存现场的时机是「重新搜索」，由 requestSearch 先确认。
 
 async function changeMode(nextMode: AnimeMode): Promise<void> {
   if (nextMode === mode.value || singleBusy.value) return
@@ -315,7 +338,6 @@ async function searchCandidates(): Promise<void> {
   seasonConfirmations.value = {}
   selectedCandidate.value = null
   resetCandidateGenerationState()
-  lastSearchQuery.value = query.value.trim()
   singleBusy.value = true
   searchLoading.value = true
   try {
@@ -346,7 +368,13 @@ async function searchCandidates(): Promise<void> {
     singleBusy.value = false
     await nextTick()
     if (searchResult.value?.candidates?.length) {
-      document.querySelector<HTMLElement>('#mikan-candidate-search-result .candidate-select')?.focus()
+      // Issue 110：成功后自动进入下方工作台，并把键盘焦点移到结果标题。
+      scrollScreenIntoView(workbenchScreen.value)
+      document.querySelector<HTMLElement>('#candidate-search-heading')?.focus({ preventScroll: true })
+    } else {
+      // 失败或无候选都留在搜索首屏就地恢复；不抢焦点（Stage 42 无障碍保证），
+      // 用户仍停在输入或原控件上，可直接修正后重试。
+      scrollScreenIntoView(heroScreen.value)
     }
   }
 }
@@ -462,7 +490,6 @@ function discardDraft(destination: 'candidates' | 'input'): void {
   resetCandidateGenerationState()
   if (destination === 'input') {
     searchResult.value = null
-    lastSearchQuery.value = ''
     searchError.value = ''
   }
   void nextTick(() => singleSearchForm.value?.focusInput())
@@ -486,114 +513,69 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 </script>
 
 <template>
-  <!-- US-363 (Stage 47 几何基线): 单番初始态是只组织一次搜索任务的居中英雄区。
-       搜索开始前不得渲染结果区、救援面板、候选卡、草案审核区或有效资源数。 -->
-  <div v-if="showSingleHome" class="single-home-hero" :class="{ 'is-searching': searchStarted }">
-    <div class="single-home-intro">
-      <h1 id="workbench-heading" class="workbench-title">添加番剧</h1>
-      <p class="single-home-subtitle">输入番剧名称 → 人工选择真实 MiKan 合集 → 审核并保存确认。</p>
-    </div>
+  <!-- Issue 110：单番使用同一页面的上下两屏（搜索首屏 + 候选工作台）。
+       搜索首屏常驻，第二屏只承载候选／草案；模块内部滚动到边界不触发切屏。 -->
+  <div v-if="showSingleJourney" class="add-anime-screens">
+    <section
+      ref="heroScreen"
+      class="add-screen single-home-hero"
+      :class="{ 'is-searching': searchLoading || (searchStarted && !hasResults) }"
+    >
+      <div class="single-home-intro">
+        <h1 id="workbench-heading" class="workbench-title">添加番剧</h1>
+        <p class="single-home-subtitle">输入番剧名称 → 人工选择真实 MiKan 合集 → 审核并保存确认。</p>
+      </div>
 
-    <AnimeModeSwitch :model-value="mode" :disabled="singleBusy" @update:model-value="changeMode" />
-
-    <SingleAnimeSearchForm
-      ref="singleSearchForm"
-      v-model:query="query"
-      :loading="searchLoading"
-      :disabled="singleBusy"
-      @submit="searchCandidates"
-    />
-
-    <p class="field-help single-home-help" id="mikan-candidate-help">
-      输入番剧标题，从真实 MiKan 搜索候选合集。候选不会自动选择，需手动点击「选择此合集」生成订阅草案。
-    </p>
-    <p v-if="reuseSource" id="reuse-handoff-summary" class="field-help" role="status">
-      已载入复制方案起点：{{ reuseSource.title }}（公开合集编号 {{ reuseSource.mikanBangumiId }}）。请重新搜索并选择真实合集。
-    </p>
-    <p v-if="searchError" id="mikan-candidate-search-error" class="field-error" role="alert">
-      {{ searchError }}
-    </p>
-
-    <ol class="journey-steps single-home-steps" aria-label="添加番剧步骤">
-      <li class="is-current">输入名称</li>
-      <li>选择真实合集</li>
-      <li>审核并保存确认</li>
-    </ol>
-  </div>
-
-  <h1 v-else-if="mode === 'batch'" id="workbench-heading" class="workbench-title">添加番剧</h1>
-
-  <!-- 批量工作台沿用既有面板结构；单番审核态独占图 03 的审核画布，
-       不再把搜索壳层留在身份区之前，避免审核页发生垂直偏移。 -->
-  <PanelSection v-if="showLegacyWorkbench" title="搜索候选合集" class="workbench-panel">
-    <ol class="journey-steps" aria-label="添加番剧步骤">
-      <li class="is-current">输入名称</li>
-      <li>选择真实合集</li>
-      <li>审核并保存确认</li>
-    </ol>
-    <!-- ── single search ──────────────────────────────────────────── -->
-    <AnimeModeSwitch :model-value="mode" :disabled="singleBusy" @update:model-value="changeMode" />
+      <AnimeModeSwitch :model-value="mode" :disabled="singleBusy" @update:model-value="changeMode" />
 
       <SingleAnimeSearchForm
-        v-if="mode === 'single' && !hasResults"
         ref="singleSearchForm"
         v-model:query="query"
         :loading="searchLoading"
         :disabled="singleBusy"
-        @submit="searchCandidates"
+        @submit="requestSearch"
       />
-      <p class="field-help" id="mikan-candidate-help">
+
+      <p class="field-help single-home-help" id="mikan-candidate-help">
         输入番剧标题，从真实 MiKan 搜索候选合集。候选不会自动选择，需手动点击「选择此合集」生成订阅草案。
       </p>
       <p v-if="reuseSource" id="reuse-handoff-summary" class="field-help" role="status">
         已载入复制方案起点：{{ reuseSource.title }}（公开合集编号 {{ reuseSource.mikanBangumiId }}）。请重新搜索并选择真实合集。
       </p>
-      <p v-if="searchError" id="mikan-candidate-search-error" class="field-error" role="alert">
-        {{ searchError }}
-      </p>
-  </PanelSection>
 
-    <!-- ── search results: created by a search, never before one ──────── -->
-    <section
-      v-if="mode === 'single' && !draftRequest && searchStarted"
-      class="search-results-panel"
-      aria-labelledby="candidate-search-heading"
-    >
-      <AnimeModeSwitch
-        class="search-results-mode-switch"
-        :model-value="mode"
-        :disabled="singleBusy"
-        @update:model-value="changeMode"
-      />
-      <div class="candidate-search-summary-row">
-        <h2 id="candidate-search-heading">搜索结果</h2>
-        <p v-if="searchResult && hasResults" class="candidate-search-summary" role="status" aria-live="polite">
-          已搜索「{{ searchResult.query }}」，请选择要审核的真实 MiKan 合集。
-        </p>
-        <div v-if="searchResult && hasResults" class="search-summary-actions">
-          <span class="search-summary-label">搜索摘要</span>
-          <BaseButton id="mikan-edit-search" variant="secondary" @click="editSearch">修改搜索</BaseButton>
-        </div>
-      </div>
+      <!-- 就地反馈：搜索中、失败、无候选都留在搜索首屏，保留输入与下一步操作。 -->
       <div
+        v-if="searchStarted && !hasResults && !draftRequest"
         id="mikan-candidate-search-result"
-        class="candidate-list-wrapper"
+        class="search-feedback"
         aria-live="polite"
         aria-relevant="additions text"
       >
         <LoadingState v-if="searchLoading" :message="`正在搜索「${query}」的 MiKan 候选...`" />
         <ErrorState
           v-else-if="searchError"
+          id="mikan-candidate-search-error"
           title="候选搜索失败"
           :message="searchError"
-          retry-label="重试"
-          @retry="searchCandidates"
         />
         <EmptyState
-          v-else-if="searchResult && !hasResults"
-          message="未找到候选合集。可调整番剧标题后重试，或使用下方直连合集生成订阅草案。"
+          v-else-if="searchResult"
+          message="未找到候选合集。请核对番剧名称或季度后重试，或使用下方直连合集生成订阅草案。"
         />
-        <section v-if="searchSettled && !hasResults" class="candidate-fallback-rescue">
+      </div>
+
+      <template v-if="searchSettled && !hasResults && !draftRequest">
+        <BaseButton
+          id="mikan-search-feedback-action"
+          variant="secondary"
+          :disabled="singleBusy"
+          @click="requestSearch"
+        >
+          {{ searchError ? '重试搜索' : '重新搜索' }}
+        </BaseButton>
+
+        <!-- 直连救援入口默认收起：只有用户主动勾选后才展开表单。 -->
+        <section class="candidate-fallback-rescue">
           <CheckboxRow
             id="mikan-fallback-enabled"
             v-model:checked="fallbackEnabled"
@@ -628,66 +610,105 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
             </div>
           </form>
         </section>
-        <template v-if="searchResult && hasResults">
-          <CandidateCollectionList
-            :candidates="visibleCandidates"
-            :query="searchResult.query"
-            :disabled="searchLoading || (draftLoading && generatingCandidateId === null)"
-            :loading-candidate-id="generatingCandidateId"
-            :candidate-errors="candidateErrors"
-            :confirmed-seasons="seasonConfirmations"
-            @select="generateFromCandidate"
-            @update:confirmed-season="(bangumiId: string, season: number | null) => (seasonConfirmations = { ...seasonConfirmations, [bangumiId]: season })"
-          />
-          <p v-if="hiddenCandidateCount" id="candidate-truncation-note" class="field-help" role="status">
-            搜索结果较多，仅显示前 4 个合集；请先核对关键词，或用更精确的标题缩小范围。
-          </p>
-          <details class="title-parse-summary">
-            <summary>标题解析摘要（诊断信息）</summary>
-            <dl class="detail-grid">
-              <template v-for="[label, value] in parseSummaryRows()" :key="label">
-                <div class="detail-row"><dt>{{ label }}</dt><dd>{{ displayValue(value) }}</dd></div>
-              </template>
-            </dl>
-            <template v-if="attemptedQueryTexts().length">
-              <h4 class="parse-subheading">实际搜索词</h4>
-              <ul class="title-parse-query-list">
-                <li v-for="text in attemptedQueryTexts()" :key="text">{{ text }}</li>
-              </ul>
-            </template>
-            <template v-if="parseNeedsReview">
-              <h4 class="parse-subheading">需人工核对</h4>
-              <ul class="title-parse-review-hints">
-                <li v-for="hint in parseReviewHints().length ? parseReviewHints() : ['该解析结果需要人工核对。']" :key="hint">
-                  {{ hint }}
-                </li>
-              </ul>
-            </template>
-          </details>
-        </template>
-      </div>
-      <p v-if="parseNeedsReview && hasResults" class="field-help" id="candidate-parse-review-note">
-        标题解析结果需人工核对；展开「标题解析摘要」查看识别标题、季度与解析来源。
-      </p>
+      </template>
+
+      <ol class="journey-steps single-home-steps" aria-label="添加番剧步骤">
+        <li class="is-current">输入名称</li>
+        <li>选择真实合集</li>
+        <li>审核并保存确认</li>
+      </ol>
     </section>
 
-    <!-- ── draft preview ───────────────────────────────────────────── -->
-    <SingleAnimeReviewPanel
-      v-if="mode === 'single' && draftRequest && draftId"
-      :key="draftId"
-      :request="draftRequest"
-      :draft-id="draftId"
-      :draft-revision="draftRevision"
-      :reuse-suggestion="reuseSuggestion"
-      :selected-collection="selectedCollection"
-      @changed="onDraftChanged"
-      @discard="discardDraft"
-      @change-mode="changeMode"
+    <!-- ── 第二屏：候选工作台 ─────────────────────────────────────── -->
+    <section
+      v-if="showCandidateScreen"
+      ref="workbenchScreen"
+      class="add-screen candidate-workbench-screen"
+      aria-labelledby="candidate-search-heading"
+    >
+      <p class="candidate-search-summary" role="status" aria-live="polite">
+        已搜索「{{ searchResult?.query }}」
+      </p>
+      <BaseButton id="mikan-back-to-search" variant="secondary" @click="backToSearch">↑ 返回搜索首屏</BaseButton>
+      <h2 id="candidate-search-heading" class="candidate-workbench-title" tabindex="-1">选择真实合集</h2>
+      <p class="candidate-workbench-subtitle">请根据标题和季度信息，选择与您想添加的番剧一致的合集。</p>
+
+      <div class="candidate-list-wrapper">
+        <CandidateCollectionList
+          :candidates="visibleCandidates"
+          :query="searchResult?.query ?? ''"
+          :disabled="searchLoading || (draftLoading && generatingCandidateId === null)"
+          :loading-candidate-id="generatingCandidateId"
+          :candidate-errors="candidateErrors"
+          :confirmed-seasons="seasonConfirmations"
+          @select="generateFromCandidate"
+          @update:confirmed-season="(bangumiId: string, season: number | null) => (seasonConfirmations = { ...seasonConfirmations, [bangumiId]: season })"
+        />
+        <p v-if="hiddenCandidateCount" id="candidate-truncation-note" class="field-help" role="status">
+          搜索结果较多，仅显示前 4 个合集；请先核对关键词，或用更精确的标题缩小范围。
+        </p>
+        <p v-if="parseNeedsReview" class="field-help" id="candidate-parse-review-note">
+          标题解析结果需人工核对；展开「标题解析摘要」查看识别结果、季度与解析来源。
+        </p>
+        <details class="title-parse-summary">
+          <summary>标题解析摘要（诊断信息）</summary>
+          <dl class="detail-grid">
+            <template v-for="[label, value] in parseSummaryRows()" :key="label">
+              <div class="detail-row"><dt>{{ label }}</dt><dd>{{ displayValue(value) }}</dd></div>
+            </template>
+          </dl>
+          <template v-if="attemptedQueryTexts().length">
+            <h4 class="parse-subheading">实际搜索词</h4>
+            <ul class="title-parse-query-list">
+              <li v-for="text in attemptedQueryTexts()" :key="text">{{ text }}</li>
+            </ul>
+          </template>
+          <template v-if="parseNeedsReview">
+            <h4 class="parse-subheading">需人工核对</h4>
+            <ul class="title-parse-review-hints">
+              <li v-for="hint in parseReviewHints().length ? parseReviewHints() : ['该解析结果需要人工核对。']" :key="hint">
+                {{ hint }}
+              </li>
+            </ul>
+          </template>
+        </details>
+      </div>
+    </section>
+
+    <!-- ── 第二屏：草案审核 ───────────────────────────────────────── -->
+    <section v-if="showDraftScreen" ref="workbenchScreen" class="add-screen candidate-workbench-screen draft-screen">
+      <SingleAnimeReviewPanel
+        :key="draftId"
+        :request="draftRequest!"
+        :draft-id="draftId"
+        :draft-revision="draftRevision"
+        :reuse-suggestion="reuseSuggestion"
+        :selected-collection="selectedCollection"
+        @changed="onDraftChanged"
+        @discard="discardDraft"
+        @change-mode="changeMode"
+      />
+    </section>
+
+    <LoadingState
+      v-if="draftLoading && !draftRequest && generatingCandidateId === null"
+      message="正在从候选生成订阅草案..."
     />
-  <LoadingState
-    v-if="mode === 'single' && draftLoading && !draftRequest && generatingCandidateId === null"
-    message="正在从候选生成订阅草案..."
-  />
+  </div>
+
+  <!-- ── 批量：搜索首屏标题、模式切换与步骤预告 ─────────────────── -->
+  <template v-if="mode === 'batch'">
+    <h1 id="workbench-heading" class="workbench-title">添加番剧</h1>
+    <AnimeModeSwitch :model-value="mode" :disabled="singleBusy" @update:model-value="changeMode" />
+    <p v-if="reuseSource" id="reuse-handoff-summary" class="field-help" role="status">
+      已载入复制方案起点：{{ reuseSource.title }}（公开合集编号 {{ reuseSource.mikanBangumiId }}）。请重新搜索并选择真实合集。
+    </p>
+    <ol class="journey-steps" aria-label="添加番剧步骤">
+      <li class="is-current">输入名称</li>
+      <li>选择真实合集</li>
+      <li>审核并保存确认</li>
+    </ol>
+  </template>
 
   <!-- ── batch workbench (US-205) ────────────────────────────────── -->
   <template v-if="batchMounted">
@@ -726,9 +747,32 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
       @restore-search-focus="batchInput?.focusInput()"
     />
   </template>
+
+  <!-- Issue 110：重新搜索会替换未保存现场时的简短确认。 -->
+  <ConfirmDialog ref="confirmDialog" />
 </template>
 
 <style scoped>
+/* Issue 110：单番两屏容器。容器自身纵向滚动并轻柔吸附；模块内部滚动带
+ * overscroll-behavior: contain，滚到边界也不会把整页切到另一屏。 */
+.add-anime-screens {
+  display: block;
+  height: calc(100vh - var(--size-shell-header) - var(--space-6) * 2);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-snap-type: y proximity;
+}
+
+.add-screen {
+  height: 100%;
+  scroll-snap-align: start;
+}
+
+.add-screen.draft-screen {
+  height: auto;
+  min-height: 100%;
+}
+
 /* US-363: 单番搜索首页英雄区（Stage 47 几何基线）。
  * 容器 720px 居中；内容在内容区内垂直居中；间距/字号/控件高全部取冻结 Token。 */
 .single-home-hero {
@@ -815,6 +859,74 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
   text-align: center;
   list-style-position: inside;
 }
+
+/* 就地反馈区与可操作的重试／重新搜索都留在搜索首屏（Issue 110）。 */
+.search-feedback {
+  width: 100%;
+  margin-top: var(--space-4);
+}
+
+.single-home-hero > #mikan-search-feedback-action {
+  margin-top: var(--space-4);
+}
+
+.single-home-hero > .candidate-fallback-rescue {
+  width: 100%;
+  margin-top: var(--space-4);
+  text-align: left;
+}
+
+/* 第二屏：候选工作台 / 草案审核。内容面板各自内部滚动，不撑长整页。 */
+.candidate-workbench-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  height: 100%;
+  padding-block: var(--space-8);
+  text-align: center;
+}
+
+.candidate-search-summary {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.candidate-workbench-title {
+  margin: 0;
+  font-size: var(--type-display);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--type-display-line-height);
+}
+
+.candidate-workbench-subtitle {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-md);
+}
+
+.candidate-workbench-screen .candidate-list-wrapper {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  text-align: left;
+}
+
+.candidate-workbench-screen.draft-screen {
+  /* 草案审核屏沿用既有面板几何（#111 负责）；这里不额外居中或加内边距。 */
+  align-items: stretch;
+  padding-block: 0;
+  text-align: left;
+  gap: 0;
+}
+
+.candidate-workbench-screen.draft-screen .candidate-list-wrapper {
+  overflow: visible;
+}
 .batch-parse-form,
 .candidate-fallback-form {
   display: grid;
@@ -849,65 +961,6 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 
 .journey-steps .is-current {
   color: var(--color-text);
-  font-weight: var(--font-weight-semibold);
-}
-
-.search-summary-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-3);
-}
-
-.search-results-panel {
-  position: relative;
-  width: 100%;
-  margin-bottom: var(--space-5);
-}
-
-/* 结果态仍允许切换到批量现场；绝对定位不改变图 02 的摘要行和卡片网格锚点。 */
-.search-results-mode-switch {
-  position: absolute;
-  top: 0;
-  right: 192px;
-  z-index: 1;
-  transform: scale(0.72);
-  transform-origin: top right;
-}
-
-.candidate-search-summary-row {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--space-4);
-  min-height: 44px;
-  margin-bottom: var(--space-5);
-}
-
-.candidate-search-summary-row h2 {
-  margin: 0;
-  font-size: var(--type-section-title);
-  line-height: 1.4;
-}
-
-.candidate-search-summary-row #mikan-edit-search {
-  width: 176px;
-}
-
-.candidate-search-summary {
-  min-width: 0;
-  margin: 0;
-  overflow: hidden;
-  color: var(--color-text-muted);
-  font-size: var(--type-label);
-  line-height: 1.5;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.search-summary-label {
-  color: var(--color-text-muted);
-  font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
 }
 

@@ -60,7 +60,7 @@ def _open_candidates(page: Page, live_server_url: str) -> None:
 
 
 class TestSingleCandidateGeometry:
-    def test_candidate_row_matches_approved_desktop_geometry(
+    def test_candidate_screen_matches_approved_desktop_geometry(
         self, page: Page, live_server_url: str
     ) -> None:
         page.set_viewport_size({"width": 1440, "height": 900})
@@ -73,38 +73,40 @@ class TestSingleCandidateGeometry:
                 return {x: rect.x, y: rect.y, width: rect.width, height: rect.height}
               }
               return {
-                summary: read('.candidate-search-summary-row'),
-                row: read('.candidate-collection-list'),
+                screen: read('.candidate-workbench-screen'),
+                heading: read('#candidate-search-heading'),
                 first: read('.candidate-card:nth-child(1)'),
                 second: read('.candidate-card:nth-child(2)'),
                 third: read('.candidate-card:nth-child(3)'),
                 poster: read('.candidate-card:nth-child(1) .candidate-poster'),
-                edit: read('#mikan-edit-search'),
+                back: read('#mikan-back-to-search'),
               }
             }"""
         )
 
-        # Issue 110：摘要行锚点不变，候选改为同排居中的等宽卡片。
-        assert boxes["summary"] == {"x": 32, "y": 96, "width": 1376, "height": 44}
-        assert boxes["row"]["x"] == 32
-        assert boxes["row"]["width"] == 1376
-        # 卡片宽 = (1440 − 2×32 − 3×--space-4) / 4 = 332，三张同为一行并居中。
+        # Issue 110：候选工作台是第二屏，与页面内容容器同宽同轴。
+        assert boxes["screen"]["x"] == 32
+        assert boxes["screen"]["width"] == 1376
+        # 结果标题在第二屏内水平居中。
+        assert abs((boxes["heading"]["x"] + boxes["heading"]["width"] / 2) - 720) <= 2
+        # 1～4 项同排：卡宽 = (1376 − 3×--space-4) / 4 = 332，行内容居中。
         assert boxes["first"]["width"] == 332
         assert boxes["second"]["width"] == 332
         assert boxes["third"]["width"] == 332
         assert boxes["first"]["y"] == boxes["second"]["y"] == boxes["third"]["y"]
         assert boxes["second"]["x"] - boxes["first"]["x"] == 348
-        assert boxes["third"]["x"] - boxes["second"]["x"] == 348
-        # 行内容在内容容器内居中：左右留白相等。
-        assert boxes["first"]["x"] - boxes["row"]["x"] == 174
-        assert boxes["row"]["x"] + boxes["row"]["width"] - (
-            boxes["third"]["x"] + boxes["third"]["width"]
-        ) == 174
+        assert boxes["first"]["x"] - boxes["screen"]["x"] == 174
+        assert (
+            boxes["screen"]["x"]
+            + boxes["screen"]["width"]
+            - (boxes["third"]["x"] + boxes["third"]["width"])
+            == 174
+        )
         # 封面按 16:9 撑满卡片内容宽（332 − 2×15 内边距 − 2×1 边框 = 300）。
         assert boxes["poster"]["width"] == 300
         assert abs(boxes["poster"]["height"] - 300 * 9 / 16) <= 0.5
-        assert boxes["edit"]["width"] == 176
-        assert boxes["edit"]["height"] == 44
+        # 返回搜索首屏是标准 44px 控件。
+        assert boxes["back"]["height"] == 44
 
     def test_candidate_row_keeps_one_centered_row_at_1280(
         self, page: Page, live_server_url: str

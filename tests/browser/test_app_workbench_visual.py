@@ -56,7 +56,7 @@ class TestAppWorkbenchVisualFixtures:
         scenario.enter_figure_01()
 
         expect(page.locator("#mikan-candidate-search-form")).to_have_count(1)
-        expect(page.locator(".search-results-panel")).to_have_count(0)
+        expect(page.locator(".candidate-workbench-screen")).to_have_count(0)
         expect(page.locator(".candidate-card")).to_have_count(0)
         expect(page.locator(".candidate-fallback-rescue")).to_have_count(0)
         # 图 01 是搜索前状态：没有候选请求，也没有外部系统访问。
@@ -79,7 +79,7 @@ class TestAppWorkbenchVisualFixtures:
         assert other.get_attribute("aria-busy") is None
         # 候选阶段不出现资源数（有效资源只在草案生成后展示）。
         assert page.evaluate("() => document.querySelectorAll('.effective-seed-group').length") == 0
-        assert "有效资源" not in page.locator(".search-results-panel").inner_text()
+        assert "有效资源" not in page.locator(".candidate-workbench-screen").inner_text()
 
     def test_figure_03_reaches_review_without_saved_safe_info(
         self, page: Page, live_server_url: str, storage_dir: Path

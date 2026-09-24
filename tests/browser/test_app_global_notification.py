@@ -154,7 +154,7 @@ class TestAppGlobalNotificationFloating:
 
         # A toast inside the document flow would shift the page up by its own
         # height when it leaves; a fixed layer must leave geometry untouched.
-        anchor = page.locator("#mikan-candidate-search-result").bounding_box()
+        anchor = page.locator(".app-main").bounding_box()
         assert anchor is not None
         close = page.locator(".global-notification-close")
         close.focus()
@@ -162,7 +162,7 @@ class TestAppGlobalNotificationFloating:
         page.keyboard.press("Enter")
         expect(toast).to_have_count(0)
 
-        after = page.locator("#mikan-candidate-search-result").bounding_box()
+        after = page.locator(".app-main").bounding_box()
         assert after is not None
         _assert_same_box(anchor, after)
 
@@ -275,7 +275,9 @@ class TestAppGlobalNotificationRecovery:
 
         in_place = page.locator("#mikan-candidate-search-result .error-state")
         expect(in_place).to_contain_text("候选搜索失败")
-        retry = in_place.locator("button:has-text('重试')")
+        # Issue 110：就地重试是首屏反馈区的独立动作，不在错误面板内部。
+        retry = page.locator("#mikan-search-feedback-action")
+        expect(retry).to_have_text("重试搜索")
         expect(retry).to_be_enabled()
 
         # Clicking the in-place retry while the error summary is still up must
@@ -328,7 +330,9 @@ class TestAppGlobalNotificationRecovery:
 
         # Closing the summary never removes the recovery path it summarised.
         expect(in_place).to_contain_text("候选搜索失败")
-        retry = in_place.locator("button:has-text('重试')")
+        # Issue 110：就地重试是首屏反馈区的独立动作，不在错误面板内部。
+        retry = page.locator("#mikan-search-feedback-action")
+        expect(retry).to_have_text("重试搜索")
         candidates["fail"] = False
         retry.click()
         expect(page.locator(".candidate-card")).to_have_count(1)
