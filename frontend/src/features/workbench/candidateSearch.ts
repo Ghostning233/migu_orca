@@ -26,6 +26,24 @@ export type CandidateSearchResult = NonNullable<
 /** One typed candidate card (public whitelist from the generated client). */
 export type MikanCandidate = CandidateSearchResult['candidates'][number]
 
+/**
+ * Issue 110：单番候选与第二屏同排展示的上限。
+ *
+ * 设计图表达「1～4 项同宽同排居中」；后端若意外返回更多，只展示前四项并给
+ * 简短截断提示，不自动选择、不虚构卡片，也不新增复杂救援入口。
+ */
+export const MAX_SINGLE_CANDIDATES = 4
+
+/** The first four candidates rendered in the single-anime row. */
+export function visibleSingleCandidates(candidates: MikanCandidate[]): MikanCandidate[] {
+  return candidates.slice(0, MAX_SINGLE_CANDIDATES)
+}
+
+/** How many candidates the single-anime row hides behind the truncation note. */
+export function hiddenSingleCandidateCount(candidates: MikanCandidate[]): number {
+  return Math.max(0, candidates.length - MAX_SINGLE_CANDIDATES)
+}
+
 /** Season evidence summary on a candidate (PROVEN / NEEDS_CONFIRMATION / CONFLICT / NONE). */
 export type SeasonEvidence = NonNullable<MikanCandidate['season_evidence']>
 

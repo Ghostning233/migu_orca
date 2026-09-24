@@ -45,11 +45,13 @@ import AnimeTitleInput from '@/features/workbench/AnimeTitleInput.vue'
 import {
   buildCandidateCreatePayload,
   buildFallbackCreatePayload,
+  hiddenSingleCandidateCount,
   parseSourceLabel,
   parseSeasonNumber,
   selectedCollectionSummary,
   validateCandidateQuery,
   validateFallbackValue,
+  visibleSingleCandidates,
   type CandidateSearchResult,
   type MikanCandidate,
 } from '@/features/workbench/candidateSearch'
@@ -197,6 +199,10 @@ const selectedCollection = computed(() =>
 )
 
 const hasResults = computed(() => (searchResult.value?.candidates?.length ?? 0) > 0)
+
+/** Issue 110: 1～4 项同排展示；超出的候选只提示不渲染、不自动选择。 */
+const visibleCandidates = computed(() => visibleSingleCandidates(searchResult.value?.candidates ?? []))
+const hiddenCandidateCount = computed(() => hiddenSingleCandidateCount(searchResult.value?.candidates ?? []))
 
 /** Candidate generation state never outlives the search results it belongs to. */
 function resetCandidateGenerationState(): void {
@@ -624,7 +630,7 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
         </section>
         <template v-if="searchResult && hasResults">
           <CandidateCollectionList
-            :candidates="searchResult.candidates"
+            :candidates="visibleCandidates"
             :query="searchResult.query"
             :disabled="searchLoading || (draftLoading && generatingCandidateId === null)"
             :loading-candidate-id="generatingCandidateId"
@@ -633,6 +639,9 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
             @select="generateFromCandidate"
             @update:confirmed-season="(bangumiId: string, season: number | null) => (seasonConfirmations = { ...seasonConfirmations, [bangumiId]: season })"
           />
+          <p v-if="hiddenCandidateCount" id="candidate-truncation-note" class="field-help" role="status">
+            搜索结果较多，仅显示前 4 个合集；请先核对关键词，或用更精确的标题缩小范围。
+          </p>
           <details class="title-parse-summary">
             <summary>标题解析摘要（诊断信息）</summary>
             <dl class="detail-grid">

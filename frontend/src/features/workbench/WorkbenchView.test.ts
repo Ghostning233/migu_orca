@@ -314,6 +314,52 @@ describe('WorkbenchView single search (US-204)', () => {
     expect(advanced.text()).toContain('芙莉莲')
   })
 
+  it('shows only the first four candidates with a short truncation note', async () => {
+    apiPost.mockResolvedValueOnce(
+      candidateResult({
+        candidates: Array.from({ length: 5 }, (_, index) =>
+          candidate({
+            bangumi_id: String(3000 + index),
+            title: `候选 ${index + 1}`,
+            mikan_url: `https://mikan.example/Home/Bangumi/${3000 + index}`,
+          }),
+        ),
+      }),
+    )
+    const { wrapper } = await mountWorkbench()
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-form').trigger('submit')
+    await flushPromises()
+
+    // Issue 110: 单番候选最多同排展示四项，不自动选择，也不虚构第五项。
+    expect(wrapper.findAll('.candidate-card')).toHaveLength(4)
+    const note = wrapper.find('#candidate-truncation-note')
+    expect(note.exists()).toBe(true)
+    expect(note.text()).toContain('仅显示前 4 个')
+    expect(wrapper.findAll('.candidate-select')).toHaveLength(4)
+  })
+
+  it('shows every candidate and no truncation note at four or fewer', async () => {
+    apiPost.mockResolvedValueOnce(
+      candidateResult({
+        candidates: Array.from({ length: 4 }, (_, index) =>
+          candidate({
+            bangumi_id: String(4000 + index),
+            title: `候选 ${index + 1}`,
+            mikan_url: `https://mikan.example/Home/Bangumi/${4000 + index}`,
+          }),
+        ),
+      }),
+    )
+    const { wrapper } = await mountWorkbench()
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.findAll('.candidate-card')).toHaveLength(4)
+    expect(wrapper.find('#candidate-truncation-note').exists()).toBe(false)
+  })
+
   it('never auto-selects a candidate even when only one matches', async () => {
     apiPost.mockResolvedValue(candidateResult())
     const { wrapper } = await mountWorkbench()

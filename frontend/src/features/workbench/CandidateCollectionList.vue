@@ -64,41 +64,30 @@ const emit = defineEmits<{
 </template>
 
 <style scoped>
+/* Issue 110：单番候选 1～4 项始终同排居中，卡片同宽且不随数量拉伸。
+ * 宽度取自 1440 标准档内容宽（1440 − 2×32 = 1376）减去 3 个 --space-4 间距
+ * 后四等分：(1376 − 48) / 4 = 332px。数量更少时保持 332px 居中。
+ * 窄于该行所需宽度时允许收缩，200% 缩放等极窄视口允许换行。 */
 .candidate-list {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  --candidate-card-width: 332px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: stretch;
   gap: var(--space-4);
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
+.candidate-list:not(.is-compact) > .candidate-card {
+  flex: 0 1 var(--candidate-card-width);
+  min-width: 240px;
+}
+
 .candidate-list.is-compact {
+  display: grid;
   grid-template-columns: 1fr;
   gap: var(--space-2);
-}
-
-@media (max-width: 1359px) {
-  .candidate-list:not(.is-compact) {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 720px) {
-  .candidate-list:not(.is-compact) {
-    grid-template-columns: 1fr;
-  }
-}
-
-@container (min-width: 721px) and (max-width: 1359px) {
-  .candidate-list:not(.is-compact) {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@container (max-width: 720px) {
-  .candidate-list:not(.is-compact) {
-    grid-template-columns: 1fr;
-  }
 }
 </style>
