@@ -9,6 +9,7 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import set_storage_preferences
+from tests.browser.screen_support import wait_for_screen_scroll
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -154,6 +155,9 @@ class TestAppGlobalNotificationFloating:
 
         # A toast inside the document flow would shift the page up by its own
         # height when it leaves; a fixed layer must leave geometry untouched.
+        # 搜索成功后的两屏切屏是文档级平滑滚动，先等它停稳再量几何，
+        # 否则「toast 消失前后」的差异会被动画本身污染。
+        wait_for_screen_scroll(page)
         anchor = page.locator(".app-main").bounding_box()
         assert anchor is not None
         close = page.locator(".global-notification-close")

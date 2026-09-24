@@ -20,13 +20,14 @@ const props = withDefaults(defineProps<{
   confirmedSeasons?: Record<string, number | null>
   loadingCandidateId?: string | null
   candidateErrors?: Record<string, string>
-  compact?: boolean
+  /** 批量工作台右栏的横向合集候选卡布局（Issue 144）。 */
+  batchLayout?: boolean
 }>(), {
   disabled: false,
   confirmedSeasons: () => ({}),
   loadingCandidateId: null,
   candidateErrors: () => ({}),
-  compact: false,
+  batchLayout: false,
 })
 
 /** True when this candidate owns the in-flight generation. */
@@ -46,13 +47,13 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <ul class="candidate-list candidate-collection-list" :class="{ 'is-compact': compact }" aria-label="MiKan 候选合集">
+  <ul class="candidate-list candidate-collection-list" :class="{ 'is-batch': batchLayout }" aria-label="MiKan 候选合集">
     <CandidateCard
       v-for="candidate in candidates"
       :key="candidate.bangumi_id"
       :candidate="candidate"
       :query="query"
-      :compact="compact"
+      :batch-layout="batchLayout"
       :disabled="disabled || candidateIsSuspended(candidate.bangumi_id)"
       :loading="candidateIsLoading(candidate.bangumi_id)"
       :error="candidateErrors[candidate.bangumi_id] ?? ''"
@@ -64,12 +65,13 @@ const emit = defineEmits<{
 </template>
 
 <style scoped>
-/* Issue 110：单番候选 1～4 项始终同排居中，卡片同宽且不随数量拉伸。
- * 宽度取自 1440 标准档内容宽（1440 − 2×32 = 1376）减去 3 个 --space-4 间距
- * 后四等分：(1376 − 48) / 4 = 332px。数量更少时保持 332px 居中。
- * 窄于该行所需宽度时允许收缩，200% 缩放等极窄视口允许换行。 */
+/* #142：单番候选 1～4 项同排居中，卡片同宽、随可用宽度协调变化。
+ *
+ * 卡宽不再是产品硬要求（旧 332px 只是 #110 在 1440 的实现值）：每张卡占行宽的
+ * 四分之一并留 1px 余量，避免亚像素舍入把第四张挤到第二行；数量更少时整行居中。
+ * 容器查询以候选区的真实可用宽度判定：装不下四列就直接两列，再窄变单列，
+ * 绝不出现 3+1，也不横向溢出。 */
 .candidate-list {
-  --candidate-card-width: 332px;
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
@@ -80,14 +82,27 @@ const emit = defineEmits<{
   padding: 0;
 }
 
-.candidate-list:not(.is-compact) > .candidate-card {
-  flex: 0 1 var(--candidate-card-width);
-  min-width: 240px;
+.candidate-list:not(.is-batch) > .candidate-card {
+  flex: 0 1 calc((100% - 3 * var(--space-4)) / 4 - 1px);
+  min-width: 0;
 }
 
-.candidate-list.is-compact {
+@container (max-width: 1000px) {
+  .candidate-list:not(.is-batch) > .candidate-card {
+    flex-basis: calc((100% - var(--space-4)) / 2 - 1px);
+  }
+}
+
+@container (max-width: 560px) {
+  .candidate-list:not(.is-batch) > .candidate-card {
+    flex-basis: 100%;
+  }
+}
+
+/* 批量工作台右栏（#144）：一行一张横向合集候选卡，栏内滚动。 */
+.candidate-list.is-batch {
   display: grid;
   grid-template-columns: 1fr;
-  gap: var(--space-2);
+  gap: var(--space-3);
 }
 </style>

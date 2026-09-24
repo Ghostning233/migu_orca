@@ -28,6 +28,26 @@ body {
   background-color: var(--color-surface-canvas);
 }
 
+/* 「添加番剧」两屏滚动所有权（Issue 140、141、143）------------------------
+ * 类名由 WorkbenchView 在挂载/卸载时开关，只作用于「添加番剧」：
+ * - 外层滚动属于文档，因此 `#app-main` 的内容、内边距与宽屏两侧留白都能驱动
+ *   两屏切换；`scroll-padding-top` 让每一屏对齐到顶栏之下的同一轴。
+ * - 顶部一级导航保持可见（sticky），外层滚动条永久隐藏但滚轮、触控板与键盘仍可滚动。
+ * - 批量工作台左右栏的内部滚动条仍可见，不受这里影响。 */
+html.add-anime-scroll {
+  scroll-padding-top: calc(var(--size-shell-header) + var(--space-6));
+  scrollbar-width: none;
+}
+
+html.add-anime-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+html.add-anime-scroll .app-header {
+  position: sticky;
+  top: 0;
+}
+
 /* Layout shell ------------------------------------------------------------- */
 
 /* US-207: keyboard skip link — visually hidden until focused (standard
