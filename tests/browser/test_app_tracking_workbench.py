@@ -179,12 +179,14 @@ class TestTrackingWorkbench:
         assert "2026" in rows.nth(0).inner_text()
         assert "已停用" in rows.nth(1).inner_text()
 
-        # Selecting a row only switches the right-hand detail.
+        # Selecting a row only switches the right-hand detail. Safe-detail
+        # loading is asynchronous, so wait for the loaded text rather than the
+        # container (which also renders the「正在读取安全详情…」state); a bare
+        # container wait races the mocked detail response on slower CI runners.
         rows.nth(1).click()
-        page.wait_for_selector(".tracking-inspector-content")
         inspector = page.locator(".tracking-inspector")
-        assert "追番详情" in inspector.inner_text()
-        assert "咒术回战" in inspector.inner_text()
+        expect(inspector).to_contain_text("追番详情")
+        expect(inspector).to_contain_text("咒术回战")
         # Selection stays on the tracking route and only records the safe id.
         assert "/app/tracking" in page.url
         assert "tracking_id=tracking-jjk" in page.url
@@ -202,7 +204,10 @@ class TestTrackingWorkbench:
             page, live_server_url, storage_dir, [_item("tracking-frieren", "葬送的芙莉莲")]
         )
         page.locator(".tracking-list-item").first.click()
-        page.wait_for_selector(".tracking-inspector-content")
+        # Wait for the loaded safe detail before asserting the collapsed
+        # sections exist; the container alone renders while the detail request
+        # is still in flight.
+        expect(page.locator(".tracking-inspector")).to_contain_text("葬送的芙莉莲")
 
         activity = page.locator("#tracking-activity-log")
         diagnostics = page.locator("#tracking-tech-diagnostics")
