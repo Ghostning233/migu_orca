@@ -1446,9 +1446,13 @@ onBeforeUnmount(() => {
           </span>
           <BaseButton id="tracking-batch-select-all" variant="secondary" @click="selectAllCurrent">全选当前结果</BaseButton>
           <BaseButton id="tracking-batch-clear" variant="secondary" :disabled="!batchSummary.selected" @click="clearSelection">清除选择</BaseButton>
-          <BaseButton id="tracking-batch-submit" :loading="batchLoading" :disabled="batchLoading || batchPending || !batchSummary.selected" @click="runBatchSubmit">
+          <BaseButton id="tracking-batch-submit" :loading="batchLoading" :disabled="batchLoading || batchPending || !batchSummary.selected || !savedRef" @click="runBatchSubmit">
             提交选中方案
           </BaseButton>
+          <!-- Issue 116：缺少已保存连接时批量提交可见但禁用，并就地说明下一步。 -->
+          <p v-if="!savedRef" id="tracking-batch-connection-required" class="field-help" role="status">
+            先在设置中连接 Auto Bangumi；缺少已保存连接时不会发起任何外部提交。
+          </p>
         </div>
         <p v-if="batchMode && batchSkippedNotice" id="tracking-batch-skipped" class="tracking-batch-skipped" role="status">{{ batchSkippedNotice }}</p>
         <div v-else id="tracking-list-container" ref="listContainer" class="tracking-list" tabindex="-1" aria-label="追番记录列表">

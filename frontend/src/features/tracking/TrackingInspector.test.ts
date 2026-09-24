@@ -213,12 +213,63 @@ describe('TrackingInspector explicit submission (US-310)', () => {
 
   it('offers SUBMIT from the saved connection without requiring a probe', async () => {
     apiGet.mockResolvedValue(detail({ available_actions: [submitAction] }) as never)
-    const wrapper = await mountInspector()
+    const wrapper = await mountInspector('tracking-1', { connectionReady: true })
     // Issue #86: the server projects the action and re-validates everything in
     // the submit request, so no settings-page probe gates the button.
     expect(wrapper.find('#tracking-submit').exists()).toBe(true)
+    // 只要存在已保存连接就可用（探测结果不作为前端门槛）。
+    expect(wrapper.find('#tracking-submit').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('#tracking-submit-connection-required').exists()).toBe(false)
     expect(wrapper.find('#tracking-revalidate').exists()).toBe(false)
     expect(apiPost).not.toHaveBeenCalled()
+  })
+
+  it('keeps external writes visible but disabled with an in-place hint without a saved connection', async () => {
+    const setEnabled = {
+      code: 'SET_ENABLED', label: '停用外部订阅', style: 'SECONDARY',
+      requires_confirmation: true, target_scopes: ['SUBSCRIPTION'],
+    }
+    const refreshRss = {
+      code: 'REFRESH_RSS', label: '刷新关联 RSS', style: 'SECONDARY',
+      requires_confirmation: false, target_scopes: ['ASSOCIATED_RSS'],
+    }
+    const deleteExternal = {
+      code: 'DELETE_EXTERNAL', label: '删除外部订阅', style: 'DANGER',
+      requires_confirmation: true, target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'],
+    }
+    apiGet.mockResolvedValue(
+      detail({ available_actions: [submitAction, setEnabled, refreshRss, deleteExternal] }) as never,
+    )
+    const wrapper = await mountInspector('tracking-1', {
+      connectionReady: false,
+      capabilities: capabilities(),
+    })
+
+    // Issue 116：缺少已保存连接时提交入口可见但禁用，并有就地下一步提示。
+    expect(wrapper.find('#tracking-submit').exists()).toBe(true)
+    expect(wrapper.find('#tracking-submit').attributes('disabled')).toBeDefined()
+    const hint = wrapper.find('#tracking-submit-connection-required')
+    expect(hint.exists()).toBe(true)
+    expect(hint.text()).toContain('先在设置中连接 Auto Bangumi')
+
+    // 外部管理操作同样禁用并提示。
+    expect(wrapper.find('#tracking-set-enabled-submit').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('#tracking-refresh-rss-submit').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('#tracking-management-connection-required').exists()).toBe(true)
+    expect(wrapper.find('#tracking-delete-external-submit').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('#tracking-delete-connection-required').exists()).toBe(true)
+    expect(apiPost).not.toHaveBeenCalled()
+  })
+
+  it('enables external writes with a saved connection even when the probe reports no capability', async () => {
+    apiGet.mockResolvedValue(detail({ available_actions: [submitAction] }) as never)
+    const wrapper = await mountInspector('tracking-1', {
+      connectionReady: true,
+      capabilities: capabilities({ subscription_submit: 'UNSUPPORTED' }),
+    })
+    // Issue 116 AC2：已保存连接就够；最近探测失败不预先禁用，服务端请求内复核。
+    expect(wrapper.find('#tracking-submit').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('#tracking-submit-connection-required').exists()).toBe(false)
   })
 
   it('keeps SUBMIT available when the diagnostic probe reports no capability', async () => {

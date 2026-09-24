@@ -30,10 +30,22 @@
 - 总集数无可信服务端值时显示「未知」；「已更新集数」按冻结规则固定显示「待开发」，绝不从有效资源数或 RSS 数推断。
 - 状态、允许动作与作用范围全部来自服务端投影；未知值 fail closed，不显示外部 ID、完整 RSS URL 或秘密。
 
-## 3. 验证命令
+## 3. 外部写的连接门控（Issue 116）
+
+| 状态 | 行为 |
+| --- | --- |
+| 无已保存 AB 连接或所需凭据 | 「提交方案」「重试提交」、批量提交、修改／启停／刷新／删除外部订阅**可见但禁用**，原处提示「先在设置中连接 Auto Bangumi；缺少已保存连接时不会发起任何外部写。」不弹确认、不发请求 |
+| 已有已保存连接 | 一律可用；最近一次探测失败或能力诊断为空**不**作为前端准入门槛，由服务端在请求内复核连接、认证、精确版本与能力 |
+| 纯本地操作 | 修改本地方案、本地复核等不依赖连接，继续可用 |
+| 结果未知／未决外部意图 | 只提供核验与恢复；只读外部核验需要已保存连接，其余恢复分支不依赖探测结果 |
+
+危险操作（外部删除）保留显式确认，请求固定 `file=false`，绝不删除已下载媒体。
+
+## 4. 验证命令
 
 ```bash
 cd frontend && npm run typecheck && npm run lint && npm run test:unit -- --run
 UV_CACHE_DIR=.uv-cache uv run pytest tests/browser/test_app_tracking_overview.py -q
 UV_CACHE_DIR=.uv-cache uv run pytest tests/browser/test_app_tracking_workbench.py -q
+UV_CACHE_DIR=.uv-cache uv run pytest tests/browser/test_app_tracking_submit_hierarchy.py -q
 ```

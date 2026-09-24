@@ -292,6 +292,14 @@ const actionBusy = computed(() => (
   props.writeBusy === true || itemActionInFlight.value || itemIntentUnresolved.value
 ))
 
+/**
+ * Issue 116：外部写（提交、重试提交、外部管理）只有在存在已保存的 Auto
+ * Bangumi 连接时才可用。它只看「是否已有已保存配置与所需凭据」，不看最近一次
+ * 探测结果；服务端仍会在请求内复核连接、认证、版本与能力。
+ */
+const externalWritesAvailable = computed(() => props.connectionReady === true)
+const connectionRequiredHint = '先在设置中连接 Auto Bangumi；缺少已保存连接时不会发起任何外部写。'
+
 function requestRecovery(action: TrackingRecoveryActionCode): void {
   if (!detail.value || actionBusy.value) return
   emit('recovery-requested', { action, item: detail.value })
@@ -731,7 +739,7 @@ defineExpose({ reload: () => fetchDetail(true) })
           <BaseButton
             id="tracking-submit"
             :loading="writeInFlight"
-            :disabled="actionBusy"
+            :disabled="actionBusy || !externalWritesAvailable"
             @click="requestWrite(submitAction)"
           >提交方案</BaseButton>
         </template>
@@ -740,11 +748,19 @@ defineExpose({ reload: () => fetchDetail(true) })
           <BaseButton
             id="tracking-retry"
             :loading="writeInFlight"
-            :disabled="actionBusy"
+            :disabled="actionBusy || !externalWritesAvailable"
             @click="requestWrite(retryAction)"
           >{{ retryAction.label }}</BaseButton>
         </template>
         <p v-else class="field-help">{{ writeHint }}</p>
+        <p
+          v-if="(submitAction || retryAction) && !externalWritesAvailable"
+          id="tracking-submit-connection-required"
+          class="field-help"
+          role="status"
+        >
+          {{ connectionRequiredHint }}
+        </p>
         <div
           v-if="thisWrite"
           id="tracking-submit-result"
@@ -809,12 +825,20 @@ defineExpose({ reload: () => fetchDetail(true) })
           <TrackingModifyForm
             :item="detail"
             :action="modifyOffer.action"
-            :busy="actionBusy"
+            :busy="actionBusy || !externalWritesAvailable"
             :loading="managementInFlight"
             @submit="requestManagement"
           />
         </template>
         <p v-else class="field-help">{{ modifyHint }}</p>
+        <p
+          v-if="modifyOffer && !externalWritesAvailable"
+          id="tracking-modify-connection-required"
+          class="field-help"
+          role="status"
+        >
+          {{ connectionRequiredHint }}
+        </p>
         <div
           v-if="thisModify"
           id="tracking-modify-result"
@@ -842,10 +866,18 @@ defineExpose({ reload: () => fetchDetail(true) })
           :set-enabled-hint="setEnabledHint"
           :refresh-hint="refreshHint"
           :result="thisManagementAction"
-          :busy="actionBusy"
+          :busy="actionBusy || !externalWritesAvailable"
           :loading="managementInFlight"
           @submit="requestManagement"
         />
+        <p
+          v-if="(setEnabledOffer || refreshOffer) && !externalWritesAvailable"
+          id="tracking-management-connection-required"
+          class="field-help"
+          role="status"
+        >
+          {{ connectionRequiredHint }}
+        </p>
       </section>
 
       <details id="tracking-activity-log" class="tracking-inspector-disclosure">
@@ -921,10 +953,18 @@ defineExpose({ reload: () => fetchDetail(true) })
           :action="deleteOffer?.action ?? null"
           :result="thisDelete"
           :hint="deleteHint"
-          :busy="actionBusy"
+          :busy="actionBusy || !externalWritesAvailable"
           :loading="managementInFlight"
           @submit="requestManagement"
         />
+        <p
+          v-if="deleteOffer && !externalWritesAvailable"
+          id="tracking-delete-connection-required"
+          class="field-help"
+          role="status"
+        >
+          {{ connectionRequiredHint }}
+        </p>
       </section>
 
       <p v-if="!detail.request_id" class="field-help" role="status">
