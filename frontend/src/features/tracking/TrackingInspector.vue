@@ -568,7 +568,7 @@ defineExpose({ reload: () => fetchDetail(true) })
           <div><dt>本地状态</dt><dd>{{ detail.status_label }}</dd></div>
           <div v-if="submissionModeLabel"><dt>提交方式</dt><dd>{{ submissionModeLabel }}</dd></div>
           <div><dt>有效资源</dt><dd>{{ detail.valid_resource_count }}</dd></div>
-          <div><dt>总集数</dt><dd>{{ detail.total_episodes ?? '待获取' }}</dd></div>
+          <div><dt>总集数</dt><dd>{{ detail.total_episodes ?? '未知' }}</dd></div>
           <div><dt>已更新集数</dt><dd>待开发</dd></div>
         </dl>
       </section>

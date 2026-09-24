@@ -1573,8 +1573,22 @@ onBeforeUnmount(() => {
 .tracking-status-card strong { font-size: 1.35rem; }
 .tracking-status-total, .tracking-count { margin: 0; color: var(--color-text-muted); }
 .tracking-compat-notice { margin: var(--space-3) 0 0; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-subtle); color: var(--color-text-muted); }
-.tracking-workspace { display: grid; grid-template-columns: minmax(0, 3fr) minmax(18rem, 2fr); gap: var(--space-5); align-items: start; }
-.tracking-list-panel { min-width: 0; }
+/* Issue 115：状态总览与导航留在外侧；列表与详情各自在固定可用高度内滚动，
+ * 展开记录或操作不会拉长整页，也不会移动另一列。 */
+.tracking-workspace {
+  --tracking-panel-max-height: clamp(320px, calc(100vh - 420px), 640px);
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(18rem, 2fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+.tracking-list-panel { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+#tracking-list-container {
+  max-height: var(--tracking-panel-max-height);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: var(--space-1);
+}
 .tracking-filters { display: grid; grid-template-columns: auto minmax(10rem, 1fr) auto minmax(8rem, .7fr) auto; gap: .65rem; align-items: center; margin-bottom: var(--space-4); }
 .tracking-filters label { font-size: .85rem; font-weight: 600; }
 .tracking-list { display: grid; gap: .55rem; }
@@ -1598,7 +1612,7 @@ onBeforeUnmount(() => {
 .tracking-list-meta { text-align: right; white-space: nowrap; }
 .tracking-list-state { min-height: 8rem; }
 .tracking-selection-note { margin: var(--space-3) 0 0; color: var(--color-text-muted); }
-.tracking-inspector { position: sticky; top: var(--space-4); display: grid; gap: var(--space-3); min-height: 15rem; padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); }
+.tracking-inspector { position: sticky; top: var(--space-4); display: grid; gap: var(--space-3); min-height: 15rem; max-height: var(--tracking-panel-max-height); overflow-y: auto; overscroll-behavior: contain; padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); }
 .tracking-inspector-placeholder { display: grid; gap: .5rem; padding: var(--space-4); border: 1px dashed var(--color-border); border-radius: var(--radius-md); }
 .tracking-inspector-placeholder h3, .tracking-inspector-placeholder p { margin: 0; }
 .tracking-connection-status { display: grid; gap: .5rem; margin: 0; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text-muted); }
@@ -1613,7 +1627,7 @@ onBeforeUnmount(() => {
 @media (max-width: 1280px) { .tracking-workspace { grid-template-columns: minmax(0, 1.35fr) minmax(16rem, 1fr); } }
 @media (max-width: 800px) {
   .tracking-status-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .tracking-workspace { grid-template-columns: 1fr; }
+  .tracking-workspace { --tracking-panel-max-height: 320px; grid-template-columns: 1fr; }
   .tracking-inspector { position: static; }
   .tracking-filters { grid-template-columns: 1fr; }
   .tracking-filters label { margin-top: .25rem; }
