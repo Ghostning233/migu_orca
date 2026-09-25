@@ -1,8 +1,10 @@
-# 添加番剧视觉回归基准（#139／#140～#144）
+# 添加番剧视觉回归基准（#139／#140～#144；批量草案修订 #145／#148～#153）
 
 本目录保存「添加番剧」页面族在**真实 Chromium** 上渲染的视觉回归截图。
 2026-09-25 用户审核后，单番三张为获批金样；批量四张未获批准，移入
 `pending-batch/` 留作 #145 改造前的参考，不参与像素与锚点金样门禁。
+批量草案工作台按 #145 修订后的四张候选图在 `pending-batch-draft/`，**等待用户审核**：
+在用户逐张接受之前它们不是回归基准，也不得替换或新增金样。
 基准不是设计位图，也不是运行产物：它们是固定 fixture 下的页面截图，用于让「明显像素
 偏差、关键几何偏差」自动失败。
 
@@ -19,6 +21,10 @@
 | `pending-batch/batch-items-one.png` | 未批准：批量工作台仅一部条目 |
 | `pending-batch/batch-items-thirty-six.png` | 未批准：批量工作台三十六部条目 |
 | `pending-batch/anchors.json` | 上述四张旧批量截图的参考几何，不是金样门禁目标 |
+| `pending-batch-draft/draft-workbench.png` | 待审核：#145 批量草案工作台默认态（当前查看 + 两项勾选） |
+| `pending-batch-draft/title-search.png` | 待审核：标题搜索放大镜浮层展开 |
+| `pending-batch-draft/resource-detail-effective.png` | 待审核：资源明细（有效资源页签） |
+| `pending-batch-draft/resource-detail-excluded.png` | 待审核：资源明细（已排除页签） |
 
 ## 门禁口径（已冻结）
 
@@ -38,6 +44,16 @@
 ```bash
 MIGU_ORCA_RECORD_VISUAL_BASELINE=1 \
   uv run pytest tests/browser/test_app_add_anime_visual.py -q
+```
+
+批量草案修订（#153）的候选图由同一套固定安全 fixture 生成，默认只写 pytest `tmp_path`；
+只有显式要求时才写 `pending-batch-draft/`：
+
+```bash
+cd frontend && npm run build && cd ..
+MIGU_ORCA_CAPTURE_REVIEW=1 \
+  uv run pytest tests/browser/test_app_batch_draft_visual.py::TestBatchDraftWorkbenchVisual::test_review_candidates_are_written_only_when_requested -q
+uv run pytest tests/browser/test_app_batch_draft_visual.py -q   # 三态连续三次稳定 + 几何矩阵
 ```
 
 批准或替换基准必须**与实现改动分开审阅**：用户逐张查看真实浏览器画面，明确接受或指出
@@ -60,3 +76,13 @@ MIGU_ORCA_RECORD_VISUAL_BASELINE=1 \
   2. 单番草案审核页的信息层级沿用 Stage 47 既有面板（身份摘要 + 编辑/资源两栏），
      效果图里的「审核追番方案」标题与顶部「返回候选」胶囊按钮尚未复刻；#141 只要求
      该页与候选页共用同一条页面滚动轴（已达成）。
+
+- 2026-09-25（#145／#153）：批量草案工作台按 2026-09-25 获批设计修订实现后，用固定安全
+  fixture（`tests/browser/batch_draft_visual_fixtures.py`）在 1440×900 生成四张候选图到
+  `pending-batch-draft/`。Agent 已核对每张截图的业务信息与安全投影，并证明三态各自连续三次
+  截图彼此差异只在栅格化噪声带内；**这仍不构成用户批准**，金样替换另需用户逐张审核。
+- 与获批效果图仍存在的已知差异（提请用户审核时确认是否接受）：
+  1. 左栏「批量条目卡」保留输入、有效种子数、下一步、字幕组与「查看草案」，因此比效果图更高，
+     1440×900 下同屏完整可见卡数少于效果图示意；效果图中的极简卡需另行确认是否要移除这些
+     仍承载真实状态与阻断原因的字段；
+  2. 资源明细弹窗与草案右栏的细节（图标、间距、样例条数）按产品契约实现，未逐像素复刻效果图。

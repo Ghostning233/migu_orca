@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest'
 
 import type { operations } from '@/api/generated/api'
 import {
-  batchAcceptAllConfirmCopy,
-  batchAcceptAllScopeText,
   batchCandidateSelectionIsBlocked,
   batchCardAuxiliaryFacts,
   batchCardNeedsReview,
@@ -15,6 +13,7 @@ import {
   batchItemCount,
   batchItemIsException,
   batchItemMatchesReviewFilters,
+  batchItemNeedsProcessing,
   batchSelectedConfirmCopy,
   batchSelectedScopeText,
   batchStatusLabel,
@@ -191,14 +190,29 @@ describe('batchWorkbench helpers (US-205)', () => {
     expect(ordered.map((item) => item.item_id)).toEqual(['failed', 'empty', 'review', 'normal-1', 'normal-2'])
   })
 
-  it('matches additive title, status, and exception filters without changing item identity', () => {
+  it('matches additive title, status, and needs-processing filters without changing item identity', () => {
     const failed = batchItem({ item_id: 'failed', status: 'FAILED', raw_title: '路哥' })
     const normal = batchItem({ item_id: 'normal', status: 'DRAFT', raw_title: '萌王' })
     expect(batchItemIsException(failed)).toBe(true)
     expect(batchItemIsException(normal)).toBe(false)
-    expect(batchItemMatchesReviewFilters(failed, { query: '路', status: 'FAILED', exceptionsOnly: true })).toBe(true)
-    expect(batchItemMatchesReviewFilters(normal, { query: '路', status: '', exceptionsOnly: false })).toBe(false)
-    expect(batchItemMatchesReviewFilters(failed, { query: '', status: 'DRAFT', exceptionsOnly: true })).toBe(false)
+    expect(batchItemMatchesReviewFilters(failed, { query: '路', status: 'FAILED', needsProcessingOnly: true }, false)).toBe(true)
+    expect(batchItemMatchesReviewFilters(normal, { query: '路', status: '', needsProcessingOnly: false }, true)).toBe(false)
+    expect(batchItemMatchesReviewFilters(failed, { query: '', status: 'DRAFT', needsProcessingOnly: true }, false)).toBe(false)
+    // 需处理筛选与底栏计数同源：可确认的草案不再算需处理，筛选也就看不到它。
+    expect(batchItemMatchesReviewFilters(normal, { query: '', status: '', needsProcessingOnly: true }, true)).toBe(false)
+    expect(batchItemMatchesReviewFilters(failed, { query: '', status: '', needsProcessingOnly: true }, false)).toBe(true)
+  })
+
+  it('#149: treats every unfinished item as needing processing and excludes only 已确认', () => {
+    expect(batchItemNeedsProcessing(batchItem({ status: 'FOUND' }), false)).toBe(true)
+    expect(batchItemNeedsProcessing(batchItem({ status: 'DRAFT' }), false)).toBe(true)
+    expect(batchItemNeedsProcessing(batchItem({ status: 'FAILED' }), false)).toBe(true)
+    expect(batchItemNeedsProcessing(batchItem({ status: 'RESPONSE_UNKNOWN' }), false)).toBe(true)
+    expect(batchItemNeedsProcessing(batchItem({ status: 'SAVED_PENDING_CONFIRM' }), false)).toBe(true)
+    // 资格已经齐备的条目不需要用户再动手。
+    expect(batchItemNeedsProcessing(batchItem({ status: 'DRAFT' }), true)).toBe(false)
+    // 本页工作已完成的「已确认待提交」不再是需处理项，即使它已不可确认。
+    expect(batchItemNeedsProcessing(batchItem({ status: 'CONFIRMED' }), false)).toBe(false)
   })
 
   it('builds the parse payload with only input + storage context', () => {
@@ -305,55 +319,6 @@ describe('batchWorkbench helpers (US-205)', () => {
   })
 })
 
-describe('batch confirm-all scope text (US-347)', () => {
-  it('describes the complete batch range with hidden and excluded counts', () => {
-    expect(batchAcceptAllScopeText({ total: 3, confirmable: 2, hidden: 1 })).toBe(
-      '保存并确认全部覆盖完整批次 3 项中的 2 项可确认条目，其中 1 项当前被筛选隐藏，排除 1 项未就绪、已确认或结果待核验条目；不受筛选或勾选影响。',
-    )
-    expect(batchAcceptAllScopeText({ total: 2, confirmable: 2, hidden: 0 })).toBe(
-      '保存并确认全部覆盖完整批次 2 项中的 2 项可确认条目；不受筛选或勾选影响。',
-    )
-  })
-
-  it('states a visible reason when no item of the complete batch is confirmable', () => {
-    expect(batchAcceptAllScopeText({ total: 4, confirmable: 0, hidden: 0 })).toContain('完整批次 4 项均不可确认')
-    expect(batchAcceptAllScopeText({ total: 0, confirmable: 0, hidden: 0 })).toBe('')
-  })
-
-  it('never reports counts outside the batch bounds', () => {
-    expect(batchAcceptAllScopeText({ total: 2, confirmable: 5, hidden: 9 })).toContain('完整批次 2 项中的 2 项可确认条目')
-    expect(batchAcceptAllScopeText({ total: 2, confirmable: 5, hidden: 9 })).toContain('其中 2 项当前被筛选隐藏')
-    expect(batchAcceptAllScopeText({ total: 2, confirmable: -1, hidden: 0 })).toContain('完整批次 2 项均不可确认')
-  })
-})
-
-describe('batch confirm-all confirm copy (US-348)', () => {
-  it('states the frozen count in the title and the confirm button', () => {
-    const copy = batchAcceptAllConfirmCopy({ total: 2, confirmable: 2, hidden: 0 })
-    expect(copy.title).toBe('保存并确认全部 2 部')
-    expect(copy.confirmLabel).toBe('保存并确认全部 2 部')
-    expect(copy.message).toContain('完整批次 2 部中当前可确认 2 部')
-    expect(copy.message).not.toContain('已排除')
-    expect(copy.message).toContain('仅保存本地订阅方案，不会提交到 Auto Bangumi')
-    expect(copy.message).toContain('外部提交需在我的追番再次确认')
-  })
-
-  it('explains hidden participants and excluded items without naming capabilities', () => {
-    const copy = batchAcceptAllConfirmCopy({ total: 3, confirmable: 2, hidden: 1 })
-    expect(copy.title).toBe('保存并确认全部 2 部')
-    expect(copy.message).toContain('其中 1 部被筛选隐藏，仍会一并保存并确认')
-    expect(copy.message).toContain('已排除 1 部未就绪、已确认或结果待核验的条目')
-    expect(copy.message).not.toContain('draft')
-  })
-
-  it('never reports counts outside the batch bounds', () => {
-    const copy = batchAcceptAllConfirmCopy({ total: 2, confirmable: 5, hidden: 9 })
-    expect(copy.title).toBe('保存并确认全部 2 部')
-    expect(copy.message).toContain('其中 2 部被筛选隐藏')
-    expect(copy.message).not.toContain('已排除')
-  })
-})
-
 describe('batch card default layer (US-355)', () => {
   function guidance(overrides: Partial<BatchCardGuidance> = {}): BatchCardGuidance {
     return {
@@ -409,13 +374,13 @@ describe('batch card default layer (US-355)', () => {
     expect(batchCardNextStep(guidance({ hasCandidates: true, hasDraft: false, blocker: '需先生成可审核草案' })))
       .toBe('在右栏选择真实 MiKan 合集生成草案。')
     expect(batchCardNextStep(guidance({ blocker: '有尚未应用的编辑' }))).toBe('先解决：有尚未应用的编辑。')
-    expect(batchCardNextStep(guidance())).toContain('保存并确认全部')
+    expect(batchCardNextStep(guidance())).toContain('保存并确认 N 部')
     expect(batchCardNextStep(guidance({ hasDraft: false }))).toContain('重新获取批量草案')
   })
 })
 
-// Stage 45 / WP-45-B / US-356: N 部（手工勾选且有资格）与确认全部的两种范围必须由
-// 同一份计数派生；两入口的可见禁用原因常驻，不依赖 title。
+// Stage 45 / WP-45-B / US-356 / #145: 唯一保存入口（保存并确认 N 部）的范围、
+// 冻结清单与可见禁用原因都由同一份计数派生，不依赖 title。
 describe('batch N-part selection scope (US-356)', () => {
   const scope = (overrides: Partial<BatchConfirmScopeCounts> = {}): BatchConfirmScopeCounts => ({
     total: 3,
@@ -424,32 +389,31 @@ describe('batch N-part selection scope (US-356)', () => {
     selectedHidden: 1,
     selectedExcluded: 0,
     confirmable: 3,
-    hidden: 1,
     needsProcessing: 0,
     ...overrides,
   })
 
-  it('states the checked-and-eligible complete-batch range with hidden participants', () => {
-    expect(batchSelectedScopeText(scope())).toBe(
-      '保存并确认 2 部来自完整批次 3 部中已勾选且当前可确认的条目，其中 1 部当前被筛选隐藏、仍会一并保存；筛选与可见全选不改变本集合。',
-    )
-    expect(batchSelectedScopeText(scope({ selectedHidden: 0, hidden: 0 }))).toBe(
-      '保存并确认 2 部来自完整批次 3 部中已勾选且当前可确认的条目；筛选与可见全选不改变本集合。',
-    )
+  it('#145: states the checked-and-eligible range in one short line', () => {
+    expect(batchSelectedScopeText(scope())).toBe('已勾选且当前可确认 2 部；其中 1 部被筛选隐藏，仍会一并保存。')
+    expect(batchSelectedScopeText(scope({ selectedHidden: 0 }))).toBe('已勾选且当前可确认 2 部。')
+    // 正常静止态（未勾选任何条目）不占用底栏那一行。
+    expect(batchSelectedScopeText(scope({ selected: 0, selectedHidden: 0, selectedExcluded: 0 }))).toBe('')
+    expect(batchSelectedScopeText(scope({ total: 0, visible: 0, selected: 0, confirmable: 0, selectedHidden: 0 }))).toBe('')
   })
 
-  it('states a visible reason when nothing checked can be confirmed', () => {
-    expect(batchSelectedScopeText(scope({ selected: 0, selectedHidden: 0 }))).toContain('请先在卡片上勾选')
+  it('states a visible, in-place reason when checked items cannot be confirmed', () => {
     expect(batchSelectedScopeText(scope({ selected: 0, selectedHidden: 0, selectedExcluded: 2 }))).toContain(
-      '已勾选但当前不可确认的 2 部被排除',
+      '已勾选但当前不可确认的 2 部已排除',
     )
-    expect(batchSelectedScopeText(scope({ total: 0, visible: 0, selected: 0, confirmable: 0, selectedHidden: 0 }))).toBe('')
+    expect(batchSelectedScopeText(scope({ selected: 1, selectedHidden: 0, selectedExcluded: 1 }))).toBe(
+      '已勾选且当前可确认 1 部；另有 1 部已勾选但暂不可确认，已排除。',
+    )
   })
 
   it('never reports counts outside the batch bounds', () => {
     const clamped = batchSelectedScopeText(scope({ total: 2, selected: 9, selectedHidden: 9, selectedExcluded: 9 }))
-    expect(clamped).toContain('保存并确认 2 部')
-    expect(clamped).toContain('其中 2 部当前被筛选隐藏')
+    expect(clamped).toContain('已勾选且当前可确认 2 部')
+    expect(clamped).toContain('其中 2 部被筛选隐藏')
     expect(clamped).not.toContain('9')
   })
 
@@ -471,12 +435,6 @@ describe('batch N-part selection scope (US-356)', () => {
     expect(copy.title).toBe('保存并确认 1 部')
     expect(copy.message).toContain('已勾选但当前不可确认的 1 部被排除')
     expect(copy.items).toEqual(['甲 第一季'])
-  })
-
-  it('lists the same frozen set as the confirm-all safety list', () => {
-    const copy = batchAcceptAllConfirmCopy({ total: 3, confirmable: 2, hidden: 1 }, ['甲 第一季', '乙 第一季'])
-    expect(copy.items).toEqual(['甲 第一季', '乙 第一季'])
-    expect(copy.itemsLabel).toBe('本次将保存并确认的 2 部')
   })
 })
 

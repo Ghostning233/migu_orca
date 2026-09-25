@@ -427,6 +427,8 @@ class TestSingleHomeGeometry:
         expect(page.locator(".batch-draft-card")).to_have_count(2)
 
         # 在批量工作台内部制造现场：筛选只留一项、展开当前查看项。
+        # #149：标题搜索默认收起为放大镜，先展开不参与布局的浮层。
+        page.click("#batch-review-search-toggle")
         page.fill("#batch-review-search", "甲")
         expect(page.locator(".batch-draft-card")).to_have_count(1)
         page.locator('.batch-draft-card[data-item-id="item-01"] .batch-card-expand').click()

@@ -339,6 +339,32 @@ html.add-anime-scroll .app-header {
   border-color: var(--color-danger-hover);
 }
 
+/* 图标按钮（Issue 149）：无边框、触控目标友好、悬停/聚焦有可见反馈。
+   批量工作台的搜索放大镜/清空/删除与资源明细弹窗的关闭都复用它。 */
+.icon-button {
+  align-items: center;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  justify-content: center;
+  min-height: 2rem;
+  min-width: 2rem;
+  padding: 0;
+}
+
+.icon-button:hover:not(:disabled) {
+  background: var(--color-bg-muted);
+  color: var(--color-text);
+}
+
+.icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 /* US-200: shared form primitives (BaseInput/BaseTextarea/BaseSelect live in
    their component scoped styles; the `[hidden]` rule below preserves the
    legacy HTML `hidden` attribute semantics that the new components rely on

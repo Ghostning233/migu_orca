@@ -26,7 +26,9 @@ import FormField from '@/components/layout/FormField.vue'
 import PanelSection from '@/components/layout/PanelSection.vue'
 
 import ResourceSummary from '@/features/workbench/ResourceSummary.vue'
+import ResourceDetailDialog from '@/features/workbench/ResourceDetailDialog.vue'
 import SubtitleGroupSelect from '@/features/workbench/SubtitleGroupSelect.vue'
+import { resourcePreview } from '@/features/workbench/resourceProjection'
 import {
   collectPreviewEditPatch,
   previewEditStateFrom,
@@ -48,6 +50,12 @@ import type { ReuseSuggestion } from '@/features/requests/reuseHandoff'
 const props = defineProps<{
   request: RequestSnapshot | RequestDetailSnapshot
   mode?: 'draft' | 'saved'
+  /**
+   * #150：`batch` 使用批量草案右栏的信息层级——合集身份、字幕与筛选、四项资源结果
+   * 与折叠的高级设置；默认层不再重复筛选规则、技术详情与完整种子分组列表。
+   * `default`（单番草案与已保存方案）保持原结构，不产生内容或操作回归。
+   */
+  layout?: 'default' | 'batch'
   heading?: string
   formHeading?: string
   applyLabel?: string
@@ -227,6 +235,17 @@ const selectedGroupName = computed(
   () => props.request.confirmable_config?.selected_subtitle_group ?? '未选择字幕组',
 )
 
+// ── #150 批量草案右栏 ────────────────────────────────────────────────
+const batchLayout = computed(() => props.layout === 'batch')
+const resourceDialog = ref<InstanceType<typeof ResourceDetailDialog> | null>(null)
+/** 默认层只放少量安全示例；完整清单在弹窗里按需浏览。 */
+const resourceSamples = computed(() => resourcePreview(effective.value, 2))
+const hasAnyResource = computed(() => effective.value.length > 0 || excluded.value.length > 0)
+
+function openResourceDetail(): void {
+  resourceDialog.value?.open('effective')
+}
+
 // F4 default layer. The selected collection falls back to the server-confirmed
 // matched title, then to the raw title, so the row is never blank on a saved
 // plan that has no candidate projection; a redacting `displayValue` still
@@ -234,9 +253,18 @@ const selectedGroupName = computed(
 const selectedCollectionTitle = computed(
   () =>
     props.candidateSummary?.title ||
-    (editorMode.value === 'saved' ? props.request.source_info?.matched_bangumi?.title || props.request.input?.raw_title : '') ||
+    (editorMode.value === 'saved' || batchLayout.value
+      ? props.request.source_info?.matched_bangumi?.title || props.request.input?.raw_title
+      : '') ||
     '未提供',
 )
+
+/** #150：批量右栏标题区直接给出已选合集与季度，供人工再次核对真实合集。 */
+const batchCollectionHeading = computed(() => {
+  const title = displayValue(selectedCollectionTitle.value)
+  const season = props.candidateSummary?.season
+  return season ? `${title} · 第 ${season} 季` : title
+})
 
 /** 筛选规则 one-line summary for the default layer (rules stay authoritative). */
 const filterSummaryText = computed(() => {
@@ -280,8 +308,148 @@ defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
 </script>
 
 <template>
-  <PanelSection :title="panelHeading" class="anime-draft-editor" :class="{ 'draft-review-editor': editorMode === 'draft' }" :data-mode="editorMode">
-    <div :id="props.containerId ?? 'anime-draft-editor'" class="request-detail" aria-live="polite" aria-relevant="additions text">
+  <PanelSection
+    :title="panelHeading"
+    class="anime-draft-editor"
+    :class="{ 'draft-review-editor': editorMode === 'draft' && !batchLayout, 'batch-draft-editor': batchLayout }"
+    :data-mode="editorMode"
+    :data-layout="batchLayout ? 'batch' : 'default'"
+  >
+    <!-- #150：批量草案右栏。先核对人工选择的真实 MiKan 合集，再集中修改常用筛选规则，
+         资源结果只给四项计数与少量安全示例；正则、大小写与目录名留在折叠的高级设置。
+         失败、结果未知与恢复动作（错误、重试、恢复上次结果）继续就地可见。 -->
+    <div
+      v-if="batchLayout"
+      :id="props.containerId ?? 'anime-draft-editor'"
+      class="request-detail batch-draft-review"
+      aria-live="polite"
+      aria-relevant="additions text"
+    >
+      <section class="batch-draft-identity" aria-label="已选真实合集">
+        <span class="batch-draft-poster" :data-poster-state="candidateSummary?.posterUrl ? 'ready' : 'placeholder'">
+          <img
+            v-if="candidateSummary?.posterUrl"
+            class="batch-draft-poster-image"
+            :src="candidateSummary.posterUrl"
+            alt=""
+            loading="lazy"
+            decoding="async"
+          >
+          <span v-else aria-hidden="true">暂无封面</span>
+        </span>
+        <div class="batch-draft-identity-text">
+          <h3 class="request-detail-title">{{ batchCollectionHeading }}</h3>
+          <span class="batch-draft-chip">已选真实合集</span>
+        </div>
+      </section>
+
+      <section class="batch-draft-section" aria-label="字幕与筛选">
+        <h4 class="batch-section-heading">字幕与筛选</h4>
+        <form :id="props.formId" class="batch-draft-filter-form" @submit.prevent="apply">
+          <FormField label="字幕组" :inputId="`${idPrefix}-subtitle-group`">
+            <SubtitleGroupSelect
+              v-model="editGroup"
+              :options="groupOptions"
+              :input-id="`${idPrefix}-subtitle-group`"
+              :disabled="disabled || subtitleGroupReadOnly"
+              :applying="applying"
+            />
+          </FormField>
+          <FormField label="包含规则" :inputId="`${idPrefix}-must-contain`">
+            <BaseInput :id="`${idPrefix}-must-contain`" v-model="editMustContain" type="text" placeholder="输入关键词，如 1080p" :disabled="disabled || clearMustContain" />
+          </FormField>
+          <FormField label="排除规则" :inputId="`${idPrefix}-must-not-contain`">
+            <BaseInput :id="`${idPrefix}-must-not-contain`" v-model="editMustNotContain" type="text" placeholder="输入关键词，如 [v2]" :disabled="disabled || clearMustNotContain" />
+          </FormField>
+          <BaseButton
+            :id="`${idPrefix}-apply-button`"
+            class="batch-draft-apply"
+            type="submit"
+            :variant="props.applyVariant ?? 'secondary'"
+            :loading="applying"
+            :disabled="disabled || !dirty"
+          >{{ applyLabel }}</BaseButton>
+        </form>
+        <p v-if="error" class="field-error" role="alert">{{ error }}</p>
+        <div v-if="canRetry" class="detail-form-recovery" role="group" aria-label="修改失败恢复">
+          <BaseButton :id="`${idPrefix}-retry-button`" type="button" variant="secondary" :loading="applying" @click="$emit('retry')">{{ retryLabel ?? '重试修改' }}</BaseButton>
+          <BaseButton :id="`${idPrefix}-reset-button`" type="button" variant="secondary" :disabled="applying" @click="$emit('reset')">恢复上次结果</BaseButton>
+        </div>
+        <slot name="review-note" />
+      </section>
+
+      <section class="batch-draft-section batch-resource-results" aria-label="资源结果">
+        <h4 class="batch-section-heading">资源结果</h4>
+        <ul class="batch-resource-metrics">
+          <li class="batch-resource-metric" data-metric="effective">
+            <span class="batch-metric-mark is-effective" aria-hidden="true"></span>
+            <span class="batch-metric-label">有效资源</span>
+            <span class="batch-metric-value">{{ effective.length }}</span>
+            <span class="batch-metric-unit">个</span>
+          </li>
+          <li class="batch-resource-metric" data-metric="excluded">
+            <span class="batch-metric-mark is-excluded" aria-hidden="true"></span>
+            <span class="batch-metric-label">已排除</span>
+            <span class="batch-metric-value">{{ excluded.length }}</span>
+            <span class="batch-metric-unit">个</span>
+          </li>
+          <!-- #145：批量草案本轮不接入可信集数数据源，两个集数字段固定显示「未开发」，
+               既不从资源数推断，也不改变其他页面缺可信值时显示「未知」的规则。 -->
+          <li class="batch-resource-metric" data-metric="updated-episodes">
+            <span class="batch-metric-mark" aria-hidden="true"></span>
+            <span class="batch-metric-label">已更新集数</span>
+            <span class="batch-metric-value">未开发</span>
+          </li>
+          <li class="batch-resource-metric" data-metric="total-episodes">
+            <span class="batch-metric-mark" aria-hidden="true"></span>
+            <span class="batch-metric-label">预期总集数</span>
+            <span class="batch-metric-value">未开发</span>
+          </li>
+        </ul>
+        <ul v-if="resourceSamples.length" class="batch-resource-samples">
+          <li v-for="seed in resourceSamples" :key="`sample-${seed}`" class="batch-resource-sample">
+            <span class="batch-doc-glyph" aria-hidden="true"></span>
+            <span class="batch-resource-sample-name">{{ seed }}</span>
+          </li>
+        </ul>
+        <p v-else class="field-help">当前字幕组没有有效资源。</p>
+        <button
+          v-if="hasAnyResource"
+          :id="`${idPrefix}-open-resources`"
+          type="button"
+          class="batch-resource-detail-link"
+          @click="openResourceDetail"
+        >
+          查看完整资源列表 <span aria-hidden="true">›</span>
+        </button>
+      </section>
+
+      <!-- #150：高级设置默认折叠。display 不覆盖 details 的默认值，否则折叠时
+           内容仍会被布局出来，既误导用户也撑出不可达的溢出。 -->
+      <details class="batch-draft-advanced">
+        <summary>高级设置</summary>
+        <div class="batch-draft-advanced-body">
+          <div class="filter-options">
+            <CheckboxRow :id="`${idPrefix}-use-regex`" v-model:checked="editUseRegex" label="使用正则" :disabled="disabled" />
+            <CheckboxRow :id="`${idPrefix}-case-sensitive`" v-model:checked="editCaseSensitive" label="大小写敏感" :disabled="disabled" />
+          </div>
+          <p class="field-help">默认按字面文本匹配且不区分大小写。</p>
+          <FormField label="存储目录名" :inputId="`${idPrefix}-folder-name`">
+            <BaseInput :id="`${idPrefix}-folder-name`" v-model="editFolderName" type="text" placeholder="期望存储目录名" :disabled="disabled || clearFolderName" />
+          </FormField>
+        </div>
+      </details>
+
+      <ResourceDetailDialog
+        ref="resourceDialog"
+        id-prefix="batch-resource-detail"
+        :effective-seeds="effective"
+        :excluded-seeds="excluded"
+        :selected-group-name="selectedGroupName"
+      />
+    </div>
+
+    <div v-else :id="props.containerId ?? 'anime-draft-editor'" class="request-detail" aria-live="polite" aria-relevant="additions text">
       <section class="draft-identity" aria-label="合集身份">
         <!-- F4: 标题同样取自公开合集投影，默认层不回显原始输入标题；技术上
              的「原始标题」留在下方折叠的技术层里。 -->
@@ -467,4 +635,217 @@ defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
   .draft-review-editor .advanced-detail { margin-top: 0; }
 }
 @media (max-width: 720px) { .detail-grid { grid-template-columns: 1fr; gap: 0.2rem; } }
+
+/* ── #150：批量草案右栏 ──────────────────────────────────────────────
+   默认层只有合集身份、字幕与筛选、四项资源结果与折叠的高级设置。面板标题、
+   重复的筛选规则摘要、技术详情与按字幕组分组的完整种子列表都不在这里出现。 */
+.batch-draft-editor {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.batch-draft-editor :deep(.panel-heading) {
+  display: none;
+}
+
+.batch-draft-review {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.batch-draft-identity {
+  align-items: center;
+  display: flex;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.batch-draft-poster {
+  align-items: center;
+  background: var(--color-bg-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  height: 72px;
+  justify-content: center;
+  overflow: hidden;
+  width: 128px;
+}
+
+.batch-draft-poster-image {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.batch-draft-identity-text {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.batch-draft-identity-text .request-detail-title {
+  font-size: var(--type-section-title);
+  line-height: 1.4;
+  margin: 0;
+}
+
+.batch-draft-chip {
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  border-radius: var(--radius-pill);
+  color: var(--color-primary);
+  font-size: var(--font-size-sm);
+  justify-self: start;
+  padding: 0.1rem 0.5rem;
+}
+
+.batch-draft-section {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+}
+
+.batch-section-heading {
+  font-size: var(--font-size-md);
+  margin: 0;
+}
+
+/* 字幕组、包含规则、排除规则与「保存修改」同一排；窄视口自然换行。 */
+.batch-draft-filter-form {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.batch-draft-filter-form :deep(.form-field) {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.batch-draft-apply {
+  flex: 0 0 auto;
+}
+
+.batch-resource-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.batch-resource-metric {
+  align-items: center;
+  display: flex;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+/* 资源结果的标记完全由 CSS 画成，不依赖 emoji/符号字体在各环境的可用性。 */
+.batch-metric-mark {
+  border: 2px solid var(--color-border);
+  border-radius: 50%;
+  display: inline-block;
+  height: 10px;
+  width: 10px;
+}
+
+.batch-metric-mark.is-effective {
+  background: var(--color-success-emphasis, #1f7a45);
+  border-color: var(--color-success-emphasis, #1f7a45);
+}
+
+.batch-metric-mark.is-excluded {
+  border-color: var(--color-text-muted);
+}
+
+.batch-doc-glyph {
+  border: 1px solid var(--color-text-muted);
+  border-radius: 2px;
+  display: inline-block;
+  flex: 0 0 auto;
+  height: 13px;
+  position: relative;
+  width: 10px;
+}
+
+.batch-doc-glyph::after {
+  background: var(--color-text-muted);
+  content: '';
+  height: 1px;
+  left: 2px;
+  position: absolute;
+  top: 4px;
+  width: 5px;
+}
+
+.batch-metric-label {
+  color: var(--color-text-muted);
+}
+
+.batch-metric-value {
+  font-weight: var(--font-weight-semibold);
+}
+
+.batch-resource-samples {
+  display: grid;
+  gap: 0.35rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.batch-resource-sample {
+  align-items: center;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  gap: var(--space-2);
+  min-width: 0;
+  padding-bottom: 0.35rem;
+}
+
+.batch-resource-sample-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.batch-resource-detail-link {
+  background: none;
+  border: 0;
+  color: var(--color-primary);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  justify-self: start;
+  padding: 0;
+}
+
+.batch-resource-detail-link:hover {
+  text-decoration: underline;
+}
+
+.batch-draft-advanced {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+}
+
+.batch-draft-advanced > summary {
+  cursor: pointer;
+  font-weight: var(--font-weight-semibold);
+}
+
+.batch-draft-advanced-body {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
 </style>

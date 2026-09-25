@@ -6,6 +6,7 @@
 // inspect a Request, duplicate filtering rules, or call an API.
 import { computed } from 'vue'
 import type { CompleteSeedGroup, ExcludedSeed } from '@/features/requests/requestDetail'
+import { safeResourceReason, safeResourceTitle } from '@/features/workbench/resourceProjection'
 
 const props = defineProps<{
   effectiveSeeds: ReadonlyArray<string>
@@ -19,23 +20,10 @@ const previewLimit = 3
 const previewEffectiveSeeds = computed(() => props.effectiveSeeds.slice(0, previewLimit))
 const hasMoreEffectiveSeeds = computed(() => props.effectiveSeeds.length > previewLimit)
 
-// URL-like / magnet values are replaced by a generic label.
-const URL_LIKE_SEED = /^(?:magnet:|[a-z][a-z0-9+.-]*:\/\/)/i
-// Absolute local paths: POSIX (`/…`), UNC (`\\…`), Windows drive (`C:\…` / `C:/…`).
-const LOCAL_PATH_LIKE_SEED = /^(?:\/|\\\\|[a-z]:[\\/])/i
-
-function safeSeedTitle(value: string): string {
-  // Seed titles are public display data, but never allow URL-like values,
-  // magnet links, or absolute local paths to become DOM-visible if an upstream
-  // parser returns one. The path itself is never echoed back.
-  if (URL_LIKE_SEED.test(value)) return '[已隐藏资源地址]'
-  if (LOCAL_PATH_LIKE_SEED.test(value)) return '[已隐藏本地路径]'
-  return value
-}
-
-function safeReason(value: string): string {
-  return safeSeedTitle(value)
-}
+// #151：URL／magnet／绝对路径的安全投影与资源明细弹窗共用同一份规则模块，
+// 这里不再保留第二套判定。
+const safeSeedTitle = safeResourceTitle
+const safeReason = safeResourceReason
 </script>
 
 <template>

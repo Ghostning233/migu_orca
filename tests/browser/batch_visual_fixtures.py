@@ -319,6 +319,11 @@ class BatchVisualScenario:
         detail.locator(".candidate-select").first.click()
         self.wait_for_held(self.held_draft, 1)
 
+    def open_title_search(self) -> None:
+        """#149：标题搜索默认收起为放大镜，浮层不参与布局。"""
+        self.page.click("#batch-review-search-toggle")
+        self.page.wait_for_selector("#batch-review-search", timeout=10_000)
+
     def release_candidate_and_check_two_drafts(self) -> None:
         """图 06：释放候选 envelope，查看草案项并手工勾选恰两项。"""
         preview = preview_request("迷宫饭", "req-visual-360-current")
@@ -327,7 +332,9 @@ class BatchVisualScenario:
         self.held_draft[0].fulfill(status=200, content_type="application/json", body=self.draft_body)
         expect(self.page.locator(".candidate-card")).to_have_count(0)
         for item_id in ("item-04", "item-05"):
-            self.page.locator(f'.batch-draft-card[data-item-id="{item_id}"] .batch-card-checkbox-row').check()
+            self.page.locator(
+                f'.batch-draft-card[data-item-id="{item_id}"] input[type="checkbox"]'
+            ).set_checked(True)
         self.page.locator('.batch-draft-card[data-item-id="item-04"] .batch-card-expand').click()
 
     def wait_for_held(self, held: list[Any], expected: int = 1, timeout: float = 10.0) -> None:
