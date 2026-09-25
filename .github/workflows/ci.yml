@@ -81,7 +81,8 @@ jobs:
 
   browser:
     name: Real Chromium browser suite
-    runs-on: ubuntu-latest
+    # Approved visual baselines were captured on Ubuntu 22.04; keep rasterization consistent.
+    runs-on: ubuntu-22.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4

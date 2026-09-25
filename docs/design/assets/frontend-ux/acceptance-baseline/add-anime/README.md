@@ -24,6 +24,8 @@
 
 - 画布与 fixture：1440×900、reduced-motion、隔离存储、mock 外部依赖、确定性文案与
   海报 fixture（`tests/browser/add_anime_visual_fixtures.py`）。
+- 运行环境：浏览器 CI 固定 Ubuntu 22.04 与 `script/setup-visual-fonts.sh` 中校验过摘要的
+  Noto CJK 字体，与单番金样的截图环境一致；迁移到新 runner 时须另行核对真实截图。
 - 任一 RGB 通道差值 >12 计为显著差异像素，显著差异比例必须 **≤0.5%**。
 - 具名动态掩码总面积 **≤5%**；三个获批单番场景都**不使用掩码**（实际 0%）。
 - 三个获批单番场景的关键锚点与尺寸偏差 **≤2 CSS px**。
