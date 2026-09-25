@@ -15,7 +15,6 @@ import {
   batchItemMatchesReviewFilters,
   batchItemNeedsProcessing,
   batchSelectedConfirmCopy,
-  batchSelectedScopeText,
   batchStatusLabel,
   batchSaveConfirmErrorLabel,
   batchSaveConfirmRecoveryAllowed,
@@ -351,11 +350,14 @@ describe('batch card default layer (US-355)', () => {
     expect(byLabel['检索关键词']).toBe('转生史莱姆 第四季')
     expect(byLabel['季数提示']).toBe('S4')
     expect(byLabel['候选合集']).toBe('1 个')
+    expect(byLabel['输入']).toBe('萌王S4')
+    expect(byLabel['有效种子数']).toBe('1')
     expect(byLabel['偏好']).toBe('未配置偏好，使用默认流程')
     expect(byLabel['总集数']).toBe('未知')
     expect(batchCardAuxiliaryFacts(batchItem())).toEqual([
       { label: '检索关键词', value: '转生史莱姆 第四季' },
       { label: '季数提示', value: 'S4' },
+      { label: '输入', value: '萌王S4' },
       { label: '偏好', value: '未配置偏好，使用默认流程' },
       { label: '总集数', value: '未知' },
     ])
@@ -391,30 +393,6 @@ describe('batch N-part selection scope (US-356)', () => {
     confirmable: 3,
     needsProcessing: 0,
     ...overrides,
-  })
-
-  it('#145: states the checked-and-eligible range in one short line', () => {
-    expect(batchSelectedScopeText(scope())).toBe('已勾选且当前可确认 2 部；其中 1 部被筛选隐藏，仍会一并保存。')
-    expect(batchSelectedScopeText(scope({ selectedHidden: 0 }))).toBe('已勾选且当前可确认 2 部。')
-    // 正常静止态（未勾选任何条目）不占用底栏那一行。
-    expect(batchSelectedScopeText(scope({ selected: 0, selectedHidden: 0, selectedExcluded: 0 }))).toBe('')
-    expect(batchSelectedScopeText(scope({ total: 0, visible: 0, selected: 0, confirmable: 0, selectedHidden: 0 }))).toBe('')
-  })
-
-  it('states a visible, in-place reason when checked items cannot be confirmed', () => {
-    expect(batchSelectedScopeText(scope({ selected: 0, selectedHidden: 0, selectedExcluded: 2 }))).toContain(
-      '已勾选但当前不可确认的 2 部已排除',
-    )
-    expect(batchSelectedScopeText(scope({ selected: 1, selectedHidden: 0, selectedExcluded: 1 }))).toBe(
-      '已勾选且当前可确认 1 部；另有 1 部已勾选但暂不可确认，已排除。',
-    )
-  })
-
-  it('never reports counts outside the batch bounds', () => {
-    const clamped = batchSelectedScopeText(scope({ total: 2, selected: 9, selectedHidden: 9, selectedExcluded: 9 }))
-    expect(clamped).toContain('已勾选且当前可确认 2 部')
-    expect(clamped).toContain('其中 2 部被筛选隐藏')
-    expect(clamped).not.toContain('9')
   })
 
   it('names the frozen N count in the title, the safety list and the confirm button', () => {

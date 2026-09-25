@@ -375,7 +375,6 @@ defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
           <BaseButton :id="`${idPrefix}-retry-button`" type="button" variant="secondary" :loading="applying" @click="$emit('retry')">{{ retryLabel ?? '重试修改' }}</BaseButton>
           <BaseButton :id="`${idPrefix}-reset-button`" type="button" variant="secondary" :disabled="applying" @click="$emit('reset')">恢复上次结果</BaseButton>
         </div>
-        <slot name="review-note" />
       </section>
 
       <section class="batch-draft-section batch-resource-results" aria-label="资源结果">

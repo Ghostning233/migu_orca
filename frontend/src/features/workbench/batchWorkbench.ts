@@ -261,6 +261,9 @@ export function batchCardAuxiliaryFacts(item: BatchItem): BatchCardFact[] {
   if (item.season_hint) facts.push({ label: '季数提示', value: String(item.season_hint) })
   const candidates = item.candidates?.length ?? 0
   if (candidates) facts.push({ label: '候选合集', value: `${candidates} 个` })
+  // #145：默认层保持紧凑，输入原文与有效种子数移到这里按需查看。
+  facts.push({ label: '输入', value: displayValue(item.raw_title) })
+  if (batchCardRequest(item)) facts.push({ label: '有效种子数', value: batchCardSeedSummary(item) })
   facts.push({ label: '偏好', value: batchCardPreferenceSummary(item) })
   facts.push({ label: '总集数', value: batchEpisodeProgressText(undefined).replace('总集数：', '') })
   return facts
@@ -456,30 +459,6 @@ function normalizeConfirmScopeCounts(counts: BatchConfirmScopeCounts): {
   const selectedExcluded = Math.max(0, Math.min(Math.trunc(counts.selectedExcluded), base.total - selected))
   const selectedHidden = Math.max(0, Math.min(Math.trunc(counts.selectedHidden), selected))
   return { ...base, visible, selected, selectedHidden, selectedExcluded, needsProcessing: base.excluded }
-}
-
-/**
- * US-356 / #145: one-line scope copy for the 保存并确认 N 部 entry.
- *
- * N is the complete batch's manually checked *and* currently eligible set
- * (D-02): a review filter only changes what the user browses, so it never drops
- * a manual intent, and a checked item that is currently blocked keeps its check
- * but is excluded from the request. #145 shrinks this to one line so the fixed
- * toolbar stays a single row; it returns an empty string when there is nothing
- * checked, which is the normal resting state.
- */
-export function batchSelectedScopeText(counts: BatchConfirmScopeCounts): string {
-  const { selected, selectedHidden, selectedExcluded } = normalizeConfirmScopeCounts(counts)
-  if (selected === 0 && selectedExcluded === 0) return ''
-  const parts: string[] = []
-  if (selected > 0) parts.push(`已勾选且当前可确认 ${selected} 部`)
-  if (selectedHidden > 0) parts.push(`其中 ${selectedHidden} 部被筛选隐藏，仍会一并保存`)
-  if (selectedExcluded > 0) {
-    parts.push(selected > 0
-      ? `另有 ${selectedExcluded} 部已勾选但暂不可确认，已排除`
-      : `已勾选但当前不可确认的 ${selectedExcluded} 部已排除：请先解决各自的阻断原因`)
-  }
-  return `${parts.join('；')}。`
 }
 
 /** 冻结意图的确认弹窗文案；清单与按钮数字来自同一冻结集合。 */

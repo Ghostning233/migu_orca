@@ -248,7 +248,7 @@ class BatchDraftVisualScenario:
                 f'.batch-draft-card[data-item-id="{item_id}"] input[type="checkbox"]'
             ).set_checked(True)
         if clicked is not None:
-            self.page.locator(f'.batch-draft-card[data-item-id="{clicked}"] .batch-card-expand').click()
+            self.page.locator(f'.batch-draft-card[data-item-id="{clicked}"]').click()
             expect(self.page.locator("#batch-detail-pane")).to_contain_text("字幕与筛选")
             # 审核截图从当前查看项开始取景：列表滚到该卡片顶部（保留焦点环余量），
             # 不让上一张卡片只露出半行。

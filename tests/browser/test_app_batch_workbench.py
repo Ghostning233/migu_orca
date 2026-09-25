@@ -461,8 +461,8 @@ class TestAppBatchCandidateAndDraft:
         page.click("#batch-parse-submit")
 
         card = page.locator(".batch-draft-card", has_text="萌王S4")
-        expect(card.locator(".batch-card-expand")).to_contain_text("查看候选")
-        card.locator(".batch-card-expand").click()
+        expect(card).to_have_attribute("aria-label", re.compile(r"查看条目"))
+        card.click()
 
         choices = page.locator("#batch-detail-pane")
         expect(choices).to_be_visible()
@@ -509,7 +509,7 @@ class TestAppBatchCandidateAndDraft:
         page.click("#batch-parse-submit")
 
         card = page.locator(".batch-draft-card", has_text="芙莉莲S4")
-        card.locator(".batch-card-expand").click()
+        card.click()
         choices = page.locator("#batch-detail-pane")
         confirmation = choices.locator(".candidate-season-confirmation input")
         choose = choices.locator(".candidate-select")
@@ -543,8 +543,8 @@ class TestAppBatchCandidateAndDraft:
 
         expect(page.locator(".batch-draft-card")).to_have_count(2)
         first = page.locator(".batch-draft-card", has_text="萌王S4")
-        expect(first.locator(".batch-card-expand")).to_contain_text("查看草案")
-        first.locator(".batch-card-expand").click()
+        expect(first).to_have_attribute("aria-label", re.compile(r"查看条目"))
+        first.click()
 
         panel = page.locator("#request-detail-container")
         expect(panel).to_be_visible()
@@ -609,9 +609,9 @@ class TestAppBatchCandidateAndDraft:
         expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选 1 部")
 
         # 切换「当前查看」到第 5 项：只有右栏换条目，勾选与保存范围不变。
-        cards.nth(4).locator(".batch-card-expand").click()
-        expect(cards.nth(4).locator(".batch-card-expand")).to_have_attribute("aria-expanded", "true")
-        expect(second.locator(".batch-card-expand")).to_have_attribute("aria-expanded", "false")
+        cards.nth(4).click()
+        expect(cards.nth(4)).to_have_class(re.compile(r"is-current"))
+        expect(second).not_to_have_class(re.compile(r"is-current"))
         expect(second.locator(".batch-card-checkbox-row")).to_be_checked()
         expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选 1 部")
         expect(page.locator("#batch-detail-pane")).to_contain_text("字幕与筛选")
@@ -627,8 +627,8 @@ class TestAppBatchCandidateAndDraft:
         expect(page.locator("#batch-accept-all")).to_have_count(0)
 
         # 回到第 2 项：保存范围仍是同一个复选框，未被「当前查看」改写。
-        second.locator(".batch-card-expand").click()
-        expect(second.locator(".batch-card-expand")).to_have_attribute("aria-expanded", "true")
+        second.click()
+        expect(second).to_have_class(re.compile(r"is-current"))
         expect(second.locator(".batch-card-checkbox-row")).to_be_checked()
         expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选 1 部")
         # 右栏仍显示被查看条目的批量草案信息层级。
@@ -734,7 +734,7 @@ class TestAppBatchCandidateAndDraft:
         _goto_batch(page, live_server_url)
         page.fill("#batch-raw-input", "萌王S4")
         page.click("#batch-parse-submit")
-        page.locator(".batch-draft-card .batch-card-expand").click()
+        page.locator(".batch-draft-card").first.click()
 
         body_text = page.locator("body").inner_text()
         assert "secret-token" not in body_text
@@ -923,11 +923,12 @@ class TestAppBatchAccept:
 
         counts = page.locator("#batch-accept-selected-count")
         expect(counts).to_contain_text("已选 2 部")
-        expect(counts).to_contain_text("当前可见 1 部")
+        expect(counts).to_contain_text("当前可见 1 部（隐藏仍参与）")
         expect(page.locator("#batch-accept-submit")).to_be_enabled()
         expect(page.locator("#batch-accept-submit")).to_contain_text("保存并确认 2 部")
-        expect(page.locator("#batch-accept-selected-scope")).to_contain_text("已勾选且当前可确认 2 部")
-        expect(page.locator("#batch-accept-selected-scope")).to_contain_text("其中 1 部被筛选隐藏，仍会一并保存")
+        expect(counts).to_contain_text("当前可见 1 部（隐藏仍参与）")
+        # #145：底栏只有一行，不再有独立范围段落。
+        expect(page.locator("#batch-accept-selected-scope")).to_have_count(0)
 
         page.click("#batch-accept-submit")
         page.wait_for_selector(".confirm-dialog", timeout=5000)
@@ -990,7 +991,7 @@ class TestAppBatchAccept:
         expect(page.locator("#batch-select-all-checkbox")).to_be_disabled()
         expect(page.locator("#batch-accept-submit")).to_be_enabled()
         expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选 2 部")
-        expect(page.locator("#batch-accept-selected-count")).to_contain_text("当前可见 0 部")
+        expect(page.locator("#batch-accept-selected-count")).to_contain_text("当前可见 0 部（隐藏仍参与）")
 
         page.click("#batch-accept-submit")
         page.wait_for_selector(".confirm-dialog", timeout=5000)
@@ -1082,12 +1083,11 @@ class TestAppBatchAccept:
         expect(page.locator("#batch-accept-submit")).to_contain_text("保存并确认 1 部")
         page.locator("#batch-accept-submit").focus()
         assert page.locator("#batch-accept-submit").get_attribute("aria-describedby") == "batch-accept-selected-count"
-        # 异常态（隐藏的勾选）才增加就地范围说明。
+        # 勾选被筛选隐藏时，同一行的计数芯片说明「隐藏仍参与」，底栏不新增第二行。
         _fill_title_search(page, "乙")
-        expect(page.locator("#batch-accept-selected-scope")).to_contain_text("其中 1 部被筛选隐藏，仍会一并保存")
-        assert page.locator("#batch-accept-submit").get_attribute("aria-describedby") == (
-            "batch-accept-selected-count batch-accept-selected-scope"
-        )
+        expect(counts).to_contain_text("当前可见 0 部（隐藏仍参与）")
+        assert page.locator("#batch-accept-submit").get_attribute("aria-describedby") == "batch-accept-selected-count"
+        expect(page.locator("#batch-accept-selected-scope")).to_have_count(0)
         assert page.evaluate("() => document.body.scrollWidth <= window.innerWidth")
 
     def test_cancel_sends_nothing_and_keeps_the_scene(
@@ -1384,7 +1384,7 @@ class TestAppBatchCompactList:
     别名与偏好按需展开；1/12/36 连续列表不引入分页或虚拟滚动；查看与勾选分离；
     键盘、焦点、长内容、缩放、reduced-motion 与敏感 canary 都必须在真实 Chromium 通过。"""
 
-    def test_default_layer_shows_title_status_blocker_and_next_step(
+    def test_default_layer_shows_title_status_and_only_stuck_guidance(
         self, page: Page, live_server_url: str
     ) -> None:
         items = [
@@ -1414,17 +1414,21 @@ class TestAppBatchCompactList:
         draft = page.locator('.batch-draft-card[data-item-id="item-draft"]')
         expect(draft.locator(".batch-card-title")).to_have_text("甲 第一季")
         expect(draft.locator(".batch-card-status")).to_have_text("草案")
-        expect(draft.locator(".batch-card-next-step")).to_contain_text("下一步：")
+        # #145：可确认的草案卡默认层只有封面、标题、状态与勾选，没有通用下一步；
+        # 输入原文与有效种子数移到按需展开的辅助信息里。
+        expect(draft.locator(".batch-card-next-step")).to_have_count(0)
+        expect(draft).not_to_contain_text("输入：")
         # 辅助信息默认折叠，但仍在按需层里可读。
         expect(draft.locator(".batch-card-facts")).not_to_be_visible()
         expect(draft.locator(".batch-card-facts")).to_contain_text("偏好")
         expect(draft.locator(".batch-card-more summary")).to_be_visible()
 
-        # 待选合集不可勾选，并就地说明原因与下一步。
+        # 待选合集不可勾选；进度由状态芯片与右栏候选列表表达，卡片不再重复说明。
         found = page.locator('.batch-draft-card[data-item-id="item-found"]')
+        expect(found.locator(".batch-card-status")).to_have_text("找到候选")
         expect(found.locator(".batch-card-checkbox-row")).to_be_disabled()
-        expect(found.locator(".batch-card-selection-help")).to_contain_text("需先生成可审核草案")
-        expect(found.locator(".batch-card-next-step")).to_contain_text("MiKan 合集")
+        expect(found.locator(".batch-card-selection-help")).to_have_count(0)
+        expect(found.locator(".batch-card-next-step")).to_have_count(0)
 
         # 失败信息与它的下一步都在默认层，不进入折叠。
         failed = page.locator('.batch-draft-card[data-item-id="item-failed"]')
@@ -1471,7 +1475,8 @@ class TestAppBatchCompactList:
         # 全部条目同时存在于 DOM：没有分页，也没有默认虚拟滚动。
         expect(page.locator(".batch-draft-card")).to_have_count(count)
         assert page.locator(".batch-pagination, .virtual-list, nav[aria-label*='分页']").count() == 0
-        expect(page.locator(".batch-card-next-step")).to_have_count(count)
+        # 可确认的草案卡默认层不再有通用下一步：卡片数量由卡片本体证明。
+        expect(page.locator(".batch-card-next-step")).to_have_count(0)
         page.locator(".batch-draft-card").last.scroll_into_view_if_needed()
         expect(page.locator(".batch-draft-card").last).to_be_visible()
         assert page.evaluate("() => document.body.scrollWidth <= window.innerWidth")
@@ -1550,7 +1555,7 @@ class TestAppBatchCompactList:
         page.locator(".batch-draft-card").last.scroll_into_view_if_needed()
         expect(page.locator(".batch-draft-card").last).to_be_visible()
         expect(page.locator("#batch-accept-submit")).to_be_visible()
-        expect(page.locator(".batch-card-next-step").first).to_be_visible()
+        expect(page.locator(".batch-draft-card").first.locator(".batch-card-title")).to_be_visible()
 
     def test_long_content_grows_the_card_without_clipping(
         self, page: Page, live_server_url: str
@@ -1607,30 +1612,25 @@ class TestAppBatchCompactList:
         card_label = cards.nth(0).get_attribute("aria-label") or ""
         assert "查看条目" in card_label
         assert (cards.nth(0).locator(".checkbox-row-label").text_content() or "").strip() == "选择 条目00"
-        assert "查看草案" in (cards.nth(0).locator(".batch-card-expand").get_attribute("aria-label") or "")
+        assert "查看条目" in (cards.nth(0).get_attribute("aria-label") or "")
 
         # 卡片自身仍由方向键移动「当前查看」。
-        cards.nth(1).locator(".batch-card-expand").click()
-        expect(cards.nth(1).locator(".batch-card-expand")).to_have_attribute("aria-expanded", "true")
+        cards.nth(1).click()
+        expect(cards.nth(1)).to_have_class(re.compile(r"is-current"))
         cards.nth(1).focus()
         page.keyboard.press("ArrowUp")
-        expect(cards.nth(0).locator(".batch-card-expand")).to_have_attribute("aria-expanded", "true")
+        expect(cards.nth(0)).to_have_class(re.compile(r"is-current"))
 
-        # 卡片内部快捷字幕组表单由它自己消费键盘，不再被卡片快捷键截获。
-        select = cards.nth(1).locator(".batch-card-subtitle-group select")
-        expect(select).to_be_visible()
-        select.focus()
-        page.keyboard.press("Enter")
-        page.keyboard.press("ArrowDown")
-        expect(cards.nth(0).locator(".batch-card-expand")).to_have_attribute("aria-expanded", "true")
-        expect(cards.nth(1).locator(".batch-card-expand")).to_have_attribute("aria-expanded", "false")
+        # #145：卡片不再内嵌快捷字幕组表单；字幕组只在右栏编辑。
+        expect(cards.nth(1).locator(".batch-card-subtitle-group")).to_have_count(0)
 
-        # 复选框同理，并且勾选只改变待确认集合。
+        # 卡片内的复选框由它自己消费键盘，不再被卡片快捷键截获，
+        # 并且勾选只改变待确认集合。
         checkbox = cards.nth(1).locator(".batch-card-checkbox-row")
         checkbox.focus()
         page.keyboard.press("Space")
         expect(cards.nth(1).locator(".batch-card-checkbox-row")).to_be_checked()
-        expect(cards.nth(0).locator(".batch-card-expand")).to_have_attribute("aria-expanded", "true")
+        expect(cards.nth(0)).to_have_class(re.compile(r"is-current"))
         expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选 1 部")
 
     def test_focus_ring_is_not_clipped_inside_the_scrolling_list(
@@ -1714,9 +1714,9 @@ class TestAppBatchCompactList:
         ]
         _open_compact_list(page, live_server_url, items)
 
-        page.locator('.batch-draft-card[data-item-id="item-00"] .batch-card-expand').click()
-        expect(page.locator('.batch-draft-card[data-item-id="item-00"] .batch-card-expand')).to_have_attribute(
-            "aria-expanded", "true"
+        page.locator('.batch-draft-card[data-item-id="item-00"]').click()
+        expect(page.locator('.batch-draft-card[data-item-id="item-00"]')).to_have_class(
+            re.compile(r"is-current")
         )
         _fill_title_search(page, "正常00")
         expect(page.locator(".batch-draft-card")).to_have_count(1)
@@ -1735,7 +1735,7 @@ class TestAppBatchCompactList:
         items = _compact_items(2)
         _open_compact_list(page, live_server_url, items)
 
-        page.locator(".batch-draft-card").nth(1).locator(".batch-card-expand").click()
+        page.locator(".batch-draft-card").nth(1).click()
         expect(page.locator("#batch-detail-pane")).to_contain_text("字幕与筛选")
         page.locator(".batch-draft-card").nth(0).locator(".batch-card-checkbox-row").check()
         _fill_title_search(page, "不存在的标题")
@@ -1803,7 +1803,7 @@ class TestAppBatchCompactList:
         assert order() == ["item-found", "item-00"]
 
         # 生成草案属于「修复」，它不自动跳位。
-        page.locator('.batch-draft-card[data-item-id="item-found"] .batch-card-expand').click()
+        page.locator('.batch-draft-card[data-item-id="item-found"]').click()
         page.locator("#batch-detail-pane .candidate-select").click()
         expect(page.locator('.batch-draft-card[data-item-id="item-found"] .batch-card-status')).to_contain_text("草案")
         assert order() == ["item-found", "item-00"]
@@ -1823,7 +1823,7 @@ class TestAppBatchCompactList:
         cards.nth(0).focus()
         page.keyboard.press("ArrowDown")
         expect(cards.nth(1)).to_have_class(re.compile(r"\bis-current\b"))
-        expect(cards.nth(1).locator(".batch-card-expand")).to_have_attribute("aria-expanded", "true")
+        expect(cards.nth(1)).to_have_class(re.compile(r"is-current"))
 
 
 def _confirm_scope_items() -> list[dict[str, Any]]:
@@ -1874,11 +1874,10 @@ class TestAppBatchConfirmScope:
 
         counts = page.locator("#batch-accept-selected-count")
         expect(counts).to_contain_text("已选 2 部")
-        expect(counts).to_contain_text("当前可见 1 部")
+        expect(counts).to_contain_text("当前可见 1 部（隐藏仍参与）")
         expect(page.locator("#batch-accept-submit")).to_be_enabled()
         expect(page.locator("#batch-accept-submit")).to_contain_text("保存并确认 2 部")
-        expect(page.locator("#batch-accept-selected-scope")).to_contain_text("已勾选且当前可确认 2 部")
-        expect(page.locator("#batch-accept-selected-scope")).to_contain_text("其中 1 部被筛选隐藏，仍会一并保存")
+        expect(page.locator("#batch-accept-selected-scope")).to_have_count(0)
 
         page.click("#batch-accept-submit")
         page.wait_for_selector(".confirm-dialog", timeout=5000)
@@ -1925,7 +1924,7 @@ class TestAppBatchConfirmScope:
         expect(page.locator(".batch-draft-card")).to_have_count(1)
         # 可见只剩乙，但隐藏的勾选仍是 N 的一部分。
         expect(page.locator("#batch-accept-submit")).to_contain_text("保存并确认 3 部")
-        expect(page.locator("#batch-accept-selected-count")).to_contain_text("当前可见 1 部")
+        expect(page.locator("#batch-accept-selected-count")).to_contain_text("当前可见 1 部（隐藏仍参与）")
 
         # 取消可见全选只取消可见项：甲/丙 仍是手工勾选。
         page.uncheck("#batch-select-all-checkbox")
@@ -1966,7 +1965,7 @@ class TestAppBatchConfirmScope:
         self._check(page, "item-b")
 
         # 先发出修改并保持响应在途：甲被阻断，N 此刻只剩乙。
-        page.locator('.batch-draft-card[data-item-id="item-a"] .batch-card-expand').click()
+        page.locator('.batch-draft-card[data-item-id="item-a"]').click()
         page.fill("#batch-preview-must-contain", "新筛选")
         page.locator("#detail-preview-edit-form").evaluate("form => form.requestSubmit()")
         expect(page.locator("#batch-accept-submit")).to_contain_text("保存并确认 1 部")
@@ -2051,12 +2050,12 @@ class TestAppBatchConfirmScope:
         expect(page.locator("#batch-accept-submit")).to_be_disabled()
         expect(page.locator("#batch-accept-selected-reason")).to_be_visible()
         expect(page.locator("#batch-accept-selected-reason")).to_contain_text("待核验")
-        # 结果待核验时该条目暂不可确认，因此范围行与禁用原因同时常驻，
-        # 并共同构成唯一入口的可访问描述。
-        expect(page.locator("#batch-accept-selected-scope")).to_be_visible()
-        expect(page.locator("#batch-accept-selected-scope")).to_contain_text("已排除")
+        # 结果待核验时该条目暂不可确认：计数芯片说明排除，禁用原因常驻为唯一入口的
+        # 可访问描述；底栏仍只有一行。
+        expect(page.locator("#batch-accept-selected-count")).to_contain_text("1 部暂不可确认，已排除")
+        expect(page.locator("#batch-accept-selected-scope")).to_have_count(0)
         assert page.locator("#batch-accept-submit").get_attribute("aria-describedby") == (
-            "batch-accept-selected-count batch-accept-selected-scope batch-accept-selected-reason"
+            "batch-accept-selected-count batch-accept-selected-reason"
         )
         expect(page.locator("#batch-accept-all")).to_have_count(0)
 
@@ -2281,7 +2280,7 @@ class TestAppBatchConfirmScope:
             page.evaluate("() => { document.documentElement.style.zoom = '2' }")
         self._check(page, "item-a")
 
-        # #145：正常态只有一行——精简计数常驻可见，主入口把它作为可访问描述。
+        # #145：底栏始终只有一行——精简计数常驻可见，主入口把它作为可访问描述。
         counts = page.locator("#batch-accept-selected-count")
         counts.scroll_into_view_if_needed()
         expect(counts).to_be_visible()
@@ -2289,15 +2288,11 @@ class TestAppBatchConfirmScope:
         expect(page.locator("#batch-accept-submit")).to_contain_text("保存并确认 1 部")
         assert page.locator("#batch-accept-submit").get_attribute("aria-describedby") == "batch-accept-selected-count"
 
-        # 异常态（勾选被筛选隐藏）才增加就地范围说明，并且同样可达、不裁切。
+        # 勾选被筛选隐藏时信息仍在同一行的计数芯片里，不新增第二行。
         _fill_title_search(page, "乙")
-        scope = page.locator("#batch-accept-selected-scope")
-        scope.scroll_into_view_if_needed()
-        expect(scope).to_be_visible()
-        expect(scope).to_contain_text("其中 1 部被筛选隐藏，仍会一并保存")
-        assert page.locator("#batch-accept-submit").get_attribute("aria-describedby") == (
-            "batch-accept-selected-count batch-accept-selected-scope"
-        )
+        expect(counts).to_contain_text("当前可见 0 部（隐藏仍参与）")
+        assert page.locator("#batch-accept-submit").get_attribute("aria-describedby") == "batch-accept-selected-count"
+        expect(page.locator("#batch-accept-selected-scope")).to_have_count(0)
 
         page.click("#batch-accept-submit")
         page.wait_for_selector(".confirm-dialog", timeout=5000)

@@ -371,7 +371,8 @@ class TestCrossFeatureResponsive:
 
         page.fill("#batch-raw-input", "萌王S4")
         page.click("#batch-parse-submit")
-        trigger = page.locator(".batch-card-expand", has_text="查看候选")
+        # #145：卡片本体是查看入口（不再有独立的「查看候选」按钮）。
+        trigger = page.locator(".batch-draft-card").first
         expect(trigger).to_be_visible()
         trigger.click()
 

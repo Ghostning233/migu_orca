@@ -120,8 +120,8 @@ class TestAppBatchVisualFixtures:
         expect(page.locator(".batch-draft-card")).to_have_count(1)
         counts = page.locator("#batch-accept-selected-count")
         expect(counts).to_contain_text("已选 2 部")
-        expect(counts).to_contain_text("当前可见 1 部")
-        expect(page.locator("#batch-accept-selected-scope")).to_contain_text("其中 1 部被筛选隐藏，仍会一并保存")
+        expect(counts).to_contain_text("当前可见 1 部（隐藏仍参与）")
+        expect(page.locator("#batch-accept-selected-scope")).to_have_count(0)
 
     @pytest.mark.parametrize("count", [1, 12, 36])
     def test_constructor_keeps_one_twelve_thirty_six_boundaries(
