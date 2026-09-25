@@ -962,6 +962,11 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
   font-size: var(--font-size-sm);
 }
 
+/* 保持返回入口在不同系统字体度量下的居中几何；文字放大时仍可自然撑宽。 */
+#mikan-back-to-search {
+  min-width: 8rem;
+}
+
 .candidate-workbench-title {
   margin: 0;
   font-size: var(--type-display);
