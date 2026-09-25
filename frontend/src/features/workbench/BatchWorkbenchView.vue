@@ -1325,28 +1325,6 @@ const selectedDialogOpen = ref(false)
 const selectedRecheckNotice = ref('')
 const selectedRecheckElement = ref<HTMLElement | null>(null)
 
-// US-356: 固定操作栏是 sticky 的，会浮在批量内容之上；它的真实渲染高度（多行范围文案与
-// 禁用原因换行后会变高）作为 CSS 变量发布，布局据此预留底部滚动空间，卡片聚焦或滚动
-// 定位时也把固定栏让出来，末卡/字段/错误因此不会被遮挡。
-const acceptToolbarElement = ref<HTMLElement | null>(null)
-const acceptToolbarHeight = ref(0)
-let acceptToolbarObserver: ResizeObserver | null = null
-
-function measureAcceptToolbar(): void {
-  acceptToolbarHeight.value = Math.ceil(acceptToolbarElement.value?.getBoundingClientRect().height ?? 0)
-}
-
-function setAcceptToolbarElement(element: unknown): void {
-  acceptToolbarObserver?.disconnect()
-  acceptToolbarObserver = null
-  acceptToolbarElement.value = element instanceof HTMLElement ? element : null
-  if (acceptToolbarElement.value && typeof ResizeObserver !== 'undefined') {
-    acceptToolbarObserver = new ResizeObserver(() => measureAcceptToolbar())
-    acceptToolbarObserver.observe(acceptToolbarElement.value)
-  }
-  measureAcceptToolbar()
-}
-
 // 两个入口的可访问描述始终包含自己的范围文案，并追加当前的常驻说明/禁用原因。
 const selectedEntryDescription = computed(() => [
   'batch-accept-selected-scope',
@@ -1637,8 +1615,6 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  acceptToolbarObserver?.disconnect()
-  acceptToolbarObserver = null
   for (const { scheduler } of editSchedulers.values()) scheduler.dispose()
   editSchedulers.clear()
 })
@@ -1677,7 +1653,6 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
       class="batch-parse-result"
       aria-live="polite"
       aria-relevant="additions text"
-      :style="{ '--batch-accept-toolbar-height': `${acceptToolbarHeight}px` }"
     >
       <LoadingState v-if="parseLoading" :message="loadingMessage" />
       <p v-if="parseLoading" id="batch-parse-loading-summary" class="batch-parse-loading-summary" role="status">
@@ -1746,7 +1721,11 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
               没有符合当前筛选条件的条目；本批次仍有 {{ items.length }} 部，数据、勾选与右栏详情均未改变。请调整或清除筛选条件后继续。
             </p>
             </div>
-            <div ref="reviewList" class="batch-card-grid-wrapper">
+            <div
+              ref="reviewList"
+              class="batch-card-grid-wrapper"
+              data-screen-scroll="inner"
+            >
               <div
                 ref="cardGrid"
                 class="batch-card-grid"
@@ -1985,7 +1964,12 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
             </div>
           </div>
 
-          <aside id="batch-detail-pane" class="batch-detail-pane" aria-label="当前批量条目详情">
+          <aside
+            id="batch-detail-pane"
+            class="batch-detail-pane"
+            data-screen-scroll="inner"
+            aria-label="当前批量条目详情"
+          >
             <template v-if="detailItem && canChooseBatchCandidate(detailItem)">
               <h3 class="batch-detail-title">候选合集：{{ batchCardTitle(detailItem) }}</h3>
               <p class="field-help">请选择一个真实 MiKan 合集后生成订阅草案。</p>
@@ -1993,7 +1977,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                 class="batch-candidate-list"
                 :candidates="detailItem.candidates ?? []"
                 :query="batchCardTitle(detailItem)"
-                compact
+                batch-layout
                 :disabled="operationLocks(detailItem.item_id ?? '')"
                 :loading-candidate-id="generatingCandidateIdFor(detailItem.item_id ?? '')"
                 :candidate-errors="candidateErrorsFor(detailItem.item_id ?? '')"
@@ -2061,7 +2045,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
           </aside>
         </div>
 
-        <div id="batch-accept-toolbar" :ref="setAcceptToolbarElement" class="batch-accept-toolbar">
+        <div id="batch-accept-toolbar" class="batch-accept-toolbar">
           <CheckboxRow
             id="batch-select-all-checkbox"
             :label="'全选当前可见可确认项'"
@@ -2078,6 +2062,36 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
               {{ batchSaveConfirmOutcomeSummaryText(saveSummary) }}
             </span>
           </span>
+          <BaseButton
+            v-if="saveOperation?.phase === 'response_unknown'"
+            id="batch-retry-frozen-operation"
+            variant="secondary"
+            :loading="saveInFlight"
+            :disabled="saveInFlight"
+            @click="retryFrozenBatchSaveConfirm"
+          >使用相同操作重试</BaseButton>
+          <div class="notification-actions batch-accept-actions">
+            <BaseButton
+              id="batch-accept-submit"
+              variant="primary"
+              :disabled="!canConfirmSelected"
+              :loading="saveInFlight"
+              :aria-describedby="selectedEntryDescription"
+              @click="confirmBatchAcceptSelected"
+            >
+              保存并确认 {{ selectedEligibleCount }} 部
+            </BaseButton>
+            <BaseButton
+              id="batch-accept-all"
+              variant="secondary"
+              :disabled="!canConfirmAll"
+              :loading="saveInFlight"
+              :aria-describedby="allEntryDescription"
+              @click="confirmBatchAcceptAll"
+            >
+              保存并确认全部 {{ batchConfirmableCount }} 部
+            </BaseButton>
+          </div>
           <!-- US-356: 两个入口的范围常驻可见，并同时是按钮的可访问描述。 -->
           <p
             id="batch-accept-selected-scope"
@@ -2132,36 +2146,6 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
           >
             {{ acceptAllRecheckNotice }}
           </p>
-          <BaseButton
-            v-if="saveOperation?.phase === 'response_unknown'"
-            id="batch-retry-frozen-operation"
-            variant="secondary"
-            :loading="saveInFlight"
-            :disabled="saveInFlight"
-            @click="retryFrozenBatchSaveConfirm"
-          >使用相同操作重试</BaseButton>
-          <div class="notification-actions batch-accept-actions">
-            <BaseButton
-              id="batch-accept-submit"
-              variant="primary"
-              :disabled="!canConfirmSelected"
-              :loading="saveInFlight"
-              :aria-describedby="selectedEntryDescription"
-              @click="confirmBatchAcceptSelected"
-            >
-              保存并确认 {{ selectedEligibleCount }} 部
-            </BaseButton>
-            <BaseButton
-              id="batch-accept-all"
-              variant="secondary"
-              :disabled="!canConfirmAll"
-              :loading="saveInFlight"
-              :aria-describedby="allEntryDescription"
-              @click="confirmBatchAcceptAll"
-            >
-              保存并确认全部 {{ batchConfirmableCount }} 部
-            </BaseButton>
-          </div>
         </div>
 
       </template>
@@ -2183,23 +2167,28 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 }
 
 .batch-parse-result {
-  display: grid;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   gap: 0.75rem;
   margin-top: 1rem;
+  min-height: 0;
 }
 
 /* US-355: the list scrolls on its own; filters, counts and the clear-filter
    entry stay outside it (always reachable), and the horizontal padding leaves
    room for the 3px focus ring so card focus is never clipped. */
 .batch-card-grid-wrapper {
-  max-height: var(--batch-column-max-height, 640px);
+  /* size containment：列表尺寸不参与父级固有尺寸计算，因此长列表既不撑长工作台
+     屏，也不会把双栏挤出底部操作栏；极窄视口／200% 缩放下保留一张卡的可用高度，
+     由工作台屏自身滚动兜底（空间不足时优先完整可读）。 */
+  contain: size;
+  flex: 1 1 auto;
+  min-height: 12rem;
   overscroll-behavior: contain;
   overflow-y: auto;
   padding: 6px;
-  /* 固定操作栏不遮末项：滚动区为操作栏预留真实高度，并让 scrollIntoView
-     与键盘聚焦把目标滚到操作栏之上。 */
-  padding-bottom: calc(6px + var(--batch-accept-toolbar-height, 0px));
-  scroll-padding-bottom: var(--batch-accept-toolbar-height, 0px);
+  scroll-padding-bottom: 8px;
 }
 
 .batch-review-controls {
@@ -2277,18 +2266,18 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 }
 
 .batch-review-layout {
-  --batch-column-max-height: clamp(572px, calc(100vh - 320px), 640px);
-  align-items: start;
+  align-items: stretch;
   display: grid;
+  flex: 1 1 auto;
   gap: 1rem;
   grid-template-columns: minmax(260px, 36%) minmax(0, 64%);
-  /* 固定操作栏的真实多行高度作为底部滚动空间预留，末卡、字段与错误可以滚到
-     固定栏之上，不被遮挡。 */
-  padding-bottom: var(--batch-accept-toolbar-height, 0px);
+  /* 不加 min-height: 0：双栏的固有尺寸（筛选区 + 至少一张卡）决定下限，装不下时
+     让工作台屏自身滚动，而不是把双栏压进底部操作栏的区域。 */
 }
 
 .batch-review-list-column {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   min-height: 0;
   min-width: 0;
 }
@@ -2296,15 +2285,17 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 .batch-detail-pane {
   background: var(--color-bg);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
-  max-height: var(--batch-column-max-height);
+  border-radius: var(--radius-md);
+  contain: size;
+  height: 100%;
+  max-height: none;
+  /* 与左栏一致：尺寸不参与父级固有尺寸计算，且保留至少一张候选卡的可用高度。 */
+  min-height: 12rem;
   min-width: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 1rem;
-  position: sticky;
-  scroll-padding-bottom: var(--batch-accept-toolbar-height, 0px);
-  top: 1rem;
+  scroll-padding-bottom: 8px;
 }
 
 .batch-detail-title {
@@ -2366,9 +2357,8 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   min-width: 0;
   padding: 6px 8px;
   position: relative;
-  /* US-355 的 8px 焦点环余量 + US-356 的固定栏高度：卡片被聚焦或滚动定位时
-     让出固定栏，末卡不会被粘住的保存栏遮住。 */
-  scroll-margin: 8px 8px calc(8px + var(--batch-accept-toolbar-height, 0px));
+  /* 卡片被聚焦或滚动定位时保留 8px 焦点环余量。 */
+  scroll-margin: 8px;
 }
 
 .batch-draft-card:focus-visible {
@@ -2614,23 +2604,28 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 .batch-accept-toolbar {
   align-items: center;
   display: flex;
+  flex: 0 0 auto;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 6px 12px;
   margin-top: 12px;
   background: var(--color-bg);
   border-top: 1px solid var(--color-border);
-  bottom: 0;
   box-shadow: 0 -4px 12px color-mix(in srgb, var(--color-text) 10%, transparent);
   padding: 0.7rem;
-  /* Issue 113：操作栏固定在工作台屏底部，不随两栏内部滚动。 */
-  position: sticky;
+  /* #143：工作台屏固定为一屏，操作栏占据它在屏内的真实高度，因此不再吸顶悬浮，
+     双栏的可视区与末项都不被它遮挡。 */
+  position: static;
   z-index: 2;
 }
 
 .batch-selected-count {
   color: var(--color-text-muted);
   display: flex;
-  flex-basis: 100%;
+  /* 与全选、两个入口同排：计数不抢走整行，两个入口按钮才有机会留在同一行；
+     空间不足时自然换行，范围文案仍各自成行常驻可见。 */
+  /* flex-basis: 0：计数不按自身内容宽度抢占整行，两个入口按钮因此能留在同一行，
+     计数在剩余空间内自行换行；范围文案仍各自成行常驻可见。 */
+  flex: 1 1 0;
   flex-wrap: wrap;
   font-size: 0.84rem;
   gap: 0.3rem 0.5rem;
@@ -2685,6 +2680,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 }
 
 .batch-accept-actions {
+  flex: 0 0 auto;
   margin-left: auto;
 }
 

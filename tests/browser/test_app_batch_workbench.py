@@ -12,6 +12,7 @@ from playwright.sync_api import Page, expect
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from shared.models import EntryRequest
 from tests.browser.conftest import issue_draft_id, set_storage_preferences
+from tests.browser.screen_support import wait_for_screen_scroll
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -1383,9 +1384,14 @@ def _route_parse(page: Page, items: list[dict[str, Any]]) -> None:
 def _open_compact_list(page: Page, live_server_url: str, items: list[dict[str, Any]]) -> None:
     _route_parse(page, items)
     _goto_batch(page, live_server_url)
+    # #143：左栏列表可视区现在是「一屏减去标题、筛选与操作栏」的剩余高度，
+    # 因此紧凑列表用例固定在 1440×900 验收画布上测量。
+    page.set_viewport_size({"width": 1440, "height": 900})
     page.fill("#batch-raw-input", "\n".join(str(item["raw_title"]) for item in items))
     page.click("#batch-parse-submit")
     expect(page.locator(".batch-draft-card")).to_have_count(len(items))
+    # 整批完成会自动把文档滚到工作台顶部；视图几何必须在滚动稳定后测量。
+    wait_for_screen_scroll(page)
 
 
 def _cards_fully_inside_list(page: Page) -> list[str]:
@@ -1506,11 +1512,13 @@ class TestAppBatchCompactList:
         expect(page.locator(".batch-draft-card").last).to_be_visible()
         assert page.evaluate("() => document.body.scrollWidth <= window.innerWidth")
 
-    def test_three_complete_cards_fit_the_list_at_1440x900(
+    def test_compact_list_viewport_stays_readable_in_the_fixed_one_screen_workbench(
         self, page: Page, live_server_url: str
     ) -> None:
-        """AC: 1440×900 的 12 项普通短标题夹具在列表可视区内至少同屏三张完整卡，
-        且卡片不被列表容器裁切（列表本身仍按既有整页布局滚动）。"""
+        """#143：批量工作台固定为一屏，顶部标题与底部操作栏必须同屏可见，因此左栏列表
+        可视区是「一屏减去标题、筛选与操作栏」后的剩余高度，不再是独立的 572px 列高。
+        1440×900 下它至少完整显示一张批量条目卡，其余条目由列表自身内部滚动到达；
+        每张卡仍完整、不被列表容器裁切。"""
         items = _compact_items(12)
         _route_parse(page, items)
         _goto_batch(page, live_server_url)
@@ -1522,13 +1530,30 @@ class TestAppBatchCompactList:
         box = page.locator(".batch-card-grid-wrapper").bounding_box()
         assert box is not None
         fully = _cards_fully_inside_list(page)
-        assert fully[:3] == ["item-00", "item-01", "item-02"], f"列表开头至少同屏三张完整卡，实际完整卡 {fully}"
-        heights = page.evaluate(
-            """() => Array.from(document.querySelectorAll('.batch-draft-card'))
-                .slice(0, 3)
-                .map((card) => card.getBoundingClientRect().height)"""
+        assert fully[:1] == ["item-00"], f"列表开头至少要有一张完整卡，实际完整卡 {fully}"
+        first_height = page.evaluate(
+            "() => document.querySelector('.batch-draft-card').getBoundingClientRect().height"
         )
-        assert box["height"] >= sum(heights) + 20, f"列表可视区装不下三张完整卡：{box['height']} vs {heights}"
+        assert box["height"] >= first_height + 10, (box["height"], first_height)
+
+        # 12 部都能通过列表内部滚动到达，末卡停在列表可视区底部之内。
+        reachable = page.evaluate(
+            """() => {
+                const wrapper = document.querySelector('.batch-card-grid-wrapper')
+                const cards = document.querySelectorAll('.batch-draft-card')
+                const last = cards[cards.length - 1]
+                wrapper.scrollTop = wrapper.scrollHeight
+                const wrapperBox = wrapper.getBoundingClientRect()
+                const lastBox = last.getBoundingClientRect()
+                return {
+                    lastFullyInside: lastBox.top >= wrapperBox.top - 0.5
+                        && lastBox.bottom <= wrapperBox.bottom + 0.5,
+                    scrolled: wrapper.scrollTop > 0,
+                }
+            }"""
+        )
+        assert reachable["scrolled"] is True
+        assert reachable["lastFullyInside"] is True, reachable
 
     def test_two_hundred_percent_zoom_keeps_the_compact_list_operable(
         self, page: Page, live_server_url: str
@@ -1542,8 +1567,24 @@ class TestAppBatchCompactList:
         page.click("#batch-parse-submit")
         expect(page.locator(".batch-draft-card")).to_have_count(12)
 
-        assert len(_cards_fully_inside_list(page)) >= 1
+        # 200% 缩放下空间不足：优先保证内容完整可读——列表仍有可用高度并可内部
+        # 滚动到全部条目，固定操作栏与首卡的下一步都可见，且没有横向溢出。
         assert page.evaluate("() => document.body.scrollWidth <= window.innerWidth")
+        list_state = page.evaluate(
+            """() => {
+                const wrapper = document.querySelector('.batch-card-grid-wrapper')
+                const card = document.querySelector('.batch-draft-card')
+                return {
+                    listHeight: wrapper.getBoundingClientRect().height,
+                    cardHeight: card.getBoundingClientRect().height,
+                    scrollable: wrapper.scrollHeight > wrapper.clientHeight + 1,
+                }
+            }"""
+        )
+        assert list_state["listHeight"] > 0, list_state
+        assert list_state["scrollable"] is True, list_state
+        page.locator(".batch-draft-card").last.scroll_into_view_if_needed()
+        expect(page.locator(".batch-draft-card").last).to_be_visible()
         expect(page.locator("#batch-accept-all")).to_be_visible()
         expect(page.locator(".batch-card-next-step").first).to_be_visible()
 
@@ -1632,6 +1673,7 @@ class TestAppBatchCompactList:
         self, page: Page, live_server_url: str
     ) -> None:
         items = _compact_items(12)
+        page.set_viewport_size({"width": 1440, "height": 900})
         _open_compact_list(page, live_server_url, items)
 
         # 键盘模态下聚焦最后一张卡，并把列表滚到底：焦点环仍在滚动区内。
@@ -2140,7 +2182,8 @@ class TestAppBatchConfirmScope:
     def test_fixed_toolbar_reserves_its_measured_multi_line_height(
         self, page: Page, live_server_url: str
     ) -> None:
-        """AC：固定栏按实际多行高度预留底部滚动空间，末卡与右栏末字段不被遮挡。"""
+        """#143：批量工作台固定为一屏，底部操作栏占据它在屏内的真实高度（不再悬浮在
+        双栏之上），双栏可视区在它之上结束；末卡与右栏末字段仍不被遮挡。"""
         items = _compact_items(12)
         _route_parse(page, items)
         _goto_batch(page, live_server_url)
@@ -2148,26 +2191,43 @@ class TestAppBatchConfirmScope:
         page.fill("#batch-raw-input", "\n".join(str(item["raw_title"]) for item in items))
         page.click("#batch-parse-submit")
         expect(page.locator(".batch-draft-card")).to_have_count(12)
+        wait_for_screen_scroll(page)
 
         geometry = page.evaluate(
             """() => {
                 const toolbar = document.querySelector('#batch-accept-toolbar')
                 const layout = document.querySelector('.batch-review-layout')
-                const root = document.querySelector('#batch-parse-result')
+                const screen = document.querySelector('.batch-workbench-screen')
+                const toolbarBox = toolbar.getBoundingClientRect()
+                const layoutBox = layout.getBoundingClientRect()
+                const paneBox = document.querySelector('#batch-detail-pane').getBoundingClientRect()
+                const listBox = document.querySelector('.batch-card-grid-wrapper').getBoundingClientRect()
                 return {
-                    measured: toolbar.getBoundingClientRect().height,
-                    published: parseFloat(root.style.getPropertyValue('--batch-accept-toolbar-height')),
-                    reserved: parseFloat(getComputedStyle(layout).paddingBottom),
-                    cardBottom: parseFloat(getComputedStyle(document.querySelector('.batch-draft-card')).scrollMarginBottom),
+                    measured: toolbarBox.height,
+                    toolbarTop: toolbarBox.top,
+                    toolbarBottom: toolbarBox.bottom,
+                    layoutBottom: layoutBox.bottom,
+                    paneBottom: paneBox.bottom,
+                    listBottom: listBox.bottom,
+                    screenHeight: screen.getBoundingClientRect().height,
+                    viewportHeight: window.innerHeight,
+                    documentHeight: document.documentElement.scrollHeight,
+                    headerHeight: document.querySelector('.app-header').getBoundingClientRect().height,
                 }
             }"""
         )
         assert geometry["measured"] > 0
-        assert abs(geometry["published"] - geometry["measured"]) <= 1, geometry
-        assert geometry["reserved"] >= geometry["measured"] - 1, geometry
-        assert geometry["cardBottom"] >= geometry["measured"], geometry
+        assert geometry["measured"] < geometry["viewportHeight"] * 0.3, geometry
+        # 操作栏取真实高度并留在视口内；双栏可视区在它之上结束，没有重叠。
+        assert geometry["toolbarBottom"] <= geometry["viewportHeight"] + 0.5, geometry
+        assert geometry["layoutBottom"] <= geometry["toolbarTop"] + 0.5, geometry
+        assert geometry["paneBottom"] <= geometry["toolbarTop"] + 0.5, geometry
+        assert geometry["listBottom"] <= geometry["toolbarTop"] + 0.5, geometry
+        # 工作台屏固定为一屏；整页仍只有两屏高。
+        assert geometry["screenHeight"] <= geometry["viewportHeight"] - geometry["headerHeight"] + 0.5
+        assert geometry["documentHeight"] <= 2 * geometry["viewportHeight"] + 1
 
-        # 列表滚到底 + 键盘聚焦最后一张卡：卡片与焦点环都在固定栏之上且在视口内。
+        # 列表滚到底 + 键盘聚焦最后一张卡：卡片与焦点环都在栏内且在操作栏之上。
         page.evaluate(
             """() => {
                 const wrapper = document.querySelector('.batch-card-grid-wrapper')
@@ -2182,39 +2242,44 @@ class TestAppBatchConfirmScope:
                 const width = parseFloat(style.outlineWidth) || 0
                 const offset = parseFloat(style.outlineOffset) || 0
                 const rect = card.getBoundingClientRect()
+                const wrapper = document.querySelector('.batch-card-grid-wrapper').getBoundingClientRect()
                 const toolbar = document.querySelector('#batch-accept-toolbar').getBoundingClientRect()
                 return {
                     id: card.dataset.itemId,
                     ringBottom: rect.bottom + width + offset,
-                    top: rect.top,
+                    ringTop: rect.top - width - offset,
+                    listTop: wrapper.top,
+                    listBottom: wrapper.bottom,
                     toolbarTop: toolbar.top,
+                    top: rect.top,
                 }
             }"""
         )
         assert focused["id"] == "item-11", focused
+        assert focused["ringTop"] >= focused["listTop"] - 0.5, focused
+        assert focused["ringBottom"] <= focused["listBottom"] + 0.5, focused
         assert focused["ringBottom"] <= focused["toolbarTop"] + 0.5, focused
         assert focused["top"] >= 0, focused
 
-        # Issue 113：右栏改为自身内部滚动；滚到底后末字段仍在栏内，
-        # 且整栏停在为固定操作栏预留的空间之上（不被遮挡）。
+        # 右栏自身内部滚动；滚到底后末字段仍在栏内且在操作栏之上。
         bottom = page.evaluate(
             """() => {
                 const pane = document.querySelector('#batch-detail-pane')
                 pane.scrollTop = pane.scrollHeight
                 const paneBox = pane.getBoundingClientRect()
-                const layout = document.querySelector('.batch-review-layout')
+                const toolbar = document.querySelector('#batch-accept-toolbar').getBoundingClientRect()
                 const rects = Array.from(pane.querySelectorAll('input, select, textarea, p, button'))
                     .map((el) => el.getBoundingClientRect().bottom)
                 return {
                     lastPaneBottom: rects.length ? Math.max(...rects) : null,
                     paneBottom: paneBox.bottom,
-                    reserved: parseFloat(getComputedStyle(layout).paddingBottom) || 0,
+                    toolbarTop: toolbar.top,
                 }
             }"""
         )
         assert bottom["lastPaneBottom"] is not None
         assert bottom["lastPaneBottom"] <= bottom["paneBottom"] + 0.5, bottom
-        assert bottom["reserved"] >= geometry["measured"] - 1, bottom
+        assert bottom["paneBottom"] <= bottom["toolbarTop"] + 0.5, bottom
 
     @pytest.mark.parametrize(
         "width,height,zoom",
@@ -2230,6 +2295,7 @@ class TestAppBatchConfirmScope:
         page.fill("#batch-raw-input", "甲S1\n乙S1\n丙S1")
         page.click("#batch-parse-submit")
         expect(page.locator(".batch-draft-card")).to_have_count(3)
+        wait_for_screen_scroll(page)
         if zoom == 2:
             page.evaluate("() => { document.documentElement.style.zoom = '2' }")
         self._check(page, "item-a")

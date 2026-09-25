@@ -16,6 +16,7 @@
 - 添加番剧、我的追番和设置的现行目标设计：[2026-09-23 新版设计图与交互基线](design/frontend-ux-redesign-2026-09-23.md)；此前六张添加页效果图已[归档](design/frontend-ux-review-mockups-2026-09-17.md)。
 - Issue #109 共用壳层的 1280／1440／1920 数值布局基线：[壳层数值基线](design/frontend-ux-shell-geometry-baseline.md)。
 - 添加番剧页面族（搜索首屏／候选工作台）的数值布局基线：[添加番剧数值基线](design/frontend-ux-add-anime-geometry-baseline.md)。
+- 先以添加番剧落实、再用于后续 Web UI 工作的视觉与交互验收：[Web UI 验收标准](design/frontend-ux-web-ui-acceptance.md)。
 - 我的追番页面族（状态总览／列表／详情）的数值布局基线：[我的追番数值基线](design/frontend-ux-tracking-geometry-baseline.md)。
 - 设置页面（默认偏好／MiGuOrca 本地数据／Auto Bangumi 连接）的数值布局基线：[设置数值基线](design/frontend-ux-settings-geometry-baseline.md)。
 - 已完成的 Stage 43～45 总体规划：[添加番剧视觉与信息层级收口](MiGuOrca_stage43_45_add_anime_visual_PRD.md)

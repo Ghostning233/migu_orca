@@ -81,7 +81,8 @@ jobs:
 
   browser:
     name: Real Chromium browser suite
-    runs-on: ubuntu-latest
+    # Approved visual baselines were captured on Ubuntu 22.04; keep rasterization consistent.
+    runs-on: ubuntu-22.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -103,6 +104,11 @@ jobs:
         run: |
           uv run playwright install --with-deps chromium
 
+      - name: Install pinned visual test fonts
+        env:
+          MIGU_VISUAL_FONT_ROOT: ${{ runner.temp }}/migu-visual-fonts
+        run: bash script/setup-visual-fonts.sh
+
       - name: Build frontend (for SPA browser tests)
         working-directory: frontend
         run: |
@@ -113,3 +119,5 @@ jobs:
         run: uv run pytest tests/browser/ -q
         env:
           MIGU_ORCA_CI: "1"
+          XDG_CONFIG_HOME: ${{ runner.temp }}/migu-visual-fonts/config
+          XDG_DATA_HOME: ${{ runner.temp }}/migu-visual-fonts/data

@@ -347,14 +347,11 @@ describe('WorkbenchView single search (US-204)', () => {
     expect(cards[0]!.text()).toContain('葬送的芙莉莲')
     expect(cards[0]!.text()).toContain('选择此合集')
     expect(cards[0]!.find('.candidate-progress').text()).toContain('总集数')
-    // F4/US-345: the collection id and the parse search query are diagnostics.
-    // They stay in the collapsed 高级信息 details, so the real browser's
-    // rendered default layer never shows them (asserted in Chromium).
-    const advanced = cards[0]!.find('details.candidate-advanced')
-    expect(advanced.exists()).toBe(true)
-    expect(advanced.attributes('open')).toBeUndefined()
-    expect(advanced.text()).toContain('2353')
-    expect(advanced.text()).toContain('芙莉莲')
+    // #142：卡片不再有「高级信息」入口或替代浮层；合集编号与解析搜索词只留在
+    // 页面级搜索诊断里，卡片默认层不出现它们。
+    expect(cards[0]!.find('details.candidate-advanced').exists()).toBe(false)
+    expect(cards[0]!.text()).not.toContain('高级信息')
+    expect(cards[0]!.text()).not.toContain('2353')
   })
 
   it('shows only the first four candidates with a short truncation note', async () => {

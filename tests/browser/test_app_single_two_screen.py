@@ -1,13 +1,16 @@
-"""Issue 110：单番搜索两屏旅程的真实 Chromium 门禁。
+"""#140：单番搜索首屏与候选工作台整屏切换的真实 Chromium 门禁。
 
-覆盖设计图 01/02/06 的已确认方向：
+父规格 #139 已确认的目标：
 
-- 搜索首屏与候选工作台是同一页面的上下两屏，成功后自动进入第二屏并把键盘焦点
-  移到结果标题；
-- 「返回搜索首屏」只滚动与聚焦，不清空下方未保存的候选现场；
-- 容器自身滚动带轻柔吸附，模块内部滚动独立且 `overscroll-behavior: contain`，
-  滚到边界不会带动整页切屏；
-- 失败与无候选都留在首屏就地恢复，直连救援入口默认收起。
+- 搜索中、失败与无候选留在搜索首屏；只有拿到候选才自动、平滑地进入工作台顶部，
+  不停在两屏中间；从首屏一次向下手势完整进入工作台；
+- 外层滚动属于文档：`#app-main` 内容、内边距与 1920 宽屏两侧留白都能驱动切屏，
+  顶部一级导航保持可见，外层滚动条永久隐藏但滚轮／触控板／键盘仍可滚动；
+- 工作台顶部向上滚动完整返回首屏；「返回搜索首屏」平滑定位结束后才聚焦输入，
+  不因焦点瞬移，也不清空未保存现场；减少动态效果时即时定位但焦点与内容仍正确；
+- 这套滚动模式只作用于「添加番剧」。
+
+本文件是可对旧实现（容器内部滚动、可见滚动条、点击即聚焦）变红的定向用例。
 """
 
 from __future__ import annotations
@@ -18,14 +21,18 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import set_storage_preferences
-from tests.browser.screen_support import wait_for_screen_scroll
+from tests.browser.screen_support import (
+    screen_metrics,
+    wait_for_hero_top,
+    wait_for_screen_scroll,
+    wheel_at,
+)
 from tests.browser.test_app_workbench import (
     _candidate,
     _candidate_result_json,
     _goto_workbench,
 )
 
-pytestmark = pytest.mark.browser
 
 def _mock_candidates(page: Page, count: int = 2) -> None:
     candidates = [
@@ -47,9 +54,11 @@ def _mock_candidates(page: Page, count: int = 2) -> None:
     )
 
 
-def _open(page: Page, live_server_url: str, storage_dir) -> None:
+def _open(
+    page: Page, live_server_url: str, storage_dir, *, viewport: tuple[int, int] = (1440, 900)
+) -> None:
     set_storage_preferences(page, storage_dir)
-    page.set_viewport_size({"width": 1440, "height": 900})
+    page.set_viewport_size({"width": viewport[0], "height": viewport[1]})
     _goto_workbench(page, live_server_url)
 
 
@@ -58,7 +67,7 @@ def _search(page: Page, query: str = "芙莉莲") -> None:
     page.click("#mikan-candidate-search-submit")
 
 
-def test_success_enters_the_second_screen_and_focuses_the_result_heading(
+def test_success_enters_the_workbench_screen_and_focuses_the_result_heading(
     page: Page, live_server_url: str, storage_dir
 ) -> None:
     _mock_candidates(page, 2)
@@ -69,25 +78,98 @@ def test_success_enters_the_second_screen_and_focuses_the_result_heading(
     # 成功后自动滚到第二屏，并把键盘焦点移到结果标题。
     expect(page.locator("#candidate-search-heading")).to_be_focused()
     wait_for_screen_scroll(page)
-    geometry = page.evaluate(
+    metrics = screen_metrics(page)
+    assert metrics["workbench"] is not None and metrics["hero"] is not None
+    # 停在两屏分界处不算通过：滚动位置必须等于工作台顶部。
+    assert abs(float(metrics["scrollY"]) - float(metrics["workbench"])) <= 2, metrics
+
+
+@pytest.mark.parametrize(
+    ("viewport", "point"),
+    [
+        ((1440, 900), (720, 500)),  # 内容区
+        ((1440, 900), (12, 500)),  # 主内容内边距
+        ((1920, 1080), (60, 600)),  # 1920 宽屏两侧留白
+    ],
+)
+def test_whole_viewport_drives_the_screen_switch(
+    page: Page,
+    live_server_url: str,
+    storage_dir,
+    viewport: tuple[int, int],
+    point: tuple[int, int],
+) -> None:
+    _mock_candidates(page, 2)
+    _open(page, live_server_url, storage_dir, viewport=viewport)
+    _search(page)
+    wait_for_screen_scroll(page)
+    entered = screen_metrics(page)
+    assert abs(float(entered["scrollY"]) - float(entered["workbench"])) <= 2
+
+    # 回到首屏后，在指定坐标发一次向下手势：内容、内边距与宽屏留白都要能驱动切屏。
+    page.click("#mikan-back-to-search")
+    wait_for_hero_top(page)
+    wheel_at(page, point[0], point[1], 240)
+    wait_for_screen_scroll(page)
+    metrics = screen_metrics(page)
+    assert abs(float(metrics["scrollY"]) - float(metrics["workbench"])) <= 2, (viewport, point, metrics)
+
+
+def test_outer_scrollbar_is_invisible_while_scrolling_and_navigation_stays_visible(
+    page: Page, live_server_url: str, storage_dir
+) -> None:
+    _mock_candidates(page, 4)
+    _open(page, live_server_url, storage_dir)
+    _search(page)
+    wait_for_screen_scroll(page)
+
+    surface = page.evaluate(
         """() => {
-          const screens = document.querySelector('.add-anime-screens')
-          const heading = document.querySelector('#candidate-search-heading')
+          const root = getComputedStyle(document.documentElement)
+          const header = document.querySelector('.app-header').getBoundingClientRect()
+          const nav = document.querySelector('.top-nav').getBoundingClientRect()
           return {
-            scrollTop: screens.scrollTop,
-            containerTop: screens.getBoundingClientRect().top,
-            headingTop: heading.getBoundingClientRect().top,
-            snapType: getComputedStyle(screens).scrollSnapType,
+            scrollbarWidth: root.scrollbarWidth,
+            gutter: window.innerWidth - document.documentElement.clientWidth,
+            scrollY: window.scrollY,
+            headerTop: header.top,
+            headerHeight: header.height,
+            navTop: nav.top,
+            navBottom: nav.bottom,
+            viewportHeight: window.innerHeight,
           }
         }"""
     )
-    assert geometry["scrollTop"] > 0
-    assert geometry["headingTop"] >= geometry["containerTop"] - 2
-    # Chromium 把 `y proximity` 归一化回默认的 `y`；两者都表示纵向轻柔吸附。
-    assert geometry["snapType"].split(" ")[0] == "y"
+    # 外层滚动条任何鼠标状态下都不可见，但滚动确实发生了。
+    assert surface["scrollbarWidth"] == "none"
+    assert surface["gutter"] == 0
+    assert surface["scrollY"] > 100
+    # 顶部一级导航保持可见（吸附在顶栏内），不被内容盖住。
+    assert surface["headerTop"] == 0
+    assert surface["headerHeight"] > 0
+    assert 0 <= surface["navTop"] < surface["navBottom"] <= surface["viewportHeight"]
 
 
-def test_return_to_search_keeps_the_unsaved_candidate_work(
+def test_keyboard_can_reach_the_workbench_without_a_visible_scrollbar(
+    page: Page, live_server_url: str, storage_dir
+) -> None:
+    _mock_candidates(page, 4)
+    _open(page, live_server_url, storage_dir)
+    _search(page)
+    wait_for_screen_scroll(page)
+    page.click("#mikan-back-to-search")
+    wait_for_hero_top(page)
+
+    # 键盘滚动不依赖可见滚动条：焦点在结果标题等非表单元素上时仍可到达两屏内容。
+    page.locator("#candidate-search-heading").focus()
+    page.keyboard.press("PageDown")
+    page.wait_for_function("() => window.scrollY > 100")
+    assert page.locator(".candidate-card").first.is_visible()
+    page.keyboard.press("Home")
+    wait_for_hero_top(page)
+
+
+def test_return_button_scrolls_first_then_focuses_the_input(
     page: Page, live_server_url: str, storage_dir
 ) -> None:
     _mock_candidates(page, 3)
@@ -97,49 +179,45 @@ def test_return_to_search_keeps_the_unsaved_candidate_work(
     wait_for_screen_scroll(page)
 
     page.click("#mikan-back-to-search")
-    # 回到首屏：输入聚焦、候选与输入内容都保留。
-    expect(page.locator("#mikan-candidate-query")).to_be_focused()
+    # 平滑定位结束后才聚焦输入：焦点落到输入时文档已经在首屏顶部，不会瞬移。
+    page.wait_for_function("() => document.activeElement?.id === 'mikan-candidate-query'")
+    assert page.evaluate("() => window.scrollY") <= 2
     expect(page.locator("#mikan-candidate-query")).to_have_value("芙莉莲")
+    # 不清空下方未保存的候选现场。
     expect(page.locator(".candidate-card")).to_have_count(3)
-    page.wait_for_function(
-        "() => document.querySelector('.add-anime-screens').scrollTop < 10"
-    )
 
 
-def test_inner_module_scroll_never_switches_screens(
+def test_workbench_top_scrolls_back_to_the_search_screen(
     page: Page, live_server_url: str, storage_dir
 ) -> None:
-    _mock_candidates(page, 4)
+    _mock_candidates(page, 2)
     _open(page, live_server_url, storage_dir)
     _search(page)
-    expect(page.locator(".candidate-card")).to_have_count(4)
     wait_for_screen_scroll(page)
 
-    styles = page.evaluate(
-        """() => {
-          const wrapper = document.querySelector(
-            '.candidate-workbench-screen .candidate-list-wrapper')
-          return {
-            overscroll: getComputedStyle(wrapper).overscrollBehaviorY,
-            overflowY: getComputedStyle(wrapper).overflowY,
-          }
-        }"""
-    )
-    # 内部滚动容器截断滚动链：滚到边界不会把整页切回第一屏。
-    assert styles["overscroll"] == "contain"
-    assert styles["overflowY"] == "auto"
+    # 工作台顶部向上滚动：下一次手势完整返回首屏，不停在分界处。
+    wheel_at(page, 720, 400, -240)
+    wait_for_hero_top(page)
+    metrics = screen_metrics(page)
+    assert float(metrics["scrollY"]) <= 2
 
-    before = page.evaluate("() => document.querySelector('.add-anime-screens').scrollTop")
-    page.evaluate(
-        """() => {
-          const wrapper = document.querySelector(
-            '.candidate-workbench-screen .candidate-list-wrapper')
-          wrapper.scrollTop = wrapper.scrollHeight
-          wrapper.dispatchEvent(new WheelEvent('wheel', { deltaY: 600, bubbles: true }))
-        }"""
-    )
-    after = page.evaluate("() => document.querySelector('.add-anime-screens').scrollTop")
-    assert after == before, f"inner scroll changed the outer screen position: {before} -> {after}"
+
+def test_reduced_motion_positions_immediately_with_correct_focus(
+    page: Page, live_server_url: str, storage_dir
+) -> None:
+    page.emulate_media(reduced_motion="reduce")
+    _mock_candidates(page, 2)
+    _open(page, live_server_url, storage_dir)
+    _search(page)
+
+    expect(page.locator(".candidate-card")).to_have_count(2)
+    expect(page.locator("#candidate-search-heading")).to_be_focused()
+    assert page.evaluate("() => window.scrollY") > 100
+
+    page.click("#mikan-back-to-search")
+    expect(page.locator("#mikan-candidate-query")).to_be_focused()
+    assert page.evaluate("() => window.scrollY") <= 2
+    expect(page.locator(".candidate-card")).to_have_count(2)
 
 
 def test_failure_and_empty_stay_on_the_first_screen_with_in_place_recovery(
@@ -164,10 +242,12 @@ def test_failure_and_empty_stay_on_the_first_screen_with_in_place_recovery(
     expect(page.locator("#mikan-candidate-query")).to_have_value("芙莉莲")
     expect(page.locator("#mikan-search-feedback-action")).to_contain_text("重试搜索")
     # 失败就地恢复但不抢焦点：用户仍停在原控件上（Stage 42 无障碍保证）。
-    assert page.evaluate(
-        "() => document.activeElement?.id ?? ''"
-    ) != "mikan-search-feedback-action"
+    assert page.evaluate("() => document.activeElement?.id ?? ''") != "mikan-search-feedback-action"
     assert "mikan_timeout" not in page.locator("body").inner_text()
+    # 没有第二屏时，任何滚动都不应把页面切到不存在的工作台。
+    wheel_at(page, 720, 500, 600)
+    page.wait_for_timeout(150)
+    assert page.evaluate("() => window.scrollY") <= 2
 
     # 无候选：同样留在首屏，提示核对关键词，直连救援默认收起。
     page.route(
@@ -184,3 +264,30 @@ def test_failure_and_empty_stay_on_the_first_screen_with_in_place_recovery(
     expect(page.locator("#mikan-search-feedback-action")).to_contain_text("重新搜索")
     expect(page.locator("#mikan-fallback-enabled")).to_be_visible()
     expect(page.locator("#mikan-fallback-form")).to_be_hidden()
+
+
+def test_add_anime_scroll_mode_does_not_leak_to_other_pages(
+    page: Page, live_server_url: str, storage_dir
+) -> None:
+    _mock_candidates(page, 2)
+    _open(page, live_server_url, storage_dir)
+    _search(page)
+    wait_for_screen_scroll(page)
+    assert (
+        page.evaluate("() => document.documentElement.classList.contains('add-anime-scroll')")
+        is True
+    )
+
+    page.goto(f"{live_server_url}/app/settings")
+    page.wait_for_selector("#app-main", timeout=5000)
+    assert (
+        page.evaluate("() => document.documentElement.classList.contains('add-anime-scroll')")
+        is False
+    )
+    assert (
+        page.evaluate("() => getComputedStyle(document.documentElement).scrollbarWidth") != "none"
+    )
+    assert (
+        page.evaluate("() => getComputedStyle(document.querySelector('.app-header')).position")
+        != "sticky"
+    )

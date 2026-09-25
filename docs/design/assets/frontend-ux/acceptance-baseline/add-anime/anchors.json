@@ -1,0 +1,104 @@
+{
+  "single-candidates-four": {
+    "#candidate-search-heading": {
+      "height": 48,
+      "width": 240,
+      "x": 600,
+      "y": 218.39
+    },
+    "#mikan-back-to-search": {
+      "height": 44,
+      "width": 127,
+      "x": 656.5,
+      "y": 162.39
+    },
+    ".candidate-card:nth-child(1)": {
+      "height": 386.98,
+      "width": 331,
+      "x": 34,
+      "y": 314.39
+    },
+    ".candidate-card:nth-child(1) .candidate-select": {
+      "height": 44,
+      "width": 299,
+      "x": 50,
+      "y": 641.38
+    },
+    ".candidate-card:nth-child(2)": {
+      "height": 386.98,
+      "width": 331,
+      "x": 381,
+      "y": 314.39
+    },
+    ".candidate-card:nth-child(3)": {
+      "height": 386.98,
+      "width": 331,
+      "x": 728,
+      "y": 314.39
+    },
+    ".candidate-card:nth-child(4)": {
+      "height": 386.98,
+      "width": 331,
+      "x": 1075,
+      "y": 314.39
+    },
+    ".candidate-card:nth-child(4) .candidate-select": {
+      "height": 44,
+      "width": 299,
+      "x": 1091,
+      "y": 641.38
+    }
+  },
+  "single-draft-review": {
+    "#single-anime-review-step": {
+      "height": 1268.52,
+      "width": 1376,
+      "x": 32,
+      "y": 96
+    },
+    "#single-review-back-candidates": {
+      "height": 44,
+      "width": 110,
+      "x": 282,
+      "y": 1213.13
+    },
+    "#single-review-save-button": {
+      "height": 52,
+      "width": 220,
+      "x": 1188,
+      "y": 1312.52
+    }
+  },
+  "single-search": {
+    "#mikan-candidate-query": {
+      "height": 52,
+      "width": 532,
+      "x": 360,
+      "y": 503
+    },
+    "#mikan-candidate-search-form": {
+      "height": 82.39,
+      "width": 720,
+      "x": 360,
+      "y": 472.61
+    },
+    "#mikan-candidate-search-submit": {
+      "height": 52,
+      "width": 176,
+      "x": 904,
+      "y": 503
+    },
+    ".app-header": {
+      "height": 72,
+      "width": 1440,
+      "x": 0,
+      "y": 0
+    },
+    ".single-home-hero": {
+      "height": 780,
+      "width": 720,
+      "x": 360,
+      "y": 96
+    }
+  }
+}

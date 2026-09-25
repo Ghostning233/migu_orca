@@ -27,6 +27,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
 import { api } from '@/api/client'
 import type { operations } from '@/api/generated/api'
+import { useAddAnimeScreenScroll } from '@/app/composables/useAddAnimeScreenScroll'
 import { useNotificationStore } from '@/app/stores/notification'
 import BaseButton from '@/components/forms/BaseButton.vue'
 import BaseInput from '@/components/forms/BaseInput.vue'
@@ -143,15 +144,12 @@ async function submitBatchSearch(): Promise<void> {
 /** Issue 112/113：整批完成、拿到稳定结果后才切到第二屏并移焦点。 */
 function onBatchParseSettled(): void {
   batchSearchSettled.value = true
-  void nextTick(() => {
-    batchWorkbenchScreen.value?.scrollIntoView?.({
-      behavior: prefersReducedMotion() ? 'auto' : 'smooth',
-      block: 'start',
-    })
+  void nextTick(async () => {
     // 这一屏刚由 v-show 显示；隐藏时无法聚焦，因此在这里把焦点落到工作台标题。
     document
       .querySelector<HTMLElement>('#panel-section-批量工作台')
       ?.focus({ preventScroll: true })
+    await screenScroll.goToSecondScreen()
   })
 }
 
@@ -243,25 +241,37 @@ function resetCandidateGenerationState(): void {
 /** Issue 110: 已有候选或未保存草案时，重新搜索会替换现场，需要先确认。 */
 const hasUnsavedSingleWork = computed(() => hasResults.value || draftRequest.value !== null)
 
-/** 尊重缩减动态效果：不做平滑滚动。 */
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== 'undefined' &&
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  )
+/**
+ * #140/#141/#143：两屏滚动所有权。
+ *
+ * 搜索首屏常驻；第二屏按当前模式取单番候选/草案屏或批量工作台屏，未挂载（搜索中、
+ * 失败、无候选、整批未完成）时不会切屏。滚动属于文档，模块外空白区同样可切屏；
+ * 批量左右栏以 `data-screen-scroll="inner"` 声明为内部滚动所有者。
+ */
+const secondScreen = computed<HTMLElement | null>(() =>
+  mode.value === 'single' ? workbenchScreen.value : batchWorkbenchScreen.value,
+)
+const screenScroll = useAddAnimeScreenScroll({
+  firstScreen: heroScreen,
+  secondScreen,
+})
+
+/**
+ * 明确按钮或模块外空白滚动都只是回到首屏，不清空第二屏现场。
+ * 平滑定位结束后才聚焦输入，避免焦点把页面瞬移回另一处。
+ */
+async function backToSearch(): Promise<void> {
+  await screenScroll.goToFirstScreen()
+  singleSearchForm.value?.focusInput()
 }
 
-function scrollScreenIntoView(element: HTMLElement | null): void {
-  if (!element || typeof element.scrollIntoView !== 'function') return
-  element.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' })
-}
-
-/** 明确按钮或模块外空白滚动都只是回到首屏，不清空第二屏现场。 */
-function backToSearch(): void {
-  scrollScreenIntoView(heroScreen.value)
-  void nextTick(() => singleSearchForm.value?.focusInput())
-}
+// #141：候选切到草案时工作台内容会变长（也可能被滚动锚定带动），
+// 因此进入草案状态后把工作台重新对齐到顶部，让审核标题与返回按钮可见。
+watch(showDraftScreen, async (visible) => {
+  if (!visible) return
+  await nextTick()
+  await screenScroll.goToSecondScreen()
+})
 
 /** 搜索入口：先确认是否会替换未保存工作，再真正发起搜索。 */
 async function requestSearch(): Promise<void> {
@@ -395,12 +405,12 @@ async function searchCandidates(): Promise<void> {
     await nextTick()
     if (searchResult.value?.candidates?.length) {
       // Issue 110：成功后自动进入下方工作台，并把键盘焦点移到结果标题。
-      scrollScreenIntoView(workbenchScreen.value)
       document.querySelector<HTMLElement>('#candidate-search-heading')?.focus({ preventScroll: true })
+      await screenScroll.goToSecondScreen()
     } else {
       // 失败或无候选都留在搜索首屏就地恢复；不抢焦点（Stage 42 无障碍保证），
       // 用户仍停在输入或原控件上，可直接修正后重试。
-      scrollScreenIntoView(heroScreen.value)
+      await screenScroll.goToFirstScreen()
     }
   }
 }
@@ -703,20 +713,19 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 
     <!-- ── 第二屏：草案审核 ───────────────────────────────────────── -->
     <section v-if="showDraftScreen" ref="workbenchScreen" class="add-screen candidate-workbench-screen draft-screen">
-      <!-- Issue 111：长草案只在第二屏的内容面板内滚动，不撑长整页。 -->
-      <div class="draft-scroll-panel">
-        <SingleAnimeReviewPanel
-          :key="draftId"
-          :request="draftRequest!"
-          :draft-id="draftId"
-          :draft-revision="draftRevision"
-          :reuse-suggestion="reuseSuggestion"
-          :selected-collection="selectedCollection"
-          @changed="onDraftChanged"
-          @discard="discardDraft"
-          @change-mode="changeMode"
-        />
-      </div>
+      <!-- Issue 141：长草案沿「添加番剧」页面唯一的外层滚动轴连续展示，
+           不再有第二条内部纵向滚动轴；标题与返回按钮随内容一起移动。 -->
+      <SingleAnimeReviewPanel
+        :key="draftId"
+        :request="draftRequest!"
+        :draft-id="draftId"
+        :draft-revision="draftRevision"
+        :reuse-suggestion="reuseSuggestion"
+        :selected-collection="selectedCollection"
+        @changed="onDraftChanged"
+        @discard="discardDraft"
+        @change-mode="changeMode"
+      />
     </section>
 
     <LoadingState
@@ -791,6 +800,7 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
       v-show="batchSearchSettled"
       ref="batchWorkbenchScreen"
       class="add-screen batch-workbench-screen"
+      data-screen-scroll="overflow"
     >
       <BatchWorkbenchView
         ref="batchWorkbench"
@@ -808,23 +818,38 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 </template>
 
 <style scoped>
-/* Issue 110：单番两屏容器。容器自身纵向滚动并轻柔吸附；模块内部滚动带
- * overscroll-behavior: contain，滚到边界也不会把整页切到另一屏。 */
+/* #140/#141/#143：单番与批量的两屏都是文档内的普通区块。
+ *
+ * 外层滚动所有权属于文档（见 main.css 的 `html.add-anime-scroll`），因此
+ * `#app-main` 的内容、内边距与宽屏两侧留白都能驱动切屏，顶部导航保持可见。
+ * 每一屏至少占满一屏可用高度；单番候选与草案可以沿同一页面滚动轴继续变长，
+ * 不再有第二条内部纵向滚动轴。 */
 .add-anime-screens {
   display: block;
-  height: calc(100vh - var(--size-shell-header) - var(--space-6) * 2);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scroll-snap-type: y proximity;
 }
 
 .add-screen {
-  height: 100%;
-  scroll-snap-align: start;
+  min-height: calc(100vh - var(--size-shell-header) - var(--space-6) * 2);
 }
 
-.add-screen.draft-screen {
-  height: 100%;
+/* 单番候选工作台：内容沿页面滚动轴连续排布，标题、返回按钮与卡片一起移动。
+ * 不使用 height/overflow，避免与外层滚动争夺同一个滚轮事件。 */
+.candidate-workbench-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding-block: var(--space-8);
+  text-align: center;
+}
+
+.candidate-workbench-screen.draft-screen {
+  /* 草案审核沿用既有面板几何（#141）；这里不额外居中或加内边距。 */
+  align-items: stretch;
+  padding-block: 0;
+  text-align: left;
+  gap: 0;
 }
 
 /* US-363: 单番搜索首页英雄区（Stage 47 几何基线）。
@@ -930,22 +955,16 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
   text-align: left;
 }
 
-/* 第二屏：候选工作台 / 草案审核。内容面板各自内部滚动，不撑长整页。 */
-.candidate-workbench-screen {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-3);
-  width: 100%;
-  height: 100%;
-  padding-block: var(--space-8);
-  text-align: center;
-}
-
+/* 第二屏：候选工作台 / 草案审核。两者共用页面唯一的外层滚动轴。 */
 .candidate-search-summary {
   margin: 0;
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
+}
+
+/* 保持返回入口在不同系统字体度量下的居中几何；文字放大时仍可自然撑宽。 */
+#mikan-back-to-search {
+  min-width: 8rem;
 }
 
 .candidate-workbench-title {
@@ -961,31 +980,12 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
   font-size: var(--font-size-md);
 }
 
+/* #141：候选列表不再自带纵向滚动，卡片变多时由页面滚动轴继续展示。 */
 .candidate-workbench-screen .candidate-list-wrapper {
-  flex: 1 1 auto;
-  min-height: 0;
   width: 100%;
-  overflow-y: auto;
-  overscroll-behavior: contain;
   text-align: left;
 }
 
-.candidate-workbench-screen.draft-screen {
-  /* 草案审核屏沿用既有面板几何（#111 负责）；这里不额外居中或加内边距。 */
-  align-items: stretch;
-  padding-block: 0;
-  text-align: left;
-  gap: 0;
-}
-
-/* Issue 111：草案内容面板内部滚动，滚到边界不带动整页切屏。 */
-.candidate-workbench-screen.draft-screen .draft-scroll-panel {
-  flex: 1 1 auto;
-  min-height: 0;
-  width: 100%;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
 .batch-parse-form,
 .candidate-fallback-form {
   display: grid;
@@ -1098,11 +1098,32 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 }
 
 .batch-workbench-screen {
-  /* Issue 113：工作台屏至少一屏高；双栏各自内部滚动，屏高由内容与固定操作栏
-     共同决定，不靠整页高度容纳长列表或长草案。 */
-  height: auto;
-  min-height: 100%;
+  /* #143：批量工作台屏固定为一屏——顶部标题与底部操作栏必须同时可见，因此长列表
+     与长草案由双栏各自的内部滚动承载，不撑长这一屏，也不与外层滚动争夺滚轮。
+     正常桌面双栏装得下时它没有溢出，滚轮仍由外层负责切屏；只有极窄视口／200% 缩放
+     装不下时才退化为这一屏自身内部滚动，优先保证内容完整可读。 */
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - var(--size-shell-header) - var(--space-6) * 2);
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* 退化滚动时不自带可见滚动条：避免滚动条出现/消失改变内容宽度造成抖动；
+     双栏内部的可见滚动条不受影响。 */
+  scrollbar-width: none;
   width: 100%;
+}
+
+.batch-workbench-screen::-webkit-scrollbar {
+  display: none;
+}
+
+/* 面板在固定一屏内按列分配高度：双栏占满剩余空间，操作栏取自己的真实高度。 */
+.batch-workbench-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
 }
 
 /* Issue 112：批量逐部进度——分段只按真实完成数点亮。 */

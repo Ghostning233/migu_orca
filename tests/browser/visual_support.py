@@ -263,7 +263,7 @@ def stability_noise_pixels(canvas_pixels: int) -> int:
 
 
 def assert_stable_reports(reports: list[dict[str, Any]]) -> None:
-    """断言连续三次截图的几何严格一致、差异统计只在栅格化噪声带内波动。"""
+    """断言多次对同一参考图的差异统计只在栅格化噪声带内波动。"""
     assert reports, "at least one report is required"
     first = reports[0]
     canvas_pixels = int(first["compared_pixels"]) + int(first["mask_pixels"])
@@ -276,6 +276,18 @@ def assert_stable_reports(reports: list[dict[str, Any]]) -> None:
         assert report["channel_threshold"] == first["channel_threshold"]
         assert abs(int(report["diff_pixels"]) - int(first["diff_pixels"])) <= noise
         assert report["masks"] == first["masks"]
+
+
+def assert_consecutive_captures_stable(reports: list[dict[str, Any]]) -> None:
+    """断言相邻截图彼此只存在栅格化噪声，不把稳定的大面积变化误判为稳定。"""
+    assert_stable_reports(reports)
+    first = reports[0]
+    canvas_pixels = int(first["compared_pixels"]) + int(first["mask_pixels"])
+    noise = stability_noise_pixels(canvas_pixels)
+    for report in reports:
+        assert int(report["diff_pixels"]) <= noise, (
+            f"连续截图差异像素 {report['diff_pixels']} 超过噪声上限 {noise}"
+        )
 
 
 def report_json(report: dict[str, Any]) -> str:

@@ -1,12 +1,14 @@
 <script setup lang="ts">
-// CandidateCard (US-204 / WP-41-D).
+// CandidateCard (US-204 / WP-41-D；#142 卡片几何与状态稳定).
 //
 // One public MiKan candidate card in the workbench search results. The default
-// layer (F4) shows only the public decision evidence: poster, title,
-// recommendation label, episode progress, season evidence and the explicit
-// "选择此合集" action. The opaque collection id and the parse search query are
-// diagnostics, so they live behind the collapsed 高级信息 details. It never
-// auto-selects a candidate and never renders raw URLs / candidate_context.
+// layer shows only the public decision evidence: poster, title, season
+// evidence, total episodes and the explicit "选择此合集" action. #142 removed
+// the 高级信息 entry: the collection id and the parse query are diagnostics
+// that stay in the page-level 搜索诊断 (`details.title-parse-summary`), so a
+// card never carries a control with no current decision value and no
+// replacement popover. It never auto-selects a candidate and never renders raw
+// URLs / candidate_context.
 //
 // Season evidence (US-204): a NEEDS_CONFIRMATION candidate shows the explicit
 // confirmation checkbox (confirmedSeason bound by the parent); a CONFLICT
@@ -19,6 +21,11 @@
 // passes `loading` only for the clicked candidate, so the others stay disabled
 // without being marked as loading). `error` keeps a sanitized generation
 // failure beside this candidate and re-offers the action as a retry.
+//
+// Geometry (#142): the feedback area keeps a reserved height so short states
+// (season confirmation / generating / failure) replace empty space instead of
+// stretching the neighbouring card or moving the content below; the primary
+// action is bottom-aligned so a 1～4 card row lines up its buttons.
 import { computed, ref } from 'vue'
 
 import BaseButton from '@/components/forms/BaseButton.vue'
@@ -34,14 +41,15 @@ import {
 const props = withDefaults(defineProps<{
   candidate: MikanCandidate
   query: string
-  compact?: boolean
+  /** 批量工作台右栏的横向合集候选卡布局（#144）。 */
+  batchLayout?: boolean
   disabled?: boolean
   confirmedSeason: number | null
   loading?: boolean
   error?: string
 }>(), {
   disabled: false,
-  compact: false,
+  batchLayout: false,
   loading: false,
   error: '',
 })
@@ -81,7 +89,7 @@ function onPosterError(): void {
 </script>
 
 <template>
-  <li class="candidate-card" :class="{ 'is-generating': loading, 'is-compact': compact }">
+  <li class="candidate-card" :class="{ 'is-generating': loading, 'is-batch': batchLayout }">
     <div class="candidate-card-poster">
       <img
         v-if="showPoster"
@@ -96,16 +104,29 @@ function onPosterError(): void {
     </div>
 
     <div class="candidate-card-content">
-      <strong class="candidate-title" :title="candidateTitle">{{ candidateTitle }}</strong>
+      <div class="candidate-card-info">
+        <strong class="candidate-title" :title="candidateTitle">{{ candidateTitle }}</strong>
 
-      <span v-if="candidate.recommendation" class="candidate-recommendation">
-        {{ candidate.recommendation }}
-      </span>
+        <span v-if="candidate.recommendation" class="candidate-recommendation">
+          {{ candidate.recommendation }}
+        </span>
 
-      <div class="candidate-progress">{{ episodeProgressText(candidate.total_episodes) }}</div>
+        <div class="candidate-card-facts">
+          <div class="candidate-progress">{{ episodeProgressText(candidate.total_episodes) }}</div>
+          <p v-if="candidate.season_evidence?.status === 'CONFLICT'" class="candidate-season-conflict">
+            候选合集季数与搜索识别结果冲突，请先人工核对。
+          </p>
+          <p v-else class="candidate-season-evidence">{{ seasonEvidenceText(candidate) }}</p>
+        </div>
+      </div>
 
-      <template v-if="needsConfirmation && seasonNumber !== null">
-        <label class="candidate-season-confirmation">
+      <!-- 预留短反馈区：季数核对、生成中与生成失败在这里就地替换，常规桌面
+           不会因此拉长邻卡、推动下方内容或让主按钮跳位。 -->
+      <div class="candidate-card-feedback">
+        <label
+          v-if="needsConfirmation && seasonNumber !== null"
+          class="candidate-season-confirmation"
+        >
           <input
             type="checkbox"
             class="base-checkbox"
@@ -117,11 +138,13 @@ function onPosterError(): void {
             我确认此合集为第{{ seasonNumber }}季（候选标题未提供季数证据）
           </span>
         </label>
-      </template>
-      <p v-else-if="candidate.season_evidence?.status === 'CONFLICT'" class="candidate-season-conflict">
-        候选合集季数与搜索识别结果冲突，请先人工核对。
-      </p>
-      <p v-else class="candidate-season-evidence">{{ seasonEvidenceText(candidate) }}</p>
+        <p v-if="loading" class="candidate-generating-status" role="status">
+          正在生成订阅草案…
+        </p>
+        <p v-else-if="error" :id="errorId" class="candidate-generate-error" role="alert">
+          {{ error }}
+        </p>
+      </div>
 
       <BaseButton
         class="candidate-select"
@@ -136,37 +159,18 @@ function onPosterError(): void {
       >
         {{ error ? '重试生成草案' : '选择此合集' }}
       </BaseButton>
-
-      <p v-if="loading" class="candidate-generating-status" role="status">
-        正在生成订阅草案…
-      </p>
-      <p v-else-if="error" :id="errorId" class="candidate-generate-error" role="alert">
-        {{ error }}
-      </p>
-
-      <!-- F4: 公开封面对应的技术编号与解析搜索词属于诊断信息，默认层不显示；
-           需要核对时按需展开。 -->
-      <details class="candidate-advanced">
-        <summary>高级信息</summary>
-        <dl class="candidate-advanced-grid">
-          <div class="candidate-advanced-row"><dt>合集编号</dt><dd>{{ candidate.bangumi_id }}</dd></div>
-          <div class="candidate-advanced-row"><dt>匹配搜索词</dt><dd>{{ candidate.source_query || query }}</dd></div>
-        </dl>
-      </details>
     </div>
   </li>
 </template>
 
 <style scoped>
 .candidate-card {
-  --candidate-poster-size: 120px;
-  --candidate-card-gap: var(--space-4);
   position: relative;
-  /* Issue 110：单番候选改为竖排卡片（封面在上、信息与主操作在下），
-   * 以便 1～4 项同排居中展示；批量紧凑态在下方单独覆盖。 */
+  /* #142：单番候选是竖排卡片（封面在上、信息与主操作在下），1～4 项同排居中。 */
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  min-width: 0;
   height: auto;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
@@ -185,6 +189,7 @@ function onPosterError(): void {
 
 .candidate-poster {
   display: block;
+  flex: 0 0 auto;
   object-fit: cover;
   border-radius: var(--radius-md);
 }
@@ -198,8 +203,17 @@ function onPosterError(): void {
   gap: var(--space-2);
 }
 
+.candidate-card-info {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
 .candidate-title {
   display: -webkit-box;
+  min-height: calc(var(--type-card-title) * 1.4);
   overflow: hidden;
   font-size: var(--type-card-title);
   font-weight: var(--font-weight-semibold);
@@ -210,7 +224,7 @@ function onPosterError(): void {
 }
 
 .candidate-recommendation {
-  justify-self: start;
+  align-self: flex-start;
   background: var(--color-bg-muted);
   border: 1px solid var(--color-border);
   border-radius: 999px;
@@ -219,10 +233,22 @@ function onPosterError(): void {
   color: var(--color-text-muted);
 }
 
-.candidate-season-evidence {
+.candidate-card-facts {
+  display: grid;
+  gap: 0.125rem;
+}
+
+.candidate-season-evidence,
+.candidate-season-conflict {
+  margin: 0;
   font-size: var(--type-label);
+  line-height: 1.5;
   color: var(--color-text-muted);
   overflow-wrap: anywhere;
+}
+
+.candidate-season-conflict {
+  color: var(--color-danger);
 }
 
 .candidate-progress {
@@ -232,40 +258,11 @@ function onPosterError(): void {
   overflow-wrap: anywhere;
 }
 
-.candidate-advanced {
-  border-top: 1px solid var(--color-border);
-  padding-top: 0.35rem;
-  font-size: 0.875rem;
-}
-
-.candidate-advanced summary {
-  cursor: pointer;
-  color: var(--color-text-muted);
-}
-
-.candidate-advanced-grid {
-  margin: 0.35rem 0 0;
+/* 预留短反馈高度（两行 14px/1.5）：季数核对、生成中与失败都落在这里。 */
+.candidate-card-feedback {
   display: grid;
-  gap: 0.2rem 1rem;
-  grid-template-columns: max-content 1fr;
-}
-
-.candidate-advanced-row {
-  display: contents;
-}
-
-.candidate-advanced-row dt {
-  font-weight: 600;
-  color: var(--color-text-muted);
-}
-
-.candidate-advanced-row dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-.candidate-poster {
-  flex: 0 0 auto;
+  gap: 0.25rem;
+  min-height: calc(var(--type-label) * 1.5 * 2);
 }
 
 .candidate-poster-placeholder {
@@ -281,13 +278,8 @@ function onPosterError(): void {
   display: flex;
   align-items: flex-start;
   gap: 0.4rem;
-  font-size: 0.875rem;
-}
-
-.candidate-season-conflict {
-  margin: 0;
-  color: var(--color-danger);
-  font-size: 0.875rem;
+  font-size: var(--type-label);
+  line-height: 1.5;
 }
 
 .candidate-select {
@@ -296,86 +288,72 @@ function onPosterError(): void {
   margin-top: auto;
 }
 
-.candidate-card:not(.is-compact) .candidate-advanced {
-  width: 100%;
-  background: var(--color-surface);
-}
-
-.candidate-card.is-compact {
-  --candidate-poster-size: 8rem;
+/* 批量工作台右栏（Issue 144）：一行一张横向合集候选卡——较大的横向封面在左、
+   判断信息在中、「选择此合集」在右。它不是左栏「批量条目卡」的紧凑尺寸。 */
+.candidate-card.is-batch {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(120px, 28%) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+}
+
+.candidate-card.is-batch .candidate-poster,
+.candidate-card.is-batch .candidate-poster-placeholder {
+  width: 100%;
   height: auto;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-md);
+}
+
+.candidate-card.is-batch .candidate-card-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'info action'
+    'feedback action';
+  align-items: center;
+  gap: 0.25rem var(--space-4);
+}
+
+.candidate-card.is-batch .candidate-card-info {
+  grid-area: info;
+  gap: 0.25rem;
+}
+
+.candidate-card.is-batch .candidate-title {
   min-height: 0;
-  gap: 0.35rem;
-  padding: 0.75rem;
-  border-radius: 6px;
+  font-size: var(--type-card-title);
+  -webkit-line-clamp: 2;
 }
 
-.candidate-card.is-compact .candidate-card-content {
-  display: contents;
-  height: auto;
+.candidate-card.is-batch .candidate-card-facts {
+  grid-area: auto;
 }
 
-.candidate-card.is-compact .candidate-card-poster {
-  order: 5;
-  width: auto;
-  height: auto;
+.candidate-card.is-batch .candidate-card-feedback {
+  grid-area: feedback;
+  min-height: 0;
 }
 
-.candidate-card.is-compact .candidate-poster {
-  width: min(8rem, 100%);
-  max-width: 8rem;
-  height: 8rem;
-  aspect-ratio: auto;
-  border-radius: 4px;
-}
-
-.candidate-card.is-compact .candidate-title {
-  order: 1;
-  display: block;
-  font-size: inherit;
-  font-weight: 600;
-  line-height: inherit;
-  -webkit-line-clamp: unset;
-}
-
-.candidate-card.is-compact .candidate-recommendation {
-  order: 2;
-}
-
-.candidate-card.is-compact .candidate-progress {
-  order: 3;
-}
-
-.candidate-card.is-compact .candidate-season-confirmation,
-.candidate-card.is-compact .candidate-season-conflict,
-.candidate-card.is-compact .candidate-season-evidence {
-  order: 4;
-}
-
-.candidate-card.is-compact .candidate-select {
-  order: 6;
+.candidate-card.is-batch .candidate-select {
+  grid-area: action;
   width: auto;
   margin-top: 0;
+  align-self: center;
 }
 
-.candidate-card.is-compact .candidate-generating-status,
-.candidate-card.is-compact .candidate-generate-error {
-  order: 7;
-}
-
-.candidate-card.is-compact .candidate-advanced {
-  order: 8;
-  position: static;
-  width: auto;
-  background: transparent;
+.candidate-card.is-batch .candidate-generating-status,
+.candidate-card.is-batch .candidate-generate-error {
+  margin: 0;
 }
 
 .candidate-generating-status,
 .candidate-generate-error {
   margin: 0;
-  font-size: 0.875rem;
+  font-size: var(--type-label);
+  line-height: 1.5;
 }
 
 .candidate-generating-status {

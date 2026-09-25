@@ -223,21 +223,24 @@ class TestAppWorkbenchSingleSearch:
         text = page.locator(".candidate-workbench-screen").inner_text()
         assert "葬送的芙莉莲" in text
         assert "咒术回战 第三季" in text
-        # F4/US-345: 默认层只放公开决策证据（封面/标题/季度证据/总集数与选择
-        # 动作）；合集编号与解析搜索词是诊断信息，折叠在「高级信息」内。
+        # #142：候选默认层只放公开决策证据：封面、标题、季度证据、总集数与选择动作；
+        # 合集编号与解析搜索词不再有卡片入口，只留在页面级搜索诊断里。
         assert "季度证据" in text
-        # 候选默认层只放公开决策证据：封面、标题、季度证据、总集数与选择动作。
         assert "总集数：28 集" in text
         assert "选择此合集" in text
         expect(page.locator(".candidate-card").first.locator(".candidate-poster")).to_have_count(1)
         assert "MiKan ID: 2353" not in text
         assert "匹配搜索词" not in text
+        assert "高级信息" not in text
 
         second_card = page.locator(".candidate-card").nth(1)
         assert "3072" not in second_card.inner_text()
-        second_card.locator("details.candidate-advanced summary").click()
-        expect(second_card.locator("details.candidate-advanced")).to_have_attribute("open", "")
-        assert "3072" in second_card.inner_text()
+        assert second_card.locator("details.candidate-advanced").count() == 0
+        # 页面级搜索诊断仍保留，可查看识别结果与解析来源。
+        diagnostics = page.locator("details.title-parse-summary")
+        expect(diagnostics).to_have_count(1)
+        diagnostics.locator("summary").click()
+        assert "解析来源" in diagnostics.inner_text()
 
     def test_initial_page_has_no_empty_result_panel_or_fallback_entry(
         self, page: Page, live_server_url: str
