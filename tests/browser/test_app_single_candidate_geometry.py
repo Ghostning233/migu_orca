@@ -29,6 +29,7 @@ from tests.browser.test_app_workbench import (
     _goto_workbench,
     _preview_request,
 )
+from tests.browser.visual_support import browser_surface
 
 pytestmark = pytest.mark.browser
 
@@ -279,6 +280,8 @@ def test_long_title_keeps_full_accessible_name_and_hides_canary(
 ) -> None:
     long_title = "葬送的芙莉莲 第二季 超长合集标题用于验证两行截断"
     canary = "us364-candidate-context-canary"
+    console_leaks: list[bool] = []
+    page.on("console", lambda message: console_leaks.append(canary in message.text))
     page.route(
         "**/api/v1/mikan/candidates",
         lambda route: route.fulfill(
@@ -311,10 +314,9 @@ def test_long_title_keeps_full_accessible_name_and_hides_canary(
     expect(page.locator(".candidate-select")).to_have_attribute("aria-label", f"选择此合集：{long_title}")
     assert title.evaluate("el => el.getBoundingClientRect().height") <= 48
     expect(page.locator(".candidate-season-confirmation")).to_be_visible()
-    surface = page.evaluate(
-        "() => ({body: document.body.innerText, url: location.href, local: JSON.stringify(localStorage), session: JSON.stringify(sessionStorage), history: JSON.stringify(history.state)})"
-    )
+    surface = browser_surface(page)
     assert all(canary not in value for value in surface.values())
+    assert not any(console_leaks)
 
 
 def test_reduced_motion_loading_has_textual_state_without_spinner(

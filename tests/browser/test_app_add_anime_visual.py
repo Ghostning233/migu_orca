@@ -1,4 +1,4 @@
-"""#140～#144：添加番剧的视觉回归硬门禁（真实 Chromium，固定 fixture）。
+"""#140～#144：获批单番金样的视觉硬门禁，批量保留稳定性验证。
 
 父规格 #139 的验收口径（已冻结，不得按单次 PR 反向调宽）：
 
@@ -9,7 +9,8 @@
 - 关键锚点与尺寸偏差 ≤2 CSS px；
 - 先证明同一场景连续三次截图稳定，截图噪声超阈值时先修环境而不是放宽门槛。
 
-基准图片只在人工（或具备读图能力的 Agent）审核真实浏览器画面后入库。记录方式：
+基准图片必须由用户逐状态审核真实浏览器画面后才可批准。当前仅三张单番图获批；
+批量旧截图因 #145 改造暂缓批准，不作像素金样。记录方式：
 
     MIGU_ORCA_RECORD_VISUAL_BASELINE=1 uv run pytest tests/browser/test_app_add_anime_visual.py -q
 
@@ -28,12 +29,13 @@ import pytest
 from playwright.sync_api import Page
 
 from tests.browser.add_anime_visual_fixtures import (
+    SCENARIO_BY_NAME,
     SCENARIOS,
     anchor_values,
     anchors_json,
 )
 from tests.browser.visual_support import (
-    assert_stable_reports,
+    assert_consecutive_captures_stable,
     capture_canvas,
     require_dist,
 )
@@ -50,6 +52,10 @@ MAX_DIFF_RATIO = 0.005
 MAX_MASK_RATIO = 0.05
 ANCHOR_TOLERANCE = 2.0
 STABILITY_REPEATS = 3
+APPROVED_SCENARIOS = tuple(
+    SCENARIO_BY_NAME[name]
+    for name in ("single-search", "single-candidates-four", "single-draft-review")
+)
 
 
 def _recording() -> bool:
@@ -84,8 +90,10 @@ def _assert_anchors(
             assert deviation <= ANCHOR_TOLERANCE, (selector, field, box, expected_box)
 
 
-@pytest.mark.parametrize("scenario", SCENARIOS, ids=[scenario.name for scenario in SCENARIOS])
-def test_add_anime_scene_matches_the_approved_baseline(
+@pytest.mark.parametrize(
+    "scenario", APPROVED_SCENARIOS, ids=[scenario.name for scenario in APPROVED_SCENARIOS]
+)
+def test_add_anime_scene_matches_the_recorded_baseline(
     page: Page, live_server_url: str, tmp_path: Path, scenario
 ) -> None:
     require_dist()
@@ -100,7 +108,7 @@ def test_add_anime_scene_matches_the_approved_baseline(
 
     baseline = BASELINE_DIR / f"{scenario.name}.png"
     assert baseline.is_file(), (
-        f"缺少获批视觉基准 {baseline.name}；先由用户审核真实浏览器画面，"
+        f"缺少获批单番视觉基准 {baseline.name}；先由用户审核真实浏览器画面，"
         f"再用 MIGU_ORCA_RECORD_VISUAL_BASELINE=1 记录。"
     )
     masks = tuple(
@@ -134,10 +142,12 @@ def test_add_anime_scene_captures_are_stable(
     scenario.setup(page, live_server_url)
 
     reports: list[dict[str, object]] = []
+    repeated_anchors: list[dict[str, dict[str, float] | None]] = []
     previous: Path | None = None
     for index in range(STABILITY_REPEATS):
         capture = tmp_path / f"{scenario.name}-{index}.png"
         capture_canvas(page, capture)
+        repeated_anchors.append(anchor_values(page, scenario.anchors))
         if previous is not None:
             reports.append(
                 compare_images(
@@ -148,4 +158,5 @@ def test_add_anime_scene_captures_are_stable(
             )
         previous = capture
 
-    assert_stable_reports(reports)
+    assert repeated_anchors[0] == repeated_anchors[1] == repeated_anchors[2]
+    assert_consecutive_captures_stable(reports)

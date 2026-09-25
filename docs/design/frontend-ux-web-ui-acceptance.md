@@ -42,11 +42,11 @@
 
 ## 5. 落地情况（2026-09-25）
 
-「添加番剧」页面族已按本文件建立第一套视觉回归基准，落地位置与审核记录见
+「添加番剧」页面族已按本文件建立第一套视觉回归基准：单番三张经用户审核批准；批量四张因 #145 改造暂缓批准，不参与像素金样门禁。落地位置与审核状态见
 [添加番剧视觉回归基准](assets/frontend-ux/acceptance-baseline/add-anime/README.md)：
 
-- 固定 fixture 在 `tests/browser/add_anime_visual_fixtures.py`；硬门禁在
-  `tests/browser/test_app_add_anime_visual.py`（5 个场景 × 像素比较与三次稳定性）。
+- 固定 fixture 在 `tests/browser/add_anime_visual_fixtures.py`；门禁在
+  `tests/browser/test_app_add_anime_visual.py`（3 个获批单番场景做像素与锚点比较，7 个场景做三次稳定性）。
 - 已执行的判定：显著像素差异 ≤0.5%（任一 RGB 通道 >12 计差异）、关键锚点 ≤2 CSS px、
   具名掩码总面积 ≤5%（当前 0%）、连续三次截图稳定；缺基准即失败。
 - 交互与几何门禁由 `test_app_single_two_screen.py`、`test_app_single_draft_screen.py`、
