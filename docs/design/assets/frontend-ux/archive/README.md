@@ -10,6 +10,7 @@
 | `batch-review-12-v2.png`、`tracking-management-v2.png` | 批量与追番页面的上一轮方向图 | 2026-09-23 |
 | `batch-partial-success-v1.png`、`tracking-revalidation-failed-v1.png` | 批量部分成功与提交前复核失败的上一轮异常图 | 2026-09-23 |
 | `redesign-2026-09-23-baseline/` 两图 | 本轮生成后被滚动条修订取代的初稿 | 2026-09-23 |
+| `redesign-2026-09-25-batch-draft-before/` | 批量草案工作台信息层级修订前的设计图 | 2026-09-25 |
 | `2609181532-web-ui-old/` | 旧 Web UI 截图 | 2026-09-18 |
 
 文件名中的 V1/V2 仅表示当时版本；历史 PRD 对这些图的引用只说明当时的验收背景。
