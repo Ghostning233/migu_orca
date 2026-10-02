@@ -248,10 +248,13 @@ def test_right_candidate_cards_differ_from_left_batch_item_cards(
     right_cover = page.evaluate(
         "() => { const r = document.querySelector('#batch-detail-pane .candidate-card-poster').getBoundingClientRect(); return {w: r.width, h: r.height} }"
     )
-    # 左栏「批量条目卡」是小方封面；右栏「批量合集候选卡」是明显更大的横向封面。
-    assert left_poster <= 64, left_poster
+    # 左栏「批量条目卡」是设计图里的紧凑缩略封面（约 88×64），右栏「批量合集
+    # 候选卡」是明显更大的横向封面；两者不是同一套尺寸规则。旧的 ≤64 上限只反映
+    # 上一版紧凑占位，与 2026-09-25 设计目标冲突，改为设计比例区间。
+    assert 76 <= left_poster <= 108, left_poster
     assert right_cover["w"] >= 160, right_cover
     assert right_cover["w"] > right_cover["h"], right_cover
+    assert right_cover["w"] > left_poster + 40, (left_poster, right_cover)
     # 左栏条目卡不是合集卡：它的文本里没有真实合集的选择动作。
     left_card = page.locator(".batch-draft-card").first
     assert left_card.locator(".candidate-select").count() == 0

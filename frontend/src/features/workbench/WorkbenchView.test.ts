@@ -6,6 +6,7 @@ import { nextTick } from 'vue'
 
 import { api } from '@/api/client'
 import type { operations } from '@/api/generated/api'
+import AnimeModeSwitch from '@/features/workbench/AnimeModeSwitch.vue'
 import WorkbenchView from '@/features/workbench/WorkbenchView.vue'
 import { buildReuseHandoff, publishReuseHandoff, clearReuseHandoff } from '@/features/requests/reuseHandoff'
 
@@ -129,6 +130,38 @@ function createDraftResult(overrides: Partial<Record<string, unknown>> = {}): Cr
     draft_revision: 1,
     ...overrides,
   } as never
+}
+
+/** 手动控制的 promise：用于把异步请求卡在「进行中」状态。 */
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => { resolve = res })
+  return { promise, resolve }
+}
+
+/** 最小批量解析条目：状态与展示字段齐全，足以渲染卡片。 */
+function batchParseItem(itemId: string, rawTitle: string, status = 'EMPTY') {
+  return {
+    item_id: itemId,
+    raw_title: rawTitle,
+    status,
+    canonical_title_candidates: [],
+    season_hint: null,
+    search_queries: [rawTitle],
+    confidence: 0.9,
+    needs_user_review: false,
+    source: 'fake',
+    parse_result: null,
+    attempted_queries: [],
+    candidates: [],
+    applied_preferences: null,
+    preference_hits: [],
+    preference_warnings: [],
+    review_hints: [],
+    enhanced_search_queries: [],
+    preview_request: null,
+    error: null,
+  }
 }
 
 async function mountWorkbench() {
@@ -707,6 +740,131 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     expect(apiPost).toHaveBeenCalledWith('/api/v1/batches/parse', expect.objectContaining({
       body: expect.objectContaining({ raw_input: '甲\n乙' }),
     }))
+  })
+
+  it('#159: batch first screen mirrors the single task structure and centres the same anchors', async () => {
+    const { wrapper } = await mountWorkbench()
+    const order = (selector: string): string[] =>
+      Array.from(wrapper.find(selector).element.children).map((child) => child.id || child.className)
+    const singleOrder = order('.single-home-hero')
+    expect(singleOrder[0]).toContain('single-home-intro')
+    expect(singleOrder[1]).toContain('anime-mode-switch')
+    expect(singleOrder).toContain('mikan-candidate-search-form')
+    expect(singleOrder[singleOrder.length - 1]).toContain('journey-steps')
+
+    await wrapper.find('#anime-mode-batch').trigger('click')
+    await nextTick()
+    const batch = wrapper.find('.batch-search-screen')
+    expect(batch.exists()).toBe(true)
+    // 同一套标题层级：标题 + 说明 + 模式切换；输入形态允许不同。
+    expect(batch.find('.batch-search-intro .workbench-title').text()).toBe('添加番剧')
+    expect(batch.find('.batch-search-intro .batch-search-subtitle').text()).toContain('粘贴番剧名称')
+    const batchOrder = order('.batch-search-screen')
+    expect(batchOrder[0]).toContain('batch-search-intro')
+    expect(batchOrder[1]).toContain('anime-mode-switch')
+    expect(batchOrder[2]).toBe('batch-parse-form')
+    expect(batchOrder[batchOrder.length - 1]).toContain('journey-steps')
+    expect(batch.find('.batch-search-steps .is-current').text()).toBe('输入名称')
+    // 空闲态不套用搜索态样式；搜索进行中才回到文档流顶部。
+    expect(batch.classes()).not.toContain('is-searching')
+  })
+
+  it('#159: batch search re-enters the flow at the top while a search is in flight', async () => {
+    const releaseParse = deferred<unknown>()
+    apiPost.mockImplementationOnce(() => releaseParse.promise as never)
+    const { wrapper } = await mountWorkbench()
+    await wrapper.find('#anime-mode-batch').trigger('click')
+    await wrapper.find('#batch-raw-input').setValue('甲')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await nextTick()
+
+    expect(wrapper.find('.batch-search-screen').classes()).toContain('is-searching')
+    expect(wrapper.find('#batch-search-progress').exists()).toBe(true)
+
+    releaseParse.resolve({ batch_id: 'batch-flow', raw_input: '甲', items: [], summary: {} })
+    await flushPromises()
+    await nextTick()
+    // 零条目仍留在搜索首屏：任务区保持顶部对齐（与单番「已搜索但无候选」同规则）。
+    expect(wrapper.find('#batch-empty-result').exists()).toBe(true)
+    expect(wrapper.find('.batch-search-screen').classes()).toContain('is-searching')
+  })
+
+  it('restores a finished batch result when the mode comes back to batch', async () => {
+    // #145 B：请求完成后才切回 batch（其他合法入口）时，必须明确恢复已完成的结果，
+    // 而不是依赖偶然的焦点滚动；搜索期间切换控件本身是禁用的。
+    const releaseParse = deferred<unknown>()
+    apiPost.mockImplementationOnce(() => releaseParse.promise as never)
+    const { wrapper } = await mountWorkbench()
+    await wrapper.find('#anime-mode-batch').trigger('click')
+    await wrapper.find('#batch-raw-input').setValue('甲')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await nextTick()
+
+    // 搜索进行中：两个方向的切换控件都被禁用。
+    expect((wrapper.find('#anime-mode-single').element as HTMLButtonElement).disabled).toBe(true)
+    expect((wrapper.find('#anime-mode-batch').element as HTMLButtonElement).disabled).toBe(true)
+
+    // 模拟「另一个合法入口」在请求完成前切到单番：这不改变已完成结果的归属。
+    wrapper.findComponent(AnimeModeSwitch).vm.$emit('update:modelValue', 'single')
+    await nextTick()
+    expect(wrapper.find('#mikan-candidate-query').exists()).toBe(true)
+
+    releaseParse.resolve({
+      batch_id: 'batch-restore',
+      raw_input: '甲',
+      items: [batchParseItem('item-1', '甲')],
+    })
+    await flushPromises()
+    await nextTick()
+    // 不在 batch 模式时不抢占屏幕：工作台屏保持隐藏。
+    expect(wrapper.find('.batch-draft-card').exists()).toBe(true)
+    expect((wrapper.find('.batch-workbench-screen').element as HTMLElement).style.display).toBe('none')
+    expect(wrapper.find('#batch-empty-result').exists()).toBe(false)
+
+    // 切回 batch：已完成结果必须被明确恢复。
+    wrapper.findComponent(AnimeModeSwitch).vm.$emit('update:modelValue', 'batch')
+    await flushPromises()
+    await nextTick()
+    expect((wrapper.find('.batch-workbench-screen').element as HTMLElement).style.display).not.toBe('none')
+    expect(wrapper.find('.batch-draft-card').exists()).toBe(true)
+    expect(wrapper.find('#batch-raw-input').element).toHaveProperty('value', '甲')
+  })
+
+  it('shows an honest empty-result notice instead of entering an empty workbench', async () => {
+    // #145 F：HTTP 200 但 items=[] → 留在搜索首屏就地说明，不是 MiKan 故障。
+    apiPost.mockResolvedValueOnce({ batch_id: 'batch-empty', raw_input: '甲', items: [] } as never)
+    const { wrapper } = await mountWorkbench()
+    await wrapper.find('#anime-mode-batch').trigger('click')
+    await wrapper.find('#batch-raw-input').setValue('甲')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.find('#batch-empty-result').text()).toContain('服务端没有返回任何条目')
+    expect(wrapper.find('#batch-empty-result').text()).not.toContain('故障')
+    expect((wrapper.find('.batch-workbench-screen').element as HTMLElement).style.display).toBe('none')
+    expect(wrapper.find('.batch-draft-card').exists()).toBe(false)
+  })
+
+  it('still enters the workbench when every item is EMPTY or FAILED', async () => {
+    apiPost.mockResolvedValueOnce({
+      batch_id: 'batch-all-failed',
+      raw_input: '甲\n乙',
+      items: [
+        batchParseItem('item-1', '甲', 'EMPTY'),
+        batchParseItem('item-2', '乙', 'FAILED'),
+      ],
+    } as never)
+    const { wrapper } = await mountWorkbench()
+    await wrapper.find('#anime-mode-batch').trigger('click')
+    await wrapper.find('#batch-raw-input').setValue('甲\n乙')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.find('.batch-draft-card').exists()).toBe(true)
+    expect((wrapper.find('.batch-workbench-screen').element as HTMLElement).style.display).not.toBe('none')
+    expect(wrapper.find('#batch-empty-result').exists()).toBe(false)
   })
 
   it('restores the single input cursor after switching modes', async () => {

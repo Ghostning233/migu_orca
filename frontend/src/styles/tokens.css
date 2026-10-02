@@ -81,10 +81,20 @@
   --control-height-lg: 52px;
   --control-target-min: 44px;
   --control-height: var(--control-height-md);
+  /* 模式切换控件高：选项 52px + 轨道内边距 2×4px + 轨道描边 2×1px = 62px（Stage 47
+   * 获批基线）。首屏任务区对齐需要它作为 Token，而不是在页面里再写一个 62px。 */
+  --control-height-mode-switch: calc(
+    var(--control-height-lg) + 2 * var(--space-1) + 2 * var(--control-border-width)
+  );
   --control-padding-inline: var(--space-3);
   --control-padding-block: var(--space-2);
   --control-border-width: 1px;
-  --control-checkbox-size: 20px;
+  /* 全站复选框（票 156）：可见方框固定 18px、选中态用现行 primary 色；方框不因点击
+   * 目标被放大，未放大前的可点区域仍由标签/外层布局提供（共享 44px 目标 Token）。 */
+  --control-checkbox-size: 18px;
+  --control-checkbox-radius: 4px;
+  --control-checkbox-border: var(--color-border-control);
+  --control-checkbox-hit: var(--control-target-min);
   --icon-sm: 16px;
   --icon-md: 20px;
   --icon-lg: 24px;

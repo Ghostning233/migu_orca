@@ -9,6 +9,10 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# #155: 截图证据工具写下的构建戳（源码指纹 + 产物摘要 + Git 状态）。它是本地产物，
+# 与 dist 同生命周期但不属于构建输出，因此不入库也不参与 Flask 静态托管。
+.evidence/
+
 # Local editor/OS noise
 .DS_Store
 *.local

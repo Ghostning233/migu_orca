@@ -203,3 +203,92 @@ describe('AnimeDraftEditor', () => {
     expect(wrapper.emitted('apply')?.[0]?.[0]).not.toHaveProperty('base_revision')
   })
 })
+
+describe('AnimeDraftEditor batch poster projection (#145)', () => {
+  /** 右栏合集身份投影；`posterUrl` 由宿主传入，必须是同源不透明海报键路径。 */
+  function summary(posterUrl: string | null) {
+    return { title: '星海旅途', season: 1, totalEpisodes: 12, posterUrl }
+  }
+
+  it('never claims a selected collection from server match metadata alone', () => {
+    // 产品边界：`source_info.matched_bangumi` 是服务端匹配/草案来源信息，
+    // 不等于用户对真实 MiKan 合集的选择，绝不能渲染成「已选真实合集」。
+    const matchedOnly = {
+      ...request,
+      source_info: {
+        ...request.source_info,
+        matched_bangumi: { title: '星海旅途', poster_url: '/api/v1/mikan/posters/2353' },
+      },
+    } as unknown as RequestSnapshot
+    const wrapper = mount(AnimeDraftEditor, {
+      props: { request: matchedOnly, layout: 'batch', candidateSummary: null },
+    })
+
+    expect(wrapper.find('.batch-draft-identity').attributes('data-selection-state')).toBe('unconfirmed')
+    const text = wrapper.text()
+    expect(text).toContain('尚未确认真实合集')
+    expect(text).not.toContain('已选真实合集')
+    // 匹配到的合集名、季度与海报都不得伪装成用户选择。
+    expect(text).not.toContain('星海旅途')
+    expect(text).not.toContain('第 1 季')
+    expect(wrapper.find('.batch-draft-poster-image').exists()).toBe(false)
+    expect(wrapper.find('.batch-draft-poster').attributes('data-poster-state')).toBe('placeholder')
+    expect(wrapper.html()).not.toContain('/api/v1/mikan/posters/2353')
+    // 待核对提示使用中性/警示语气，而不是「已选」的确认胶囊。
+    expect(wrapper.find('.batch-draft-chip').classes()).toContain('is-unconfirmed')
+    // 原始 MiKan 地址与草案内部标识都不进入 DOM。
+    expect(wrapper.html()).not.toContain('mikan.example')
+    expect(wrapper.html()).not.toContain('draft-public-id')
+  })
+
+  it('shows the confirmed identity only when the host passes a real selection', () => {
+    const wrapper = mount(AnimeDraftEditor, {
+      props: { request, layout: 'batch', candidateSummary: summary('/api/v1/mikan/posters/2353') },
+    })
+
+    expect(wrapper.find('.batch-draft-identity').attributes('data-selection-state')).toBe('confirmed')
+    const text = wrapper.text()
+    expect(text).toContain('已选真实合集')
+    expect(text).toContain('星海旅途 · 第 1 季')
+    expect(text).not.toContain('尚未确认真实合集')
+    expect(wrapper.find('.batch-draft-poster-image').attributes('src')).toBe(
+      '/api/v1/mikan/posters/2353',
+    )
+    expect(wrapper.find('.batch-draft-chip').classes()).not.toContain('is-unconfirmed')
+  })
+
+  it('renders a same-origin opaque poster key path', () => {
+    const wrapper = mount(AnimeDraftEditor, {
+      props: { request, layout: 'batch', candidateSummary: summary('/api/v1/mikan/posters/2353') },
+    })
+
+    const image = wrapper.find('.batch-draft-poster-image')
+    expect(image.exists()).toBe(true)
+    expect(image.attributes('src')).toBe('/api/v1/mikan/posters/2353')
+    expect(wrapper.find('.batch-draft-poster').attributes('data-poster-state')).toBe('ready')
+  })
+
+  it.each([
+    'https://evil.example/poster.png',
+    'https://user:secret@evil.example/poster.png',
+    'data:image/png;base64,AAAA',
+    'file:///etc/passwd',
+    '/srv/private/poster.png',
+    '//evil.example/poster.png',
+    '/api/v1/mikan/posters/../../etc/passwd',
+    '/api/v1/mikan/posters/2353?token=secret',
+  ])('never writes an unsafe poster value into the DOM: %s', (posterUrl) => {
+    const wrapper = mount(AnimeDraftEditor, {
+      props: { request, layout: 'batch', candidateSummary: summary(posterUrl) },
+    })
+
+    expect(wrapper.find('.batch-draft-poster-image').exists()).toBe(false)
+    expect(wrapper.find('.batch-draft-poster').attributes('src')).toBeUndefined()
+    expect(wrapper.find('.batch-draft-poster').attributes('data-poster-state')).toBe('placeholder')
+    const html = wrapper.html()
+    expect(html).not.toContain(posterUrl)
+    expect(html).not.toContain('evil.example')
+    expect(html).not.toContain('base64')
+    expect(html).not.toContain('/srv/private')
+  })
+})

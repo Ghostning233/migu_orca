@@ -109,11 +109,12 @@ jobs:
           MIGU_VISUAL_FONT_ROOT: ${{ runner.temp }}/migu-visual-fonts
         run: bash script/setup-visual-fonts.sh
 
-      - name: Build frontend (for SPA browser tests)
+      - name: Install frontend dependencies (npm ci)
         working-directory: frontend
-        run: |
-          npm ci
-          npm run build
+        run: npm ci
+
+      - name: Build frontend with evidence stamp (#155)
+        run: uv run python -m tests.browser.evidence build
 
       - name: Run browser suite (fail loudly if Chromium cannot start)
         run: uv run pytest tests/browser/ -q

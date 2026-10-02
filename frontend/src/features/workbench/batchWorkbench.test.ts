@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
 import type { operations } from '@/api/generated/api'
+import * as batchModuleExports from '@/features/workbench/batchWorkbench'
 import {
   batchCandidateSelectionIsBlocked,
   batchCardAuxiliaryFacts,
+  batchCardCover,
   batchCardNeedsReview,
   batchCardNextStep,
   batchCardPreferenceSummary,
@@ -11,11 +13,11 @@ import {
   batchCardTitle,
   batchConfirmDisabledReason,
   batchItemCount,
-  batchItemIsException,
   batchItemMatchesReviewFilters,
   batchItemNeedsProcessing,
   batchSelectedConfirmCopy,
   batchStatusLabel,
+  batchStatusTone,
   batchSaveConfirmErrorLabel,
   batchSaveConfirmRecoveryAllowed,
   batchSaveErrorInvalidatesDraft,
@@ -192,8 +194,6 @@ describe('batchWorkbench helpers (US-205)', () => {
   it('matches additive title, status, and needs-processing filters without changing item identity', () => {
     const failed = batchItem({ item_id: 'failed', status: 'FAILED', raw_title: '路哥' })
     const normal = batchItem({ item_id: 'normal', status: 'DRAFT', raw_title: '萌王' })
-    expect(batchItemIsException(failed)).toBe(true)
-    expect(batchItemIsException(normal)).toBe(false)
     expect(batchItemMatchesReviewFilters(failed, { query: '路', status: 'FAILED', needsProcessingOnly: true }, false)).toBe(true)
     expect(batchItemMatchesReviewFilters(normal, { query: '路', status: '', needsProcessingOnly: false }, true)).toBe(false)
     expect(batchItemMatchesReviewFilters(failed, { query: '', status: 'DRAFT', needsProcessingOnly: true }, false)).toBe(false)
@@ -531,5 +531,115 @@ describe('batch parse progress event adapter (Issue 132)', () => {
     expect(
       readBatchParseItemEvent({ event: 'item', data: { completed: '一', total: 3, item: {} } }),
     ).toBeNull()
+  })
+})
+
+describe('batch draft card presentation helpers (#145)', () => {
+  const matchedRequest = {
+    request_id: 'req-1',
+    status: 'PENDING_CONFIRM',
+    input: { raw_title: '葬送的芙莉莲' },
+    source_info: {
+      matched_bangumi: {
+        title: '葬送的芙莉莲',
+        poster_url: '/api/v1/mikan/posters/2353',
+      },
+      rss_sources: [],
+    },
+    confirmable_config: { selected_subtitle_group: '喵萌' },
+    effective_seed_names: [],
+  }
+
+  it('groups status codes into weights without promoting failures to normal', () => {
+    expect(batchStatusTone('DRAFT')).toBe('attention')
+    expect(batchStatusTone('FOUND')).toBe('attention')
+    expect(batchStatusTone('CONFIRMED')).toBe('success')
+    expect(batchStatusTone('FAILED')).toBe('danger')
+    expect(batchStatusTone('RESPONSE_UNKNOWN')).toBe('danger')
+    expect(batchStatusTone('SOMETHING_NEW')).toBe('neutral')
+    expect(batchStatusTone(null)).toBe('neutral')
+  })
+
+  it('only projects same-origin opaque poster paths for the card cover', () => {
+    const item = batchItem({
+      status: 'DRAFT',
+      preview_request: matchedRequest,
+      draft_id: 'draft-1',
+      draft_revision: 1,
+    })
+    // 只有用户本次会话明确选择的合集才算 selected；服务端匹配海报只是 candidate。
+    expect(batchCardCover(item)).toEqual({ url: '/api/v1/mikan/posters/2353', state: 'candidate' })
+
+    expect(
+      batchCardCover(item, {
+        title: '葬送的芙莉莲',
+        season: 1,
+        totalEpisodes: 28,
+        posterUrl: '/api/v1/mikan/posters/9999',
+      }),
+    ).toEqual({ url: '/api/v1/mikan/posters/9999', state: 'selected' })
+
+    // 外部 URL / data: / 本地路径一律 fail closed，退回候选或占位。
+    const unsafe = batchItem({
+      status: 'DRAFT',
+      preview_request: {
+        ...matchedRequest,
+        source_info: {
+          ...matchedRequest.source_info,
+          matched_bangumi: { title: '葬送的芙莉莲', poster_url: 'https://evil.example/p.png' },
+        },
+      },
+      candidates: [
+        {
+          bangumi_id: '1',
+          title: '葬送的芙莉莲',
+          mikan_url: 'https://mikan.example/Home/Bangumi/1',
+          poster_url: 'data:image/png;base64,AAAA',
+        },
+      ],
+    })
+    expect(batchCardCover(unsafe)).toEqual({ url: null, state: 'none' })
+    expect(batchCardCover(batchItem())).toEqual({ url: null, state: 'none' })
+  })
+
+  it('marks a not-yet-chosen collection cover as a candidate preview', () => {
+    const found = batchItem({
+      status: 'FOUND',
+      candidates: [
+        {
+          bangumi_id: '42',
+          title: '转生史莱姆 第四季',
+          mikan_url: 'https://mikan.example/Home/Bangumi/42',
+          poster_url: '/api/v1/mikan/posters/42',
+        },
+      ],
+    })
+    expect(batchCardCover(found)).toEqual({ url: '/api/v1/mikan/posters/42', state: 'candidate' })
+  })
+
+  it('never claims a selection from server match metadata alone', () => {
+    // 产品边界：服务端匹配/草案来源只能作为提示，不能当作「用户已选真实合集」。
+    // 这里锁住「投影层不会用匹配信息合成选择投影」这一条，UI 侧再由
+    // AnimeDraftEditor 的未确认态断言兜住。
+    const item = batchItem({
+      status: 'DRAFT',
+      season_hint: '第 9 季',
+      preview_request: matchedRequest,
+      draft_id: 'draft-1',
+      draft_revision: 1,
+      candidates: [
+        {
+          bangumi_id: '2353',
+          title: '葬送的芙莉莲',
+          mikan_url: 'https://mikan.example/Home/Bangumi/2353',
+          poster_url: '/api/v1/mikan/posters/2353',
+          season_evidence: { status: 'PROVEN', season: 1, requires_review: false },
+          total_episodes: 28,
+        },
+      ],
+    })
+    expect('batchFallbackCollectionSummary' in batchModuleExports).toBe(false)
+    // 封面投影仍可给出候选/匹配预览，但状态绝不是 selected。
+    expect(batchCardCover(item).state).toBe('candidate')
   })
 })

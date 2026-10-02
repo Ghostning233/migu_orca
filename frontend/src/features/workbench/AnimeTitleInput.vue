@@ -83,7 +83,7 @@ defineExpose({
     :id="props.id || 'anime-title-input-batch'"
     class="anime-title-input-batch"
     rows="1"
-    placeholder="萌王S4&#10;路哥S4&#10;杖剑谭S2"
+    placeholder="萌王S4&#10;路哥S4"
     :model-value="props.modelValue"
     :disabled="props.disabled"
     @update:model-value="onInput"

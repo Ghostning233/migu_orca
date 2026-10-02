@@ -19,6 +19,10 @@ import type { ApiStreamEvent } from '@/api/client'
 import type { operations } from '@/api/generated/api'
 import { isPublicRouteIdentifier } from '@/app/router/catalog'
 import { displayValue, type RequestSnapshot } from '@/features/requests/requestDetail'
+import {
+  publicPosterPath,
+  type SelectedCollectionSummary,
+} from '@/features/workbench/candidateSearch'
 import type { SaveConfirmBatchItemsBody, SaveConfirmBatchItemsResult, TrackingItemsResult } from '@/app/composables/useBatchReviewJourney'
 
 /** Public batch parse result produced by `POST /api/v1/batches/parse`. */
@@ -34,6 +38,18 @@ export interface BatchParseProgressEvent {
   completed: number
   total: number
   item: BatchItem
+}
+
+/**
+ * 批量解析的终态（#145 F）。
+ *
+ * - `itemCount` 是服务端返回的可展示条目数；`0` 表示「服务端没有返回任何条目」，
+ *   它与「全部条目都是 EMPTY/FAILED」不同：后者仍有条目，必须能进入工作台逐项处理。
+ * - `failed` 表示本次解析以失败结束（就地错误反馈由子组件呈现）。
+ */
+export interface BatchParseOutcome {
+  itemCount: number
+  failed: boolean
 }
 
 /**
@@ -115,6 +131,82 @@ export function batchCardTitle(item: BatchItem): string {
     return canonical[0] || '未命名条目'
   }
   return item.raw_title || '未命名条目'
+}
+
+/** 视觉权重分组：只表达状态语气，不改变任何状态码或可用动作。 */
+export type BatchStatusTone = 'neutral' | 'attention' | 'danger' | 'success'
+
+const BATCH_STATUS_TONES: Record<string, BatchStatusTone> = {
+  RAW: 'neutral',
+  PARSED: 'attention',
+  FOUND: 'attention',
+  EMPTY: 'attention',
+  FAILED: 'danger',
+  NEEDS_REVIEW: 'attention',
+  DRAFT: 'attention',
+  READY: 'attention',
+  ACCEPTED: 'success',
+  CONFIRMED: 'success',
+  SAVED_PENDING_CONFIRM: 'attention',
+  SAVED_PENDING_LOCATE: 'attention',
+  RESPONSE_UNKNOWN: 'danger',
+}
+
+/**
+ * 状态芯片的语气（#145 视觉校准）。
+ *
+ * 纯展示分类：未知状态码保留中性语气，绝不把失败、结果未知等待处理状态画成
+ * 正常/成功。中文状态文本始终与芯片同时呈现，颜色不是唯一的信息载体。
+ */
+export function batchStatusTone(status: string | null | undefined): BatchStatusTone {
+  return BATCH_STATUS_TONES[String(status ?? '')] ?? 'neutral'
+}
+
+/** 批量条目卡封面的安全投影结果。 */
+export interface BatchCardCover {
+  /** 同源不透明海报路径；null 表示只能显示占位。 */
+  url: string | null
+  /**
+   * `selected` = 用户本次会话明确选择的真实合集（唯一可称为「已选」的来源）；
+   * `candidate` = 仅来自公开候选或服务端匹配的预览封面，绝不代表用户已选；
+   * `none` = 没有可安全展示的封面。
+   */
+  state: 'selected' | 'candidate' | 'none'
+}
+
+/**
+ * 服务端为这条草案匹配到的公开元数据。
+ *
+ * 这是**匹配/推断**结果：它只说明服务端按标题找到了什么，不代表用户已经选择。
+ * 因此它只能用于「预览封面」这类不宣称选择的展示，不能用于「已选真实合集」。
+ */
+function matchedBangumi(item: BatchItem): { title: string; posterUrl: string | null } | null {
+  const matched = batchCardRequest(item)?.source_info?.matched_bangumi
+  if (!matched) return null
+  return {
+    title: String(matched.title ?? '').trim(),
+    posterUrl: publicPosterPath(matched.poster_url),
+  }
+}
+
+/**
+ * 左栏条目卡封面的安全投影（#145 视觉校准）。
+ *
+ * 顺序：用户在本会话明确选择的合集海报（`selected`）→ 首个公开候选的封面
+ * （`candidate`）→ 服务端匹配合集海报（同样只是 `candidate`，因为匹配不等于用户选择）
+ * → 占位。任何非 `/api/v1/mikan/posters/<key>` 的取值都 fail closed。
+ */
+export function batchCardCover(
+  item: BatchItem,
+  selected?: SelectedCollectionSummary | null,
+): BatchCardCover {
+  const selectedUrl = publicPosterPath(selected?.posterUrl)
+  if (selectedUrl) return { url: selectedUrl, state: 'selected' }
+  const candidateUrl = publicPosterPath((item.candidates ?? [])[0]?.poster_url)
+  if (candidateUrl) return { url: candidateUrl, state: 'candidate' }
+  const matched = matchedBangumi(item)
+  if (matched?.posterUrl) return { url: matched.posterUrl, state: 'candidate' }
+  return { url: null, state: 'none' }
 }
 
 /** Chinese label for a preference-hit field code (legacy helper). */
@@ -218,11 +310,6 @@ export function orderBatchItemsForReview(items: BatchItem[]): BatchItem[] {
   return groups.flat()
 }
 
-/** Whether a batch item is an exception that should be surfaced for review. */
-export function batchItemIsException(item: BatchItem): boolean {
-  return String(item.status ?? '') === 'FAILED' || String(item.status ?? '') === 'EMPTY' || batchCardNeedsReview(item)
-}
-
 /**
  * #149：「需处理」= 当前不可确认且尚未「已确认」的条目。
  *
@@ -318,15 +405,6 @@ export function batchCardNextStep(guidance: BatchCardGuidance): string {
   if (guidance.blocker) return `先解决：${guidance.blocker}。`
   if (guidance.hasDraft) return '勾选该条目后使用底栏的「保存并确认 N 部」。'
   return '重新获取批量草案以生成可审核条目。'
-}
-
-/** Find the next exception after the current item, wrapping at the end. */
-export function nextBatchException(items: BatchItem[], currentItemId: string | null): BatchItem | null {
-  const exceptions = items.filter(batchItemIsException)
-  if (!exceptions.length) return null
-  const currentIndex = items.findIndex((item) => item.item_id === currentItemId)
-  const start = currentIndex < 0 ? 0 : currentIndex + 1
-  return exceptions.find((item) => items.indexOf(item) >= start) ?? exceptions[0] ?? null
 }
 
 /** Match one item against the additive workbench search/filter controls. */

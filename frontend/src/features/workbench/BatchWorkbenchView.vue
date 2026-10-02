@@ -67,6 +67,8 @@ import {
   batchCardNeedsReview,
   batchCardRequest,
   batchCardTitle,
+  batchCardCover,
+  batchStatusTone,
   batchItemMatchesReviewFilters,
   batchItemNeedsProcessing,
   batchItemCount,
@@ -77,7 +79,6 @@ import {
   canChooseBatchCandidate,
   canExpandBatchCard,
   orderBatchItemsForReview,
-  nextBatchException,
   validateBatchRawInput,
   type BatchConfirmScopeCounts,
   type BatchCardFact,
@@ -85,7 +86,9 @@ import {
   type BatchSaveConfirmOutcomeSummary,
   type BatchSaveConfirmResult,
   type BatchCandidate,
+  type BatchCardCover,
   type BatchItem,
+  type BatchParseOutcome,
   type BatchParseResult,
 } from '@/features/workbench/batchWorkbench'
 import type { BatchSaveRecoveryAction } from '@/features/workbench/batchWorkbench'
@@ -117,8 +120,13 @@ const props = withDefaults(defineProps<{ rawInput?: string; hideInput?: boolean 
 const emit = defineEmits<{
   (event: 'update:rawInput', value: string): void
   (event: 'restore-search-focus'): void
-  /** Issue 112: the whole batch finished and a stable result is on screen. */
-  (event: 'parse-settled'): void
+  /** #145：工作台页头的「返回搜索首屏」入口；只切屏，不清除审核现场。 */
+  (event: 'back-to-search'): void
+  /**
+   * Issue 112: the whole batch finished and a stable result is on screen.
+   * #145 F: 载荷说明服务端返回了多少可展示条目；父组件据此决定是否进入工作台。
+   */
+  (event: 'parse-settled', outcome: BatchParseOutcome): void
 }>()
 
 /** Issue 112: one real per-item completion, as reported by the server stream. */
@@ -361,6 +369,10 @@ const processingCount = computed(() => items.value.filter((item) => draftSession
 const allSelected = computed(
   () => selectable.value.length > 0 && selectable.value.every((item) => selectedItemIds.value.has(item.item_id ?? '')),
 )
+/** #156：全选作用于当前可见可确认项；部分勾选时用 indeterminate 与「全选」区分。 */
+const allSelectionPartial = computed(
+  () => !allSelected.value && selectable.value.some((item) => selectedItemIds.value.has(item.item_id ?? '')),
+)
 
 // US-356 / D-02: N 部（保存并确认 N 部）的资格集合是「完整批次中手工勾选且当前可确认」
 // 的条目。筛选只改变浏览：被隐藏的勾选仍参与，被阻断的勾选保留意图但不进入请求。
@@ -419,6 +431,27 @@ const visibleItems = computed(() => items.value.filter((item) =>
   }, itemConfirmability(item.item_id ?? '').confirmable),
 ))
 
+/**
+ * #145：左栏条目卡的封面。优先用用户点选的合集，其次用服务端为这条草案匹配到的
+ * 合集海报，最后才退回首个公开候选；全部经过 `batchCardCover` 的同源路径校验。
+ */
+function cardCoverFor(item: BatchItem): BatchCardCover {
+  return batchCardCover(item, selectedCollectionByItem.value[item.item_id ?? ''] ?? null)
+}
+
+/**
+ * #145／产品边界：右栏合集身份只来自**用户本次会话明确选择的合集**。
+ *
+ * 服务端匹配信息（`source_info.matched_bangumi`）是搜索/规则/草案来源的提示，不等于
+ * 用户对真实 MiKan 合集的选择，因此绝不回填到这里冒充「已选真实合集」。没有用户选择
+ * 时传 null，右栏改为「尚未确认真实合集」的就地待核对状态。
+ */
+const detailCollectionSummary = computed<SelectedCollectionSummary | null>(() => {
+  const item = detailItem.value
+  if (!item) return null
+  return selectedCollectionByItem.value[item.item_id ?? ''] ?? null
+})
+
 async function restoreReviewScrollPosition(): Promise<void> {
   await nextTick()
   if (reviewList.value) reviewList.value.scrollTop = reviewScrollPositions.get(reviewFilterKey.value) ?? 0
@@ -432,13 +465,6 @@ watch([reviewQuery, reviewStatus, needsProcessingOnly], (_values, oldValues) => 
   void restoreReviewScrollPosition()
 })
 
-function clearReviewFilters(): void {
-  reviewQuery.value = ''
-  reviewStatus.value = ''
-  needsProcessingOnly.value = false
-  temporarilyShownItemId.value = null
-}
-
 /** #149：放大镜浮层不参与布局；打开即聚焦输入，关闭后关键词与结果保留。 */
 async function openTitleSearch(): Promise<void> {
   searchExpanded.value = true
@@ -451,17 +477,12 @@ function closeTitleSearch(options: { restoreFocus?: boolean } = {}): void {
   if (options.restoreFocus) searchToggle.value?.focus()
 }
 
-/** #149：× 只清空关键词，筛选（状态／只看需处理）与浮层开合不变。 */
-function clearTitleSearch(): void {
-  reviewQuery.value = ''
-  void nextTick(() => searchInput.value?.focus())
-}
-
 function toggleTitleSearch(): void {
   if (searchExpanded.value) closeTitleSearch({ restoreFocus: true })
   else void openTitleSearch()
 }
 
+/** #158：Esc 在浮层任意位置（输入框或关闭按钮）都收起搜索并回到放大镜。 */
 function onTitleSearchKeydown(event: KeyboardEvent): void {
   if (event.key !== 'Escape') return
   event.preventDefault()
@@ -665,20 +686,6 @@ function onCardKeydown(event: KeyboardEvent, item: BatchItem): void {
   }
 }
 
-function goToNextException(): void {
-  const next = nextBatchException(items.value, currentItemId.value)
-  if (!next?.item_id) return
-  const hidden = !batchItemMatchesReviewFilters(next, {
-    query: reviewQuery.value,
-    status: reviewStatus.value,
-    needsProcessingOnly: needsProcessingOnly.value,
-  }, itemConfirmability(next.item_id ?? '').confirmable)
-  temporarilyShownItemId.value = hidden ? next.item_id : null
-  selectCurrentItem(next)
-  focusAnnouncement.value = hidden ? `已临时显示异常条目：${batchCardTitle(next)}` : `已定位到异常条目：${batchCardTitle(next)}`
-  focusCard(next.item_id)
-}
-
 function syncBatchIdToUrl(batchIdValue: string): void {
   if (batchIdValue) {
     void router.replace(routeLocation('add', { batch_id: batchIdValue }))
@@ -757,11 +764,18 @@ async function parseBatch(onProgress?: (progress: BatchParseProgress) => void): 
     saveSummary.value = null
     savingItemIds.value = new Set()
     seasonConfirmations.value = {}
-    notification.success('批量搜索完成', `已返回 ${items.value.length} 个条目的候选搜索状态。`)
+    const itemCount = items.value.length
+    if (itemCount) {
+      notification.success('批量搜索完成', `已返回 ${itemCount} 个条目的候选搜索状态。`)
+    } else {
+      // 服务端成功但没有返回条目：这是「空结果」，不是 MiKan 故障。
+      notification.info('批量解析完成', '服务端没有返回任何条目；请核对输入后重新搜索。')
+    }
     await nextTick()
-    document.querySelector<HTMLElement>('#panel-section-批量工作台')?.focus()
-    // 整批完成、拿到稳定结果后才切到工作台。
-    emit('parse-settled')
+    // 整批完成、拿到稳定结果：只声明「数据已稳定可展示」以及有多少条目。切屏、切屏
+    // 目标与焦点都由父组件在搜索状态收尾、第二屏稳定之后唯一决定，子组件不抢占屏幕
+    // 所有权；items=[] 由父组件留在搜索首屏就地说明，不进入空工作台。
+    emit('parse-settled', { itemCount, failed: false })
   } catch (error) {
     void error
     journey.dispatch({ type: 'parse_failed', error })
@@ -1543,6 +1557,18 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 
 <template>
   <PanelSection title="批量工作台" class="batch-workbench-panel">
+    <!-- #145：工作台页头沿用设计图的层级——深海蓝大标题在左，「返回搜索首屏」在右；
+         它只切屏与聚焦输入，绝不清除下方未保存的审核现场。 -->
+    <template #actions>
+      <BaseButton
+        v-if="props.hideInput"
+        id="batch-back-to-search"
+        variant="secondary"
+        @click="emit('back-to-search')"
+      >
+        ↑ 返回搜索首屏
+      </BaseButton>
+    </template>
     <form v-if="!props.hideInput" id="batch-parse-form" class="batch-parse-form" @submit.prevent="parseBatch()">
       <label v-if="!props.hideInput" for="batch-raw-input">批量番剧名称</label>
       <AnimeTitleInput
@@ -1586,7 +1612,9 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
       />
       <EmptyState
         v-else-if="!items.length"
-        message="粘贴多行番剧名称后获取解析结果。"
+        :message="parseStarted
+          ? '整批解析已完成，但服务端没有返回任何条目；请核对输入后重新搜索。'
+          : '粘贴多行番剧名称后获取解析结果。'"
       />
       <template v-else>
         <div class="batch-review-layout">
@@ -1598,7 +1626,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                    打开/关闭都不推挤筛选控件、卡片或底栏。 -->
               <div class="batch-review-filters" aria-label="批量结果筛选">
                 <label class="batch-review-status-field">
-                  状态
+                  <span class="visually-hidden">状态</span>
                   <select id="batch-review-status" v-model="reviewStatus">
                     <option value="">全部状态</option>
                     <option v-for="status in ['FAILED', 'EMPTY', 'FOUND', 'DRAFT', 'SAVED_PENDING_LOCATE', 'SAVED_PENDING_CONFIRM', 'CONFIRMED']" :key="status" :value="status">
@@ -1628,6 +1656,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                     class="batch-review-search-popover"
                     role="dialog"
                     aria-label="标题搜索"
+                    @keydown="onTitleSearchKeydown"
                   >
                     <span class="batch-search-glyph is-muted" aria-hidden="true"></span>
                     <input
@@ -1637,17 +1666,16 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                       type="search"
                       placeholder="搜索番剧标题"
                       aria-label="搜索番剧标题"
-                      @keydown="onTitleSearchKeydown"
                     />
                     <button
-                      id="batch-review-search-clear"
+                      id="batch-review-search-close"
                       type="button"
-                      class="icon-button batch-review-search-clear"
-                      aria-label="清空标题搜索"
-                      title="清空"
-                      @click="clearTitleSearch"
+                      class="icon-button batch-review-search-close"
+                      aria-label="关闭标题搜索"
+                      title="关闭标题搜索"
+                      @click="closeTitleSearch({ restoreFocus: true })"
                     >
-                      ×
+                      <span class="batch-close-glyph" aria-hidden="true"></span>
                     </button>
                   </div>
                 </div>
@@ -1663,35 +1691,17 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                   <span class="batch-review-toggle-track" aria-hidden="true"><span class="batch-review-toggle-knob"></span></span>
                   只看需处理
                 </button>
-                <button
-                  id="batch-next-exception"
-                  type="button"
-                  class="icon-button batch-next-exception"
-                  aria-label="下一异常"
-                  title="下一异常"
-                  :disabled="!nextBatchException(items, currentItemId)"
-                  @click="goToNextException"
-                >
-                  <span class="batch-next-exception-glyph" aria-hidden="true">!</span>
-                </button>
-                <BaseButton
-                  v-if="reviewQuery || reviewStatus || needsProcessingOnly"
-                  id="batch-review-clear"
-                  variant="secondary"
-                  @click="clearReviewFilters"
-                >
-                  清除条件
-                </BaseButton>
               </div>
-              <!-- #145：默认层只保留设计图中的筛选控件与卡片；条目总数、解析完成状态与
-                   下一异常的就地说明对读屏保留，但不占视觉空间。 -->
+              <!-- #145：默认层只保留设计图中的筛选控件与卡片；条目总数与解析完成状态对
+                   读屏保留，但不占视觉空间。 -->
               <p class="batch-review-count visually-hidden" role="status">共 {{ items.length }} 部，当前显示 {{ visibleItems.length }} 部</p>
               <p id="batch-parse-progress" class="batch-parse-progress visually-hidden" role="status">
-                解析完成：{{ items.length }} / {{ parseCount }} 部；异常条目已置顶，条目顺序已固定。
+                解析完成：{{ items.length }} / {{ parseCount }} 部；条目顺序已固定。
               </p>
+              <!-- #158：删除「下一异常」入口后，这一行只保留保存结果的就地播报（首个失败/
+                   首个未处理条目的定位），不再为已删除按钮预留说明或空白。 -->
               <div class="batch-review-navigation">
                 <span v-if="focusAnnouncement" class="visually-hidden" role="status" aria-live="polite">{{ focusAnnouncement }}</span>
-                <span v-else class="visually-hidden">无异常时不可用</span>
               </div>
               <p v-if="detailItem && !visibleItems.some((item) => item.item_id === detailItem?.item_id)" class="batch-filter-hidden" role="status">
                 当前条目已被筛选隐藏，详情仍保持显示。
@@ -1726,11 +1736,23 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
               @click="selectCurrentItem(item)"
               @keydown="onCardKeydown($event, item)"
             >
-              <div class="batch-card-poster">
+              <!-- #145：封面是卡片的主要扫描信息之一；只有同源不透明海报路径会被
+                   渲染，缺封面时才退回占位文案。 -->
+              <div
+                class="batch-card-poster"
+                :data-poster-state="cardCoverFor(item).state"
+              >
+                <img
+                  v-if="cardCoverFor(item).url"
+                  class="batch-card-poster-image"
+                  :src="cardCoverFor(item).url ?? undefined"
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                >
                 <span
-                  v-if="canChooseBatchCandidate(item)"
+                  v-else-if="canChooseBatchCandidate(item)"
                   class="batch-card-poster-placeholder"
-                  data-poster-state="unselected"
                   title="待选择真实 MiKan 合集"
                 >
                   待选择
@@ -1738,7 +1760,6 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                 <span
                   v-else
                   class="batch-card-poster-placeholder"
-                  data-poster-state="unavailable"
                   title="暂无封面"
                 >
                   无封面
@@ -1750,7 +1771,10 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
               <div class="batch-card-main">
                 <div class="batch-card-headline">
                   <strong class="batch-card-title">{{ batchCardTitle(item) }}</strong>
-                  <span class="batch-status batch-card-status">{{ batchStatusLabel(item.status) }}</span>
+                  <span
+                    class="batch-status batch-card-status"
+                    :data-tone="batchStatusTone(item.status)"
+                  >{{ batchStatusLabel(item.status) }}</span>
                   <span v-if="batchCardNeedsReview(item)" class="batch-status batch-card-review-status">
                     需人工核对
                   </span>
@@ -1859,10 +1883,10 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                 </details>
               </div>
 
-              <!-- #149：当前查看由卡片高亮表达，保存范围由右侧复选框表达；两者是不同
-                   控件。未保存条目的删除入口是右侧小图标，悬停或键盘聚焦时可见，并
-                   沿用既有确认与状态限制。 -->
-              <div class="batch-card-controls">
+              <!-- #149/#156：当前查看由卡片高亮表达，保存范围由右侧复选框表达；两者是
+                   不同控件。整个控制列的点击都不冒泡到卡片的「查看」动作，勾选不会
+                   顺带切换右栏或触发删除。 -->
+              <div class="batch-card-controls" @click.stop>
                 <button
                   v-if="!['CONFIRMED', 'SAVED_PENDING_LOCATE', 'SAVED_PENDING_CONFIRM'].includes(String(item.status ?? ''))"
                   type="button"
@@ -1870,7 +1894,6 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                   :aria-label="`删除 ${item.raw_title ?? '批量条目'}`"
                   title="删除"
                   :disabled="operationLocks(item.item_id ?? '')"
-                  @click.stop
                   @click="deleteBatchCard(item.item_id ?? '')"
                 >
                   ×
@@ -1881,7 +1904,6 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                   :label="`选择 ${item.raw_title ?? '批量条目'}`"
                   :checked="selectedItemIds.has(item.item_id ?? '')"
                   :disabled="!itemConfirmability(item.item_id ?? '').confirmable || operationLocks(item.item_id ?? '')"
-                  @click.stop
                   @update:checked="(value: boolean) => toggleItemSelection(item.item_id ?? '', value)"
                 />
               </div>
@@ -1922,7 +1944,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                   :key="`detail-${detailItem.item_id ?? detailItem.raw_title ?? ''}`"
                   layout="batch"
                   :request="(ensureDraftSession(detailItem)?.request.value ?? batchCardRequest(detailItem)) as RequestSnapshot"
-                  :candidate-summary="selectedCollectionByItem[detailItem.item_id ?? ''] ?? null"
+                  :candidate-summary="detailCollectionSummary"
                   id-prefix="batch-preview"
                   form-id="detail-preview-edit-form"
                   container-id="request-detail-container"
@@ -1968,6 +1990,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
               id="batch-select-all-checkbox"
               :label="'全选当前可见可确认项'"
               :checked="allSelected"
+              :indeterminate="allSelectionPartial"
               :disabled="selectable.length === 0 || saveInFlight"
               @update:checked="setAllSelected"
             />
@@ -2065,7 +2088,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   min-height: 12rem;
   overscroll-behavior: contain;
   overflow-y: auto;
-  padding: 6px;
+  padding: 4px var(--space-2) var(--space-3);
   scroll-padding-bottom: 8px;
   /* #148：左栏目标是隐藏滚动条而不是隐藏滚动能力——滚轮、触控板、键盘 Tab
      与读屏导航仍可到达全部卡片，卡片自身可聚焦并用方向键移动。 */
@@ -2079,6 +2102,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 .batch-review-controls {
   display: grid;
   min-width: 0;
+  padding: 0 var(--space-2) var(--space-3);
 }
 
 /* 只对读屏可见：保留状态播报与测试可读文本，但不占视觉空间。 */
@@ -2092,23 +2116,14 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   width: 1px;
 }
 
-.batch-next-exception-glyph {
-  border: 1px solid currentColor;
-  border-radius: 50%;
-  font-size: 0.7rem;
-  font-weight: 700;
-  height: 1rem;
-  line-height: 0.95rem;
-  text-align: center;
-  width: 1rem;
-}
-
+/* #145：筛选行按设计图收紧——等高的状态选择框、放大镜按钮、细分隔线与「只看需处理」
+   开关同排；浮层绝对定位，开合都不改变这一行、卡片或底栏的几何。 */
 .batch-review-filters {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.6rem;
-  padding: 0 0 0.5rem;
+  gap: var(--space-2);
+  padding: 0 0 var(--space-2);
   /* 标题搜索浮层相对本行定位；浮层自身不在布局流内。 */
   position: relative;
 }
@@ -2123,12 +2138,20 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 
 .batch-review-filters input,
 .batch-review-filters select {
-  background: var(--color-bg);
+  background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   color: var(--color-text);
-  min-height: 2rem;
-  padding: 0.25rem 0.5rem;
+  font-size: var(--font-size-md);
+  min-height: var(--control-height-md);
+  padding: 0 var(--space-3);
+}
+
+.batch-review-filters select {
+  /* 固定宽度而不是让内容撑开：筛选行在 1440 主验收画布上必须保持一行
+     （状态筛选 + 放大镜 + 只看需处理），内容更宽时截断显示。 */
+  text-overflow: ellipsis;
+  width: 8.5rem;
 }
 
 /* 放大镜完全由 CSS 画成：不依赖 emoji 字体在各环境的栅格化差异。 */
@@ -2163,10 +2186,16 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 }
 
 .batch-review-search-toggle {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  min-height: var(--control-height-md);
+  min-width: var(--control-height-md);
   position: relative;
 }
 
 .batch-review-search-toggle.is-active {
+  background: var(--color-primary-subtle);
   border-color: var(--color-primary);
   color: var(--color-primary);
 }
@@ -2176,38 +2205,94 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   border-radius: var(--radius-pill);
   height: 6px;
   position: absolute;
-  right: 4px;
-  top: 4px;
+  right: 5px;
+  top: 5px;
   width: 6px;
 }
 
-/* 浮层绝对定位：打开与关闭都不推挤状态筛选、卡片或底部操作栏。 */
+/* #158：浮层是独立悬浮背景（内边距、圆角、阴影），承载输入框与关闭按钮；输入框
+   自身不描边，避免把输入框边框当成整个浮层。绝对定位：开合都不推挤工具栏/卡片/底栏。 */
 .batch-review-search-popover {
   align-items: center;
-  background: var(--color-surface-raised);
+  background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-dialog);
   display: flex;
-  gap: 0.4rem;
+  gap: var(--space-2);
   left: 0;
-  padding: 0.35rem 0.5rem;
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
   position: absolute;
   right: 0;
   top: calc(100% + 4px);
-  z-index: var(--z-overlay);
+  z-index: var(--z-popover);
 }
 
 .batch-review-search-popover input {
+  background: transparent;
   border: 0;
   flex: 1 1 auto;
-  min-height: 2rem;
+  font-size: var(--font-size-md);
+  min-height: var(--control-height-sm);
   min-width: 0;
-  padding: 0.25rem 0.25rem;
+  padding: 0;
 }
 
-.batch-review-search-icon {
-  color: var(--color-text-muted);
+/* `type="search"` 的原生清除图标会与唯一的关闭按钮形成第二个「叉」的歧义。 */
+.batch-review-search-popover input::-webkit-search-cancel-button,
+.batch-review-search-popover input::-webkit-search-decoration {
+  appearance: none;
+  -webkit-appearance: none;
+  display: none;
+}
+
+/* 输入框自身不画第二个内框，但焦点必须有等价、可见的指示：焦点落在整行输入容器上，
+   用 Token 的 focus-ring 描边，而不是把 outline 去掉后什么都不留。 */
+.batch-review-search-popover:focus-within {
+  border-color: var(--color-focus-ring);
+  box-shadow: var(--focus-ring);
+}
+
+.batch-review-search-popover input:focus-visible {
+  outline: none;
+}
+
+/* 唯一可见的关闭入口：具读屏名称，悬停/聚焦有可见反馈。 */
+.batch-review-search-close {
+  flex: 0 0 auto;
+  min-height: var(--control-height-sm);
+  min-width: var(--control-height-sm);
+}
+
+.batch-review-search-close:hover {
+  background: var(--color-surface-subtle);
+}
+
+/* 关闭叉同样由 CSS 画成，不依赖字体符号。 */
+.batch-close-glyph {
+  display: inline-block;
+  height: 12px;
+  position: relative;
+  width: 12px;
+}
+
+.batch-close-glyph::before,
+.batch-close-glyph::after {
+  background: currentColor;
+  content: '';
+  height: 2px;
+  left: 0;
+  position: absolute;
+  top: 5px;
+  width: 12px;
+}
+
+.batch-close-glyph::before {
+  transform: rotate(45deg);
+}
+
+.batch-close-glyph::after {
+  transform: rotate(-45deg);
 }
 
 .batch-review-filter-divider {
@@ -2225,31 +2310,32 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   color: var(--color-text-muted);
   cursor: pointer;
   display: inline-flex;
-  font-size: 0.84rem;
-  gap: 0.4rem;
-  padding: 0.2rem 0;
+  font-size: var(--font-size-md);
+  gap: var(--space-2);
+  min-height: var(--control-height-md);
+  padding: 0;
 }
 
 .batch-review-toggle-track {
-  background: var(--color-border);
+  background: var(--color-border-strong);
   border-radius: var(--radius-pill);
   display: inline-block;
-  height: 1.1rem;
+  height: 1.35rem;
   position: relative;
   transition: background 0.15s ease;
-  width: 2rem;
+  width: 2.4rem;
 }
 
 .batch-review-toggle-knob {
-  background: var(--color-surface-raised);
+  background: var(--color-surface);
   border-radius: 50%;
   box-shadow: var(--shadow-card);
-  height: 0.9rem;
-  left: 0.1rem;
+  height: 1.1rem;
+  left: 0.125rem;
   position: absolute;
-  top: 0.1rem;
+  top: 0.125rem;
   transition: transform 0.15s ease;
-  width: 0.9rem;
+  width: 1.1rem;
 }
 
 .batch-review-toggle[aria-checked='true'] {
@@ -2261,7 +2347,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 }
 
 .batch-review-toggle[aria-checked='true'] .batch-review-toggle-knob {
-  transform: translateX(0.9rem);
+  transform: translateX(1.05rem);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2283,10 +2369,6 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   display: contents;
 }
 
-.batch-next-exception:disabled {
-  opacity: 0.4;
-}
-
 .batch-review-navigation [role='status'] {
   color: var(--color-text-muted);
   font-size: 0.84rem;
@@ -2304,34 +2386,62 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   overflow-wrap: anywhere;
 }
 
-/* Issue 113：工作台是第二屏；标题留在屏内顶部，底部操作栏固定在屏内。
- * 左右两栏各自拥有由视口推导的可用高度与可见内部滚动条，滚到边界不带动
- * 整页切屏；三张紧凑卡（US-355 硬性回归）仍必须同屏可见。 */
+/* #145：工作台屏固定为一屏；标题留在屏内顶部，底部操作栏固定在屏内。
+ * 左右两栏各自拥有由视口推导的可用高度与隐藏滚动条，滚到边界不带动整页切屏。 */
 .batch-workbench-panel {
+  /* 设计图里两栏直接坐在暖白画布上，没有包裹整页的「管理表单外框」；
+     面板只保留语义容器与页面标题行。 */
+  background: transparent;
+  border: 0;
   margin-bottom: 0;
+  padding: 0;
+}
+
+/* 页头：深海蓝大标题 + 右侧「返回搜索首屏」；与设计图同一层级。 */
+.batch-workbench-panel :deep(.panel-heading) {
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.batch-workbench-panel :deep(.panel-heading h2) {
+  color: var(--color-primary);
+  font-size: var(--type-display);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--type-display-line-height);
 }
 
 .batch-review-layout {
   align-items: stretch;
   display: grid;
   flex: 1 1 auto;
-  gap: 1rem;
-  grid-template-columns: minmax(260px, 36%) minmax(0, 64%);
+  gap: var(--space-6);
+  /* `fr` 比例让栏间距先从可用宽度里扣除，再按 36/64 分配；用百分比 + gap 会让
+     两条轨道合计 100% 再加间距，右栏因此比页面内容宽出一个 gap。 */
+  grid-template-columns: minmax(260px, 36fr) minmax(0, 64fr);
   /* 不加 min-height: 0：双栏的固有尺寸（筛选区 + 至少一张卡）决定下限，装不下时
      让工作台屏自身滚动，而不是把双栏压进底部操作栏的区域。 */
 }
 
+/* 左栏是设计图里的一张白卡：筛选行固定在卡内顶部，卡片列表在卡内滚动；
+   两者都不显示滚动条。 */
 .batch-review-list-column {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
   display: flex;
   flex-direction: column;
   min-height: 0;
   min-width: 0;
+  padding: var(--space-4) var(--space-2) var(--space-2);
 }
 
 .batch-detail-pane {
-  background: var(--color-bg);
+  background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
   contain: size;
   height: 100%;
   max-height: none;
@@ -2340,7 +2450,9 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   min-width: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 1rem;
+  /* #157：右栏内容内边距按设计图放大（常规桌面 24px，窄屏 16px）；不再用负 margin
+     抵消编辑器内部间距，模块末项与固定底栏都保持可达。 */
+  padding: var(--space-6);
   scroll-padding-bottom: 8px;
   /* #148：右栏同样隐藏滚动条但保留滚动：栏内控件（字幕组、规则、按钮）在键盘
      Tab 顺序内，聚焦即可用方向键／PageDown 浏览到底。 */
@@ -2367,10 +2479,6 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   overflow-wrap: anywhere;
 }
 
-.batch-detail-pane :deep(.batch-draft-panel) {
-  margin: -1rem;
-}
-
 .batch-candidate-list {
   display: grid;
   gap: 0.75rem;
@@ -2387,7 +2495,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 
 .batch-card-grid {
   display: grid;
-  gap: 10px;
+  gap: var(--space-3);
   grid-template-columns: 1fr;
   margin: 0;
   padding: 0;
@@ -2398,20 +2506,29 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   outline-offset: calc(-1 * var(--focus-ring-width));
 }
 
-/* US-355 / #149 紧凑左卡：封面在左、标题与状态在中、当前查看与勾选在右；
-   别名与偏好进 .batch-card-more，失败、结果未知与恢复动作永不折叠。 */
+/* #145 左卡：封面 / 标题 / 状态芯片 / 当前查看 / 勾选或删除是主要扫描信息。
+   卡片在白色栏内不再各自描边；当前查看项用淡蓝底 + 左缘强调条表达。
+   失败、结果未知与恢复动作永不折叠，允许这些卡片自然增高。 */
 .batch-draft-card {
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
+  --batch-attention-surface: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface));
+  --batch-attention-text: color-mix(in srgb, var(--color-accent) 78%, var(--color-text));
+  align-items: start;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr) auto;
-  gap: 3px 8px;
+  gap: var(--space-3);
+  grid-template-columns: 88px minmax(0, 1fr) auto;
+  min-height: 88px;
   min-width: 0;
-  padding: 6px 8px;
+  padding: var(--space-3);
   position: relative;
   /* 卡片被聚焦或滚动定位时保留 8px 焦点环余量。 */
   scroll-margin: 8px;
+}
+
+.batch-draft-card:hover {
+  background: var(--color-surface-subtle);
 }
 
 .batch-draft-card:focus-visible {
@@ -2420,24 +2537,33 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 }
 
 .batch-draft-card.is-current {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 18%, transparent);
+  background: var(--color-surface-selected);
+  box-shadow: inset 3px 0 0 var(--color-primary);
 }
 
 .batch-card-poster {
   align-items: center;
   background: var(--color-bg-muted);
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
   color: var(--color-text-muted);
   display: flex;
-  font-size: 0.68rem;
-  font-weight: 700;
+  font-size: 0.72rem;
+  font-weight: var(--font-weight-semibold);
   grid-column: 1;
   grid-row: 1;
-  height: 44px;
+  height: 64px;
+  justify-content: center;
   overflow: hidden;
   text-align: center;
+  width: 88px;
+}
+
+.batch-card-poster-image {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
 }
 
 .batch-card-poster-placeholder {
@@ -2445,27 +2571,62 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 }
 
 .batch-card-main {
+  align-content: start;
   display: grid;
-  gap: 3px;
-  /* #149：封面在第 1 列、条目内容在第 2 列、当前查看与勾选控件在第 3 列。 */
+  gap: 6px;
+  /* #145：封面在第 1 列、条目内容在第 2 列、当前查看与勾选控件在第 3 列。 */
   grid-column: 2;
-  grid-row: 1 / span 2;
+  grid-row: 1;
   min-width: 0;
 }
 
+/* #158：标题与状态（找到候选／草案／需人工核对）优先同排；空间不足时才自然换行，
+   不把每个芯片都单独堆成一行。 */
 .batch-card-headline {
-  align-items: baseline;
+  align-items: center;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px var(--space-2);
   min-width: 0;
 }
 
 .batch-card-title {
-  font-size: 1rem;
-  font-weight: 600;
-  line-height: 1.35;
+  font-size: var(--type-section-title);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.3;
   overflow-wrap: anywhere;
+}
+
+/* #145：状态用中文芯片表达；语气只分中性 / 待处理 / 危险 / 成功，未知状态码留在
+   中性，不把失败或结果未知画成正常。文字始终与颜色同时呈现。 */
+.batch-status {
+  border-radius: var(--radius-pill);
+  display: inline-block;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.5;
+  padding: 0.05rem var(--space-3);
+  white-space: nowrap;
+}
+
+.batch-card-status {
+  background: var(--color-surface-subtle);
+  color: var(--color-text-secondary);
+}
+
+.batch-card-status[data-tone='attention'] {
+  background: var(--batch-attention-surface);
+  color: var(--batch-attention-text);
+}
+
+.batch-card-status[data-tone='danger'] {
+  background: var(--color-danger-surface);
+  color: var(--color-danger);
+}
+
+.batch-card-status[data-tone='success'] {
+  background: var(--color-success-surface);
+  color: var(--color-success);
 }
 
 
@@ -2478,9 +2639,8 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 }
 
 .batch-card-review-status {
-  background: #fdf1dd;
-  border: 1px solid #e8c378;
-  color: #8a5a13;
+  background: var(--color-warning-surface);
+  color: var(--color-warning);
 }
 
 /* US-355: 默认层常驻的下一步。 */
@@ -2500,7 +2660,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 }
 
 .batch-card-checkbox-row {
-  min-width: 1.25rem;
+  min-width: 0;
 }
 
 
@@ -2510,21 +2670,19 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 /* CheckboxRow 把 class 透传到原生 input，因此卡片里的这一格由外层 cell 承担。 */
 .batch-card-controls {
   align-items: center;
-  align-self: start;
+  align-self: center;
   display: flex;
   flex: 0 0 auto;
-  gap: 0.35rem;
+  gap: var(--space-2);
   grid-column: 3;
   grid-row: 1;
   position: relative;
   z-index: 1;
 }
 
-/* 紧凑列表里的复选框按桌面尺寸呈现（touch 目标尺寸留给移动端布局）。 */
+/* 复选框外观统一由共享样式提供（#156）；这里只保留卡片控制列自己的定位。 */
 .batch-card-controls :deep(.base-checkbox) {
-  margin-top: 0.1rem;
-  min-height: 1.25rem;
-  min-width: 1.25rem;
+  margin-top: 0;
 }
 
 /* 复选框的可访问名称仍是「选择 <条目>」，视觉上只保留控件本身，避免在紧凑
@@ -2638,11 +2796,12 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   flex: 0 0 auto;
   flex-direction: column;
   gap: 6px;
-  margin-top: 12px;
-  background: var(--color-bg);
-  border-top: 1px solid var(--color-border);
-  box-shadow: 0 -4px 12px color-mix(in srgb, var(--color-text) 10%, transparent);
-  padding: 0.7rem;
+  margin-top: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 -1px 3px rgb(16 35 63 / 4%);
+  padding: var(--space-1) var(--space-4);
   /* #143：工作台屏固定为一屏，操作栏占据它在屏内的真实高度，因此不再吸顶悬浮，
      双栏的可视区与末项都不被它遮挡。 */
   position: static;
@@ -2670,11 +2829,21 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 }
 
 /* US-356: 已选范围 / 隐藏仍参与 / 暂不可确认 / 重算中各自成组，组内文案自带作用域
-   名称，不再是一行难以分辨的连续数字。 */
+   名称，不再是一行难以分辨的连续数字。#145：设计图里基础已选数是纯文本，只有
+   被筛选隐藏或暂不可确认这些附加范围才用紧凑计数芯片。 */
 .batch-count-group {
-  background: var(--color-bg-muted);
-  border-radius: 4px;
-  padding: 0.1rem 0.45rem;
+  border-radius: var(--radius-sm);
+}
+
+.batch-count-group:not([data-scope='selection']) {
+  background: var(--color-surface-subtle);
+  color: var(--color-text-secondary);
+  padding: 0.1rem var(--space-2);
+}
+
+.batch-accept-row :deep(.checkbox-row-label) {
+  color: var(--color-text);
+  font-size: var(--font-size-md);
 }
 
 /* US-356: 保存中/待核验时入口不可用，这条常驻原因紧邻主入口，不依赖 title。 */
@@ -2714,7 +2883,12 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 
 @media (max-width: 1080px) {
   .batch-review-layout {
-    grid-template-columns: minmax(220px, 38%) minmax(0, 62%);
+    grid-template-columns: minmax(220px, 38fr) minmax(0, 62fr);
+  }
+
+  /* #157：窄屏右栏内边距收一档到 16px，保持内容不被挤压成紧凑后台表单。 */
+  .batch-detail-pane {
+    padding: var(--space-4);
   }
 }
 

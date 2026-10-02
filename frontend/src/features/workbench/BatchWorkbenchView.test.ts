@@ -7,7 +7,6 @@ import { nextTick } from 'vue'
 import { api } from '@/api/client'
 import type { operations } from '@/api/generated/api'
 import BatchWorkbenchView from '@/features/workbench/BatchWorkbenchView.vue'
-import { nextBatchException } from '@/features/workbench/batchWorkbench'
 
 // US-205: batch workbench migration. The view parses a multi-line input into
 // independent FOUND/EMPTY/FAILED cards, opens the shared candidate popover,
@@ -347,7 +346,8 @@ describe('BatchWorkbenchView parse (US-205)', () => {
     expect(wrapper.find('.batch-detail-title').text()).toContain('路哥')
     expect(wrapper.find('.batch-review-count').text()).toContain('共 2 部，当前显示 1 部')
 
-    await wrapper.find('#batch-review-clear').trigger('click')
+    // #158：删除「清除条件」后，删空搜索词只取消标题条件。
+    await wrapper.find('#batch-review-search').setValue('')
     await nextTick()
     expect(wrapper.findAll('.batch-draft-card')).toHaveLength(2)
   })
@@ -408,34 +408,37 @@ describe('BatchWorkbenchView parse (US-205)', () => {
     expect(router.currentRoute.value.query.batch_id).toBe('batch-1')
   })
 
-  it('cycles to the next exception and temporarily reveals a filtered target', async () => {
+  it('#158: removes the clear-filters and next-exception entries with their placeholder', async () => {
     apiPost.mockResolvedValue(parseResult({
       items: [
         batchItem({ item_id: 'item-normal', raw_title: '正常', status: 'FOUND' }),
         batchItem({ item_id: 'item-failed', raw_title: '异常', status: 'FAILED', canonical_title_candidates: [] }),
-        batchItem({ item_id: 'item-empty', raw_title: '空结果', status: 'EMPTY', canonical_title_candidates: [] }),
       ],
     }))
     const { wrapper } = await mountBatch()
-    await wrapper.find('#batch-raw-input').setValue('正常\n异常\n空结果')
+    await wrapper.find('#batch-raw-input').setValue('正常\n异常')
     await wrapper.find('#batch-parse-submit').trigger('click')
     await flushPromises()
 
-    expect(nextBatchException(
-      [batchItem({ item_id: 'normal' }), batchItem({ item_id: 'failed', status: 'FAILED' })],
-      'normal',
-    )?.item_id).toBe('failed')
-    await wrapper.find('.batch-draft-card[data-item-id="item-normal"]').trigger('click')
-    await typeTitleSearch(wrapper, '正常')
-    await wrapper.find('#batch-next-exception').trigger('click')
+    // 两个入口及其专用占位/导航说明都从真实 DOM 中移除，筛选行不留右侧空白。
+    expect(wrapper.find('#batch-next-exception').exists()).toBe(false)
+    expect(wrapper.find('#batch-review-clear').exists()).toBe(false)
+    expect(wrapper.find('.batch-review-navigation').text()).toBe('')
+    expect(wrapper.text()).not.toContain('无异常时不可用')
+    // 状态筛选与「只看需处理」仍由各自控件恢复默认。
+    await wrapper.find('#batch-review-status').setValue('FAILED')
     await nextTick()
-
-    expect(wrapper.find('.batch-draft-card[data-item-id="item-failed"]').exists()).toBe(true)
-    expect(wrapper.find('.batch-review-navigation').text()).toContain('已临时显示异常条目')
-    expect(document.activeElement).toBe(wrapper.find('.batch-draft-card[data-item-id="item-failed"]').element)
-    await wrapper.find('#batch-next-exception').trigger('click')
+    expect(wrapper.findAll('.batch-draft-card')).toHaveLength(1)
+    await wrapper.find('#batch-review-status').setValue('')
     await nextTick()
-    expect(wrapper.find('.batch-draft-card[data-item-id="item-empty"]').classes()).toContain('is-current')
+    expect(wrapper.findAll('.batch-draft-card')).toHaveLength(2)
+    await wrapper.find('#batch-review-needs-processing').trigger('click')
+    await nextTick()
+    expect(wrapper.find('#batch-review-needs-processing').attributes('aria-checked')).toBe('true')
+    await wrapper.find('#batch-review-needs-processing').trigger('click')
+    await nextTick()
+    expect(wrapper.find('#batch-review-needs-processing').attributes('aria-checked')).toBe('false')
+    expect(wrapper.findAll('.batch-draft-card')).toHaveLength(2)
   })
 
   it('uses arrow keys to move cards and Enter activates their primary action', async () => {
@@ -512,14 +515,38 @@ describe('BatchWorkbenchView left column filters (#149)', () => {
     expect(wrapper.find('#batch-review-search-toggle').classes()).toContain('is-active')
     expect(wrapper.find('#batch-review-search-toggle').attributes('aria-label')).toContain('已筛选')
 
-    // 重新打开即可继续编辑，× 只清空关键词并恢复结果。
+    // 重新打开即可继续编辑；手动删空关键词恢复标题搜索范围。
     await wrapper.find('#batch-review-search-toggle').trigger('click')
     await nextTick()
-    await wrapper.find('#batch-review-search-clear').trigger('click')
+    expect((wrapper.find('#batch-review-search').element as HTMLInputElement).value).toBe('路哥')
+    await wrapper.find('#batch-review-search').setValue('')
     await nextTick()
     expect(cardIds(wrapper)).toEqual(['item-draft', 'item-found', 'item-confirmed'])
     expect(wrapper.find('#batch-review-search').exists()).toBe(true)
     expect(wrapper.find('#batch-review-search-toggle').classes()).not.toContain('is-active')
+  })
+
+  it('#158: offers exactly one visible, named close control and no clear button', async () => {
+    const wrapper = await mountFiltered()
+    await wrapper.find('#batch-review-search-toggle').trigger('click')
+    await nextTick()
+    await wrapper.find('#batch-review-search').setValue('路哥')
+    await nextTick()
+
+    // 浮层里只有一个带读屏名称的关闭入口；自定义清空 × 不再存在。
+    expect(wrapper.find('#batch-review-search-clear').exists()).toBe(false)
+    const close = wrapper.find('#batch-review-search-close')
+    expect(close.exists()).toBe(true)
+    expect(close.attributes('aria-label')).toBe('关闭标题搜索')
+
+    await close.trigger('click')
+    await nextTick()
+    expect(wrapper.find('#batch-review-search').exists()).toBe(false)
+    expect(wrapper.find('#batch-review-search-toggle').attributes('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(wrapper.find('#batch-review-search-toggle').element)
+    // 关键词与筛选结果保留，图标显示搜索活动状态。
+    expect(cardIds(wrapper)).toEqual(['item-found'])
+    expect(wrapper.find('#batch-review-search-toggle').classes()).toContain('is-active')
   })
 
   it('closes the open popover with Escape and returns focus to the magnifier', async () => {
@@ -536,6 +563,21 @@ describe('BatchWorkbenchView left column filters (#149)', () => {
     expect(wrapper.find('#batch-review-search-toggle').attributes('aria-expanded')).toBe('false')
     expect(document.activeElement).toBe(wrapper.find('#batch-review-search-toggle').element)
     // 关闭后筛选继续生效。
+    expect(cardIds(wrapper)).toEqual(['item-found'])
+  })
+
+  it('#158: Escape also closes from the close button inside the popover', async () => {
+    const wrapper = await mountFiltered()
+    await wrapper.find('#batch-review-search-toggle').trigger('click')
+    await nextTick()
+    await wrapper.find('#batch-review-search').setValue('路哥')
+    await nextTick()
+
+    await wrapper.find('#batch-review-search-close').trigger('keydown', { key: 'Escape' })
+    await nextTick()
+
+    expect(wrapper.find('#batch-review-search').exists()).toBe(false)
+    expect(document.activeElement).toBe(wrapper.find('#batch-review-search-toggle').element)
     expect(cardIds(wrapper)).toEqual(['item-found'])
   })
 
@@ -573,8 +615,10 @@ describe('BatchWorkbenchView left column filters (#149)', () => {
     await typeTitleSearch(wrapper, '杖剑')
     expect(cardIds(wrapper)).toEqual([])
 
-    // 清除条件只恢复可见性，勾选保留。
-    await wrapper.find('#batch-review-clear').trigger('click')
+    // #158：状态筛选、只看需处理与标题搜索都由各自控件恢复默认；勾选保留。
+    await wrapper.find('#batch-review-status').setValue('')
+    await wrapper.find('#batch-review-search').setValue('')
+    await wrapper.find('#batch-review-needs-processing').trigger('click')
     await nextTick()
     expect(cardIds(wrapper)).toEqual(['item-draft', 'item-found', 'item-confirmed'])
     expect(wrapper.find('#batch-accept-selected-count').text()).toContain('已选 1 部')
@@ -1075,7 +1119,7 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     await typeTitleSearch(wrapper, '乙')
     await wrapper.find('#batch-select-all-checkbox').setValue(true)
     await nextTick()
-    await wrapper.find('#batch-review-clear').trigger('click')
+    await wrapper.find('#batch-review-search').setValue('')
     await nextTick()
     expect((wrapper.find('.batch-draft-card[data-item-id="item-a"] input[type="checkbox"]').element as HTMLInputElement).checked).toBe(true)
     expect((wrapper.find('.batch-draft-card[data-item-id="item-b"] input[type="checkbox"]').element as HTMLInputElement).checked).toBe(true)
@@ -1566,6 +1610,8 @@ describe('BatchWorkbenchView compact cards (US-355)', () => {
 
   function draftItem(itemId: string, rawTitle: string, matchedTitle = '关于我转生变成史莱姆这档事 第四季') {
     const request = previewRequest(`req-${itemId}`)
+    // 每个条目的输入标题各不相同，右栏身份区因此可以精确绑定到当前查看项。
+    request.input.raw_title = rawTitle
     request.source_info.matched_bangumi.title = matchedTitle
     return batchItem({
       item_id: itemId,
@@ -1735,10 +1781,10 @@ describe('BatchWorkbenchView compact cards (US-355)', () => {
     expect(notice.exists()).toBe(true)
     expect(notice.text()).toContain('没有符合当前筛选条件')
     expect(notice.text()).toContain('2 部')
-    // 空批次文案不能被复用，清除筛选入口仍然可达。
+    // 空批次文案不能被复用；删空搜索词即可恢复全部条目，不需要额外「清除条件」入口。
     expect(wrapper.text()).not.toContain('粘贴多行番剧名称后获取解析结果。')
-    expect(wrapper.find('#batch-review-clear').attributes('disabled')).toBeUndefined()
-    await wrapper.find('#batch-review-clear').trigger('click')
+    expect(wrapper.find('#batch-review-clear').exists()).toBe(false)
+    await wrapper.find('#batch-review-search').setValue('')
     await nextTick()
     expect(wrapper.findAll('.batch-draft-card')).toHaveLength(2)
     expect(wrapper.find('#batch-review-no-match').exists()).toBe(false)
@@ -1787,7 +1833,14 @@ describe('BatchWorkbenchView compact cards (US-355)', () => {
 
     expect(wrapper.find('.batch-draft-card[data-item-id="item-b"]').classes()).toContain('is-current')
     expect(wrapper.find('.batch-draft-card[data-item-id="item-a"]').classes()).not.toContain('is-current')
-    expect(wrapper.find('#batch-detail-pane').text()).toContain('乙的合集')
+    // 右栏绑定的是 item-b：身份区显示它的输入标题，并且不把服务端匹配名
+    // （「乙的合集」）冒充成用户已选的真实合集。
+    const identityTitle = wrapper.find('#batch-detail-pane .batch-draft-identity .request-detail-title')
+    expect(identityTitle.text()).toBe('乙')
+    const paneText = wrapper.find('#batch-detail-pane').text()
+    expect(paneText).toContain('尚未确认真实合集')
+    expect(paneText).not.toContain('已选真实合集')
+    expect(paneText).not.toContain('乙的合集')
   })
 
   it('separates the view and check affordances for assistive technology', async () => {
@@ -2180,5 +2233,31 @@ describe('BatchWorkbenchView selection scope (US-356)', () => {
     expect(document.activeElement).toBe(failedCard.element)
     expect(wrapperUnderTest.text()).not.toContain('poisoned detail')
     expect(wrapperUnderTest.find('.batch-draft-card[data-item-id="item-b"] .batch-card-status').text()).toContain('已确认待提交')
+  })
+
+  it('#156: distinguishes partial selection with indeterminate and keeps the current item unchanged', async () => {
+    await mountAndParse([draftItem('item-a', '甲'), draftItem('item-b', '乙')], '甲\n乙')
+    const selectAll = () => wrapperUnderTest.find('#batch-select-all-checkbox').element as HTMLInputElement
+    expect(selectAll().indeterminate).toBe(false)
+    expect(selectAll().checked).toBe(false)
+
+    // 右栏当前查看项来自点击卡片；点击控制列的复选框不应顺带切换右栏。
+    await wrapperUnderTest.find('.batch-draft-card[data-item-id="item-a"]').trigger('click')
+    await nextTick()
+    expect(wrapperUnderTest.find('.batch-draft-card[data-item-id="item-a"]').classes()).toContain('is-current')
+
+    await check('item-a')
+    expect(selectAll().indeterminate).toBe(true)
+    expect(selectAll().checked).toBe(false)
+    expect(wrapperUnderTest.find('.batch-draft-card[data-item-id="item-a"]').classes()).toContain('is-current')
+
+    await check('item-b')
+    expect(selectAll().indeterminate).toBe(false)
+    expect(selectAll().checked).toBe(true)
+
+    await wrapperUnderTest.find('#batch-select-all-checkbox').setValue(false)
+    await nextTick()
+    expect(selectAll().indeterminate).toBe(false)
+    expect(selectAll().checked).toBe(false)
   })
 })

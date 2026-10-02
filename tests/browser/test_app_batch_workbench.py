@@ -550,7 +550,12 @@ class TestAppBatchCandidateAndDraft:
         expect(panel).to_be_visible()
         expanded_text = panel.inner_text()
         # #150：右栏信息层级 = 合集身份 + 字幕与筛选 + 资源结果 + 折叠的高级设置。
-        assert "已选真实合集" in expanded_text
+        # 产品边界：这条 fixture 只有服务端匹配信息、没有用户人工选择，因此身份区必须
+        # 显示待核对，绝不声称「已选真实合集」。（真实人工选择后的确认态由
+        # test_app_batch_draft_visual.py::test_unconfirmed_draft_never_claims_a_selected_collection
+        # 与几何用例覆盖。）
+        assert "尚未确认真实合集" in expanded_text
+        assert "已选真实合集" not in expanded_text
         assert "字幕与筛选" in expanded_text
         assert "资源结果" in expanded_text
         assert "已更新集数" in expanded_text and "未开发" in expanded_text
@@ -1698,10 +1703,10 @@ class TestAppBatchCompactList:
         expect(cards).to_have_count(0)
         assert page.evaluate("() => document.activeElement && document.activeElement.id") == "panel-section-批量工作台"
 
-    def test_next_exception_reveals_then_focuses_a_hidden_item(
+    def test_next_exception_entry_is_removed_with_its_placeholder(
         self, page: Page, live_server_url: str
     ) -> None:
-        """AC: 下一个异常先让被筛选隐藏的条目可见，再定位、查看并聚焦。"""
+        """#158：删除「下一异常」入口及其专用占位；筛选隐藏的条目仍如实保留数据与详情。"""
         items = [
             _compact_items(1, prefix="正常")[0],
             _batch_item(
@@ -1721,13 +1726,14 @@ class TestAppBatchCompactList:
         _fill_title_search(page, "正常00")
         expect(page.locator(".batch-draft-card")).to_have_count(1)
 
-        page.click("#batch-next-exception")
-
+        # 入口与「无异常时不可用」占位都不在真实 DOM 里，也没有预留空白。
+        expect(page.locator("#batch-next-exception")).to_have_count(0)
+        expect(page.locator("#batch-review-clear")).to_have_count(0)
+        expect(page.locator(".batch-review-navigation")).not_to_contain_text("无异常时不可用")
+        # 被筛选隐藏的失败条目仍留在完整批次里：删空搜索词即可恢复。
+        page.fill("#batch-review-search", "")
         failed = page.locator('.batch-draft-card[data-item-id="item-failed"]')
         expect(failed).to_be_visible()
-        expect(page.locator(".batch-review-navigation")).to_contain_text("已临时显示异常条目")
-        assert _active_item_id(page) == "item-failed", "异常项必须获得焦点"
-        expect(page.locator("#batch-detail-pane")).to_contain_text("异常 第一季")
 
     def test_filter_without_match_is_never_an_empty_batch(
         self, page: Page, live_server_url: str
@@ -1748,13 +1754,12 @@ class TestAppBatchCompactList:
         # 不能被当成空批次。
         expect(page.locator(".empty-state")).to_have_count(0)
         expect(page.locator(".batch-review-count")).to_contain_text("共 2 部，当前显示 0 部")
-        # 右栏详情与勾选都还在，清除筛选入口可达。
+        # 右栏详情与勾选都还在；#158 之后由搜索控件自身恢复默认（删空关键词）。
         expect(page.locator("#batch-detail-pane")).to_contain_text("字幕与筛选")
         expect(page.locator(".batch-filter-hidden")).to_be_visible()
-        clear = page.locator("#batch-review-clear")
-        clear.scroll_into_view_if_needed()
-        expect(clear).to_be_enabled()
-        clear.click()
+        search = page.locator("#batch-review-search")
+        expect(search).to_be_visible()
+        page.fill("#batch-review-search", "")
 
         expect(page.locator(".batch-draft-card")).to_have_count(2)
         expect(page.locator("#batch-review-no-match")).to_have_count(0)
@@ -1929,7 +1934,9 @@ class TestAppBatchConfirmScope:
         # 取消可见全选只取消可见项：甲/丙 仍是手工勾选。
         page.uncheck("#batch-select-all-checkbox")
         expect(page.locator("#batch-accept-submit")).to_contain_text("保存并确认 2 部")
-        page.click("#batch-review-clear")
+        # #158：删空搜索词即可恢复完整批次（不再有单独的「清除条件」入口）。
+        expect(page.locator("#batch-review-clear")).to_have_count(0)
+        page.fill("#batch-review-search", "")
         expect(page.locator(".batch-draft-card")).to_have_count(3)
         checked = page.evaluate(
             """() => Array.from(document.querySelectorAll('.batch-draft-card')).map((card) => [
@@ -2200,7 +2207,7 @@ class TestAppBatchConfirmScope:
         assert geometry["layoutBottom"] <= geometry["toolbarTop"] + 0.5, geometry
         assert geometry["paneBottom"] <= geometry["toolbarTop"] + 0.5, geometry
         assert geometry["listBottom"] <= geometry["toolbarTop"] + 0.5, geometry
-        # 工作台屏固定为一屏；整页仍只有两屏高。
+        # 工作台屏固定为一屏；短输入的空闲首屏也在一屏内，整页仍只有两屏高。
         assert geometry["screenHeight"] <= geometry["viewportHeight"] - geometry["headerHeight"] + 0.5
         assert geometry["documentHeight"] <= 2 * geometry["viewportHeight"] + 1
 

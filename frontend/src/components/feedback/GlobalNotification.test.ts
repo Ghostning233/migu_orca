@@ -17,9 +17,24 @@ function mountToast() {
   return { wrapper, store: useNotificationStore(pinia) }
 }
 
+/**
+ * 组件把「提示条环境」（documentElement/body 的内联样式与 scrollRestoration）保存在
+ * 模块级变量里，文件内各用例因此共享同一份状态。挂载再卸载一次会走完整的
+ * `restoreToastEnvironment()`，把上一用例遗留的环境真正复位，避免用例互相污染。
+ */
+function resetSharedToastEnvironment(): void {
+  mount(GlobalNotification, { attachTo: document.body, global: { plugins: [createPinia()] } }).unmount()
+  vi.clearAllTimers()
+  document.documentElement.style.scrollBehavior = ''
+  document.documentElement.style.overflowAnchor = ''
+  document.body.style.overflowAnchor = ''
+  history.scrollRestoration = 'auto'
+}
+
 describe('GlobalNotification toast (US-199 / US-346)', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    resetSharedToastEnvironment()
   })
 
   afterEach(() => {
@@ -121,5 +136,61 @@ describe('GlobalNotification toast (US-199 / US-346)', () => {
     wrapper.unmount()
     expect(store.current).toBeNull()
     expect(vi.getTimerCount()).toBe(0)
+  })
+
+  /** 推进一帧，让排队的退场恢复回调执行。 */
+  async function flushRestoreFrame(): Promise<void> {
+    vi.advanceTimersByTime(50)
+    await Promise.resolve()
+  }
+
+  it('keeps the new toast protected when it replaces one whose restore frame is still queued', async () => {
+    // 已确认竞态：旧提示清除后排队的 rAF 在新提示出现后才执行，旧回调会恢复样式并
+    // 清空共享的 toast 环境，让新提示失去滚动保护。
+    const { wrapper, store } = mountToast()
+    store.success('第一条', '正在处理。')
+    await wrapper.vm.$nextTick()
+    expect(document.documentElement.style.scrollBehavior).toBe('auto')
+    expect(history.scrollRestoration).toBe('manual')
+
+    // 退场排队一帧；同一帧内立刻出现新通知。
+    store.clear()
+    store.info('第二条', '新的提示。')
+    await wrapper.vm.$nextTick()
+    await flushRestoreFrame()
+
+    // 旧恢复回调必须失效：新提示的滚动保护仍在。
+    expect(document.documentElement.style.scrollBehavior).toBe('auto')
+    expect(history.scrollRestoration).toBe('manual')
+    expect(wrapper.find('.global-notification').text()).toContain('第二条')
+
+    // 新提示正常关闭后才恢复原样式与滚动环境。
+    store.clear()
+    await wrapper.vm.$nextTick()
+    await flushRestoreFrame()
+    expect(document.documentElement.style.scrollBehavior).toBe('')
+    expect(history.scrollRestoration).toBe('auto')
+  })
+
+  it('restores the environment once when several toasts are replaced in the same frame', async () => {
+    const { wrapper, store } = mountToast()
+    store.success('第一条')
+    await wrapper.vm.$nextTick()
+    store.clear()
+    store.info('第二条')
+    await wrapper.vm.$nextTick()
+    store.clear()
+    store.error('第三条')
+    await wrapper.vm.$nextTick()
+    await flushRestoreFrame()
+
+    // 前两次退场的回调都已过期，第三条仍在保护中。
+    expect(document.documentElement.style.scrollBehavior).toBe('auto')
+
+    store.clear()
+    await wrapper.vm.$nextTick()
+    await flushRestoreFrame()
+    expect(document.documentElement.style.scrollBehavior).toBe('')
+    expect(history.scrollRestoration).toBe('auto')
   })
 })

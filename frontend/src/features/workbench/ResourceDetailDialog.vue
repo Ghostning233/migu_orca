@@ -8,7 +8,7 @@
 // 可访问性：Teleport 到 body 的 `aria-modal="true"` 对话框，复用 useFocusTrap
 // （Tab 循环、Esc 关闭、关闭后焦点回到触发入口）；打开与关闭都记录并恢复触发入口
 // 所在滚动容器的位置，因此工作台滚动位置不变。样式与 ConfirmDialog 保持一致。
-import { computed, nextTick, ref, useId } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, useId } from 'vue'
 
 import BaseButton from '@/components/forms/BaseButton.vue'
 import { useFocusTrap } from '@/app/composables/useFocusTrap'
@@ -82,13 +82,26 @@ function onTabKeydown(event: KeyboardEvent): void {
 
 const { activate, deactivate } = useFocusTrap(dialogEl, () => close())
 
+/**
+ * 打开代际（参考 ConfirmDialog 的 generation 保护）。
+ *
+ * `activate()` 必须等 Vue 把弹窗挂到 DOM 之后才能运行，因此它排在 `nextTick()` 上。
+ * 关闭、卸载或重新打开都会让这一代失效：过期的回调绝不能再激活陷阱，否则弹窗已经
+ * 不在 DOM 里，`activate()` 只会留下 document 上的 keydown 监听——Tab 被吞、
+ * Escape 被拦，而且没有对应容器可以解除。
+ */
+let dialogGeneration = 0
+
 function openDialog(tab: ResourceTab = 'effective'): void {
   if (open.value) return
+  const generation = ++dialogGeneration
   trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null
   captureScrollPositions()
   activeTab.value = tab
   open.value = true
-  void nextTick(() => {
+  void nextTick().then(() => {
+    // 仍是当前代际、弹窗仍打开、容器真的挂上了，才允许激活。
+    if (generation !== dialogGeneration || !open.value || dialogEl.value === null) return
     // 焦点陷阱默认落在第一个可聚焦元素（关闭按钮）；页签可继续用 Tab 到达。
     activate()
   })
@@ -96,6 +109,8 @@ function openDialog(tab: ResourceTab = 'effective'): void {
 
 function close(): void {
   if (!open.value) return
+  // 让仍在排队的打开回调失效，避免「打开后立刻关闭」时激活一个不存在的弹窗。
+  dialogGeneration += 1
   open.value = false
   deactivate()
   // 关闭后恢复工作台（或任一滚动祖先）的滚动位置；触发入口的焦点由焦点陷阱恢复。
@@ -103,6 +118,19 @@ function close(): void {
   restoreScroll = []
   trigger = null
 }
+
+// #151 缺陷修复：弹窗打开时组件若因路由切换、父组件卸载或条件渲染被直接销毁，
+// 正常关闭路径不会执行。这里按 ConfirmDialog 的生命周期清理方式回收焦点陷阱，
+// 保证 document 上的键盘监听与被设为 inert 的兄弟节点都被解除，后续页面仍可 Tab
+// 访问。清理是幂等的：已经正常 close() 过（陷阱已解除）或从未打开过都不会出错；
+// 销毁时不再把焦点移回正在离开 DOM 的触发入口。
+onBeforeUnmount(() => {
+  dialogGeneration += 1
+  deactivate({ restoreFocus: false })
+  restoreScroll = []
+  trigger = null
+  open.value = false
+})
 
 defineExpose({ open: openDialog, close, isOpen: () => open.value })
 </script>
@@ -159,7 +187,9 @@ defineExpose({ open: openDialog, close, isOpen: () => open.value })
           </button>
         </div>
 
-        <p class="resource-dialog-group">当前字幕组：{{ selectedGroupName || '未选择字幕组' }}</p>
+        <p class="resource-dialog-group">
+          当前字幕组：<strong>{{ selectedGroupName || '未选择字幕组' }}</strong>
+        </p>
 
         <div
           :id="`${idPrefix}-panel-effective`"
@@ -222,45 +252,50 @@ defineExpose({ open: openDialog, close, isOpen: () => open.value })
 }
 
 .resource-dialog {
-  background: var(--color-surface-raised);
+  background: var(--color-surface);
   color: var(--color-text);
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-dialog);
   padding: var(--space-5) var(--space-6);
-  max-width: 720px;
+  max-width: 768px;
   width: 100%;
-  max-height: min(80vh, 640px);
+  /* 设计图两个页签共用同一弹窗框：高度固定，列表在框内滚动。 */
+  height: min(78vh, 700px);
   display: grid;
-  gap: var(--space-3);
+  gap: var(--space-4);
   grid-template-rows: auto auto auto minmax(0, 1fr) auto;
 }
 
 .resource-dialog-header {
-  align-items: start;
+  align-items: center;
   display: flex;
   justify-content: space-between;
 }
 
 .resource-dialog-title {
   margin: 0;
-  font-size: var(--type-section-title);
+  color: var(--color-primary);
+  font-size: var(--type-page-title);
+  font-weight: var(--font-weight-bold);
+  line-height: 1.2;
 }
 
 .resource-dialog-tabs {
   border-bottom: 1px solid var(--color-border);
   display: flex;
-  gap: var(--space-4);
+  gap: var(--space-6);
 }
 
 .resource-dialog-tab {
   background: none;
   border: 0;
-  border-bottom: 2px solid transparent;
+  border-bottom: 3px solid transparent;
   color: var(--color-text-muted);
   cursor: pointer;
-  font-size: var(--font-size-md);
-  padding: 0.4rem 0.1rem;
+  font-size: var(--type-card-title);
+  font-weight: var(--font-weight-medium);
+  padding: var(--space-2) 0.1rem;
 }
 
 .resource-dialog-tab[aria-selected='true'] {
@@ -272,6 +307,11 @@ defineExpose({ open: openDialog, close, isOpen: () => open.value })
 .resource-dialog-group {
   color: var(--color-text-muted);
   margin: 0;
+}
+
+.resource-dialog-group strong {
+  color: var(--color-text);
+  font-weight: var(--font-weight-semibold);
 }
 
 /* 长清单只在弹窗内滚动；滚动条留在弹窗里，不影响工作台。 */
@@ -298,33 +338,35 @@ defineExpose({ open: openDialog, close, isOpen: () => open.value })
   border-bottom: 1px solid var(--color-border);
   display: flex;
   gap: var(--space-3);
+  min-height: 56px;
   min-width: 0;
-  padding: 0.6rem 0.2rem;
+  padding: var(--space-3) var(--space-1);
 }
 
 /* 文档图标由 CSS 画出，避免依赖 emoji 字体。 */
 .batch-doc-glyph {
-  border: 1px solid var(--color-text-muted);
-  border-radius: 2px;
+  border: 1.5px solid var(--color-primary);
+  border-radius: 3px;
   display: inline-block;
   flex: 0 0 auto;
-  height: 13px;
+  height: 18px;
   position: relative;
-  width: 10px;
+  width: 14px;
 }
 
 .batch-doc-glyph::after {
-  background: var(--color-text-muted);
+  background: var(--color-primary);
   content: '';
-  height: 1px;
-  left: 2px;
+  height: 1.5px;
+  left: 3px;
   position: absolute;
-  top: 4px;
-  width: 5px;
+  top: 6px;
+  width: 6px;
 }
 
 .resource-dialog-name {
   flex: 1 1 auto;
+  font-size: var(--font-size-md);
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -335,12 +377,13 @@ defineExpose({ open: openDialog, close, isOpen: () => open.value })
   color: var(--color-danger-emphasis);
   flex: 0 0 auto;
   font-size: var(--font-size-sm);
-  padding: 0.1rem 0.5rem;
+  font-weight: var(--font-weight-medium);
+  padding: 0.15rem var(--space-3);
 }
 
 .resource-dialog-empty {
   color: var(--color-text-muted);
-  margin: 0.5rem 0 0;
+  margin: var(--space-2) 0 0;
 }
 
 .resource-dialog-footer {

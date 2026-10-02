@@ -25,8 +25,9 @@ from typing import Any
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page, expect
 
+from tests.browser.add_anime_visual_fixtures import install_poster_route
 from tests.browser.batch_visual_fixtures import batch_candidate as _visual_candidate
-from tests.browser.conftest import set_storage_preferences
+from tests.browser.conftest import issue_draft_id, set_storage_preferences
 from tests.browser.screen_support import wait_for_screen_scroll
 from tests.browser.test_app_batch_workbench import (
     _batch_item,
@@ -54,53 +55,136 @@ CANARY_DRAFT_MARKER = "batch-draft-153-canary-draft"
 CHECKED_ITEM_IDS: tuple[str, ...] = ("item-01", "item-02")
 CLICKED_ITEM_ID = "item-01"
 
+# 资源明细弹窗的固定安全密度：设计图的「有效资源」需要多行可见并在弹窗内滚动，
+# 「已排除」需要多条带不同安全原因。全部是离线确定性文案，不含 URL、magnet 或路径。
+RESOURCE_EFFECTIVE_COUNT = 24
+EXCLUDED_RESOURCE_SUFFIXES: tuple[tuple[str, str], ...] = (
+    ("S01E01 720p.mkv", "未命中包含规则：1080p"),
+    ("S01E03 [v2].mkv", "命中排除规则：[v2]"),
+    ("特典 SP01.mkv", "未命中包含规则：1080p"),
+    ("S02E01 1080p HEVC.mkv", "命中排除规则：HEVC"),
+)
+
+# 明确确认选择的草案态：item_id → (bangumi_id, 合集标题, 有效资源条数)。
+# 这些条目一开始是 FOUND，由 fixture 在真实浏览器里点开卡片、选择候选，再由
+# `POST /api/v1/requests` 生成草案——「已选真实合集」只能来自这条人工路径。
+SELECTIONS: dict[str, tuple[str, str, int]] = {
+    "item-01": ("2353", DRAFT_LINES[0], RESOURCE_EFFECTIVE_COUNT),
+    "item-02": ("3072", DRAFT_LINES[1], 12),
+}
+
+# 未确认选择态：只有服务端匹配/草案来源信息，没有用户人工选择。
+UNCONFIRMED_ITEM_ID = "item-05"
+
+
+
+def poster_path(bangumi_id: str) -> str:
+    """同源不透明海报键路径：与单番视觉 fixture 复用同一套确定性图片。"""
+    return f"/api/v1/mikan/posters/{bangumi_id}"
+
+
+def _resource_seed_names(title: str, count: int = RESOURCE_EFFECTIVE_COUNT) -> list[str]:
+    return [f"{title} S01E{index:02d} 1080p WEB-DL x264.mkv" for index in range(1, count + 1)]
+
+
+def _excluded_seed_entries(title: str) -> list[dict[str, str]]:
+    return [
+        {"name": f"{title} {suffix}", "reason": reason}
+        for suffix, reason in EXCLUDED_RESOURCE_SUFFIXES
+    ]
+
+
+def with_public_resources(
+    preview: dict[str, Any],
+    *,
+    bangumi_id: str,
+    title: str,
+    effective_count: int = RESOURCE_EFFECTIVE_COUNT,
+) -> dict[str, Any]:
+    """给固定的未保存草案补上公开、确定的资源密度与同源海报键（仅供视觉审核）。
+
+    只写 ``source_info`` / ``confirmable_config`` 已有的公开字段，不新增接口、不写业务
+    逻辑，也不产生任何真实 MiKan 数据。
+    """
+    request = json.loads(json.dumps(preview, ensure_ascii=False))
+    matched = request.setdefault("source_info", {}).setdefault("matched_bangumi", {})
+    matched["title"] = title
+    matched["poster_url"] = poster_path(bangumi_id)
+    sources = request["source_info"].setdefault("rss_sources", [])
+    if sources:
+        source = sources[0]
+        effective = _resource_seed_names(title, effective_count)
+        excluded = _excluded_seed_entries(title)
+        source["valid_seed_names"] = effective
+        source["excluded_seed_names"] = excluded
+        source["valid_seed_count"] = len(effective)
+        source["invalid_seed_count"] = len(excluded)
+        source["total_seed_count"] = len(effective) + len(excluded)
+        request.setdefault("confirmable_config", {})["effective_seed_names"] = list(effective)
+    return request
+
 
 def batch_draft_items() -> list[dict[str, Any]]:
-    """固定批次：3 项草案（2 项已勾选）+ 1 项待选合集 + 1 项搜索失败。
+    """固定批次：3 项待选合集 + 1 项搜索失败 + 1 项「未确认真实合集」的草案。
 
-    最后一项没有有效资源：它是真实 DRAFT，但位于可确认范围之外并给出就地原因。
+    - ``item-01``／``item-02`` 是**待选择**条目：fixture 会在真实浏览器里点开卡片、
+      选择候选，让服务端生成草案，「已选真实合集」只来自这条人工选择路径。
+    - ``item-03`` 始终停留在待选择状态（候选阶段的视觉与语义）。
+    - ``item-04`` 搜索失败，失败原因与唯一恢复动作留在卡片内。
+    - ``item-05`` 是**未确认选择**的草案：只有服务端匹配/草案来源信息，没有用户人工
+      选择，界面必须显示待核对而不是「已选真实合集」。
     """
     items = [
         _batch_item(
             "item-01",
             DRAFT_LINES[0],
-            status="DRAFT",
-            canonical_title=f"{DRAFT_LINES[0]} 第一季",
+            status="FOUND",
+            canonical_title=DRAFT_LINES[0],
             season_hint="第 1 季",
             candidates=[
                 _visual_candidate(
                     bangumi_id="2353",
-                    title=f"{DRAFT_LINES[0]} 第一季",
+                    title=DRAFT_LINES[0],
                     season=1,
                     total_episodes=28,
                     source_query=DRAFT_LINES[0],
                     candidate_context=CANARY_CANDIDATE_CONTEXT,
                 )
+                | {"poster_url": poster_path("2353")},
             ],
-            preview_request=_preview_request(DRAFT_LINES[0], f"req-{BATCH_ID}-01"),
         ),
         _batch_item(
             "item-02",
             DRAFT_LINES[1],
-            status="DRAFT",
-            canonical_title=f"{DRAFT_LINES[1]} 第一季",
+            status="FOUND",
+            canonical_title=DRAFT_LINES[1],
             season_hint="第 1 季",
-            preview_request=_preview_request(DRAFT_LINES[1], f"req-{BATCH_ID}-02"),
+            candidates=[
+                _visual_candidate(
+                    bangumi_id="3072",
+                    title=DRAFT_LINES[1],
+                    season=1,
+                    total_episodes=12,
+                    source_query=DRAFT_LINES[1],
+                )
+                | {"poster_url": poster_path("3072")},
+            ],
         ),
         _batch_item(
             "item-03",
             DRAFT_LINES[2],
             status="FOUND",
-            canonical_title=f"{DRAFT_LINES[2]} 第一季",
+            canonical_title=DRAFT_LINES[2],
             season_hint="第 1 季",
             candidates=[
                 _visual_candidate(
                     bangumi_id="2888",
-                    title=f"{DRAFT_LINES[2]} 第一季",
+                    title=DRAFT_LINES[2],
                     season=1,
                     total_episodes=12,
                     source_query=DRAFT_LINES[2],
                 )
+                | {"poster_url": poster_path("2888")},
             ],
         ),
         _batch_item(
@@ -113,12 +197,19 @@ def batch_draft_items() -> list[dict[str, Any]]:
             },
         ),
         _batch_item(
-            "item-05",
+            UNCONFIRMED_ITEM_ID,
             DRAFT_LINES[4],
             status="DRAFT",
-            canonical_title=f"{DRAFT_LINES[4]} 第一季",
+            canonical_title=DRAFT_LINES[4],
             season_hint="第 1 季",
-            preview_request=_preview_request_without_resources(DRAFT_LINES[4], f"req-{BATCH_ID}-05"),
+            # 未确认选择 + 没有有效资源：只有服务端匹配信息与排除原因，
+            # 因此既不能声称「已选真实合集」，也不能进入保存确认范围。
+            preview_request=with_public_resources(
+                _preview_request_without_resources(DRAFT_LINES[4], f"req-{BATCH_ID}-05"),
+                bangumi_id="4096",
+                title=f"{DRAFT_LINES[4]} 第一季",
+                effective_count=0,
+            ),
         ),
     ]
     # 真实敏感 canary：只存在于客户端内存，任何浏览器表面或截图都不应出现它。
@@ -162,9 +253,11 @@ def batch_parse_envelope(items: list[dict[str, Any]], raw_input: str) -> str:
     )
 
 
-def canary_values(items: list[dict[str, Any]]) -> tuple[str, ...]:
+def canary_values(
+    items: list[dict[str, Any]], extra: Iterable[str] = ()
+) -> tuple[str, ...]:
     """真实的草案能力标识：绝不能进入 URL、存储、DOM 文本、日志或截图像素。"""
-    values = [CANARY_CANDIDATE_CONTEXT, CANARY_DRAFT_MARKER]
+    values = [CANARY_CANDIDATE_CONTEXT, CANARY_DRAFT_MARKER, *extra]
     for item in items:
         draft_id = item.get("draft_id")
         if isinstance(draft_id, str) and draft_id:
@@ -181,6 +274,12 @@ class BatchDraftVisualScenario:
         self.items: list[dict[str, Any]] = batch_draft_items()
         self.console_messages: list[str] = []
         self.external_calls: list[str] = []
+        # 人工选择产生的草案标识：同样属于不得进入浏览器表面的能力标识。
+        self.created_draft_ids: list[str] = []
+        self.selection_specs: dict[str, tuple[str, int]] = {
+            bangumi_id: (title, effective_count)
+            for bangumi_id, title, effective_count in SELECTIONS.values()
+        }
 
     def install(self, storage_dir: Path, *, items: list[dict[str, Any]] | None = None) -> None:
         require_dist()
@@ -194,9 +293,12 @@ class BatchDraftVisualScenario:
         payload = batch_parse_envelope(self.items, raw_input_for(self.items))
         # 宽泛的兜底 route 先注册：Playwright 以最后注册的匹配为先。
         self.page.route("**/api/v1/mikan/**", self._on_unexpected_external)
+        # 同源海报接口是公开的确定性 fixture；比兜底 route 后注册，因此优先命中。
+        install_poster_route(self.page)
         self.page.route("**/api/v1/batches/*/save-confirm**", self._on_save_confirm)
         self.page.route("**/api/v1/requests/*/safe-info", self._on_safe_info)
-        self.page.route("**/api/v1/requests", self._on_unexpected_external)
+        # 用户点选候选后的草案生成：这是「已选真实合集」的唯一合法来源。
+        self.page.route("**/api/v1/requests", self._on_create_request)
         self.page.route(
             "**/api/v1/batches/parse",
             lambda route: route.fulfill(status=200, content_type="application/json", body=payload),
@@ -205,6 +307,47 @@ class BatchDraftVisualScenario:
     def _on_unexpected_external(self, route: Any, request: Any) -> None:
         self.external_calls.append(request.url)
         route.abort()
+
+    def _on_create_request(self, route: Any, request: Any) -> None:
+        """真实人工选择路径：服务端为被点选的候选返回草案快照。
+
+        只有 fixture 明确登记过的候选（``SELECTIONS``）才生成草案；其他请求仍然按
+        「意外外部调用」记帐并中止，避免把未登记的网络行为当成合法路径。
+        """
+        if request.method != "POST":
+            self._on_unexpected_external(route, request)
+            return
+        body = request.post_data_json or {}
+        bangumi_id = str(body.get("mikan_bangumi") or "").rsplit("/", 1)[-1]
+        spec = self.selection_specs.get(bangumi_id)
+        if spec is None:
+            self._on_unexpected_external(route, request)
+            return
+        title, effective_count = spec
+        preview = with_public_resources(
+            _preview_request(title, f"req-{BATCH_ID}-selected-{bangumi_id}"),
+            bangumi_id=bangumi_id,
+            title=title,
+            effective_count=effective_count,
+        )
+        draft_id = issue_draft_id(preview)
+        self.created_draft_ids.append(draft_id)
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "ok": True,
+                    "result": {
+                        "request": preview,
+                        "summary": {},
+                        "draft_id": draft_id,
+                        "draft_revision": 1,
+                    },
+                },
+                ensure_ascii=False,
+            ),
+        )
 
     def _on_save_confirm(self, route: Any, request: Any) -> None:
         self.external_calls.append(request.url)
@@ -230,19 +373,51 @@ class BatchDraftVisualScenario:
         self.page.click("#anime-mode-batch")
         self.page.wait_for_selector("#batch-parse-form", timeout=10_000)
 
+    def default_selections(self) -> tuple[str, ...]:
+        """本批次中真正存在候选、且登记为「用户确认选择」的条目。"""
+        by_id = {str(item.get("item_id") or ""): item for item in self.items}
+        return tuple(
+            item_id
+            for item_id in SELECTIONS
+            if by_id.get(item_id, {}).get("candidates")
+        )
+
+    def select_candidate_for(self, item_id: str) -> None:
+        """走真实人工路径：点开条目 → 选择候选 → 服务端生成草案。
+
+        「已选真实合集」只能由这条路径产生；fixture 不伪造选择结果。
+        """
+        card = self.page.locator(f'.batch-draft-card[data-item-id="{item_id}"]')
+        card.click()
+        pane = self.page.locator("#batch-detail-pane")
+        expect(pane).to_contain_text("候选合集")
+        pane.locator(".candidate-select").first.click()
+        expect(card.locator(".batch-card-status")).to_contain_text("草案")
+        expect(pane).to_contain_text("已选真实合集")
+
     def enter_workbench(
         self,
         *,
         checked_item_ids: tuple[str, ...] | None = None,
         click_item_id: str | None = None,
+        select_item_ids: tuple[str, ...] | None = None,
     ) -> None:
-        """进入批量工作台：按参数勾选条目，并把当前查看项定在指定卡片。"""
+        """进入批量工作台：先按真实路径确认选择的条目，再勾选并把当前项定在指定卡片。"""
         checked = checked_item_ids if checked_item_ids is not None else CHECKED_ITEM_IDS
         clicked = click_item_id if click_item_id is not None else CLICKED_ITEM_ID
+        # 默认只对「本批次里真有候选」的登记条目走人工选择；边界批次（repeat_items）
+        # 没有这些条目，不需要也不会伪造选择。
+        selections = (
+            select_item_ids
+            if select_item_ids is not None
+            else self.default_selections()
+        )
         self.open_batch_input()
         self.page.fill("#batch-raw-input", raw_input_for(self.items))
         self.page.click("#batch-parse-submit")
         expect(self.page.locator(".batch-draft-card")).to_have_count(len(self.items))
+        for item_id in selections:
+            self.select_candidate_for(item_id)
         for item_id in checked:
             self.page.locator(
                 f'.batch-draft-card[data-item-id="{item_id}"] input[type="checkbox"]'
@@ -281,10 +456,13 @@ class BatchDraftVisualScenario:
         expect(self.page.locator(".batch-draft-card")).to_have_count(1)
 
     def reset_title_search(self) -> None:
-        """关闭浮层并清空关键词，回到完整批次。"""
-        self.page.click("#batch-review-search-toggle")
+        """关闭浮层并清空关键词，回到完整批次（#158：关闭入口是唯一的具名按钮）。"""
+        if self.page.locator("#batch-review-search").count() == 0:
+            self.page.click("#batch-review-search-toggle")
+            self.page.wait_for_selector("#batch-review-search", timeout=10_000)
+        self.page.fill("#batch-review-search", "")
+        self.page.click("#batch-review-search-close")
         expect(self.page.locator("#batch-review-search")).to_have_count(0)
-        self.page.click("#batch-review-clear")
         expect(self.page.locator(".batch-draft-card")).to_have_count(len(self.items))
 
     def open_resource_dialog(self, tab: str = "effective") -> None:
@@ -312,6 +490,14 @@ class BatchDraftVisualScenario:
         """幂等地把页面推进到某个审核状态（重复调用不重复开合）。"""
         if self.page.locator(".resource-dialog").count():
             self.close_resource_dialog()
+        # #145：审核截图从左栏列表顶部取景，让置顶的异常卡片（原因与唯一恢复动作）
+        # 与当前查看项同时完整可见；否则更高的审核卡会把异常卡挤出取景。
+        self.page.evaluate(
+            """() => {
+                const list = document.querySelector('.batch-card-grid-wrapper')
+                if (list) list.scrollTop = 0
+            }"""
+        )
         if name == "draft-workbench":
             if self.page.locator("#batch-review-search").count():
                 self.reset_title_search()

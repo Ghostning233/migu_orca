@@ -32,6 +32,7 @@ import { resourcePreview } from '@/features/workbench/resourceProjection'
 import {
   collectPreviewEditPatch,
   previewEditStateFrom,
+  publicPosterPath,
   type PreviewEditState,
   type PreviewPatch,
   type SelectedCollectionSummary,
@@ -242,6 +243,15 @@ const resourceDialog = ref<InstanceType<typeof ResourceDetailDialog> | null>(nul
 const resourceSamples = computed(() => resourcePreview(effective.value, 2))
 const hasAnyResource = computed(() => effective.value.length > 0 || excluded.value.length > 0)
 
+/**
+ * 右栏合集封面（#145）。
+ *
+ * 复用左栏条目卡与候选卡同一份 `publicPosterPath` 校验，而不是直接把宿主投影写进
+ * `img.src`：外链、`data:`、`file:`、带凭据 URL、绝对本地路径和越界键路径一律
+ * fail closed 退回占位，绝不进入任何 DOM 属性。
+ */
+const batchPosterUrl = computed(() => publicPosterPath(props.candidateSummary?.posterUrl))
+
 function openResourceDetail(): void {
   resourceDialog.value?.open('effective')
 }
@@ -259,8 +269,23 @@ const selectedCollectionTitle = computed(
     '未提供',
 )
 
-/** #150：批量右栏标题区直接给出已选合集与季度，供人工再次核对真实合集。 */
+/**
+ * #150／产品边界：批量右栏的「已选真实合集」只来自用户对真实 MiKan 合集的最终选择。
+ *
+ * 宿主只在用户本次会话明确点选候选（或服务端明确返回可证明的已确认选择）时才传入
+ * `candidateSummary`。仅有服务端匹配信息时这里为 false：不显示「已选真实合集」，
+ * 也不把匹配标题、季度或海报伪装成用户选择，而是就地提示待核对。
+ */
+const batchSelectionConfirmed = computed(() => Boolean(props.candidateSummary))
+
+/**
+ * #150：确认选择后给出合集名与季度；尚未确认时只显示条目自身的输入标题，
+ * 不展示任何来自服务端匹配的合集名/季度。
+ */
 const batchCollectionHeading = computed(() => {
+  if (!batchSelectionConfirmed.value) {
+    return displayValue(props.request.input?.raw_title) || '未命名条目'
+  }
   const title = displayValue(selectedCollectionTitle.value)
   const season = props.candidateSummary?.season
   return season ? `${title} · 第 ${season} 季` : title
@@ -325,12 +350,17 @@ defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
       aria-live="polite"
       aria-relevant="additions text"
     >
-      <section class="batch-draft-identity" aria-label="已选真实合集">
-        <span class="batch-draft-poster" :data-poster-state="candidateSummary?.posterUrl ? 'ready' : 'placeholder'">
+      <section
+        class="batch-draft-identity"
+        :class="{ 'is-unconfirmed': !batchSelectionConfirmed }"
+        :data-selection-state="batchSelectionConfirmed ? 'confirmed' : 'unconfirmed'"
+        :aria-label="batchSelectionConfirmed ? '已选真实合集' : '尚未确认真实合集'"
+      >
+        <span class="batch-draft-poster" :data-poster-state="batchPosterUrl ? 'ready' : 'placeholder'">
           <img
-            v-if="candidateSummary?.posterUrl"
+            v-if="batchPosterUrl"
             class="batch-draft-poster-image"
-            :src="candidateSummary.posterUrl"
+            :src="batchPosterUrl ?? undefined"
             alt=""
             loading="lazy"
             decoding="async"
@@ -339,7 +369,10 @@ defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
         </span>
         <div class="batch-draft-identity-text">
           <h3 class="request-detail-title">{{ batchCollectionHeading }}</h3>
-          <span class="batch-draft-chip">已选真实合集</span>
+          <span v-if="batchSelectionConfirmed" class="batch-draft-chip">已选真实合集</span>
+          <span v-else class="batch-draft-chip is-unconfirmed">
+            尚未确认真实合集：请先在左侧条目中选择真实 MiKan 合集
+          </span>
         </div>
       </section>
 
@@ -379,48 +412,52 @@ defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
 
       <section class="batch-draft-section batch-resource-results" aria-label="资源结果">
         <h4 class="batch-section-heading">资源结果</h4>
-        <ul class="batch-resource-metrics">
-          <li class="batch-resource-metric" data-metric="effective">
-            <span class="batch-metric-mark is-effective" aria-hidden="true"></span>
-            <span class="batch-metric-label">有效资源</span>
-            <span class="batch-metric-value">{{ effective.length }}</span>
-            <span class="batch-metric-unit">个</span>
-          </li>
-          <li class="batch-resource-metric" data-metric="excluded">
-            <span class="batch-metric-mark is-excluded" aria-hidden="true"></span>
-            <span class="batch-metric-label">已排除</span>
-            <span class="batch-metric-value">{{ excluded.length }}</span>
-            <span class="batch-metric-unit">个</span>
-          </li>
-          <!-- #145：批量草案本轮不接入可信集数数据源，两个集数字段固定显示「未开发」，
-               既不从资源数推断，也不改变其他页面缺可信值时显示「未知」的规则。 -->
-          <li class="batch-resource-metric" data-metric="updated-episodes">
-            <span class="batch-metric-mark" aria-hidden="true"></span>
-            <span class="batch-metric-label">已更新集数</span>
-            <span class="batch-metric-value">未开发</span>
-          </li>
-          <li class="batch-resource-metric" data-metric="total-episodes">
-            <span class="batch-metric-mark" aria-hidden="true"></span>
-            <span class="batch-metric-label">预期总集数</span>
-            <span class="batch-metric-value">未开发</span>
-          </li>
-        </ul>
-        <ul v-if="resourceSamples.length" class="batch-resource-samples">
-          <li v-for="seed in resourceSamples" :key="`sample-${seed}`" class="batch-resource-sample">
-            <span class="batch-doc-glyph" aria-hidden="true"></span>
-            <span class="batch-resource-sample-name">{{ seed }}</span>
-          </li>
-        </ul>
-        <p v-else class="field-help">当前字幕组没有有效资源。</p>
-        <button
-          v-if="hasAnyResource"
-          :id="`${idPrefix}-open-resources`"
-          type="button"
-          class="batch-resource-detail-link"
-          @click="openResourceDetail"
-        >
-          查看完整资源列表 <span aria-hidden="true">›</span>
-        </button>
+        <!-- #157：四项结果、安全示例与完整列表入口同处一个与「字幕与筛选」一致的描边盒子；
+             盒内不再有设计图以外的横向/纵向分割线。 -->
+        <div class="batch-resource-box">
+          <ul class="batch-resource-metrics">
+            <li class="batch-resource-metric" data-metric="effective">
+              <span class="batch-metric-mark is-effective" aria-hidden="true"></span>
+              <span class="batch-metric-label">有效资源</span>
+              <span class="batch-metric-value">{{ effective.length }}</span>
+              <span class="batch-metric-unit">个</span>
+            </li>
+            <li class="batch-resource-metric" data-metric="excluded">
+              <span class="batch-metric-mark is-excluded" aria-hidden="true"></span>
+              <span class="batch-metric-label">已排除</span>
+              <span class="batch-metric-value">{{ excluded.length }}</span>
+              <span class="batch-metric-unit">个</span>
+            </li>
+            <!-- #145：批量草案本轮不接入可信集数数据源，两个集数字段固定显示「未开发」，
+                 既不从资源数推断，也不改变其他页面缺可信值时显示「未知」的规则。 -->
+            <li class="batch-resource-metric" data-metric="updated-episodes">
+              <span class="batch-metric-mark is-clock" aria-hidden="true"></span>
+              <span class="batch-metric-label">已更新集数</span>
+              <span class="batch-metric-value">未开发</span>
+            </li>
+            <li class="batch-resource-metric" data-metric="total-episodes">
+              <span class="batch-metric-mark is-bars" aria-hidden="true"></span>
+              <span class="batch-metric-label">预期总集数</span>
+              <span class="batch-metric-value">未开发</span>
+            </li>
+          </ul>
+          <ul v-if="resourceSamples.length" class="batch-resource-samples">
+            <li v-for="seed in resourceSamples" :key="`sample-${seed}`" class="batch-resource-sample">
+              <span class="batch-doc-glyph" aria-hidden="true"></span>
+              <span class="batch-resource-sample-name">{{ seed }}</span>
+            </li>
+          </ul>
+          <p v-else class="field-help">当前字幕组没有有效资源。</p>
+          <button
+            v-if="hasAnyResource"
+            :id="`${idPrefix}-open-resources`"
+            type="button"
+            class="batch-resource-detail-link"
+            @click="openResourceDetail"
+          >
+            查看完整资源列表 <span aria-hidden="true">›</span>
+          </button>
+        </div>
       </section>
 
       <!-- #150：高级设置默认折叠。display 不覆盖 details 的默认值，否则折叠时
@@ -644,38 +681,52 @@ defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
   padding: 0;
 }
 
+/* #150：批量草案右栏默认层不重复面板标题；但父级 PanelSection 用
+   `aria-labelledby` 指向这个 h2，所以它必须留在可访问性树里——只做视觉隐藏，
+   不能用 `display: none` 让 `aria-labelledby` 指向一个不渲染的元素。
+   Issue #145：面板标题的隐藏规则见下（视觉隐藏而不是 display: none）。 */
 .batch-draft-editor :deep(.panel-heading) {
-  display: none;
+  border: 0;
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
 }
 
 .batch-draft-review {
   display: grid;
-  gap: var(--space-4);
+  gap: 0;
 }
 
+/* 合集身份：设计图里是较大的横向封面 + 深海蓝标题 + 珊瑚橙「已选真实合集」胶囊。 */
 .batch-draft-identity {
   align-items: center;
+  border-bottom: 1px solid var(--color-border);
   display: flex;
-  gap: var(--space-3);
+  gap: var(--space-5);
   min-width: 0;
+  padding-bottom: var(--space-4);
 }
 
 .batch-draft-poster {
   align-items: center;
-  background: var(--color-bg-muted);
+  background: var(--color-surface-subtle);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   color: var(--color-text-muted);
   display: inline-flex;
   flex: 0 0 auto;
-  font-size: 0.7rem;
-  height: 72px;
+  font-size: 0.72rem;
+  height: 70px;
   justify-content: center;
   overflow: hidden;
-  width: 128px;
+  width: 120px;
 }
 
 .batch-draft-poster-image {
+  display: block;
   height: 100%;
   object-fit: cover;
   width: 100%;
@@ -683,44 +734,63 @@ defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
 
 .batch-draft-identity-text {
   display: grid;
-  gap: 0.35rem;
+  gap: var(--space-2);
   min-width: 0;
 }
 
 .batch-draft-identity-text .request-detail-title {
+  color: var(--color-primary);
   font-size: var(--type-section-title);
-  line-height: 1.4;
+  font-weight: var(--font-weight-bold);
+  line-height: 1.3;
   margin: 0;
 }
 
+/* 珊瑚橙只做状态强调：这是「已选真实合集」的确认胶囊，不是可点击控件。 */
 .batch-draft-chip {
-  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface));
   border-radius: var(--radius-pill);
-  color: var(--color-primary);
+  color: color-mix(in srgb, var(--color-accent) 78%, var(--color-text));
   font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
   justify-self: start;
-  padding: 0.1rem 0.5rem;
+  padding: 0.1rem var(--space-3);
 }
 
+/* 尚未确认选择：中性偏警示语气，绝不复用「已选」的珊瑚橙确认色，避免把服务端匹配
+   信息读成用户已完成的选择。 */
+.batch-draft-chip.is-unconfirmed {
+  background: var(--color-warning-surface);
+  color: var(--color-warning);
+}
+
+/* #145：分区之间是发丝分隔线，不是一个分区一个描边盒子；这样右栏读起来是
+   「审核详情」而不是四个等权表单块。 */
 .batch-draft-section {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  border-bottom: 1px solid var(--color-border);
   display: grid;
   gap: var(--space-3);
-  padding: var(--space-4);
+  padding: var(--space-4) 0;
 }
 
 .batch-section-heading {
-  font-size: var(--font-size-md);
+  color: var(--color-primary);
+  font-size: var(--type-section-title);
+  font-weight: var(--font-weight-semibold);
   margin: 0;
 }
 
-/* 字幕组、包含规则、排除规则与「保存修改」同一排；窄视口自然换行。 */
+/* 字幕组、包含规则、排除规则与「保存修改」同一排；窄视口自然换行。
+   常用筛选规则装在一张浅描边子卡里，与设计图的层级一致。 */
 .batch-draft-filter-form {
   align-items: end;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
 }
 
 .batch-draft-filter-form :deep(.form-field) {
@@ -732,10 +802,22 @@ defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
   flex: 0 0 auto;
 }
 
+/* #145/#157：资源结果与「字幕与筛选」同属一个描边盒子层级——盒内四项同排、安全示例
+   自然换行，不再用无设计依据的横/竖分割线切分。 */
+.batch-resource-box {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+}
+
 .batch-resource-metrics {
+  align-items: center;
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
+  gap: var(--space-2) var(--space-6);
   list-style: none;
   margin: 0;
   padding: 0;
@@ -744,59 +826,122 @@ defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
 .batch-resource-metric {
   align-items: center;
   display: flex;
-  gap: 0.35rem;
+  gap: var(--space-2);
   min-width: 0;
 }
 
 /* 资源结果的标记完全由 CSS 画成，不依赖 emoji/符号字体在各环境的可用性。 */
 .batch-metric-mark {
-  border: 2px solid var(--color-border);
+  border: 2px solid var(--color-text-muted);
   border-radius: 50%;
-  display: inline-block;
-  height: 10px;
-  width: 10px;
-}
-
-.batch-metric-mark.is-effective {
-  background: var(--color-success-emphasis, #1f7a45);
-  border-color: var(--color-success-emphasis, #1f7a45);
-}
-
-.batch-metric-mark.is-excluded {
-  border-color: var(--color-text-muted);
-}
-
-.batch-doc-glyph {
-  border: 1px solid var(--color-text-muted);
-  border-radius: 2px;
+  color: var(--color-text-muted);
   display: inline-block;
   flex: 0 0 auto;
-  height: 13px;
+  height: 18px;
   position: relative;
+  width: 18px;
+}
+
+/* 有效资源：绿色实心对勾。 */
+.batch-metric-mark.is-effective {
+  background: var(--color-success);
+  border-color: var(--color-success);
+}
+
+.batch-metric-mark.is-effective::after {
+  border: solid var(--color-text-inverse);
+  border-width: 0 2px 2px 0;
+  content: '';
+  height: 9px;
+  left: 6px;
+  position: absolute;
+  top: 2px;
+  transform: rotate(45deg);
+  width: 4px;
+}
+
+/* 已排除：灰色实心横杠。 */
+.batch-metric-mark.is-excluded {
+  background: var(--color-text-disabled);
+  border-color: var(--color-text-disabled);
+}
+
+.batch-metric-mark.is-excluded::after {
+  background: var(--color-text-inverse);
+  content: '';
+  height: 2px;
+  left: 4px;
+  position: absolute;
+  top: 8px;
   width: 10px;
 }
 
-.batch-doc-glyph::after {
-  background: var(--color-text-muted);
+/* 已更新集数：时钟轮廓（圆 + 两条指针）。 */
+.batch-metric-mark.is-clock::after {
+  border-bottom: 2px solid currentColor;
+  border-left: 2px solid currentColor;
   content: '';
-  height: 1px;
-  left: 2px;
+  height: 5px;
+  left: 4px;
   position: absolute;
-  top: 4px;
+  top: 3px;
   width: 5px;
 }
 
+/* 预期总集数：三根柱子的柱状图。 */
+.batch-metric-mark.is-bars {
+  border: 0;
+  border-radius: 0;
+  height: 16px;
+  width: 18px;
+}
+
+.batch-metric-mark.is-bars::after {
+  background:
+    linear-gradient(currentColor, currentColor) left bottom / 4px 9px no-repeat,
+    linear-gradient(currentColor, currentColor) center bottom / 4px 16px no-repeat,
+    linear-gradient(currentColor, currentColor) right bottom / 4px 6px no-repeat;
+  content: '';
+  inset: 0;
+  position: absolute;
+}
+
+.batch-doc-glyph {
+  border: 1.5px solid var(--color-primary);
+  border-radius: 3px;
+  display: inline-block;
+  flex: 0 0 auto;
+  height: 16px;
+  position: relative;
+  width: 13px;
+}
+
+.batch-doc-glyph::after {
+  background: var(--color-primary);
+  content: '';
+  height: 1.5px;
+  left: 3px;
+  position: absolute;
+  top: 5px;
+  width: 6px;
+}
+
 .batch-metric-label {
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
 }
 
 .batch-metric-value {
+  color: var(--color-text);
   font-weight: var(--font-weight-semibold);
+}
+
+.batch-metric-unit {
+  color: var(--color-text-secondary);
 }
 
 .batch-resource-samples {
   display: grid;
-  gap: 0.35rem;
+  gap: var(--space-1);
   list-style: none;
   margin: 0;
   padding: 0;
@@ -804,11 +949,10 @@ defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
 
 .batch-resource-sample {
   align-items: center;
-  border-bottom: 1px solid var(--color-border);
   display: flex;
-  gap: var(--space-2);
+  gap: var(--space-3);
   min-width: 0;
-  padding-bottom: 0.35rem;
+  padding: 0;
 }
 
 .batch-resource-sample-name {
@@ -816,35 +960,81 @@ defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
   overflow-wrap: anywhere;
 }
 
+/* #157：入口默认就是 primary 蓝的文本按钮；悬停给淡蓝圆角背景，键盘聚焦有可见焦点，
+   不只靠下划线反馈。它仍是打开双页签弹窗的真实按钮，开关不改变右栏滚动位置。 */
 .batch-resource-detail-link {
   background: none;
   border: 0;
+  border-radius: var(--radius-sm);
   color: var(--color-primary);
   cursor: pointer;
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
   justify-self: start;
-  padding: 0;
+  margin-inline-start: calc(-1 * var(--space-2));
+  padding: var(--space-1) var(--space-2);
 }
 
 .batch-resource-detail-link:hover {
-  text-decoration: underline;
+  background: var(--color-primary-subtle);
 }
 
+.batch-resource-detail-link:focus-visible {
+  background: var(--color-primary-subtle);
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* #157：高级设置默认折叠，展开后紧凑对齐；不再用大内边距撑成一块粗重表单。 */
 .batch-draft-advanced {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  padding: var(--space-4);
+  margin-top: var(--space-4);
+  padding: var(--space-2) var(--space-3);
 }
 
 .batch-draft-advanced > summary {
+  align-items: center;
   cursor: pointer;
-  font-weight: var(--font-weight-semibold);
+  display: flex;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  justify-content: space-between;
+  list-style: none;
+  min-height: 1.5rem;
+}
+
+.batch-draft-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.batch-draft-advanced > summary::after {
+  border: solid var(--color-text-muted);
+  border-width: 0 2px 2px 0;
+  content: '';
+  height: 7px;
+  margin-inline-end: var(--space-1);
+  transform: rotate(45deg);
+  transition: transform 0.15s ease;
+  width: 7px;
+}
+
+.batch-draft-advanced[open] > summary::after {
+  transform: rotate(-135deg);
 }
 
 .batch-draft-advanced-body {
   display: grid;
-  gap: var(--space-3);
-  margin-top: var(--space-3);
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.batch-draft-advanced-body .filter-options {
+  gap: var(--space-2) var(--space-5);
+}
+
+.batch-draft-advanced-body .field-help {
+  margin: 0;
 }
 
 </style>

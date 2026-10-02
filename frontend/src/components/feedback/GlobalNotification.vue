@@ -37,6 +37,14 @@ type ToastEnvironment = {
 }
 
 let toastEnvironment: ToastEnvironment | null = null
+/**
+ * 提示条生命周期代际。
+ *
+ * 每次「显示」都会开启新一代：在途的退场恢复回调（rAF）由此失效，绝不能在新提示
+ * 仍然可见时恢复样式并清空共享环境，否则新提示会失去滚动保护。卸载同样自增一代，
+ * 保证过期回调不会再触碰环境。
+ */
+let toastGeneration = 0
 
 function captureToastEnvironment(): void {
   if (toastEnvironment) return
@@ -69,24 +77,57 @@ function restoreToastEnvironment(): void {
   toastEnvironment = null
 }
 
+/** Record *this* viewport: the position to restore is the one held just before removal. */
+function refreshToastViewport(): void {
+  if (toastEnvironment) {
+    toastEnvironment.viewport = { x: window.scrollX, y: window.scrollY }
+  }
+}
+
+/**
+ * 提示条退场：先记下当前视口，再等下一帧（固定层已移除、Chromium 可能已经做过一次
+ * 滚动锚定之后）把它恢复回去。
+ *
+ * 这里必须恢复「移除前此刻」的位置，而不是 `captureToastEnvironment()` 里那份提示条
+ * *出现时* 的位置：批量搜索完成的汇总提示条出现时页面还在搜索首屏，之后整批结果会
+ * 自动切到第二屏（用户也可能在提示条可见期间自己滚动）。把出现时的旧位置写回去会
+ * 在提示条自动关闭的瞬间把页面强行拉回搜索首屏，用户必须重新向下滚动。刷新后再恢复
+ * 既保留了「移除固定层不移动页面」的保护，也不覆盖期间的合法滚动。
+ *
+ * 恢复回调绑定「调度时的代际」：同一帧内又出现新提示（或组件卸载）都会开启新一代，
+ * 使这个过期回调不再恢复样式、也不再清空共享环境。
+ */
+function scheduleToastEnvironmentRestore(): void {
+  if (!toastEnvironment) return
+  refreshToastViewport()
+  const generation = toastGeneration
+  requestAnimationFrame(() => {
+    if (generation !== toastGeneration) return
+    restoreToastEnvironment()
+  })
+}
+
 watch(current, (value) => {
-  if (value) captureToastEnvironment()
-  else restoreToastEnvironment()
+  if (value) {
+    // 每次显示都是新一代，上一代的在途恢复回调由此失效。
+    toastGeneration += 1
+    captureToastEnvironment()
+    return
+  }
+  scheduleToastEnvironmentRestore()
 }, { flush: 'sync' })
 
 function dismiss(): void {
   // Removing a focused fixed element can trigger Chromium's scroll anchoring
   // even though the toast is outside document flow. Preserve the viewport so
-  // dismissing a summary cannot move the page it is announcing.
+  // dismissing a summary cannot move the page it is announcing (the sync
+  // watcher above performs the deferred restore).
   captureToastEnvironment()
-  if (toastEnvironment) {
-    toastEnvironment.viewport = { x: window.scrollX, y: window.scrollY }
-  }
+  refreshToastViewport()
   if (document.activeElement instanceof HTMLElement) {
     document.activeElement.blur()
   }
   notificationStore.clear()
-  requestAnimationFrame(() => restoreToastEnvironment())
 }
 
 function restoreViewport(scrollX: number, scrollY: number): void {
@@ -104,6 +145,8 @@ function restoreViewport(scrollX: number, scrollY: number): void {
 // The store owns the auto-close timers; unmounting has to take the pending one
 // with it so it cannot outlive the toast and mutate the shell afterwards.
 onBeforeUnmount(() => {
+  // 卸载同样开启新一代：在途的退场恢复回调不得再触碰环境或共享状态。
+  toastGeneration += 1
   restoreToastEnvironment()
   notificationStore.clear()
 })
