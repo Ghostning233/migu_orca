@@ -1,0 +1,218 @@
+{
+  "build": {
+    "artifact_digest": "2fcd5b508fd2f305f4df84e686128510632499f2bbda9f2d74469816c99627ea",
+    "artifact_file_count": 16,
+    "built_at": "2026-10-02T08:25:38Z",
+    "source_fingerprint": {
+      "algorithm": "sha256",
+      "digest": "c3898bac1bb32ec485296a802e4b6ca3beb6b95e73985dedc5d553b32d2890ea",
+      "file_count": 78,
+      "files": [
+        "eslint.config.js",
+        "index.html",
+        "package-lock.json",
+        "package.json",
+        "src/App.vue",
+        "src/api/client.ts",
+        "src/api/generated/api.ts",
+        "src/app/composables/useAddAnimeScreenScroll.ts",
+        "src/app/composables/useBatchReviewJourney.ts",
+        "src/app/composables/useDraftSession.ts",
+        "src/app/composables/useFocusTrap.ts",
+        "src/app/composables/useLeaveGuard.ts",
+        "src/app/composables/useSensitiveFields.ts",
+        "src/app/composables/useSingleAnimeJourney.ts",
+        "src/app/composables/useTrackedRequest.ts",
+        "src/app/router/catalog.ts",
+        "src/app/router/index.ts",
+        "src/app/stores/connectionStatus.ts",
+        "src/app/stores/loading.ts",
+        "src/app/stores/notification.ts",
+        "src/components/feedback/ConfirmDialog.vue",
+        "src/components/feedback/EmptyState.vue",
+        "src/components/feedback/ErrorBoundary.vue",
+        "src/components/feedback/ErrorState.vue",
+        "src/components/feedback/GlobalLoadingBar.vue",
+        "src/components/feedback/GlobalNotification.vue",
+        "src/components/feedback/LoadingState.vue",
+        "src/components/feedback/StatusAlert.vue",
+        "src/components/forms/BaseButton.vue",
+        "src/components/forms/BaseInput.vue",
+        "src/components/forms/BaseSelect.vue",
+        "src/components/forms/BaseTextarea.vue",
+        "src/components/forms/CheckboxRow.vue",
+        "src/components/layout/FormField.vue",
+        "src/components/layout/PanelSection.vue",
+        "src/features/autobangumi/serviceRoot.ts",
+        "src/features/requests/requestDetail.ts",
+        "src/features/requests/requestStorage.ts",
+        "src/features/requests/requestsList.ts",
+        "src/features/requests/reuseHandoff.ts",
+        "src/features/requests/useSavedPlanEditor.ts",
+        "src/features/settings/SettingsView.vue",
+        "src/features/settings/preferences.ts",
+        "src/features/settings/storagePreferences.ts",
+        "src/features/tracking/TrackingExternalDelete.vue",
+        "src/features/tracking/TrackingInspector.vue",
+        "src/features/tracking/TrackingManagementActions.vue",
+        "src/features/tracking/TrackingModifyForm.vue",
+        "src/features/tracking/TrackingPoster.vue",
+        "src/features/tracking/TrackingSubmissionModeDialog.vue",
+        "src/features/tracking/TrackingView.vue",
+        "src/features/tracking/batchSelection.ts",
+        "src/features/tracking/trackingManagement.ts",
+        "src/features/tracking/trackingProjection.ts",
+        "src/features/workbench/AnimeDraftEditor.vue",
+        "src/features/workbench/AnimeModeSwitch.vue",
+        "src/features/workbench/AnimeTitleInput.vue",
+        "src/features/workbench/BatchWorkbenchView.vue",
+        "src/features/workbench/CandidateCard.vue",
+        "src/features/workbench/CandidateCollectionList.vue",
+        "src/features/workbench/ResourceDetailDialog.vue",
+        "src/features/workbench/ResourceSummary.vue",
+        "src/features/workbench/SingleAnimeReviewPanel.vue",
+        "src/features/workbench/SingleAnimeSearchForm.vue",
+        "src/features/workbench/SubtitleGroupSelect.vue",
+        "src/features/workbench/WorkbenchView.vue",
+        "src/features/workbench/batchWorkbench.ts",
+        "src/features/workbench/candidateSearch.ts",
+        "src/features/workbench/draftEditScheduler.ts",
+        "src/features/workbench/mikanFeedback.ts",
+        "src/features/workbench/resourceProjection.ts",
+        "src/main.ts",
+        "src/styles/main.css",
+        "src/styles/tokens.css",
+        "src/vite-env.d.ts",
+        "tsconfig.json",
+        "vite.config.ts",
+        "vitest.config.ts"
+      ],
+      "roots": [
+        "src"
+      ]
+    },
+    "toolchain": {
+      "node": "v24.19.0",
+      "npm": "11.17.0"
+    }
+  },
+  "captured_at": "2026-10-02T10:03:46Z",
+  "fixture": {
+    "description": "固定安全批次：离线草案、确定性海报与安全资源样例；不连接真实 MiKan／AB／qB。",
+    "id": "batch-draft-review-153",
+    "mock_routes": [
+      "/api/v1/batches/parse",
+      "/api/v1/requests",
+      "/api/v1/mikan/posters"
+    ]
+  },
+  "git": {
+    "branch": "feat/batch-draft-workbench-issue145",
+    "changed_paths": 9,
+    "dirty": true,
+    "head": "679b4582ee8de3e334d01ef48ec8dad6996ebc19"
+  },
+  "page": {
+    "loaded_resources": [
+      {
+        "content_type": "text/html; charset=utf-8",
+        "path": "/app/add",
+        "sha256": "248610af289ad9ef2d39bb867133372c12df5984f9bef1c3c378d07c4b436956",
+        "status": 200
+      },
+      {
+        "content_type": "text/css; charset=utf-8",
+        "path": "/app/assets/BaseSelect-BazgxLur.css",
+        "sha256": "08c6cb72ebe4ffcafdd09f22a953544eac304d503530749a968844c074590546",
+        "status": 200
+      },
+      {
+        "content_type": "text/javascript; charset=utf-8",
+        "path": "/app/assets/BaseSelect-D1d0RScB.js",
+        "sha256": "542f3fa83c0749686e26b10b78299b0e5246b08f3b6348315feca6f1d09a357d",
+        "status": 200
+      },
+      {
+        "content_type": "text/css; charset=utf-8",
+        "path": "/app/assets/BaseTextarea-B_04uvgl.css",
+        "sha256": "1814b9a765605172ab13cac35db7a1014daabeb40844a2ac6b5a721ff2c0a003",
+        "status": 200
+      },
+      {
+        "content_type": "text/javascript; charset=utf-8",
+        "path": "/app/assets/BaseTextarea-CqRVskpU.js",
+        "sha256": "abda9c7693a86ba9171ae82f43c34b76ed11067e8b8f9eb2643921b305534423",
+        "status": 200
+      },
+      {
+        "content_type": "text/javascript; charset=utf-8",
+        "path": "/app/assets/WorkbenchView--a28QsH1.js",
+        "sha256": "38c6a3bb515c02bb7d9832d997f564599b57fe4368a3887ec43bf64db36d107e",
+        "status": 200
+      },
+      {
+        "content_type": "text/css; charset=utf-8",
+        "path": "/app/assets/WorkbenchView-DXvVXmkk.css",
+        "sha256": "9f81ce3dbfe8d151a58f4332a484a0701833c2f3c5e18216dc5cdd696bfb4b74",
+        "status": 200
+      },
+      {
+        "content_type": "text/javascript; charset=utf-8",
+        "path": "/app/assets/index-BeYW3ZUi.js",
+        "sha256": "164d46b8819c4463614315aae0ab8b64397959285175239512500420e2023404",
+        "status": 200
+      },
+      {
+        "content_type": "text/css; charset=utf-8",
+        "path": "/app/assets/index-DHbr5Hcf.css",
+        "sha256": "ff40ca653df2fb304d663c6f50224cd25679c347112d1b5db4812ba6f922f59c",
+        "status": 200
+      },
+      {
+        "content_type": "text/css; charset=utf-8",
+        "path": "/app/assets/reuseHandoff-B9cGGwVn.css",
+        "sha256": "50f2f787568338cfcf1bb7baedab2524e7028f0f7e6fefa1b6ad03630a74ffe7",
+        "status": 200
+      },
+      {
+        "content_type": "text/javascript; charset=utf-8",
+        "path": "/app/assets/reuseHandoff-GV2Tje8U.js",
+        "sha256": "5fa305b6affa85abafae5701f6c24c7e8c948180fe87c1de2b9d4e5cc70c6477",
+        "status": 200
+      },
+      {
+        "content_type": "text/javascript; charset=utf-8",
+        "path": "/app/assets/vendor-DSvOteB3.js",
+        "sha256": "71597fbfbb09a225d7b97e9974255ace61a08beccd067737ca2d7807287a9be8",
+        "status": 200
+      }
+    ],
+    "route": "/app/add"
+  },
+  "runtime": {
+    "chromium_version": "151.0.7922.34",
+    "css_zoom": "1",
+    "device_scale_factor": 1,
+    "reduced_motion": true,
+    "viewport": {
+      "height": 900,
+      "width": 1440
+    }
+  },
+  "scenario": {
+    "id": "batch-draft-resource-detail-effective-1440x900",
+    "steps": [
+      "以 1440×900、reduced-motion 进入固定批量草案工作台",
+      "推进到 resource-detail-effective 状态并关闭页面级提示条",
+      "等待字体/图片与双帧稳定后截图，并校验实际加载产物与 dist 一致"
+    ],
+    "title": "批量草案工作台候选图（resource-detail-effective）"
+  },
+  "schema_version": 1,
+  "screenshot": {
+    "file_name": "resource-detail-effective.png",
+    "height": 900,
+    "sha256": "ccf23c84462bbea7d55c073fcc29bc38e5c13827f8e334fc47f68396bc4d29b1",
+    "width": 1440
+  }
+}

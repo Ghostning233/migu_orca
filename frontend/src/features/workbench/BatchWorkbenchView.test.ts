@@ -7,7 +7,6 @@ import { nextTick } from 'vue'
 import { api } from '@/api/client'
 import type { operations } from '@/api/generated/api'
 import BatchWorkbenchView from '@/features/workbench/BatchWorkbenchView.vue'
-import { nextBatchException } from '@/features/workbench/batchWorkbench'
 
 // US-205: batch workbench migration. The view parses a multi-line input into
 // independent FOUND/EMPTY/FAILED cards, opens the shared candidate popover,
@@ -154,6 +153,34 @@ async function mountBatch(options: { tracking?: boolean } = {}) {
   })
   await nextTick()
   return { wrapper, router }
+}
+
+/**
+ * #149：标题搜索默认收起为放大镜；浮层不参与布局，先展开再输入。
+ * 关闭浮层后关键词与结果保留，因此这里只在必要时展开一次。
+ */
+async function typeTitleSearch(
+  wrapper: Awaited<ReturnType<typeof mountBatch>>['wrapper'],
+  value: string,
+): Promise<void> {
+  if (!wrapper.find('#batch-review-search').exists()) {
+    await wrapper.find('#batch-review-search-toggle').trigger('click')
+    await nextTick()
+  }
+  await wrapper.find('#batch-review-search').setValue(value)
+  await nextTick()
+}
+
+/** 勾选「全选当前可见可确认项」后按唯一主入口保存并确认。 */
+async function saveAllVisible(
+  wrapper: Awaited<ReturnType<typeof mountBatch>>['wrapper'],
+): Promise<void> {
+  await wrapper.find('#batch-select-all-checkbox').setValue(true)
+  await nextTick()
+  await wrapper.find('#batch-accept-submit').trigger('click')
+  await nextTick()
+  await wrapper.find('.confirm-dialog .primary-button').trigger('click')
+  await flushPromises()
 }
 
 describe('BatchWorkbenchView parse (US-205)', () => {
@@ -311,8 +338,7 @@ describe('BatchWorkbenchView parse (US-205)', () => {
 
     const failedCard = wrapper.find('.batch-draft-card[data-item-id="item-failed"]')
     await failedCard.trigger('click')
-    await wrapper.find('#batch-review-search').setValue('萌王')
-    await nextTick()
+    await typeTitleSearch(wrapper, '萌王')
 
     expect(wrapper.findAll('.batch-draft-card')).toHaveLength(1)
     expect(wrapper.find('.batch-draft-card').attributes('data-item-id')).toBe('item-found')
@@ -320,12 +346,13 @@ describe('BatchWorkbenchView parse (US-205)', () => {
     expect(wrapper.find('.batch-detail-title').text()).toContain('路哥')
     expect(wrapper.find('.batch-review-count').text()).toContain('共 2 部，当前显示 1 部')
 
-    await wrapper.find('#batch-review-clear').trigger('click')
+    // #158：删除「清除条件」后，删空搜索词只取消标题条件。
+    await wrapper.find('#batch-review-search').setValue('')
     await nextTick()
     expect(wrapper.findAll('.batch-draft-card')).toHaveLength(2)
   })
 
-  it('sorts exceptions only when explicitly requested', async () => {
+  it('#149: keeps card order frozen and offers no implicit re-sort entry', async () => {
     apiPost.mockResolvedValue(parseResult({
       items: [
         batchItem({ item_id: 'item-normal', status: 'FOUND', raw_title: '正常' }),
@@ -336,9 +363,9 @@ describe('BatchWorkbenchView parse (US-205)', () => {
     await wrapper.find('#batch-raw-input').setValue('正常\n异常')
     await wrapper.find('#batch-parse-submit').trigger('click')
     await flushPromises()
+    // 异常条目在解析后已经置顶，条目顺序固定，不再提供二次排序入口。
     expect(wrapper.findAll('.batch-draft-card')[0]?.attributes('data-item-id')).toBe('item-failed')
-    await wrapper.find('#batch-review-sort-exceptions').trigger('click')
-    expect(wrapper.find('.batch-review-count').text()).toContain('已按异常排序')
+    expect(wrapper.find('#batch-review-sort-exceptions').exists()).toBe(false)
   })
 
   it('shows a loading message with the item count and a safe error on failure', async () => {
@@ -381,35 +408,37 @@ describe('BatchWorkbenchView parse (US-205)', () => {
     expect(router.currentRoute.value.query.batch_id).toBe('batch-1')
   })
 
-  it('cycles to the next exception and temporarily reveals a filtered target', async () => {
+  it('#158: removes the clear-filters and next-exception entries with their placeholder', async () => {
     apiPost.mockResolvedValue(parseResult({
       items: [
         batchItem({ item_id: 'item-normal', raw_title: '正常', status: 'FOUND' }),
         batchItem({ item_id: 'item-failed', raw_title: '异常', status: 'FAILED', canonical_title_candidates: [] }),
-        batchItem({ item_id: 'item-empty', raw_title: '空结果', status: 'EMPTY', canonical_title_candidates: [] }),
       ],
     }))
     const { wrapper } = await mountBatch()
-    await wrapper.find('#batch-raw-input').setValue('正常\n异常\n空结果')
+    await wrapper.find('#batch-raw-input').setValue('正常\n异常')
     await wrapper.find('#batch-parse-submit').trigger('click')
     await flushPromises()
 
-    expect(nextBatchException(
-      [batchItem({ item_id: 'normal' }), batchItem({ item_id: 'failed', status: 'FAILED' })],
-      'normal',
-    )?.item_id).toBe('failed')
-    await wrapper.find('.batch-draft-card[data-item-id="item-normal"]').trigger('click')
-    await wrapper.find('#batch-review-search').setValue('正常')
+    // 两个入口及其专用占位/导航说明都从真实 DOM 中移除，筛选行不留右侧空白。
+    expect(wrapper.find('#batch-next-exception').exists()).toBe(false)
+    expect(wrapper.find('#batch-review-clear').exists()).toBe(false)
+    expect(wrapper.find('.batch-review-navigation').text()).toBe('')
+    expect(wrapper.text()).not.toContain('无异常时不可用')
+    // 状态筛选与「只看需处理」仍由各自控件恢复默认。
+    await wrapper.find('#batch-review-status').setValue('FAILED')
     await nextTick()
-    await wrapper.find('#batch-next-exception').trigger('click')
+    expect(wrapper.findAll('.batch-draft-card')).toHaveLength(1)
+    await wrapper.find('#batch-review-status').setValue('')
     await nextTick()
-
-    expect(wrapper.find('.batch-draft-card[data-item-id="item-failed"]').exists()).toBe(true)
-    expect(wrapper.find('.batch-review-navigation').text()).toContain('已临时显示异常条目')
-    expect(document.activeElement).toBe(wrapper.find('.batch-draft-card[data-item-id="item-failed"]').element)
-    await wrapper.find('#batch-next-exception').trigger('click')
+    expect(wrapper.findAll('.batch-draft-card')).toHaveLength(2)
+    await wrapper.find('#batch-review-needs-processing').trigger('click')
     await nextTick()
-    expect(wrapper.find('.batch-draft-card[data-item-id="item-empty"]').classes()).toContain('is-current')
+    expect(wrapper.find('#batch-review-needs-processing').attributes('aria-checked')).toBe('true')
+    await wrapper.find('#batch-review-needs-processing').trigger('click')
+    await nextTick()
+    expect(wrapper.find('#batch-review-needs-processing').attributes('aria-checked')).toBe('false')
+    expect(wrapper.findAll('.batch-draft-card')).toHaveLength(2)
   })
 
   it('uses arrow keys to move cards and Enter activates their primary action', async () => {
@@ -430,6 +459,169 @@ describe('BatchWorkbenchView parse (US-205)', () => {
     expect(wrapper.find('.batch-draft-card[data-item-id="item-two"]').classes()).toContain('is-current')
     await wrapper.find('.batch-draft-card[data-item-id="item-two"]').trigger('keydown', { key: 'Enter' })
     expect(wrapper.find('.batch-detail-title').text()).toContain('关于我转生变成史莱姆这档事')
+  })
+})
+
+describe('BatchWorkbenchView left column filters (#149)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    apiPost.mockReset()
+  })
+
+  function filterItems() {
+    return [
+      batchItem({ item_id: 'item-draft', raw_title: '萌王', canonical_title_candidates: [], status: 'DRAFT', preview_request: previewRequest('req-draft'), draft_id: 'draft-1', draft_revision: 1 }),
+      batchItem({ item_id: 'item-found', raw_title: '路哥', canonical_title_candidates: [], status: 'FOUND', candidates: [{ bangumi_id: '7' }] }),
+      batchItem({ item_id: 'item-confirmed', raw_title: '杖剑谭', canonical_title_candidates: [], status: 'CONFIRMED' }),
+    ]
+  }
+
+  function cardIds(wrapper: Awaited<ReturnType<typeof mountBatch>>['wrapper']): string[] {
+    return wrapper.findAll('.batch-draft-card').map((card) => card.attributes('data-item-id') ?? '')
+  }
+
+  async function mountFiltered() {
+    apiPost.mockResolvedValue(parseResult({ items: filterItems() }))
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王\n路哥\n杖剑谭')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    return wrapper
+  }
+
+  it('keeps the search box out of the layout until the magnifier is used, then preserves it', async () => {
+    const wrapper = await mountFiltered()
+
+    // 默认只有放大镜：没有搜索输入，也没有活动标记。
+    expect(wrapper.find('#batch-review-search').exists()).toBe(false)
+    expect(wrapper.find('#batch-review-search-toggle').attributes('aria-expanded')).toBe('false')
+    expect(wrapper.find('#batch-review-search-toggle').classes()).not.toContain('is-active')
+
+    await wrapper.find('#batch-review-search-toggle').trigger('click')
+    await nextTick()
+    expect(wrapper.find('#batch-review-search').exists()).toBe(true)
+    expect(wrapper.find('#batch-review-search-toggle').attributes('aria-expanded')).toBe('true')
+    expect(document.activeElement).toBe(wrapper.find('#batch-review-search').element)
+
+    await wrapper.find('#batch-review-search').setValue('路哥')
+    await nextTick()
+    expect(cardIds(wrapper)).toEqual(['item-found'])
+
+    // 关闭浮层：关键词与筛选结果保留，放大镜如实反映「筛选中」。
+    await wrapper.find('#batch-review-search-toggle').trigger('click')
+    await nextTick()
+    expect(wrapper.find('#batch-review-search').exists()).toBe(false)
+    expect(cardIds(wrapper)).toEqual(['item-found'])
+    expect(wrapper.find('#batch-review-search-toggle').classes()).toContain('is-active')
+    expect(wrapper.find('#batch-review-search-toggle').attributes('aria-label')).toContain('已筛选')
+
+    // 重新打开即可继续编辑；手动删空关键词恢复标题搜索范围。
+    await wrapper.find('#batch-review-search-toggle').trigger('click')
+    await nextTick()
+    expect((wrapper.find('#batch-review-search').element as HTMLInputElement).value).toBe('路哥')
+    await wrapper.find('#batch-review-search').setValue('')
+    await nextTick()
+    expect(cardIds(wrapper)).toEqual(['item-draft', 'item-found', 'item-confirmed'])
+    expect(wrapper.find('#batch-review-search').exists()).toBe(true)
+    expect(wrapper.find('#batch-review-search-toggle').classes()).not.toContain('is-active')
+  })
+
+  it('#158: offers exactly one visible, named close control and no clear button', async () => {
+    const wrapper = await mountFiltered()
+    await wrapper.find('#batch-review-search-toggle').trigger('click')
+    await nextTick()
+    await wrapper.find('#batch-review-search').setValue('路哥')
+    await nextTick()
+
+    // 浮层里只有一个带读屏名称的关闭入口；自定义清空 × 不再存在。
+    expect(wrapper.find('#batch-review-search-clear').exists()).toBe(false)
+    const close = wrapper.find('#batch-review-search-close')
+    expect(close.exists()).toBe(true)
+    expect(close.attributes('aria-label')).toBe('关闭标题搜索')
+
+    await close.trigger('click')
+    await nextTick()
+    expect(wrapper.find('#batch-review-search').exists()).toBe(false)
+    expect(wrapper.find('#batch-review-search-toggle').attributes('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(wrapper.find('#batch-review-search-toggle').element)
+    // 关键词与筛选结果保留，图标显示搜索活动状态。
+    expect(cardIds(wrapper)).toEqual(['item-found'])
+    expect(wrapper.find('#batch-review-search-toggle').classes()).toContain('is-active')
+  })
+
+  it('closes the open popover with Escape and returns focus to the magnifier', async () => {
+    const wrapper = await mountFiltered()
+    await wrapper.find('#batch-review-search-toggle').trigger('click')
+    await nextTick()
+    await wrapper.find('#batch-review-search').setValue('路哥')
+    await nextTick()
+
+    await wrapper.find('#batch-review-search').trigger('keydown', { key: 'Escape' })
+    await nextTick()
+
+    expect(wrapper.find('#batch-review-search').exists()).toBe(false)
+    expect(wrapper.find('#batch-review-search-toggle').attributes('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(wrapper.find('#batch-review-search-toggle').element)
+    // 关闭后筛选继续生效。
+    expect(cardIds(wrapper)).toEqual(['item-found'])
+  })
+
+  it('#158: Escape also closes from the close button inside the popover', async () => {
+    const wrapper = await mountFiltered()
+    await wrapper.find('#batch-review-search-toggle').trigger('click')
+    await nextTick()
+    await wrapper.find('#batch-review-search').setValue('路哥')
+    await nextTick()
+
+    await wrapper.find('#batch-review-search-close').trigger('keydown', { key: 'Escape' })
+    await nextTick()
+
+    expect(wrapper.find('#batch-review-search').exists()).toBe(false)
+    expect(document.activeElement).toBe(wrapper.find('#batch-review-search-toggle').element)
+    expect(cardIds(wrapper)).toEqual(['item-found'])
+  })
+
+  it('composes status, needs-processing and title filters without dropping the scene', async () => {
+    const wrapper = await mountFiltered()
+
+    // 勾选一个条目并把当前查看切到另一个条目。
+    await wrapper.find('.batch-draft-card[data-item-id="item-draft"] input[type="checkbox"]').setValue(true)
+    await wrapper.find('.batch-draft-card[data-item-id="item-found"]').trigger('click')
+    await nextTick()
+    expect(wrapper.find('.batch-detail-title').text()).toContain('路哥')
+
+    // 只看需处理：已可确认的草案与已确认待提交都不再需要动手，因此被隐藏。
+    await wrapper.find('#batch-review-needs-processing').trigger('click')
+    await nextTick()
+    expect(wrapper.find('#batch-review-needs-processing').attributes('aria-checked')).toBe('true')
+    expect(cardIds(wrapper)).toEqual(['item-found'])
+    // 当前查看项仍是路哥；被隐藏的勾选保留并如实计数。
+    expect(wrapper.find('.batch-detail-title').text()).toContain('路哥')
+    expect(wrapper.find('#batch-accept-selected-count').text()).toContain('已选 1 部')
+    expect(wrapper.find('#batch-accept-selected-count').text()).toContain('当前可见 0 部')
+
+    // 叠加状态筛选后没有命中；当前查看项与既有勾选都不被重置。
+    await wrapper.find('#batch-review-status').setValue('EMPTY')
+    await nextTick()
+    expect(cardIds(wrapper)).toEqual([])
+    expect(wrapper.find('#batch-review-no-match').text()).toContain('没有符合当前筛选条件的条目')
+    expect(wrapper.find('.batch-detail-title').text()).toContain('路哥')
+    expect(wrapper.find('#batch-accept-selected-count').text()).toContain('已选 1 部')
+
+    // 再叠加标题搜索：状态、需处理与关键词三者同时生效。
+    await wrapper.find('#batch-review-status').setValue('FOUND')
+    await typeTitleSearch(wrapper, '路')
+    expect(cardIds(wrapper)).toEqual(['item-found'])
+    await typeTitleSearch(wrapper, '杖剑')
+    expect(cardIds(wrapper)).toEqual([])
+
+    // #158：状态筛选、只看需处理与标题搜索都由各自控件恢复默认；勾选保留。
+    await wrapper.find('#batch-review-status').setValue('')
+    await wrapper.find('#batch-review-search').setValue('')
+    await wrapper.find('#batch-review-needs-processing').trigger('click')
+    await nextTick()
+    expect(cardIds(wrapper)).toEqual(['item-draft', 'item-found', 'item-confirmed'])
+    expect(wrapper.find('#batch-accept-selected-count').text()).toContain('已选 1 部')
   })
 })
 
@@ -460,8 +652,10 @@ describe('BatchWorkbenchView candidate & draft (US-205)', () => {
     await flushPromises()
 
     const card = wrapper.find('.batch-draft-card')
-    expect(card.find('.batch-card-expand').text()).toContain('查看候选')
-    await card.find('.batch-card-expand').trigger('click')
+    // #145：卡片本身就是查看入口（Enter/点击都进入详情），不再有独立按钮。
+    expect(card.find('.batch-card-expand').exists()).toBe(false)
+    expect(card.attributes('aria-label')).toContain('查看条目')
+    await card.trigger('click')
     await nextTick()
 
     const detailCandidates = wrapper.find('.batch-detail-pane')
@@ -473,15 +667,17 @@ describe('BatchWorkbenchView candidate & draft (US-205)', () => {
       timeoutMs: 240000,
     }))
     expect(card.find('.batch-card-status').text()).toContain('草案')
-    // US-353: only the clicked public candidate is projected into the shared
-    // review header; the Request snapshot is not used to invent season data.
-    expect(wrapper.find('.draft-review-summary').text()).toContain('关于我转生变成史莱姆这档事 第四季')
-    expect(wrapper.find('.draft-review-summary').text()).toContain('未知')
+    // US-353 / #150: only the clicked public candidate is projected into the
+    // batch review header; the Request snapshot is not used to invent season data.
+    expect(wrapper.find('.batch-draft-identity').text()).toContain('关于我转生变成史莱姆这档事 第四季')
+    // #145: 两个集数字段在批量草案固定显示「未开发」，不从资源数推断。
+    expect(wrapper.find('[data-metric="updated-episodes"]').text()).toContain('未开发')
+    expect(wrapper.find('[data-metric="total-episodes"]').text()).toContain('未开发')
     // The draft_id never enters the DOM.
     expect(wrapper.text()).not.toContain('opaque-draft')
   })
 
-  it('reuses the shared draft panel and shows batch actions', async () => {
+  it('#150: reuses the shared draft panel with the batch information hierarchy', async () => {
     apiPost.mockResolvedValue(
       parseResult({
         items: [batchItem({ item_id: 'item-draft', status: 'DRAFT', preview_request: previewRequest('req-saved'), draft_id: 'draft-1' })],
@@ -493,18 +689,61 @@ describe('BatchWorkbenchView candidate & draft (US-205)', () => {
     await wrapper.find('#batch-parse-submit').trigger('click')
     await flushPromises()
 
-    await wrapper.find('.batch-card-expand').trigger('click')
+    await wrapper.find('.batch-draft-card').trigger('click')
     await nextTick()
 
+    // 共享的草案编辑表单仍在（字幕组、包含/排除规则可编辑），并保留自动重算语义。
     expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(true)
-    expect(wrapper.find('#batch-detail-accept').exists()).toBe(true)
-    expect(wrapper.find('#batch-detail-delete').exists()).toBe(true)
-    // F4/US-345: 右栏只负责当前条目的查看与改选，固定操作栏是唯一的批量
-    // 「保存并确认 N 部」主入口，右栏不再摆放第二个主按钮。
-    expect(wrapper.find('#batch-detail-accept').classes()).toContain('secondary-button')
+    expect(wrapper.find('#batch-preview-subtitle-group').exists()).toBe(true)
+    expect(wrapper.find('#batch-preview-must-contain').exists()).toBe(true)
+    expect(wrapper.find('#batch-preview-must-not-contain').exists()).toBe(true)
     expect(wrapper.find('#batch-preview-apply-button').classes()).toContain('secondary-button')
+    // #150：高级设置默认折叠，只含正则、大小写与目录名。
+    const advanced = wrapper.find('.batch-draft-advanced')
+    expect(advanced.element.hasAttribute('open')).toBe(false)
+    expect(advanced.find('#batch-preview-use-regex').exists()).toBe(true)
+    expect(advanced.find('#batch-preview-case-sensitive').exists()).toBe(true)
+    expect(advanced.find('#batch-preview-folder-name').exists()).toBe(true)
+    // 移除默认层重复信息：筛选规则展示区、技术详情、完整种子分组列表、
+    // 「加入批量确认」与右栏重复删除按钮。
+    expect(wrapper.find('.filter-section').exists()).toBe(false)
+    expect(wrapper.find('.advanced-detail').exists()).toBe(false)
+    expect(wrapper.find('.complete-seed-details').exists()).toBe(false)
+    expect(wrapper.find('#batch-detail-accept').exists()).toBe(false)
+    expect(wrapper.find('#batch-detail-delete').exists()).toBe(false)
+    // 唯一主入口仍在固定底栏，右栏没有第二个主按钮。
     expect(wrapper.find('#batch-accept-submit').classes()).toContain('primary-button')
     expect(wrapper.find('#batch-detail-pane').findAll('.primary-button')).toHaveLength(0)
+  })
+
+  it('#151: opens the resource detail dialog from the batch resource results', async () => {
+    apiPost.mockResolvedValue(
+      parseResult({
+        items: [batchItem({ item_id: 'item-draft', status: 'DRAFT', preview_request: previewRequest('req-saved'), draft_id: 'draft-1' })],
+      }),
+    )
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王S4')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.batch-draft-card').trigger('click')
+    await nextTick()
+
+    // 默认层只有一条安全示例与一个入口；完整清单在弹窗里。
+    expect(wrapper.find('.batch-resource-sample').text()).toContain('史莱姆 S4 01 [1080p]')
+    expect(wrapper.find('#batch-resource-detail-panel-effective').exists()).toBe(false)
+    await wrapper.find('#batch-preview-open-resources').trigger('click')
+    await nextTick()
+
+    const dialog = wrapper.find('.resource-dialog')
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.find('#batch-resource-detail-tab-effective').attributes('aria-selected')).toBe('true')
+    expect(dialog.find('#batch-resource-detail-tab-excluded').text()).toContain('已排除（0）')
+    expect(dialog.find('#batch-resource-detail-panel-effective').text()).toContain('史莱姆 S4 01 [1080p]')
+    expect(dialog.find('#batch-resource-detail-count').text()).toContain('共 1 条')
+    await dialog.find('#batch-resource-detail-close').trigger('click')
+    await nextTick()
+    expect(wrapper.find('.resource-dialog').exists()).toBe(false)
   })
 
   it('blocks a dirty draft from detail selection and save-confirm', async () => {
@@ -515,12 +754,14 @@ describe('BatchWorkbenchView candidate & draft (US-205)', () => {
     await wrapper.find('#batch-raw-input').setValue('萌王S4')
     await wrapper.find('#batch-parse-submit').trigger('click')
     await flushPromises()
-    await wrapper.find('.batch-card-expand').trigger('click')
+    await wrapper.find('.batch-draft-card').trigger('click')
     await wrapper.find('#batch-preview-must-contain').setValue('未应用修改')
     await nextTick()
 
-    expect(wrapper.find('#batch-detail-accept').attributes('disabled')).toBeDefined()
-    expect(wrapper.find('.batch-card-checkbox-row').attributes('disabled')).toBeDefined()
+    // #149/#150: 右栏不再有第二个保存入口；资格仍由同一个门禁决定，
+    // 未应用编辑的条目复选框被禁用并给出就地原因。
+    expect(wrapper.find('.batch-draft-card input[type="checkbox"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('#batch-accept-submit').attributes('disabled')).toBeDefined()
     expect(wrapper.text()).toContain('有尚未应用的编辑')
     expect(apiPost).toHaveBeenCalledTimes(1)
     // US-344: leaving the item disposes the pending 1.5s debounce window, so a
@@ -573,7 +814,7 @@ describe('BatchWorkbenchView candidate & draft (US-205)', () => {
     expect(wrapper.findAll('.batch-draft-card')).toHaveLength(1)
     expect(wrapper.find('.batch-card-status').text()).toContain('找到候选')
     expect(wrapper.find('#request-detail-container').exists()).toBe(false)
-    expect(wrapper.find('.batch-card-expand').text()).toContain('查看候选')
+    expect(wrapper.find('.batch-draft-card').attributes('aria-label')).toContain('查看条目')
     expect((wrapper.find('.batch-draft-card input[type="checkbox"]').element as HTMLInputElement).checked).toBe(false)
     expect(wrapper.find('#batch-detail-pane').text()).toContain('候选合集')
     expect(wrapper.text()).not.toContain('已删除批量卡片')
@@ -613,11 +854,11 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     await wrapper.find('#batch-parse-submit').trigger('click')
     await flushPromises()
 
-    expect(wrapper.find('#batch-accept-selected-count').text()).toContain('已选且可确认 0 项')
+    expect(wrapper.find('#batch-accept-selected-count').text()).toContain('已选 0 部')
     const firstCard = wrapper.find('.batch-draft-card[data-item-id="item-1"]')
     await firstCard.find('input[type=checkbox]').setValue(true)
     await nextTick()
-    expect(wrapper.find('#batch-accept-selected-count').text()).toContain('已选且可确认 1 项')
+    expect(wrapper.find('#batch-accept-selected-count').text()).toContain('已选 1 部')
 
     await wrapper.find('#batch-accept-submit').trigger('click')
     await nextTick()
@@ -643,7 +884,7 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     expect(wrapper.find('.batch-draft-card[data-item-id="item-1"] .batch-card-status').text()).toContain('已确认待提交')
   })
 
-  it('accepts all reviewable cards when item_ids is omitted', async () => {
+  it('always pins the checked set in item_ids instead of widening the request', async () => {
     apiPost
       .mockResolvedValueOnce(parseResult({ items: reviewableItems() }))
       .mockResolvedValueOnce(
@@ -661,15 +902,14 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     await wrapper.find('#batch-parse-submit').trigger('click')
     await flushPromises()
 
-    await wrapper.find('#batch-accept-all').trigger('click')
-    await nextTick()
-    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
-    await flushPromises()
+    await saveAllVisible(wrapper)
 
     const acceptCall = apiPost.mock.calls.find(([path]) => path === '/api/v1/batches/{batch_id}/save-confirm')
     expect(acceptCall).toBeDefined()
     const body = acceptCall![1]!.body as Record<string, unknown>
-    expect(body.item_ids).toBeUndefined()
+    // #145：唯一入口只保存「当前可见可确认的勾选集合」，并把它显式钉在 item_ids 上，
+    // 不再存在省略 item_ids 的全局快捷入口。
+    expect(body.item_ids).toEqual(['item-1', 'item-2'])
     expect((body.items as Array<{ item_id: string }>).map((i) => i.item_id)).toEqual(['item-1', 'item-2'])
     expect(wrapper.find('.batch-draft-card[data-item-id="item-1"] .batch-card-status').text()).toContain('已确认待提交')
     expect(wrapper.find('.batch-draft-card[data-item-id="item-2"] .batch-card-status').text()).toContain('已确认待提交')
@@ -685,10 +925,7 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     await wrapper.find('#batch-parse-submit').trigger('click')
     await flushPromises()
 
-    await wrapper.find('#batch-accept-all').trigger('click')
-    await nextTick()
-    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
-    await flushPromises()
+    await saveAllVisible(wrapper)
 
     const { useNotificationStore } = await import('@/app/stores/notification')
     const notification = useNotificationStore()
@@ -707,10 +944,7 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     await wrapper.find('#batch-raw-input').setValue('萌王S4')
     await wrapper.find('#batch-parse-submit').trigger('click')
     await flushPromises()
-    await wrapper.find('#batch-accept-all').trigger('click')
-    await nextTick()
-    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
-    await flushPromises()
+    await saveAllVisible(wrapper)
 
     expect(wrapper.find('.batch-card-status').text()).toContain('结果待核验')
     expect(wrapper.find('#batch-retry-frozen-operation').exists()).toBe(true)
@@ -725,10 +959,7 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     await wrapper.find('#batch-raw-input').setValue('萌王S4')
     await wrapper.find('#batch-parse-submit').trigger('click')
     await flushPromises()
-    await wrapper.find('#batch-accept-all').trigger('click')
-    await nextTick()
-    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
-    await flushPromises()
+    await saveAllVisible(wrapper)
     await wrapper.find('#batch-retry-frozen-operation').trigger('click')
     await flushPromises()
 
@@ -749,16 +980,10 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     await wrapper.find('#batch-raw-input').setValue('萌王S4')
     await wrapper.find('#batch-parse-submit').trigger('click')
     await flushPromises()
-    await wrapper.find('#batch-accept-all').trigger('click')
-    await nextTick()
-    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
-    await flushPromises()
+    await saveAllVisible(wrapper)
     const first = apiPost.mock.calls.find(([path]) => path === '/api/v1/batches/{batch_id}/save-confirm')
     expect(wrapper.find('#batch-retry-frozen-operation').exists()).toBe(false)
-    await wrapper.find('#batch-accept-all').trigger('click')
-    await nextTick()
-    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
-    await flushPromises()
+    await saveAllVisible(wrapper)
     const saves = apiPost.mock.calls.filter(([path]) => path === '/api/v1/batches/{batch_id}/save-confirm')
     expect(saves).toHaveLength(2)
     expect(saves[1]?.[1]).not.toEqual(first?.[1])
@@ -777,10 +1002,7 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     await wrapper.find('#batch-raw-input').setValue('萌王S4')
     await wrapper.find('#batch-parse-submit').trigger('click')
     await flushPromises()
-    await wrapper.find('#batch-accept-all').trigger('click')
-    await nextTick()
-    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
-    await flushPromises()
+    await saveAllVisible(wrapper)
     expect(wrapper.find('.batch-card-status').text()).toContain('结果待核验')
     expect(wrapper.find('#batch-retry-frozen-operation').exists()).toBe(true)
     expect(wrapper.text()).not.toContain('secret')
@@ -798,10 +1020,7 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     await wrapper.find('#batch-raw-input').setValue('萌王S4')
     await wrapper.find('#batch-parse-submit').trigger('click')
     await flushPromises()
-    await wrapper.find('#batch-accept-all').trigger('click')
-    await nextTick()
-    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
-    await flushPromises()
+    await saveAllVisible(wrapper)
     expect(wrapper.find('.batch-card-status').text()).toContain('草案')
     expect(wrapper.find('#batch-retry-frozen-operation').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('poisoned server detail')
@@ -819,10 +1038,7 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     await wrapper.find('#batch-raw-input').setValue('萌王S4')
     await wrapper.find('#batch-parse-submit').trigger('click')
     await flushPromises()
-    await wrapper.find('#batch-accept-all').trigger('click')
-    await nextTick()
-    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
-    await flushPromises()
+    await saveAllVisible(wrapper)
     expect(wrapper.find('.batch-card-status').text()).toContain('结果待核验')
     expect(wrapper.find('#batch-retry-frozen-operation').exists()).toBe(true)
     expect(wrapper.text()).not.toContain('poisoned')
@@ -841,14 +1057,13 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     await wrapper.find('#batch-raw-input').setValue('萌王S4')
     await wrapper.find('#batch-parse-submit').trigger('click')
     await flushPromises()
-    await wrapper.find('#batch-accept-all').trigger('click')
-    await nextTick()
-    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
-    await flushPromises()
+    await saveAllVisible(wrapper)
 
     const first = apiPost.mock.calls.find(([path]) => path === '/api/v1/batches/{batch_id}/save-confirm')
     expect(wrapper.find('#batch-retry-frozen-operation').exists()).toBe(true)
-    expect(wrapper.find('.batch-draft-card[data-item-id="item-1"] .batch-card-expand').attributes('disabled')).toBeDefined()
+    expect(
+      wrapper.find('.batch-draft-card[data-item-id="item-1"] input[type="checkbox"]').attributes('disabled'),
+    ).toBeDefined()
     await wrapper.find('#batch-retry-frozen-operation').trigger('click')
     await flushPromises()
     const saveCalls = apiPost.mock.calls.filter(([path]) => path === '/api/v1/batches/{batch_id}/save-confirm')
@@ -877,15 +1092,12 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     await wrapper.find('#batch-raw-input').setValue('萌王S4')
     await wrapper.find('#batch-parse-submit').trigger('click')
     await flushPromises()
-    await wrapper.find('#batch-accept-all').trigger('click')
-    await nextTick()
-    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
-    await flushPromises()
+    await saveAllVisible(wrapper)
     await wrapper.find('#batch-retry-frozen-operation').trigger('click')
     await flushPromises()
     expect(wrapper.find('.batch-card-status').text()).toContain('找到候选')
     expect(wrapper.find('#batch-retry-frozen-operation').exists()).toBe(false)
-    await wrapper.find('.batch-card-expand').trigger('click')
+    await wrapper.find('.batch-draft-card').trigger('click')
     await nextTick()
     await wrapper.find('.candidate-select').trigger('click')
     await flushPromises()
@@ -904,11 +1116,10 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     await wrapper.find('#batch-parse-submit').trigger('click')
     await flushPromises()
     await wrapper.find('.batch-draft-card[data-item-id="item-a"] input[type="checkbox"]').setValue(true)
-    await wrapper.find('#batch-review-search').setValue('乙')
-    await nextTick()
+    await typeTitleSearch(wrapper, '乙')
     await wrapper.find('#batch-select-all-checkbox').setValue(true)
     await nextTick()
-    await wrapper.find('#batch-review-clear').trigger('click')
+    await wrapper.find('#batch-review-search').setValue('')
     await nextTick()
     expect((wrapper.find('.batch-draft-card[data-item-id="item-a"] input[type="checkbox"]').element as HTMLInputElement).checked).toBe(true)
     expect((wrapper.find('.batch-draft-card[data-item-id="item-b"] input[type="checkbox"]').element as HTMLInputElement).checked).toBe(true)
@@ -1209,7 +1420,11 @@ describe('BatchWorkbenchView outcome recovery (US-357)', () => {
     expect(wrapper.find('#batch-save-summary').text()).toContain('本次结果：已确认 1 项；失败 1 项；完整批次剩余 2 项。')
     expect(wrapper.find('.batch-draft-card[data-item-id="item-1"] .batch-card-status').text()).toContain('已确认待提交')
     expect(wrapper.find('.batch-draft-card[data-item-id="item-1"] input[type="checkbox"]').attributes('disabled')).toBeDefined()
-    expect(wrapper.find('#batch-accept-all').text()).toContain('1 部')
+    // #145：唯一入口的数字只来自「已勾选且可确认」集合；未勾选的剩余条目不计入。
+    expect(wrapper.find('#batch-accept-submit').text()).toContain('保存并确认 0 部')
+    await wrapper.find('.batch-draft-card[data-item-id="item-3"] input[type="checkbox"]').setValue(true)
+    await nextTick()
+    expect(wrapper.find('#batch-accept-submit').text()).toContain('保存并确认 1 部')
   })
 
   it('does not present a previous save summary as the current result after a later unknown response', async () => {
@@ -1226,9 +1441,7 @@ describe('BatchWorkbenchView outcome recovery (US-357)', () => {
 
     expect(wrapper.find('#batch-save-summary').text()).toContain('本次结果：已确认 1 项；失败 1 项；完整批次剩余 2 项。')
 
-    await wrapper.find('#batch-accept-all').trigger('click')
-    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
-    await flushPromises()
+    await saveAllVisible(wrapper)
 
     expect(wrapper.find('#batch-save-summary').exists()).toBe(false)
     expect(wrapper.find('#batch-accept-selected-reason').text()).toContain('结果待核验')
@@ -1270,452 +1483,6 @@ describe('BatchWorkbenchView outcome recovery (US-357)', () => {
 // WP-41-B / US-343: batch candidate generation locks only the current item.
 // The clicked candidate loads in place; every other item stays viewable,
 // selectable and editable and is never marked as loading.
-// Stage 43 / WP-43-A / US-347: 筛选只影响浏览。确认全部的资格集合是完整批次，
-// 不是当前可见子集；按钮可用性、M 计数、弹窗数量和描述符必须同源。
-describe('BatchWorkbenchView confirm-all scope (US-347)', () => {
-  beforeEach(() => {
-    localStorage.clear()
-    apiPost.mockReset()
-  })
-
-  function twoDrafts() {
-    return [
-      batchItem({ item_id: 'item-a', raw_title: '甲', status: 'DRAFT', canonical_title_candidates: [], preview_request: previewRequest('req-a'), draft_id: 'draft-a', draft_revision: 1 }),
-      batchItem({ item_id: 'item-b', raw_title: '乙', status: 'DRAFT', canonical_title_candidates: [], preview_request: previewRequest('req-b'), draft_id: 'draft-b', draft_revision: 1 }),
-    ]
-  }
-
-  function twoConfirmedResults() {
-    return saveConfirmResult({
-      results: [
-        { item_id: 'item-a', outcome: 'CONFIRMED', request_id: 'req-a', status: 'CONFIRMED', error_type: null, error_message: null, tracking_id: 'tracking-a', tracking_ready: true },
-        { item_id: 'item-b', outcome: 'CONFIRMED', request_id: 'req-b', status: 'CONFIRMED', error_type: null, error_message: null, tracking_id: 'tracking-b', tracking_ready: true },
-      ],
-      summary: { requested: 2, confirmed: 2, failed: 0 },
-    })
-  }
-
-  let wrapperUnderTest: Awaited<ReturnType<typeof mountBatch>>['wrapper']
-
-  async function mountAndParse(rawInput: string) {
-    const mounted = await mountBatch()
-    wrapperUnderTest = mounted.wrapper
-    await wrapperUnderTest.find('#batch-raw-input').setValue(rawInput)
-    await wrapperUnderTest.find('#batch-parse-submit').trigger('click')
-    await flushPromises()
-    return mounted
-  }
-
-  async function confirmAllAndReadBody() {
-    await wrapperUnderTest.find('#batch-accept-all').trigger('click')
-    await nextTick()
-    await wrapperUnderTest.find('.confirm-dialog .primary-button').trigger('click')
-    await flushPromises()
-    const acceptCall = apiPost.mock.calls.find(([path]) => path === '/api/v1/batches/{batch_id}/save-confirm')
-    expect(acceptCall).toBeDefined()
-    return acceptCall![1]!.body as Record<string, unknown>
-  }
-
-  it('sends every eligible item when the filter hides one of them', async () => {
-    apiPost
-      .mockResolvedValueOnce(parseResult({ items: twoDrafts() }))
-      .mockResolvedValueOnce(twoConfirmedResults())
-    await mountAndParse('甲\n乙')
-
-    await wrapperUnderTest.find('#batch-review-search').setValue('乙')
-    await nextTick()
-    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(1)
-    expect(wrapperUnderTest.find('.batch-draft-card').attributes('data-item-id')).toBe('item-b')
-    expect((wrapperUnderTest.find('.batch-draft-card input[type="checkbox"]').element as HTMLInputElement).checked).toBe(false)
-
-    const body = await confirmAllAndReadBody()
-    expect(body.item_ids).toBeUndefined()
-    expect((body.items as Array<{ item_id: string }>).map((entry) => entry.item_id)).toEqual(['item-a', 'item-b'])
-    // 扩大的集合仍只发送生成的能力描述符，不带完整 Request 或额外字段。
-    expect(Object.keys(body).sort()).toEqual(['items', 'storage_dir'])
-    for (const entry of body.items as Array<Record<string, unknown>>) {
-      expect(Object.keys(entry).sort()).toEqual(['base_revision', 'draft_id', 'idempotency_key', 'item_id'])
-    }
-  })
-
-  it('keeps confirm-all usable and complete when the filter hides every item', async () => {
-    apiPost
-      .mockResolvedValueOnce(parseResult({ items: twoDrafts() }))
-      .mockResolvedValueOnce(twoConfirmedResults())
-    await mountAndParse('甲\n乙')
-
-    await wrapperUnderTest.find('#batch-review-search').setValue('不存在的标题')
-    await nextTick()
-    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(0)
-    expect(wrapperUnderTest.find('#batch-accept-all').attributes('disabled')).toBeUndefined()
-    expect(wrapperUnderTest.find('#batch-accept-all-scope').text()).toContain('完整批次 2 项中的 2 项可确认条目')
-
-    const body = await confirmAllAndReadBody()
-    expect(body.item_ids).toBeUndefined()
-    expect((body.items as Array<{ item_id: string }>).map((entry) => entry.item_id)).toEqual(['item-a', 'item-b'])
-  })
-
-  it('disables confirm-all with a visible reason when the complete batch has no eligible item', async () => {
-    const noSeeds = twoDrafts()
-    for (const item of noSeeds) {
-      ;(item as { preview_request: { confirmable_config: { effective_seed_names: string[] } } }).preview_request.confirmable_config.effective_seed_names = []
-    }
-    apiPost.mockResolvedValueOnce(parseResult({ items: noSeeds }))
-    await mountAndParse('甲\n乙')
-
-    expect(wrapperUnderTest.find('#batch-accept-all').attributes('disabled')).toBeDefined()
-    expect(wrapperUnderTest.find('#batch-accept-all-scope').text()).toContain('完整批次 2 项均不可确认')
-  })
-
-  it('keeps confirm-all available for the eligible items and states the exclusions', async () => {
-    apiPost
-      .mockResolvedValueOnce(parseResult({
-        items: [
-          ...twoDrafts().slice(0, 1),
-          batchItem({ item_id: 'item-failed', raw_title: '丙', status: 'FAILED', canonical_title_candidates: [] }),
-        ],
-      }))
-      .mockResolvedValueOnce(saveConfirmResult({
-        results: [{ item_id: 'item-a', outcome: 'CONFIRMED', request_id: 'req-a', status: 'CONFIRMED', error_type: null, error_message: null, tracking_id: 'tracking-a', tracking_ready: true }],
-        summary: { requested: 1, confirmed: 1, failed: 0 },
-      }))
-    await mountAndParse('甲\n丙')
-
-    expect(wrapperUnderTest.find('#batch-accept-all').attributes('disabled')).toBeUndefined()
-    const scope = wrapperUnderTest.find('#batch-accept-all-scope').text()
-    expect(scope).toContain('完整批次 2 项中的 1 项可确认条目')
-    expect(scope).toContain('排除 1 项')
-
-    const body = await confirmAllAndReadBody()
-    expect((body.items as Array<{ item_id: string }>).map((entry) => entry.item_id)).toEqual(['item-a'])
-  })
-
-  it('reveals and focuses a filter-hidden item whose confirm failed', async () => {
-    apiPost
-      .mockResolvedValueOnce(parseResult({ items: twoDrafts() }))
-      .mockResolvedValueOnce(saveConfirmResult({
-        results: [
-          { item_id: 'item-a', outcome: 'failed', request_id: null, status: null, error_type: 'invalid_request_status', error_message: 'poisoned detail', tracking_id: null, tracking_ready: null },
-          { item_id: 'item-b', outcome: 'CONFIRMED', request_id: 'req-b', status: 'CONFIRMED', error_type: null, error_message: null, tracking_id: 'tracking-b', tracking_ready: true },
-        ],
-        summary: { requested: 2, confirmed: 1, failed: 1 },
-      }))
-    await mountAndParse('甲\n乙')
-
-    await wrapperUnderTest.find('#batch-review-search').setValue('乙')
-    await nextTick()
-    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(1)
-
-    await wrapperUnderTest.find('#batch-accept-all').trigger('click')
-    await nextTick()
-    await wrapperUnderTest.find('.confirm-dialog .primary-button').trigger('click')
-    await flushPromises()
-
-    // 隐藏失败项先可见化再聚焦，安全原因留在卡片原位。
-    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(2)
-    const failedCard = wrapperUnderTest.find('.batch-draft-card[data-item-id="item-a"]')
-    expect(failedCard.find('.batch-card-status').text()).toContain('草案')
-    expect(failedCard.find('.batch-card-reason').text()).toContain('保存确认失败，请重试。')
-    expect(wrapperUnderTest.find('.batch-review-navigation').text()).toContain('已定位到首个失败条目')
-    expect(document.activeElement).toBe(failedCard.element)
-    expect(wrapperUnderTest.text()).not.toContain('poisoned detail')
-    // 成功项不再参与全部范围，失败项仍需重新处理。
-    expect(wrapperUnderTest.find('.batch-draft-card[data-item-id="item-b"] .batch-card-status').text()).toContain('已确认待提交')
-    expect(wrapperUnderTest.find('#batch-accept-all').text()).toContain('1 部')
-  })
-})
-
-// Stage 43 / WP-43-A / US-348: 二次确认看到的数量和集合就是最终发送的对象。
-// 打开弹窗时把完整批次的参与集合与绑定版本冻结在内存 intent 里；确认前重新核对，
-// 任何资格/版本/batch 变化都不发送，改为在固定业务区常驻说明。
-describe('BatchWorkbenchView confirm-all dialog intent (US-348)', () => {
-  beforeEach(() => {
-    localStorage.clear()
-    apiPost.mockReset()
-  })
-
-  let wrapperUnderTest: Awaited<ReturnType<typeof mountBatch>>['wrapper']
-
-  function twoDrafts() {
-    return [
-      batchItem({ item_id: 'item-a', raw_title: '甲', status: 'DRAFT', canonical_title_candidates: [], preview_request: previewRequest('req-a'), draft_id: 'draft-a', draft_revision: 1 }),
-      batchItem({ item_id: 'item-b', raw_title: '乙', status: 'DRAFT', canonical_title_candidates: [], preview_request: previewRequest('req-b'), draft_id: 'draft-b', draft_revision: 1 }),
-    ]
-  }
-
-  function twoConfirmedResults() {
-    return saveConfirmResult({
-      results: [
-        { item_id: 'item-a', outcome: 'CONFIRMED', request_id: 'req-a', status: 'CONFIRMED', error_type: null, error_message: null, tracking_id: 'tracking-a', tracking_ready: true },
-        { item_id: 'item-b', outcome: 'CONFIRMED', request_id: 'req-b', status: 'CONFIRMED', error_type: null, error_message: null, tracking_id: 'tracking-b', tracking_ready: true },
-      ],
-      summary: { requested: 2, confirmed: 2, failed: 0 },
-    })
-  }
-
-  function saveConfirmCalls() {
-    return apiPost.mock.calls.filter(([path]) => path === '/api/v1/batches/{batch_id}/save-confirm')
-  }
-
-  async function mountAndParse(rawInput: string) {
-    const mounted = await mountBatch()
-    wrapperUnderTest = mounted.wrapper
-    await wrapperUnderTest.find('#batch-raw-input').setValue(rawInput)
-    await wrapperUnderTest.find('#batch-parse-submit').trigger('click')
-    await flushPromises()
-    return mounted
-  }
-
-  async function openAllDialog() {
-    await wrapperUnderTest.find('#batch-accept-all').trigger('click')
-    await nextTick()
-  }
-
-  async function confirmDialog() {
-    await wrapperUnderTest.find('.confirm-dialog .primary-button').trigger('click')
-    await flushPromises()
-  }
-
-  it('states the frozen all scope in the dialog and sends exactly that set', async () => {
-    apiPost
-      .mockResolvedValueOnce(parseResult({
-        items: [...twoDrafts(), batchItem({ item_id: 'item-c', raw_title: '丙', status: 'FAILED', canonical_title_candidates: [] })],
-      }))
-      .mockResolvedValueOnce(twoConfirmedResults())
-    await mountAndParse('甲\n乙\n丙')
-    await openAllDialog()
-
-    const dialog = wrapperUnderTest.find('.confirm-dialog')
-    expect(dialog.find('.confirm-dialog-title').text()).toBe('保存并确认全部 2 部')
-    expect(dialog.find('.primary-button').text()).toContain('保存并确认全部 2 部')
-    const message = dialog.find('.confirm-dialog-message').text()
-    expect(message).toContain('完整批次 3 部中当前可确认 2 部')
-    expect(message).toContain('已排除 1 部')
-    expect(message).toContain('仅保存本地订阅方案')
-    expect(message).toContain('我的追番再次确认')
-    // 能力只留在内存 intent 里，不进入弹窗文案。
-    expect(dialog.text()).not.toContain('draft-a')
-    expect(dialog.text()).not.toContain('draft-b')
-
-    await confirmDialog()
-    expect(saveConfirmCalls()).toHaveLength(1)
-    const body = saveConfirmCalls()[0]![1]!.body as Record<string, unknown>
-    expect(body.item_ids).toBeUndefined()
-    expect((body.items as Array<{ item_id: string }>).map((entry) => entry.item_id)).toEqual(['item-a', 'item-b'])
-  })
-
-  it('sends nothing on cancel and keeps the batch scene unchanged', async () => {
-    apiPost.mockResolvedValueOnce(parseResult({ items: twoDrafts() }))
-    await mountAndParse('甲\n乙')
-    await wrapperUnderTest.find('.batch-draft-card[data-item-id="item-a"] input[type="checkbox"]').setValue(true)
-    await wrapperUnderTest.find('.batch-draft-card[data-item-id="item-b"] .batch-card-expand').trigger('click')
-    await nextTick()
-    await openAllDialog()
-
-    await wrapperUnderTest.find('.confirm-dialog .secondary-button').trigger('click')
-    await flushPromises()
-
-    expect(saveConfirmCalls()).toHaveLength(0)
-    expect(wrapperUnderTest.find('.confirm-dialog').exists()).toBe(false)
-    expect(wrapperUnderTest.find('#batch-accept-all-recheck').exists()).toBe(false)
-    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(2)
-    expect((wrapperUnderTest.find('.batch-draft-card[data-item-id="item-a"] input[type="checkbox"]').element as HTMLInputElement).checked).toBe(true)
-    expect(wrapperUnderTest.find('#batch-detail-pane').text()).toContain('编辑订阅草案')
-  })
-
-  it('closes the all dialog on Escape without sending or flagging a recheck', async () => {
-    apiPost.mockResolvedValueOnce(parseResult({ items: twoDrafts() }))
-    await mountAndParse('甲\n乙')
-    await openAllDialog()
-    expect(wrapperUnderTest.find('.confirm-dialog').exists()).toBe(true)
-
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
-    await flushPromises()
-
-    expect(wrapperUnderTest.find('.confirm-dialog').exists()).toBe(false)
-    expect(saveConfirmCalls()).toHaveLength(0)
-    expect(wrapperUnderTest.find('#batch-accept-all-recheck').exists()).toBe(false)
-    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(2)
-  })
-
-  it('rechecks the frozen versions and refuses to send when a draft revision changed', async () => {
-    let resolveModify!: (value: unknown) => void
-    const pendingModify = new Promise((resolve) => { resolveModify = resolve })
-    apiPost
-      .mockResolvedValueOnce(parseResult({ items: twoDrafts() }))
-      .mockImplementationOnce(() => pendingModify as never)
-      .mockResolvedValueOnce(twoConfirmedResults())
-    await mountAndParse('甲\n乙')
-    await wrapperUnderTest.find('.batch-draft-card[data-item-id="item-a"] .batch-card-expand').trigger('click')
-    await nextTick()
-
-    // 先发出修改并保持响应在途；真实 ConfirmDialog 打开后背景表单会 inert，
-    // 因此不能在弹窗打开后再从背景触发表单提交。
-    // 同一 tick 内改规则并提交：不让 1.5s 防抖窗口在慢环境下先行触发，
-    // 否则会多出一次 preview-modify，把「恰好一次」的防重断言变成计时器竞态。
-    wrapperUnderTest.find('#batch-preview-must-contain').setValue('新筛选')
-    await wrapperUnderTest.find('#detail-preview-edit-form').trigger('submit')
-    await nextTick()
-    expect(apiPost.mock.calls.filter(([path]) => path === '/api/v1/requests/preview-modify')).toHaveLength(1)
-
-    await openAllDialog()
-    expect(wrapperUnderTest.find('.confirm-dialog').exists()).toBe(true)
-
-    // 弹窗打开期间，已在途的修改响应把该条目的草案版本推进到 2。
-    const applied = previewRequest('req-a')
-    applied.confirmable_config.filter_rule.must_contain = '新筛选'
-    resolveModify({ request: applied, draft_id: 'draft-a', draft_revision: 2 })
-    await flushPromises()
-
-    await confirmDialog()
-
-    expect(saveConfirmCalls()).toHaveLength(0)
-    expect(wrapperUnderTest.find('.confirm-dialog').exists()).toBe(false)
-    const notice = wrapperUnderTest.find('#batch-accept-all-recheck')
-    expect(notice.exists()).toBe(true)
-    expect(notice.text()).toContain('资格或草案版本已变化')
-    expect(notice.text()).toContain('重新确认全部')
-    expect(document.activeElement).toBe(notice.element)
-    // 校验失败不改变现场，也不自动重新打开确认。
-    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(2)
-
-    // 重新确认：新 intent 记录最新版本，发送精确 body。
-    await openAllDialog()
-    expect(wrapperUnderTest.find('#batch-accept-all-recheck').exists()).toBe(false)
-    await confirmDialog()
-    const body = saveConfirmCalls()[0]![1]!.body as Record<string, unknown>
-    expect((body.items as Array<{ item_id: string; base_revision: number }>).map((entry) => [entry.item_id, entry.base_revision]))
-      .toEqual([['item-a', 2], ['item-b', 1]])
-  })
-
-  it('refuses to send when another item becomes confirmable while the dialog is open', async () => {
-    apiPost
-      .mockResolvedValueOnce(parseResult({
-        items: [
-          ...twoDrafts(),
-          batchItem({
-            item_id: 'item-c',
-            raw_title: '丙',
-            status: 'FOUND',
-            canonical_title_candidates: [],
-            candidates: [{ bangumi_id: '77', title: '候选丙', mikan_url: 'https://mikan.example/Home/Bangumi/77' }],
-          }),
-        ],
-      }))
-      .mockResolvedValueOnce({ request: previewRequest('req-c'), summary: {}, draft_id: 'draft-c', draft_revision: 1 })
-    await mountAndParse('甲\n乙\n丙')
-    await openAllDialog()
-
-    // 弹窗打开期间，第三个条目生成了可审核草案并加入资格集合。
-    await wrapperUnderTest.find('.batch-draft-card[data-item-id="item-c"] .batch-card-expand').trigger('click')
-    await nextTick()
-    await wrapperUnderTest.find('#batch-detail-pane .candidate-select').trigger('click')
-    await flushPromises()
-
-    await confirmDialog()
-
-    expect(saveConfirmCalls()).toHaveLength(0)
-    expect(wrapperUnderTest.find('.confirm-dialog').exists()).toBe(false)
-    const notice = wrapperUnderTest.find('#batch-accept-all-recheck')
-    expect(notice.exists()).toBe(true)
-    expect(notice.text()).toContain('资格或草案版本已变化')
-    // 不自动补新 rows：三个条目都还在，只有明确重新确认才会发送。
-    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(3)
-    expect(wrapperUnderTest.find('#batch-accept-all').text()).toContain('3 部')
-  })
-
-  it('keeps the frozen all set when only the filter and the checkboxes change', async () => {
-    apiPost
-      .mockResolvedValueOnce(parseResult({ items: twoDrafts() }))
-      .mockResolvedValueOnce(twoConfirmedResults())
-    await mountAndParse('甲\n乙')
-    await openAllDialog()
-
-    // 可见性与勾选变化不改变已冻结的 all 集合。
-    await wrapperUnderTest.find('#batch-review-search').setValue('乙')
-    await wrapperUnderTest.find('.batch-draft-card[data-item-id="item-b"] input[type="checkbox"]').setValue(true)
-    await nextTick()
-
-    await confirmDialog()
-
-    expect(saveConfirmCalls()).toHaveLength(1)
-    const body = saveConfirmCalls()[0]![1]!.body as Record<string, unknown>
-    expect(body.item_ids).toBeUndefined()
-    expect((body.items as Array<{ item_id: string }>).map((entry) => entry.item_id)).toEqual(['item-a', 'item-b'])
-  })
-
-  it('refuses to send when the batch was re-parsed while the dialog was open', async () => {
-    apiPost
-      .mockResolvedValueOnce(parseResult({ items: twoDrafts() }))
-      .mockResolvedValueOnce(parseResult({
-        batch_id: 'batch-2',
-        items: [batchItem({ item_id: 'item-x', raw_title: '新甲', status: 'DRAFT', canonical_title_candidates: [], preview_request: previewRequest('req-x'), draft_id: 'draft-x', draft_revision: 1 })],
-      }))
-    await mountAndParse('甲\n乙')
-    await openAllDialog()
-
-    // 弹窗打开期间重新解析：batch 与参与集合都已改变。
-    await wrapperUnderTest.find('#batch-raw-input').setValue('新甲')
-    await wrapperUnderTest.find('#batch-parse-submit').trigger('click')
-    await flushPromises()
-    await nextTick()
-    // 重新解析必须先真正落地，否则「弹窗打开期间批次变化」的判定会在慢环境里竞争。
-    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(1)
-
-    await confirmDialog()
-
-    expect(saveConfirmCalls()).toHaveLength(0)
-    expect(wrapperUnderTest.find('.confirm-dialog').exists()).toBe(false)
-    expect(wrapperUnderTest.find('#batch-accept-all-recheck').text()).toContain('资格或草案版本已变化')
-    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(1)
-  })
-
-  it('ignores a second open while the all dialog is still open', async () => {
-    apiPost
-      .mockResolvedValueOnce(parseResult({ items: twoDrafts() }))
-      .mockResolvedValueOnce(twoConfirmedResults())
-    await mountAndParse('甲\n乙')
-    await wrapperUnderTest.find('.batch-draft-card[data-item-id="item-a"] .batch-card-expand').trigger('click')
-    await nextTick()
-    await openAllDialog()
-
-    // 弹窗打开期间第一个条目变成不可确认；第二次进入必须被函数入口挡掉，
-    // 弹窗仍保持打开时冻结的 2 部，而不是按新资格静默缩成 1 部。
-    await wrapperUnderTest.find('#batch-preview-must-contain').setValue('未应用修改')
-    await nextTick()
-    await wrapperUnderTest.find('#batch-accept-all').trigger('click')
-    await nextTick()
-
-    expect(wrapperUnderTest.findAll('.confirm-dialog')).toHaveLength(1)
-    expect(wrapperUnderTest.find('.confirm-dialog .confirm-dialog-title').text()).toBe('保存并确认全部 2 部')
-
-    await confirmDialog()
-    expect(saveConfirmCalls()).toHaveLength(0)
-    expect(wrapperUnderTest.find('#batch-accept-all-recheck').exists()).toBe(true)
-  })
-
-  it('keeps an unknown save result on the original frozen request without a new intent', async () => {
-    apiPost
-      .mockResolvedValueOnce(parseResult({ items: twoDrafts() }))
-      .mockRejectedValueOnce({ network: true, type: 'network_error', message: 'network' })
-      .mockResolvedValueOnce(twoConfirmedResults())
-    await mountAndParse('甲\n乙')
-    await openAllDialog()
-    await confirmDialog()
-
-    const first = saveConfirmCalls()[0]
-    expect(wrapperUnderTest.find('#batch-retry-frozen-operation').exists()).toBe(true)
-    expect(wrapperUnderTest.find('#batch-accept-all-recheck').exists()).toBe(false)
-
-    await wrapperUnderTest.find('#batch-retry-frozen-operation').trigger('click')
-    await flushPromises()
-    // 未知重试沿用原冻结 body/key/revision，不新建 intent 也不弹确认框。
-    expect(wrapperUnderTest.find('.confirm-dialog').exists()).toBe(false)
-    expect(saveConfirmCalls()).toHaveLength(2)
-    expect(saveConfirmCalls()[1]?.[1]).toEqual(first?.[1])
-  })
-})
-
 describe('BatchWorkbenchView candidate loading feedback (US-343)', () => {
   beforeEach(() => {
     localStorage.clear()
@@ -1758,7 +1525,7 @@ describe('BatchWorkbenchView candidate loading feedback (US-343)', () => {
     await wrapper.find('#batch-parse-submit').trigger('click')
     await flushPromises()
 
-    await wrapper.find('.batch-draft-card[data-item-id="item-a"] .batch-card-expand').trigger('click')
+    await wrapper.find('.batch-draft-card[data-item-id="item-a"]').trigger('click')
     await nextTick()
     const pane = wrapper.find('#batch-detail-pane')
     await pane.find('.candidate-select').trigger('click')
@@ -1774,9 +1541,9 @@ describe('BatchWorkbenchView candidate loading feedback (US-343)', () => {
 
     // The other item stays viewable and selectable: switch its detail pane and
     // pick another candidate; nothing there is marked as loading.
-    const expandB = wrapper.find('.batch-draft-card[data-item-id="item-b"] .batch-card-expand')
-    expect((expandB.element as HTMLButtonElement).disabled).toBe(false)
-    await expandB.trigger('click')
+    const cardB = wrapper.find('.batch-draft-card[data-item-id="item-b"]')
+    expect((cardB.element as HTMLElement).getAttribute('aria-disabled')).toBeNull()
+    await cardB.trigger('click')
     await nextTick()
 
     const paneB = wrapper.find('#batch-detail-pane')
@@ -1805,7 +1572,7 @@ describe('BatchWorkbenchView candidate loading feedback (US-343)', () => {
     await wrapper.find('#batch-parse-submit').trigger('click')
     await flushPromises()
 
-    await wrapper.find('.batch-draft-card[data-item-id="item-a"] .batch-card-expand').trigger('click')
+    await wrapper.find('.batch-draft-card[data-item-id="item-a"]').trigger('click')
     await nextTick()
     await wrapper.find('#batch-detail-pane .candidate-select').trigger('click')
     await flushPromises()
@@ -1843,6 +1610,8 @@ describe('BatchWorkbenchView compact cards (US-355)', () => {
 
   function draftItem(itemId: string, rawTitle: string, matchedTitle = '关于我转生变成史莱姆这档事 第四季') {
     const request = previewRequest(`req-${itemId}`)
+    // 每个条目的输入标题各不相同，右栏身份区因此可以精确绑定到当前查看项。
+    request.input.raw_title = rawTitle
     request.source_info.matched_bangumi.title = matchedTitle
     return batchItem({
       item_id: itemId,
@@ -1869,7 +1638,7 @@ describe('BatchWorkbenchView compact cards (US-355)', () => {
     return wrapper.findAll('.batch-draft-card').map((card) => card.attributes('data-item-id') ?? '')
   }
 
-  it('answers title, Chinese status and next step by default and keeps auxiliary facts on demand', async () => {
+  it('answers title and Chinese status by default and keeps auxiliary facts on demand', async () => {
     const { wrapper } = await mountAndParse(
       [
         batchItem({
@@ -1888,10 +1657,10 @@ describe('BatchWorkbenchView compact cards (US-355)', () => {
     )
 
     const card = wrapper.find('.batch-draft-card[data-item-id="item-facts"]')
-    // 默认层：标题 + 中文状态 + 下一步。
+    // #145：默认层只有封面、标题、状态与勾选；可确认的草案卡不再显示通用下一步。
     expect(card.find('.batch-card-title').text()).toBe('关于我转生变成史莱姆这档事 第四季')
     expect(card.find('.batch-card-status').text()).toBe('草案')
-    expect(card.find('.batch-card-next-step').text()).toContain('下一步：')
+    expect(card.find('.batch-card-next-step').exists()).toBe(false)
     // 辅助信息（别名/检索词/季数/偏好）只在按需展开层里。
     const more = card.find('.batch-card-more')
     expect(more.exists()).toBe(true)
@@ -1903,7 +1672,10 @@ describe('BatchWorkbenchView compact cards (US-355)', () => {
     expect(facts).toContain('检索关键词')
     expect(facts).toContain('季数提示')
     expect(facts).toContain('偏好')
-    expect(card.find('.batch-card-next-step').text()).not.toContain('别名')
+    expect(facts).toContain('输入')
+    // 别名等辅助信息只存在于折叠层里：默认层（下一个断言）不含它们。
+    expect(card.find('.batch-card-more .batch-card-facts').text()).toContain('别名')
+    expect(card.find('.batch-card-next-step').exists()).toBe(false)
   })
 
   it('never folds failures, unapplied edits, unknown results or recovery actions', async () => {
@@ -1944,9 +1716,10 @@ describe('BatchWorkbenchView compact cards (US-355)', () => {
     )
     const card = wrapper.find('.batch-draft-card[data-item-id="item-cand"]')
     expect((card.find('input[type="checkbox"]').element as HTMLInputElement).disabled).toBe(true)
-    expect(card.find('.batch-card-selection-help').text()).toContain('需先生成可审核草案')
-    expect(card.find('.batch-card-next-step').text()).toContain('右栏')
-    expect(card.find('.batch-card-next-step').text()).toContain('MiKan 合集')
+    // #145：待选合集的进度由状态芯片与右栏候选列表表达，卡片默认层不再重复说明。
+    expect(card.find('.batch-card-status').text()).toContain('找到候选')
+    expect(card.find('.batch-card-selection-help').exists()).toBe(false)
+    expect(card.find('.batch-card-next-step').exists()).toBe(false)
   })
 
   it('keeps a checked card whose intent survives a recalculation block while excluding it', async () => {
@@ -1955,16 +1728,16 @@ describe('BatchWorkbenchView compact cards (US-355)', () => {
     const card = wrapper.find('.batch-draft-card[data-item-id="item-blocked"]')
     await card.find('input[type="checkbox"]').setValue(true)
     await nextTick()
-    expect(wrapper.find('#batch-accept-selected-count').text()).toContain('已选且可确认 1 项')
+    expect(wrapper.find('#batch-accept-selected-count').text()).toContain('已选 1 部')
 
     // 打开右栏并制造一个尚未应用的编辑：条目被重算阻断。
-    await card.find('.batch-card-expand').trigger('click')
+    await card.trigger('click')
     await wrapper.find('#batch-preview-must-contain').setValue('未应用修改')
     await nextTick()
 
     expect((card.find('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(true)
     expect((card.find('input[type="checkbox"]').element as HTMLInputElement).disabled).toBe(true)
-    expect(wrapper.find('#batch-accept-selected-count').text()).toContain('已选且可确认 0 项')
+    expect(wrapper.find('#batch-accept-selected-count').text()).toContain('已选 0 部')
     const note = card.find('.batch-card-intent-note')
     expect(note.exists()).toBe(true)
     expect(note.text()).toContain('已勾选')
@@ -1989,7 +1762,7 @@ describe('BatchWorkbenchView compact cards (US-355)', () => {
     await flushPromises()
 
     expect(cardOrder(wrapper)).toEqual(['item-a', 'item-b'])
-    await wrapper.find('.batch-draft-card[data-item-id="item-a"] .batch-card-expand').trigger('click')
+    await wrapper.find('.batch-draft-card[data-item-id="item-a"]').trigger('click')
     await nextTick()
     await wrapper.find('#batch-detail-pane .candidate-select').trigger('click')
     await flushPromises()
@@ -2001,18 +1774,17 @@ describe('BatchWorkbenchView compact cards (US-355)', () => {
   it('never presents a filter with no match as an empty batch', async () => {
     const { wrapper } = await mountAndParse([draftItem('item-a', '甲'), draftItem('item-b', '乙')], '甲\n乙')
 
-    await wrapper.find('#batch-review-search').setValue('不存在的标题')
-    await nextTick()
+    await typeTitleSearch(wrapper, '不存在的标题')
 
     expect(wrapper.findAll('.batch-draft-card')).toHaveLength(0)
     const notice = wrapper.find('#batch-review-no-match')
     expect(notice.exists()).toBe(true)
     expect(notice.text()).toContain('没有符合当前筛选条件')
     expect(notice.text()).toContain('2 部')
-    // 空批次文案不能被复用，清除筛选入口仍然可达。
+    // 空批次文案不能被复用；删空搜索词即可恢复全部条目，不需要额外「清除条件」入口。
     expect(wrapper.text()).not.toContain('粘贴多行番剧名称后获取解析结果。')
-    expect(wrapper.find('#batch-review-clear').attributes('disabled')).toBeUndefined()
-    await wrapper.find('#batch-review-clear').trigger('click')
+    expect(wrapper.find('#batch-review-clear').exists()).toBe(false)
+    await wrapper.find('#batch-review-search').setValue('')
     await nextTick()
     expect(wrapper.findAll('.batch-draft-card')).toHaveLength(2)
     expect(wrapper.find('#batch-review-no-match').exists()).toBe(false)
@@ -2043,27 +1815,32 @@ describe('BatchWorkbenchView compact cards (US-355)', () => {
     expect(document.activeElement).not.toBe(document.body)
   })
 
-  it('never lets the card shortcut intercept an inner form control', async () => {
+  it('keeps inner form controls out of the card shortcut', async () => {
     const { wrapper } = await mountAndParse(
       [draftItem('item-a', '甲', '甲的合集'), draftItem('item-b', '乙', '乙的合集')],
       '甲\n乙',
     )
 
-    // item-b 是当前查看项；item-a 卡片里的快捷字幕组表单不得被卡片方向键/回车截获。
-    await wrapper.find('.batch-draft-card[data-item-id="item-b"] .batch-card-expand').trigger('click')
+    // item-b 是当前查看项；卡片内的复选框是内层控件，方向键/回车不得被卡片截获。
+    await wrapper.find('.batch-draft-card[data-item-id="item-b"]').trigger('click')
     await nextTick()
     expect(wrapper.find('.batch-draft-card[data-item-id="item-b"]').classes()).toContain('is-current')
 
-    const select = wrapper.find('.batch-draft-card[data-item-id="item-a"] .batch-card-subtitle-group select')
-    expect(select.exists()).toBe(true)
-    await select.trigger('keydown', { key: 'ArrowDown' })
-    await nextTick()
-    await select.trigger('keydown', { key: 'Enter' })
+    const checkbox = wrapper.find('.batch-draft-card[data-item-id="item-a"] input[type="checkbox"]')
+    expect(checkbox.exists()).toBe(true)
+    await checkbox.trigger('keydown', { key: 'Enter' })
     await nextTick()
 
     expect(wrapper.find('.batch-draft-card[data-item-id="item-b"]').classes()).toContain('is-current')
     expect(wrapper.find('.batch-draft-card[data-item-id="item-a"]').classes()).not.toContain('is-current')
-    expect(wrapper.find('#batch-detail-pane').text()).toContain('乙的合集')
+    // 右栏绑定的是 item-b：身份区显示它的输入标题，并且不把服务端匹配名
+    // （「乙的合集」）冒充成用户已选的真实合集。
+    const identityTitle = wrapper.find('#batch-detail-pane .batch-draft-identity .request-detail-title')
+    expect(identityTitle.text()).toBe('乙')
+    const paneText = wrapper.find('#batch-detail-pane').text()
+    expect(paneText).toContain('尚未确认真实合集')
+    expect(paneText).not.toContain('已选真实合集')
+    expect(paneText).not.toContain('乙的合集')
   })
 
   it('separates the view and check affordances for assistive technology', async () => {
@@ -2072,7 +1849,7 @@ describe('BatchWorkbenchView compact cards (US-355)', () => {
     const card = wrapper.find('.batch-draft-card[data-item-id="item-a"]')
     expect(card.attributes('aria-label')).toContain('查看条目')
     expect(card.find('.checkbox-row-label').text()).toContain('选择')
-    expect(card.find('.batch-card-expand').attributes('aria-label')).toContain('查看草案')
+    expect(card.attributes('aria-label')).toContain('查看条目')
   })
 })
 
@@ -2151,14 +1928,13 @@ describe('BatchWorkbenchView selection scope (US-356)', () => {
     await check('item-a')
     await check('item-b')
 
-    await wrapperUnderTest.find('#batch-review-search').setValue('乙')
-    await nextTick()
+    await typeTitleSearch(wrapperUnderTest, '乙')
     expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(1)
 
     // D-02：筛选只影响浏览，隐藏的手工勾选仍进入 N 的完整集合。
     const counts = wrapperUnderTest.find('#batch-accept-selected-count').text()
-    expect(counts).toContain('已选且可确认 2 项')
-    expect(counts).toContain('其中被筛选隐藏仍参与 1 项')
+    expect(counts).toContain('已选 2 部')
+    expect(counts).toContain('当前可见 1 部')
     expect(wrapperUnderTest.find('#batch-accept-submit').text()).toContain('保存并确认 2 部')
     expect(wrapperUnderTest.find('#batch-accept-submit').attributes('disabled')).toBeUndefined()
 
@@ -2181,19 +1957,20 @@ describe('BatchWorkbenchView selection scope (US-356)', () => {
     apiPost.mockResolvedValueOnce(confirmedResults(['item-a']))
     await check('item-a')
     await check('item-c')
-    expect(wrapperUnderTest.find('#batch-accept-selected-count').text()).toContain('已选且可确认 2 项')
+    expect(wrapperUnderTest.find('#batch-accept-selected-count').text()).toContain('已选 2 部')
 
     // 检查后制造一个尚未应用的编辑：该条目被重算阻断，保留勾选但退出 N 的资格集合。
-    await wrapperUnderTest.find('.batch-draft-card[data-item-id="item-c"] .batch-card-expand').trigger('click')
+    await wrapperUnderTest.find('.batch-draft-card[data-item-id="item-c"]').trigger('click')
     await nextTick()
     await wrapperUnderTest.find('#batch-preview-must-contain').setValue('未应用修改')
     await nextTick()
     expect(wrapperUnderTest.find('.batch-draft-card[data-item-id="item-c"] .batch-card-intent-note').exists()).toBe(true)
 
     const counts = wrapperUnderTest.find('#batch-accept-selected-count').text()
-    expect(counts).toContain('已选且可确认 1 项')
-    expect(counts).toContain('已排除 1 项')
-    expect(wrapperUnderTest.find('#batch-accept-selected-scope').text()).toContain('已勾选但当前不可确认的 1 部被排除')
+    expect(counts).toContain('已选 1 部')
+    expect(counts).toContain('1 部暂不可确认，已排除')
+    // #145：底栏始终只有一行，不再另起范围段落。
+    expect(wrapperUnderTest.find('#batch-accept-selected-scope').exists()).toBe(false)
 
     await openSelectedDialog()
     const dialog = wrapperUnderTest.find('.confirm-dialog')
@@ -2243,7 +2020,7 @@ describe('BatchWorkbenchView selection scope (US-356)', () => {
     apiPost.mockImplementationOnce(() => pendingModify as never)
     await check('item-a')
     await check('item-b')
-    await wrapperUnderTest.find('.batch-draft-card[data-item-id="item-a"] .batch-card-expand').trigger('click')
+    await wrapperUnderTest.find('.batch-draft-card[data-item-id="item-a"]').trigger('click')
     await nextTick()
 
     // 先发出修改并保持响应在途：甲被阻断，N 此刻只剩乙。
@@ -2310,8 +2087,7 @@ describe('BatchWorkbenchView selection scope (US-356)', () => {
     await openSelectedDialog()
 
     // 发送范围在弹窗打开时冻结：之后的筛选只改变浏览，不改写已确认的集合。
-    await wrapperUnderTest.find('#batch-review-search').setValue('乙')
-    await nextTick()
+    await typeTitleSearch(wrapperUnderTest, '乙')
 
     await confirmDialog()
     expect(saveConfirmCalls()).toHaveLength(1)
@@ -2340,7 +2116,7 @@ describe('BatchWorkbenchView selection scope (US-356)', () => {
     expect(saveConfirmCalls()[1]?.[1]).toEqual(first?.[1])
   })
 
-  it('disables both entries with a persistent visible reason while a save result is unverified', async () => {
+  it('disables the single save entry with a persistent visible reason while a save result is unverified', async () => {
     await mountAndParse([draftItem('item-a', '甲'), draftItem('item-b', '乙')], '甲\n乙')
     apiPost.mockRejectedValueOnce({ network: true, type: 'network_error', message: 'network' })
     await check('item-a')
@@ -2349,21 +2125,139 @@ describe('BatchWorkbenchView selection scope (US-356)', () => {
 
     expect(wrapperUnderTest.find('#batch-retry-frozen-operation').exists()).toBe(true)
     expect(wrapperUnderTest.find('#batch-accept-submit').attributes('disabled')).toBeDefined()
-    expect(wrapperUnderTest.find('#batch-accept-all').attributes('disabled')).toBeDefined()
     expect(wrapperUnderTest.find('#batch-accept-selected-reason').text()).toContain('待核验')
-    expect(wrapperUnderTest.find('#batch-accept-all-reason').text()).toContain('待核验')
+    // 唯一入口：不再有并行的「保存并确认全部」。
+    expect(wrapperUnderTest.find('#batch-accept-all').exists()).toBe(false)
   })
 
-  it('states a persistent visible reason when nothing checked can be confirmed', async () => {
+  it('#145: keeps the resting bottom bar to one line and only explains an active scope', async () => {
     await mountAndParse([draftItem('item-a', '甲'), draftItem('item-b', '乙')], '甲\n乙')
 
+    // 静止态（未勾选任何条目）：主入口禁用，没有多余的范围长句。
     expect(wrapperUnderTest.find('#batch-accept-submit').attributes('disabled')).toBeDefined()
-    expect(wrapperUnderTest.find('#batch-accept-selected-scope').text()).toContain('请先在卡片上勾选')
-    // 可见全选只改可见项：全选后 N 与全部的数量都来自同一个完整批次集合。
+    expect(wrapperUnderTest.find('#batch-accept-submit').text()).toContain('保存并确认 0 部')
+    expect(wrapperUnderTest.find('#batch-accept-selected-count').text()).toContain('已选 0 部')
+    expect(wrapperUnderTest.find('#batch-accept-selected-scope').exists()).toBe(false)
+
+    // 「全选当前可见可确认项」只改可见项，数量与按钮数字同源。
     await wrapperUnderTest.find('#batch-select-all-checkbox').setValue(true)
     await nextTick()
-    expect(wrapperUnderTest.find('#batch-accept-selected-scope').text()).toContain('保存并确认 2 部')
-    expect(wrapperUnderTest.find('#batch-accept-selected-count').text()).toContain('当前可见 2 部')
-    expect(wrapperUnderTest.find('#batch-accept-selected-count').text()).toContain('完整批次 2 部')
+    expect(wrapperUnderTest.find('#batch-accept-selected-count').text()).toContain('已选 2 部')
+    expect(wrapperUnderTest.find('#batch-accept-submit').text()).toContain('保存并确认 2 部')
+    // 正常态没有范围长句；异常态（隐藏勾选/暂不可确认）才就地说明。
+    expect(wrapperUnderTest.find('#batch-accept-selected-scope').exists()).toBe(false)
+    expect(wrapperUnderTest.find('#batch-accept-submit').attributes('aria-describedby')).toBe(
+      'batch-accept-selected-count',
+    )
+  })
+
+  it('#145: sends nothing on cancel and keeps the batch scene unchanged', async () => {
+    await mountAndParse([draftItem('item-a', '甲'), draftItem('item-b', '乙')], '甲\n乙')
+    await check('item-a')
+    await wrapperUnderTest.find('.batch-draft-card[data-item-id="item-b"]').trigger('click')
+    await nextTick()
+    await openSelectedDialog()
+
+    await wrapperUnderTest.find('.confirm-dialog .secondary-button').trigger('click')
+    await flushPromises()
+
+    expect(saveConfirmCalls()).toHaveLength(0)
+    expect(wrapperUnderTest.find('.confirm-dialog').exists()).toBe(false)
+    expect(wrapperUnderTest.find('#batch-accept-selected-recheck').exists()).toBe(false)
+    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(2)
+    expect((wrapperUnderTest.find('.batch-draft-card[data-item-id="item-a"] input[type="checkbox"]').element as HTMLInputElement).checked).toBe(true)
+    expect(wrapperUnderTest.find('#batch-detail-pane').text()).toContain('字幕与筛选')
+  })
+
+  it('#145: closes the dialog on Escape without sending or flagging a recheck', async () => {
+    await mountAndParse([draftItem('item-a', '甲'), draftItem('item-b', '乙')], '甲\n乙')
+    await check('item-a')
+    await openSelectedDialog()
+    expect(wrapperUnderTest.find('.confirm-dialog').exists()).toBe(true)
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await flushPromises()
+
+    expect(wrapperUnderTest.find('.confirm-dialog').exists()).toBe(false)
+    expect(saveConfirmCalls()).toHaveLength(0)
+    expect(wrapperUnderTest.find('#batch-accept-selected-recheck').exists()).toBe(false)
+    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(2)
+  })
+
+  it('#145: ignores a second open while the save dialog is still open', async () => {
+    await mountAndParse([draftItem('item-a', '甲'), draftItem('item-b', '乙')], '甲\n乙')
+    await check('item-a')
+    await check('item-b')
+    await wrapperUnderTest.find('.batch-draft-card[data-item-id="item-a"]').trigger('click')
+    await nextTick()
+    await openSelectedDialog()
+
+    // 弹窗打开期间第一个条目变成不可确认；第二次进入必须被函数入口挡掉，
+    // 弹窗仍保持打开时冻结的 2 部，而不是按新资格静默缩成 1 部。
+    await wrapperUnderTest.find('#batch-preview-must-contain').setValue('未应用修改')
+    await nextTick()
+    await wrapperUnderTest.find('#batch-accept-submit').trigger('click')
+    await nextTick()
+
+    expect(wrapperUnderTest.findAll('.confirm-dialog')).toHaveLength(1)
+    expect(wrapperUnderTest.find('.confirm-dialog .confirm-dialog-title').text()).toBe('保存并确认 2 部')
+
+    await confirmDialog()
+    expect(saveConfirmCalls()).toHaveLength(0)
+    expect(wrapperUnderTest.find('#batch-accept-selected-recheck').exists()).toBe(true)
+  })
+
+  it('#145: reveals and focuses a filter-hidden item whose save failed', async () => {
+    await mountAndParse([draftItem('item-a', '甲'), draftItem('item-b', '乙')], '甲\n乙')
+    apiPost.mockResolvedValueOnce(saveConfirmResult({
+      results: [
+        { item_id: 'item-a', outcome: 'failed', request_id: null, status: null, error_type: 'invalid_request_status', error_message: 'poisoned detail', tracking_id: null, tracking_ready: null },
+        { item_id: 'item-b', outcome: 'CONFIRMED', request_id: 'req-b', status: 'CONFIRMED', error_type: null, error_message: null, tracking_id: 'tracking-b', tracking_ready: true },
+      ],
+      summary: { requested: 2, confirmed: 1, failed: 1 },
+    }))
+    await check('item-a')
+    await check('item-b')
+    await typeTitleSearch(wrapperUnderTest, '乙')
+    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(1)
+
+    await openSelectedDialog()
+    await confirmDialog()
+
+    // 隐藏失败项先可见化再聚焦，安全原因留在卡片原位。
+    expect(wrapperUnderTest.findAll('.batch-draft-card')).toHaveLength(2)
+    const failedCard = wrapperUnderTest.find('.batch-draft-card[data-item-id="item-a"]')
+    expect(failedCard.find('.batch-card-status').text()).toContain('草案')
+    expect(failedCard.find('.batch-card-reason').text()).toContain('保存确认失败，请重试。')
+    expect(wrapperUnderTest.find('.batch-review-navigation').text()).toContain('已定位到首个失败条目')
+    expect(document.activeElement).toBe(failedCard.element)
+    expect(wrapperUnderTest.text()).not.toContain('poisoned detail')
+    expect(wrapperUnderTest.find('.batch-draft-card[data-item-id="item-b"] .batch-card-status').text()).toContain('已确认待提交')
+  })
+
+  it('#156: distinguishes partial selection with indeterminate and keeps the current item unchanged', async () => {
+    await mountAndParse([draftItem('item-a', '甲'), draftItem('item-b', '乙')], '甲\n乙')
+    const selectAll = () => wrapperUnderTest.find('#batch-select-all-checkbox').element as HTMLInputElement
+    expect(selectAll().indeterminate).toBe(false)
+    expect(selectAll().checked).toBe(false)
+
+    // 右栏当前查看项来自点击卡片；点击控制列的复选框不应顺带切换右栏。
+    await wrapperUnderTest.find('.batch-draft-card[data-item-id="item-a"]').trigger('click')
+    await nextTick()
+    expect(wrapperUnderTest.find('.batch-draft-card[data-item-id="item-a"]').classes()).toContain('is-current')
+
+    await check('item-a')
+    expect(selectAll().indeterminate).toBe(true)
+    expect(selectAll().checked).toBe(false)
+    expect(wrapperUnderTest.find('.batch-draft-card[data-item-id="item-a"]').classes()).toContain('is-current')
+
+    await check('item-b')
+    expect(selectAll().indeterminate).toBe(false)
+    expect(selectAll().checked).toBe(true)
+
+    await wrapperUnderTest.find('#batch-select-all-checkbox').setValue(false)
+    await nextTick()
+    expect(selectAll().indeterminate).toBe(false)
+    expect(selectAll().checked).toBe(false)
   })
 })

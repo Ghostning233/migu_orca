@@ -19,6 +19,10 @@ import type { ApiStreamEvent } from '@/api/client'
 import type { operations } from '@/api/generated/api'
 import { isPublicRouteIdentifier } from '@/app/router/catalog'
 import { displayValue, type RequestSnapshot } from '@/features/requests/requestDetail'
+import {
+  publicPosterPath,
+  type SelectedCollectionSummary,
+} from '@/features/workbench/candidateSearch'
 import type { SaveConfirmBatchItemsBody, SaveConfirmBatchItemsResult, TrackingItemsResult } from '@/app/composables/useBatchReviewJourney'
 
 /** Public batch parse result produced by `POST /api/v1/batches/parse`. */
@@ -34,6 +38,18 @@ export interface BatchParseProgressEvent {
   completed: number
   total: number
   item: BatchItem
+}
+
+/**
+ * 批量解析的终态（#145 F）。
+ *
+ * - `itemCount` 是服务端返回的可展示条目数；`0` 表示「服务端没有返回任何条目」，
+ *   它与「全部条目都是 EMPTY/FAILED」不同：后者仍有条目，必须能进入工作台逐项处理。
+ * - `failed` 表示本次解析以失败结束（就地错误反馈由子组件呈现）。
+ */
+export interface BatchParseOutcome {
+  itemCount: number
+  failed: boolean
 }
 
 /**
@@ -115,6 +131,82 @@ export function batchCardTitle(item: BatchItem): string {
     return canonical[0] || '未命名条目'
   }
   return item.raw_title || '未命名条目'
+}
+
+/** 视觉权重分组：只表达状态语气，不改变任何状态码或可用动作。 */
+export type BatchStatusTone = 'neutral' | 'attention' | 'danger' | 'success'
+
+const BATCH_STATUS_TONES: Record<string, BatchStatusTone> = {
+  RAW: 'neutral',
+  PARSED: 'attention',
+  FOUND: 'attention',
+  EMPTY: 'attention',
+  FAILED: 'danger',
+  NEEDS_REVIEW: 'attention',
+  DRAFT: 'attention',
+  READY: 'attention',
+  ACCEPTED: 'success',
+  CONFIRMED: 'success',
+  SAVED_PENDING_CONFIRM: 'attention',
+  SAVED_PENDING_LOCATE: 'attention',
+  RESPONSE_UNKNOWN: 'danger',
+}
+
+/**
+ * 状态芯片的语气（#145 视觉校准）。
+ *
+ * 纯展示分类：未知状态码保留中性语气，绝不把失败、结果未知等待处理状态画成
+ * 正常/成功。中文状态文本始终与芯片同时呈现，颜色不是唯一的信息载体。
+ */
+export function batchStatusTone(status: string | null | undefined): BatchStatusTone {
+  return BATCH_STATUS_TONES[String(status ?? '')] ?? 'neutral'
+}
+
+/** 批量条目卡封面的安全投影结果。 */
+export interface BatchCardCover {
+  /** 同源不透明海报路径；null 表示只能显示占位。 */
+  url: string | null
+  /**
+   * `selected` = 用户本次会话明确选择的真实合集（唯一可称为「已选」的来源）；
+   * `candidate` = 仅来自公开候选或服务端匹配的预览封面，绝不代表用户已选；
+   * `none` = 没有可安全展示的封面。
+   */
+  state: 'selected' | 'candidate' | 'none'
+}
+
+/**
+ * 服务端为这条草案匹配到的公开元数据。
+ *
+ * 这是**匹配/推断**结果：它只说明服务端按标题找到了什么，不代表用户已经选择。
+ * 因此它只能用于「预览封面」这类不宣称选择的展示，不能用于「已选真实合集」。
+ */
+function matchedBangumi(item: BatchItem): { title: string; posterUrl: string | null } | null {
+  const matched = batchCardRequest(item)?.source_info?.matched_bangumi
+  if (!matched) return null
+  return {
+    title: String(matched.title ?? '').trim(),
+    posterUrl: publicPosterPath(matched.poster_url),
+  }
+}
+
+/**
+ * 左栏条目卡封面的安全投影（#145 视觉校准）。
+ *
+ * 顺序：用户在本会话明确选择的合集海报（`selected`）→ 首个公开候选的封面
+ * （`candidate`）→ 服务端匹配合集海报（同样只是 `candidate`，因为匹配不等于用户选择）
+ * → 占位。任何非 `/api/v1/mikan/posters/<key>` 的取值都 fail closed。
+ */
+export function batchCardCover(
+  item: BatchItem,
+  selected?: SelectedCollectionSummary | null,
+): BatchCardCover {
+  const selectedUrl = publicPosterPath(selected?.posterUrl)
+  if (selectedUrl) return { url: selectedUrl, state: 'selected' }
+  const candidateUrl = publicPosterPath((item.candidates ?? [])[0]?.poster_url)
+  if (candidateUrl) return { url: candidateUrl, state: 'candidate' }
+  const matched = matchedBangumi(item)
+  if (matched?.posterUrl) return { url: matched.posterUrl, state: 'candidate' }
+  return { url: null, state: 'none' }
 }
 
 /** Chinese label for a preference-hit field code (legacy helper). */
@@ -218,9 +310,16 @@ export function orderBatchItemsForReview(items: BatchItem[]): BatchItem[] {
   return groups.flat()
 }
 
-/** Whether a batch item is an exception that should be surfaced for review. */
-export function batchItemIsException(item: BatchItem): boolean {
-  return String(item.status ?? '') === 'FAILED' || String(item.status ?? '') === 'EMPTY' || batchCardNeedsReview(item)
+/**
+ * #149：「需处理」= 当前不可确认且尚未「已确认」的条目。
+ *
+ * 它与底栏「需处理 N 部」计数同源，因此「只看需处理」筛选出的集合和计数永远一致：
+ * 待选合集、草案待审核、搜索失败、结果待核验、已保存待确认／待定位都仍需用户动手；
+ * 只有本页工作已经完成的「已确认待提交」不算需处理。
+ */
+export function batchItemNeedsProcessing(item: BatchItem, isConfirmable: boolean): boolean {
+  if (String(item.status ?? '') === 'CONFIRMED') return false
+  return !isConfirmable
 }
 
 /** One label/value pair of the card's on-demand auxiliary layer. */
@@ -249,6 +348,9 @@ export function batchCardAuxiliaryFacts(item: BatchItem): BatchCardFact[] {
   if (item.season_hint) facts.push({ label: '季数提示', value: String(item.season_hint) })
   const candidates = item.candidates?.length ?? 0
   if (candidates) facts.push({ label: '候选合集', value: `${candidates} 个` })
+  // #145：默认层保持紧凑，输入原文与有效种子数移到这里按需查看。
+  facts.push({ label: '输入', value: displayValue(item.raw_title) })
+  if (batchCardRequest(item)) facts.push({ label: '有效种子数', value: batchCardSeedSummary(item) })
   facts.push({ label: '偏好', value: batchCardPreferenceSummary(item) })
   facts.push({ label: '总集数', value: batchEpisodeProgressText(undefined).replace('总集数：', '') })
   return facts
@@ -301,29 +403,21 @@ export function batchCardNextStep(guidance: BatchCardGuidance): string {
   if (status === 'EMPTY') return '删除该条目，或改用更完整的名称后重新获取。'
   if (guidance.hasCandidates) return '在右栏选择真实 MiKan 合集生成草案。'
   if (guidance.blocker) return `先解决：${guidance.blocker}。`
-  if (guidance.hasDraft) return '勾选加入待确认，或用「保存并确认全部」。'
+  if (guidance.hasDraft) return '勾选该条目后使用底栏的「保存并确认 N 部」。'
   return '重新获取批量草案以生成可审核条目。'
-}
-
-/** Find the next exception after the current item, wrapping at the end. */
-export function nextBatchException(items: BatchItem[], currentItemId: string | null): BatchItem | null {
-  const exceptions = items.filter(batchItemIsException)
-  if (!exceptions.length) return null
-  const currentIndex = items.findIndex((item) => item.item_id === currentItemId)
-  const start = currentIndex < 0 ? 0 : currentIndex + 1
-  return exceptions.find((item) => items.indexOf(item) >= start) ?? exceptions[0] ?? null
 }
 
 /** Match one item against the additive workbench search/filter controls. */
 export function batchItemMatchesReviewFilters(
   item: BatchItem,
-  filters: { query: string; status: string; exceptionsOnly: boolean },
+  filters: { query: string; status: string; needsProcessingOnly: boolean },
+  isConfirmable: boolean,
 ): boolean {
   const query = filters.query.trim().toLocaleLowerCase()
   const title = `${item.raw_title ?? ''} ${batchCardTitle(item)}`.toLocaleLowerCase()
   if (query && !title.includes(query)) return false
   if (filters.status && String(item.status ?? '') !== filters.status) return false
-  if (filters.exceptionsOnly && !batchItemIsException(item)) return false
+  if (filters.needsProcessingOnly && !batchItemNeedsProcessing(item, isConfirmable)) return false
   return true
 }
 
@@ -387,25 +481,22 @@ export interface BatchSaveConfirmDescriptor {
   idempotency_key: string
 }
 
-export interface BatchAcceptAllCounts {
+export interface BatchConfirmCounts {
   /** Every item of the parsed batch. */
   total: number
   /** Items currently passing the shared confirmability gate. */
   confirmable: number
-  /** Confirmable items the active review filter hides. */
-  hidden: number
 }
 
 /**
- * US-356: the one count model both save entries are described by.
+ * US-356 / #145：唯一保存入口（保存并确认 N 部）的计数模型。
  *
- * `confirmable`/`hidden` describe the complete batch's 保存并确认全部 scope;
- * `selected`/`selectedHidden`/`selectedExcluded` describe the D-02 scope of
- * 保存并确认 N 部 (manually checked *and* currently eligible items of the
- * complete batch — a review filter never removes a manual intent, and a checked
- * item that is not currently eligible never enters the request).
+ * `selected`/`selectedHidden`/`selectedExcluded` 描述 D-02 范围：完整批次中手工勾选
+ * 且当前可确认的条目。筛选只改变浏览，从不移除手工意图；被勾选但当前不可确认的
+ * 条目保留勾选与就地原因，但不进入请求。`confirmable`/`needsProcessing` 供底栏的
+ * 可确认／需处理计数使用。
  */
-export interface BatchConfirmScopeCounts extends BatchAcceptAllCounts {
+export interface BatchConfirmScopeCounts extends BatchConfirmCounts {
   /** Items the active review filter currently shows. */
   visible: number
   /** Complete-batch items that are checked and currently eligible (N). */
@@ -418,17 +509,15 @@ export interface BatchConfirmScopeCounts extends BatchAcceptAllCounts {
   needsProcessing: number
 }
 
-/** Clamp the confirm-all counts to the batch they describe. */
-function normalizeAcceptAllCounts(counts: BatchAcceptAllCounts): {
+/** Clamp the complete-batch counts to the batch they describe. */
+function normalizeBatchCounts(counts: BatchConfirmCounts): {
   total: number
   confirmable: number
-  hidden: number
   excluded: number
 } {
   const total = Math.max(0, Math.trunc(counts.total))
   const confirmable = Math.max(0, Math.min(Math.trunc(counts.confirmable), total))
-  const hidden = Math.max(0, Math.min(Math.trunc(counts.hidden), confirmable))
-  return { total, confirmable, hidden, excluded: total - confirmable }
+  return { total, confirmable, excluded: total - confirmable }
 }
 
 /** Clamp every scope count to the set it is derived from. */
@@ -439,11 +528,10 @@ function normalizeConfirmScopeCounts(counts: BatchConfirmScopeCounts): {
   selectedHidden: number
   selectedExcluded: number
   confirmable: number
-  hidden: number
   excluded: number
   needsProcessing: number
 } {
-  const base = normalizeAcceptAllCounts(counts)
+  const base = normalizeBatchCounts(counts)
   const visible = Math.max(0, Math.min(Math.trunc(counts.visible), base.total))
   const selected = Math.max(0, Math.min(Math.trunc(counts.selected), base.total))
   const selectedExcluded = Math.max(0, Math.min(Math.trunc(counts.selectedExcluded), base.total - selected))
@@ -451,31 +539,7 @@ function normalizeConfirmScopeCounts(counts: BatchConfirmScopeCounts): {
   return { ...base, visible, selected, selectedHidden, selectedExcluded, needsProcessing: base.excluded }
 }
 
-/**
- * US-356: visible scope line for the 保存并确认 N 部 entry.
- *
- * N is the complete batch's manually checked *and* currently eligible set
- * (D-02): a review filter only changes what the user browses, so it never drops
- * a manual intent, and a checked item that is currently blocked keeps its check
- * but is excluded from the request. The copy states the batch total, that same
- * N, how many of the N items the filter hides, and how many checked items are
- * excluded, so the entry is described by visible copy and not only by a title.
- */
-export function batchSelectedScopeText(counts: BatchConfirmScopeCounts): string {
-  const { total, selected, selectedHidden, selectedExcluded } = normalizeConfirmScopeCounts(counts)
-  if (total === 0) return ''
-  if (selected === 0) {
-    const excluded = selectedExcluded
-      ? `已勾选但当前不可确认的 ${selectedExcluded} 部被排除：请先解决各自的阻断原因。`
-      : ''
-    return `完整批次 ${total} 部中没有已勾选且可确认的条目：请先在卡片上勾选当前可确认的条目。${excluded}`
-  }
-  const details = [`保存并确认 ${selected} 部来自完整批次 ${total} 部中已勾选且当前可确认的条目`]
-  if (selectedHidden) details.push(`其中 ${selectedHidden} 部当前被筛选隐藏、仍会一并保存`)
-  if (selectedExcluded) details.push(`已勾选但当前不可确认的 ${selectedExcluded} 部被排除`)
-  return `${details.join('，')}；筛选与可见全选不改变本集合。`
-}
-
+/** 冻结意图的确认弹窗文案；清单与按钮数字来自同一冻结集合。 */
 export interface BatchConfirmDialogCopy {
   title: string
   message: string
@@ -485,8 +549,6 @@ export interface BatchConfirmDialogCopy {
   /** The frozen, display-safe titles of exactly the items that will be sent. */
   items: string[]
 }
-
-export type BatchAcceptAllConfirmCopy = BatchConfirmDialogCopy
 
 /**
  * US-356: dialog copy for one frozen N-part intent.
@@ -507,54 +569,6 @@ export function batchSelectedConfirmCopy(
   if (selectedHidden) clauses.push(`其中 ${selectedHidden} 部被筛选隐藏，仍会一并保存并确认`)
   const exclusion = selectedExcluded ? `已勾选但当前不可确认的 ${selectedExcluded} 部被排除。` : ''
   const label = `保存并确认 ${selected} 部`
-  return {
-    title: label,
-    confirmLabel: label,
-    itemsLabel: titles.length ? `本次将保存并确认的 ${titles.length} 部` : '',
-    items: [...titles],
-    message: `${clauses.join('，')}。${exclusion}仅保存本地订阅方案，不会提交到 Auto Bangumi；外部提交需在我的追番再次确认。`,
-  }
-}
-
-/**
- * US-347: visible scope line for the 保存并确认全部 entry.
- *
- * The confirm-all scope is the complete batch's confirmable set — review
- * filters and checkbox selection only change what the user browses, never what
- * 全部 saves. The text therefore states the batch total, the confirmable count
- * (M), how many of them the current filter hides, and how many are excluded,
- * so the entry is described by visible copy and not only by a hover title.
- */
-export function batchAcceptAllScopeText(counts: BatchAcceptAllCounts): string {
-  const { total, confirmable, hidden, excluded } = normalizeAcceptAllCounts(counts)
-  if (total === 0) return ''
-  if (confirmable === 0) {
-    return `完整批次 ${total} 项均不可确认：请先为条目生成可审核草案，并处理待应用编辑、重算、失败、已确认或结果待核验的条目。`
-  }
-  const details = [`保存并确认全部覆盖完整批次 ${total} 项中的 ${confirmable} 项可确认条目`]
-  if (hidden) details.push(`其中 ${hidden} 项当前被筛选隐藏`)
-  if (excluded) details.push(`排除 ${excluded} 项未就绪、已确认或结果待核验条目`)
-  return `${details.join('，')}；不受筛选或勾选影响。`
-}
-
-/**
- * US-348 / US-356: dialog copy for one frozen confirm-all intent.
- *
- * The title and the confirm button both state M so the number the user saw is
- * the number the button promises; the body states the complete batch, the
- * hidden participants that still travel with the request, the excluded items,
- * and that this only saves a local plan — the external Auto Bangumi submit is
- * a separate, later confirmation.
- */
-export function batchAcceptAllConfirmCopy(
-  counts: BatchAcceptAllCounts,
-  titles: readonly string[] = [],
-): BatchConfirmDialogCopy {
-  const { total, confirmable, hidden, excluded } = normalizeAcceptAllCounts(counts)
-  const clauses = [`完整批次 ${total} 部中当前可确认 ${confirmable} 部`]
-  if (hidden) clauses.push(`其中 ${hidden} 部被筛选隐藏，仍会一并保存并确认`)
-  const exclusion = excluded ? `已排除 ${excluded} 部未就绪、已确认或结果待核验的条目。` : ''
-  const label = `保存并确认全部 ${confirmable} 部`
   return {
     title: label,
     confirmLabel: label,

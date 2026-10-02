@@ -88,7 +88,9 @@ function close(result: boolean): void {
 
 onBeforeUnmount(() => {
   dialogGeneration += 1
-  deactivate()
+  // Teardown must release the trap (inert siblings + document keydown) without
+  // moving focus into a trigger that is itself leaving the DOM.
+  deactivate({ restoreFocus: false })
   state.value?.resolve(false)
   state.value = null
   open.value = false

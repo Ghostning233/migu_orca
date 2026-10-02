@@ -53,17 +53,31 @@ _STABILITY_CSS = """
 _WAIT_SCRIPT = """
 async () => {
   await document.fonts.ready;
-  const images = Array.from(document.images);
-  await Promise.all(
-    images.map((image) =>
-      image.complete
-        ? Promise.resolve()
-        : new Promise((resolve) => {
-            image.addEventListener('load', resolve, { once: true });
-            image.addEventListener('error', resolve, { once: true });
-          }),
-    ),
-  );
+  // 只等「可能进入本次取景」的图片。`loading="lazy"` 且仍在视口之外的长列表封面
+  // 永远不会触发 load/error，对全部 `document.images` 做无界等待会把截图助手挂死
+  // （36 部批量列表就是这种情况）。视口外的图片不属于这一帧取景，直接跳过；视口内
+  // 的图片仍要等到加载完成，并保留有界兜底，因此半渲染的取景依旧会被像素门禁判失败。
+  const PREFETCH_MARGIN = 1250;
+  const IMAGE_BUDGET_MS = 2000;
+  const pending = [];
+  for (const image of Array.from(document.images)) {
+    if (image.complete) continue;
+    const rect = image.getBoundingClientRect();
+    const inFrame = rect.bottom > -PREFETCH_MARGIN && rect.top < window.innerHeight + PREFETCH_MARGIN;
+    if (!inFrame) continue;
+    pending.push(
+      new Promise((resolve) => {
+        const timer = setTimeout(resolve, IMAGE_BUDGET_MS);
+        const done = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+        image.addEventListener('load', done, { once: true });
+        image.addEventListener('error', done, { once: true });
+      }),
+    );
+  }
+  await Promise.all(pending);
   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 }
 """
@@ -107,12 +121,15 @@ def install_shell_status_routes(
 
 
 def require_dist() -> None:
-    """SPA 生产构建是浏览器视觉用例的硬前置。"""
-    if (REPO_ROOT / "frontend" / "dist" / "index.html").is_file():
-        return
-    raise RuntimeError(
-        "frontend/dist missing — run `cd frontend && npm run build` before browser visual fixtures."
-    )
+    """SPA 生产构建是浏览器视觉用例的硬前置（#155：必须是可取证的最新构建）。
+
+    仅检查 ``dist/index.html`` 存在无法证明截图来自当前源码；这里改为校验构建戳：
+    dist 必须由 ``uv run python -m tests.browser.evidence build`` 从当前源码构建，
+    且之后没有被改写。陈旧/被修改的产物会抛出可读错误而不是静默通过。
+    """
+    from tests.browser.evidence import require_fresh_build
+
+    require_fresh_build()
 
 
 def prepare_canvas(page: Page) -> None:

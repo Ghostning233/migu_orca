@@ -1462,7 +1462,7 @@ onBeforeUnmount(() => {
             <input
               v-if="batchMode"
               type="checkbox"
-              class="tracking-list-checkbox"
+              class="base-checkbox tracking-list-checkbox"
               :checked="isBatchSelected(batchSelection, item.tracking_id)"
               :disabled="Boolean(batchSkipReason(item))"
               :aria-label="`选择提交 ${item.title || '未命名番剧'}`"
@@ -1601,7 +1601,7 @@ onBeforeUnmount(() => {
 .tracking-list-item.is-selected .tracking-list-indicator { background: var(--color-primary); }
 .tracking-list-indicator { align-self: stretch; min-height: 2rem; border-radius: 99px; background: var(--color-border); }
 .tracking-list-item.is-batch { grid-template-columns: auto .35rem auto minmax(0, 1fr) auto; }
-.tracking-list-checkbox { inline-size: 1.05rem; block-size: 1.05rem; accent-color: var(--color-primary); }
+.tracking-list-checkbox { align-self: center; }
 .tracking-batch-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-subtle); }
 .tracking-batch-count { margin-inline-end: auto; font-weight: 600; }
 .tracking-batch-skipped { margin: var(--space-2) 0 0; color: var(--color-text-muted); }

@@ -123,7 +123,15 @@ export interface SelectedCollectionSummary {
   posterUrl: string | null
 }
 
-function publicPosterPath(value: unknown): string | null {
+/**
+ * Same-origin opaque poster key path, or null.
+ *
+ * Shared by every cover renderer (single candidate card, batch candidate card,
+ * batch draft card, batch draft detail): only the opaque
+ * `/api/v1/mikan/posters/<key>` path may reach an `<img src>`; an external URL,
+ * a `data:` payload or a local path fails closed to the placeholder.
+ */
+export function publicPosterPath(value: unknown): string | null {
   const path = typeof value === 'string' ? value : ''
   return /^\/api\/v1\/mikan\/posters\/[A-Za-z0-9_-]+$/.test(path) ? path : null
 }

@@ -426,11 +426,13 @@ class TestSingleHomeGeometry:
         page.click("#batch-parse-submit")
         expect(page.locator(".batch-draft-card")).to_have_count(2)
 
-        # 在批量工作台内部制造现场：筛选只留一项、展开当前查看项。
+        # 在批量工作台内部制造现场：先进入当前查看项，再用标题搜索筛到一项。
+        # #149：标题搜索默认收起为放大镜，浮层打开后会覆盖卡片，因此先选卡片。
+        page.locator('.batch-draft-card[data-item-id="item-01"]').click()
+        expect(page.locator("#batch-detail-pane")).to_be_visible()
+        page.click("#batch-review-search-toggle")
         page.fill("#batch-review-search", "甲")
         expect(page.locator(".batch-draft-card")).to_have_count(1)
-        page.locator('.batch-draft-card[data-item-id="item-01"] .batch-card-expand').click()
-        expect(page.locator("#batch-detail-pane")).to_be_visible()
 
         # 切回单番：批量区隐藏但不卸载。
         page.click("#anime-mode-single")

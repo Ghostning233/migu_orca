@@ -47,8 +47,6 @@ import CandidateCollectionList from '@/features/workbench/CandidateCollectionLis
 import { useDraftEditScheduler, type DraftEditScheduler } from '@/features/workbench/draftEditScheduler'
 
 import {
-  batchAcceptAllConfirmCopy,
-  batchAcceptAllScopeText,
   batchCardAuxiliaryFacts,
   batchCardNextStep,
   batchConfirmDisabledReason,
@@ -65,13 +63,14 @@ import {
   readBatchParseItemEvent,
   batchSaveConfirmTrackingId,
   batchSelectedConfirmCopy,
-  batchSelectedScopeText,
   findBatchTrackingItem,
   batchCardNeedsReview,
   batchCardRequest,
-  batchCardSeedSummary,
   batchCardTitle,
+  batchCardCover,
+  batchStatusTone,
   batchItemMatchesReviewFilters,
+  batchItemNeedsProcessing,
   batchItemCount,
   batchStatusLabel,
   buildBatchSaveConfirmPayload,
@@ -80,7 +79,6 @@ import {
   canChooseBatchCandidate,
   canExpandBatchCard,
   orderBatchItemsForReview,
-  nextBatchException,
   validateBatchRawInput,
   type BatchConfirmScopeCounts,
   type BatchCardFact,
@@ -88,7 +86,9 @@ import {
   type BatchSaveConfirmOutcomeSummary,
   type BatchSaveConfirmResult,
   type BatchCandidate,
+  type BatchCardCover,
   type BatchItem,
+  type BatchParseOutcome,
   type BatchParseResult,
 } from '@/features/workbench/batchWorkbench'
 import type { BatchSaveRecoveryAction } from '@/features/workbench/batchWorkbench'
@@ -120,8 +120,13 @@ const props = withDefaults(defineProps<{ rawInput?: string; hideInput?: boolean 
 const emit = defineEmits<{
   (event: 'update:rawInput', value: string): void
   (event: 'restore-search-focus'): void
-  /** Issue 112: the whole batch finished and a stable result is on screen. */
-  (event: 'parse-settled'): void
+  /** #145：工作台页头的「返回搜索首屏」入口；只切屏，不清除审核现场。 */
+  (event: 'back-to-search'): void
+  /**
+   * Issue 112: the whole batch finished and a stable result is on screen.
+   * #145 F: 载荷说明服务端返回了多少可展示条目；父组件据此决定是否进入工作台。
+   */
+  (event: 'parse-settled', outcome: BatchParseOutcome): void
 }>()
 
 /** Issue 112: one real per-item completion, as reported by the server stream. */
@@ -273,12 +278,6 @@ function disposeScheduler(itemId: string): void {
   editSchedulers.delete(itemId)
 }
 
-/** Displayed subtitle group for a card: unconfirmed intent first. */
-function cardSubtitleGroupValue(item: BatchItem): string {
-  const pending = editSchedulers.get(item.item_id ?? '')?.scheduler.pendingGroup.value
-  if (pending) return pending
-  return batchCardRequest(item)?.confirmable_config?.selected_subtitle_group ?? ''
-}
 
 interface BatchItemConfirmability {
   confirmable: boolean
@@ -348,20 +347,31 @@ function clearBatchRouteLocalState(): void {
 // the user explicitly asks for exception-first sorting.
 const reviewQuery = ref('')
 const reviewStatus = ref('')
-const exceptionsOnly = ref(false)
-const exceptionSorted = ref(false)
+// #149：切换为「只看需处理」；判定见 batchItemNeedsProcessing（当前不可确认且尚未
+// 「已确认」），与底栏「需处理 N 部」同源。
+const needsProcessingOnly = ref(false)
+// #149：标题搜索默认收起为放大镜，展开为不参与布局的浮层；关闭后关键词与筛选
+// 结果保留，按 Esc 或再次点击放大镜收起，× 清空关键词并恢复结果。
+const searchExpanded = ref(false)
+const searchToggle = ref<HTMLButtonElement | null>(null)
+const searchInput = ref<HTMLInputElement | null>(null)
 const reviewList = ref<HTMLElement | null>(null)
 const cardGrid = ref<HTMLElement | null>(null)
 const reviewScrollPositions = new Map<string, number>()
 const cardElements = new Map<string, HTMLElement>()
 const temporarilyShownItemId = ref<string | null>(null)
 const focusAnnouncement = ref('')
-const reviewFilterKey = computed(() => `${reviewQuery.value}\u0000${reviewStatus.value}\u0000${exceptionsOnly.value}`)
+const reviewFilterKey = computed(() => `${reviewQuery.value}\u0000${reviewStatus.value}\u0000${needsProcessingOnly.value}`)
+const searchFilterActive = computed(() => reviewQuery.value.trim().length > 0)
 
 const selectable = computed(() => visibleItems.value.filter((item) => itemConfirmability(item.item_id ?? '').confirmable))
 const processingCount = computed(() => items.value.filter((item) => draftSessions.get(item.item_id ?? '')?.applying.value).length)
 const allSelected = computed(
   () => selectable.value.length > 0 && selectable.value.every((item) => selectedItemIds.value.has(item.item_id ?? '')),
+)
+/** #156：全选作用于当前可见可确认项；部分勾选时用 indeterminate 与「全选」区分。 */
+const allSelectionPartial = computed(
+  () => !allSelected.value && selectable.value.some((item) => selectedItemIds.value.has(item.item_id ?? '')),
 )
 
 // US-356 / D-02: N 部（保存并确认 N 部）的资格集合是「完整批次中手工勾选且当前可确认」
@@ -376,18 +386,18 @@ const visibleItemIds = computed(() => new Set(visibleItems.value.map((item) => i
 const selectedHiddenCount = computed(
   () => selectedEligibleItems.value.filter((item) => !visibleItemIds.value.has(item.item_id)).length,
 )
+/** #149：底栏「当前可见 M 部」中的 M = 已勾选且当前可见的可确认条目。 */
+const selectedVisibleCount = computed(() => Math.max(0, selectedEligibleCount.value - selectedHiddenCount.value))
 
-// US-347: 保存并确认全部 的范围是完整批次，不是当前可见子集。筛选和
-// 「全选当前可见可确认项」只改变浏览，因此 all 的资格集合、按钮可用性、M 计数、
-// 弹窗数量和描述符都必须来自下面同一个完整批次集合。
-const batchConfirmable = computed(() => items.value.filter((item) => itemConfirmability(item.item_id ?? '').confirmable))
-const batchConfirmableCount = computed(() => batchConfirmable.value.length)
-const batchNeedsProcessingCount = computed(() => Math.max(0, items.value.length - batchConfirmableCount.value))
-const batchHiddenConfirmableCount = computed(
-  () => batchConfirmable.value.filter((item) => !visibleItemIds.value.has(item.item_id)).length,
+// #149：完整批次中仍需在本工作台处理的条目 = 当前不可确认且尚未「已确认」。
+// 它与「只看需处理」筛选同源，保证计数与筛选集合永远一致。
+const batchNeedsProcessingCount = computed(
+  () => items.value.filter((item) => batchItemNeedsProcessing(item, itemConfirmability(item.item_id ?? '').confirmable)).length,
 )
 
-// US-356: 两个入口的数量、范围文案、弹窗安全清单、描述符与 item_ids 都从这一份计数派生。
+const batchConfirmableCount = computed(() => items.value.filter((item) => itemConfirmability(item.item_id ?? '').confirmable).length)
+
+// US-356: 勾选入口的数量、范围文案、弹窗安全清单、描述符与 item_ids 都从这一份计数派生。
 const batchConfirmScope = computed<BatchConfirmScopeCounts>(() => ({
   total: items.value.length,
   visible: visibleItems.value.length,
@@ -395,20 +405,18 @@ const batchConfirmScope = computed<BatchConfirmScopeCounts>(() => ({
   selectedHidden: selectedHiddenCount.value,
   selectedExcluded: selectedExcludedCount.value,
   confirmable: batchConfirmableCount.value,
-  hidden: batchHiddenConfirmableCount.value,
   needsProcessing: batchNeedsProcessingCount.value,
 }))
-const batchSelectedScope = computed(() => batchSelectedScopeText(batchConfirmScope.value))
-const batchAcceptAllScope = computed(() => batchAcceptAllScopeText(batchConfirmScope.value))
+// #145：底栏永远只有一行——全选复选框、精简计数（含必要时的「当前可见 M 部」与
+// 「N 部暂不可确认」）与唯一主入口。范围不再另起段落，避免多行底栏。
 
-// US-356: 保存中或上一次结果待核验时两个入口都不可用，并在固定栏常驻同一条可见原因，
-// 不依赖按钮的 title。空集合的原因由各自的 scope 文案给出。
+// US-356: 保存中或上一次结果待核验时入口不可用，并在固定栏常驻同一条可见原因，
+// 不依赖按钮的 title。空集合的原因由 scope 文案给出。
 const batchSaveOperationalReason = computed(() => batchConfirmDisabledReason({
   saving: saveInFlight.value,
   pendingVerification: saveOperation.value?.phase === 'response_unknown',
 }))
 const canConfirmSelected = computed(() => selectedEligibleCount.value > 0 && !batchSaveOperationalReason.value)
-const canConfirmAll = computed(() => batchConfirmableCount.value > 0 && !batchSaveOperationalReason.value)
 
 const detailItem = computed(() =>
   (detailItemId.value || currentItemId.value)
@@ -419,52 +427,67 @@ const visibleItems = computed(() => items.value.filter((item) =>
   item.item_id === temporarilyShownItemId.value || batchItemMatchesReviewFilters(item, {
     query: reviewQuery.value,
     status: reviewStatus.value,
-    exceptionsOnly: exceptionsOnly.value,
-  }),
+    needsProcessingOnly: needsProcessingOnly.value,
+  }, itemConfirmability(item.item_id ?? '').confirmable),
 ))
 
-// US-348: 打开「保存并确认全部」时把完整批次参与集合与绑定版本冻结成内存 intent
-// （confirmBatchAcceptAll 的 route-local 闭包值），确认前重新核对，任何资格/版本/batch
-// 变化都不发送。draft_id 等能力只存在于该对象，不展示、不持久化、不进入 URL 或存储。
-interface BatchAcceptAllIntent {
-  batchId: string
-  participants: Array<{ itemId: string; draftId: string; baseRevision: number }>
-  counts: BatchConfirmScopeCounts
-  titles: string[]
+/**
+ * #145：左栏条目卡的封面。优先用用户点选的合集，其次用服务端为这条草案匹配到的
+ * 合集海报，最后才退回首个公开候选；全部经过 `batchCardCover` 的同源路径校验。
+ */
+function cardCoverFor(item: BatchItem): BatchCardCover {
+  return batchCardCover(item, selectedCollectionByItem.value[item.item_id ?? ''] ?? null)
 }
-const acceptAllDialogOpen = ref(false)
-const acceptAllRecheckNotice = ref('')
-const acceptAllRecheckElement = ref<HTMLElement | null>(null)
 
-function saveReviewScrollPosition(): void {
-  if (reviewList.value) reviewScrollPositions.set(reviewFilterKey.value, reviewList.value.scrollTop)
-}
+/**
+ * #145／产品边界：右栏合集身份只来自**用户本次会话明确选择的合集**。
+ *
+ * 服务端匹配信息（`source_info.matched_bangumi`）是搜索/规则/草案来源的提示，不等于
+ * 用户对真实 MiKan 合集的选择，因此绝不回填到这里冒充「已选真实合集」。没有用户选择
+ * 时传 null，右栏改为「尚未确认真实合集」的就地待核对状态。
+ */
+const detailCollectionSummary = computed<SelectedCollectionSummary | null>(() => {
+  const item = detailItem.value
+  if (!item) return null
+  return selectedCollectionByItem.value[item.item_id ?? ''] ?? null
+})
 
 async function restoreReviewScrollPosition(): Promise<void> {
   await nextTick()
   if (reviewList.value) reviewList.value.scrollTop = reviewScrollPositions.get(reviewFilterKey.value) ?? 0
 }
 
-watch([reviewQuery, reviewStatus, exceptionsOnly], (_values, oldValues) => {
+watch([reviewQuery, reviewStatus, needsProcessingOnly], (_values, oldValues) => {
   if (reviewList.value) {
-    const [query, status, exceptions] = oldValues
-    reviewScrollPositions.set(`${query}\u0000${status}\u0000${exceptions}`, reviewList.value.scrollTop)
+    const [query, status, needsProcessing] = oldValues
+    reviewScrollPositions.set(`${query}\u0000${status}\u0000${needsProcessing}`, reviewList.value.scrollTop)
   }
   void restoreReviewScrollPosition()
 })
 
-function clearReviewFilters(): void {
-  reviewQuery.value = ''
-  reviewStatus.value = ''
-  exceptionsOnly.value = false
-  temporarilyShownItemId.value = null
+/** #149：放大镜浮层不参与布局；打开即聚焦输入，关闭后关键词与结果保留。 */
+async function openTitleSearch(): Promise<void> {
+  searchExpanded.value = true
+  await nextTick()
+  searchInput.value?.focus()
 }
 
-function sortExceptionsFirst(): void {
-  saveReviewScrollPosition()
-  items.value = orderBatchItemsForReview(items.value)
-  exceptionSorted.value = true
-  void restoreReviewScrollPosition()
+function closeTitleSearch(options: { restoreFocus?: boolean } = {}): void {
+  searchExpanded.value = false
+  if (options.restoreFocus) searchToggle.value?.focus()
+}
+
+function toggleTitleSearch(): void {
+  if (searchExpanded.value) closeTitleSearch({ restoreFocus: true })
+  else void openTitleSearch()
+}
+
+/** #158：Esc 在浮层任意位置（输入框或关闭按钮）都收起搜索并回到放大镜。 */
+function onTitleSearchKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Escape') return
+  event.preventDefault()
+  event.stopPropagation()
+  closeTitleSearch({ restoreFocus: true })
 }
 
 function selectCurrentItem(item: BatchItem): void {
@@ -493,6 +516,36 @@ function setCardElement(itemId: string | null | undefined, element: unknown): vo
 // blockers, failures, unknown results and recovery actions stay in this layer.
 function itemBlockers(itemId: string): string[] {
   return itemConfirmability(itemId).blockers
+}
+
+/**
+ * #145：设计图的默认层只保留封面、标题与状态芯片。通用的「下一步」是进度提示，
+ * 只在条目真的卡住或需要恢复时才就地显示；正常待选择/待审核的进度由状态芯片表达。
+ */
+const CARD_STUCK_STATUSES = [
+  'FAILED',
+  'EMPTY',
+  'SAVED_PENDING_LOCATE',
+  'SAVED_PENDING_CONFIRM',
+  'RESPONSE_UNKNOWN',
+]
+
+function cardNeedsNextStep(item: BatchItem): boolean {
+  if (CARD_STUCK_STATUSES.includes(String(item.status ?? ''))) return true
+  if (generatingCandidateIdFor(item.item_id ?? '')) return true
+  if (recoveryActionFor(item) !== 'NONE') return true
+  return Boolean(draftSessions.get(item.item_id ?? '')?.applying.value)
+}
+
+/**
+ * #145：状态芯片已经说明「待选合集／未找到候选／搜索失败」这类进度；
+ * 只有在条目看起来可以确认却暂不可确认（未应用编辑、重算中、草案失效等）时，
+ * 才把阻断原因就地写出来。
+ */
+function cardShowsBlocker(item: BatchItem): boolean {
+  const status = String(item.status ?? '')
+  if (!['DRAFT', 'READY'].includes(status)) return false
+  return !itemConfirmability(item.item_id ?? '').confirmable
 }
 
 /** The card's single next step, derived from public state only. */
@@ -633,20 +686,6 @@ function onCardKeydown(event: KeyboardEvent, item: BatchItem): void {
   }
 }
 
-function goToNextException(): void {
-  const next = nextBatchException(items.value, currentItemId.value)
-  if (!next?.item_id) return
-  const hidden = !batchItemMatchesReviewFilters(next, {
-    query: reviewQuery.value,
-    status: reviewStatus.value,
-    exceptionsOnly: exceptionsOnly.value,
-  })
-  temporarilyShownItemId.value = hidden ? next.item_id : null
-  selectCurrentItem(next)
-  focusAnnouncement.value = hidden ? `已临时显示异常条目：${batchCardTitle(next)}` : `已定位到异常条目：${batchCardTitle(next)}`
-  focusCard(next.item_id)
-}
-
 function syncBatchIdToUrl(batchIdValue: string): void {
   if (batchIdValue) {
     void router.replace(routeLocation('add', { batch_id: batchIdValue }))
@@ -668,7 +707,7 @@ async function parseBatch(onProgress?: (progress: BatchParseProgress) => void): 
     notification.error('校验失败', validationError)
     return
   }
-  if (items.value.length && hasUnsafeBatchWork() && !acceptAllDialogOpen.value && !selectedDialogOpen.value) {
+  if (items.value.length && hasUnsafeBatchWork() && !selectedDialogOpen.value) {
     const confirmed = await confirmDialog.value?.confirm({
       title: '重新搜索批量条目',
       message: '重新搜索将舍弃当前候选、草案和勾选现场，只保留新的批量输入。是否继续？',
@@ -725,11 +764,18 @@ async function parseBatch(onProgress?: (progress: BatchParseProgress) => void): 
     saveSummary.value = null
     savingItemIds.value = new Set()
     seasonConfirmations.value = {}
-    notification.success('批量搜索完成', `已返回 ${items.value.length} 个条目的候选搜索状态。`)
+    const itemCount = items.value.length
+    if (itemCount) {
+      notification.success('批量搜索完成', `已返回 ${itemCount} 个条目的候选搜索状态。`)
+    } else {
+      // 服务端成功但没有返回条目：这是「空结果」，不是 MiKan 故障。
+      notification.info('批量解析完成', '服务端没有返回任何条目；请核对输入后重新搜索。')
+    }
     await nextTick()
-    document.querySelector<HTMLElement>('#panel-section-批量工作台')?.focus()
-    // 整批完成、拿到稳定结果后才切到工作台。
-    emit('parse-settled')
+    // 整批完成、拿到稳定结果：只声明「数据已稳定可展示」以及有多少条目。切屏、切屏
+    // 目标与焦点都由父组件在搜索状态收尾、第二屏稳定之后唯一决定，子组件不抢占屏幕
+    // 所有权；items=[] 由父组件留在搜索首屏就地说明，不进入空工作台。
+    emit('parse-settled', { itemCount, failed: false })
   } catch (error) {
     void error
     journey.dispatch({ type: 'parse_failed', error })
@@ -847,32 +893,6 @@ async function generateDraftFromCandidate(candidate: BatchCandidate): Promise<vo
     delete nextCandidates[itemId]
     draftCreateCandidateIds.value = nextCandidates
   }
-}
-
-function subtitleGroupOptions(item: BatchItem): Array<{ value: string; label: string }> {
-  return ((batchCardRequest(item)?.source_info?.rss_sources ?? []) as Array<{ subtitle_group?: string | null }>)
-    .map((source) => ({ value: source.subtitle_group ?? '', label: source.subtitle_group ?? '未知字幕组' }))
-    .filter((option) => option.value)
-}
-
-/**
- * US-344: a subtitle-group change is authoritative immediately, from either
- * surface. The scheduler owns the CAS so the card and the detail pane can
- * never issue two requests with the same revision.
- */
-function applyCardSubtitleGroup(item: BatchItem, value: string): void {
-  if (!value) return
-  const scheduler = ensureScheduler(item)
-  if (!scheduler) return
-  draftApplyErrors.value = { ...draftApplyErrors.value, [item.item_id ?? '']: '' }
-  scheduler.setSubtitleGroup(value)
-}
-
-async function retryCardModify(item: BatchItem): Promise<void> {
-  const scheduler = ensureScheduler(item)
-  if (!scheduler) return
-  draftApplyErrors.value = { ...draftApplyErrors.value, [item.item_id ?? '']: '' }
-  await scheduler.retry()
 }
 
 function openDraftDetail(item: BatchItem): void {
@@ -1325,16 +1345,11 @@ const selectedDialogOpen = ref(false)
 const selectedRecheckNotice = ref('')
 const selectedRecheckElement = ref<HTMLElement | null>(null)
 
-// 两个入口的可访问描述始终包含自己的范围文案，并追加当前的常驻说明/禁用原因。
+// 唯一保存入口的可访问描述始终包含自己的范围文案，并追加当前的常驻说明/禁用原因。
 const selectedEntryDescription = computed(() => [
-  'batch-accept-selected-scope',
+  'batch-accept-selected-count',
   ...(selectedRecheckNotice.value ? ['batch-accept-selected-recheck'] : []),
   ...(batchSaveOperationalReason.value ? ['batch-accept-selected-reason'] : []),
-].join(' '))
-const allEntryDescription = computed(() => [
-  'batch-accept-all-scope',
-  ...(acceptAllRecheckNotice.value ? ['batch-accept-all-recheck'] : []),
-  ...(batchSaveOperationalReason.value ? ['batch-accept-all-reason'] : []),
 ].join(' '))
 
 /** Freeze the complete batch's manually checked eligible set as the N intent. */
@@ -1402,86 +1417,6 @@ async function confirmBatchAcceptSelected(): Promise<void> {
   }
 }
 
-/** Freeze the complete batch's confirmable set as the confirm-all intent. */
-function buildAcceptAllIntent(): BatchAcceptAllIntent | null {
-  const rows = batchConfirmable.value
-  if (!rows.length) return null
-  const participants = rows.map((row) => ({
-    itemId: row.item_id ?? '',
-    draftId: row.draft_id ?? '',
-    baseRevision: row.draft_revision ?? 1,
-  }))
-  if (participants.some((participant) => !participant.itemId || !participant.draftId)) return null
-  return {
-    batchId: batchId.value,
-    participants,
-    counts: batchConfirmScope.value,
-    // US-356: 安全标题清单与描述符、item_ids 同源（同一冻结集合、同一批次顺序）。
-    titles: rows.map((row) => displayValue(batchCardTitle(row))),
-  }
-}
-
-/**
- * True only while the frozen intent is exactly what would be sent now: the same
- * batch, the same eligible rows (neither added nor removed) and the same
- * draft/revision binding per participant. A changed scope always requires a new
- * confirmation instead of silently filtering or padding the old one.
- */
-function acceptAllIntentIsCurrent(intent: BatchAcceptAllIntent): boolean {
-  if (batchId.value !== intent.batchId) return false
-  const rows = batchConfirmable.value
-  if (rows.length !== intent.participants.length) return false
-  return intent.participants.every((participant) => {
-    const row = rows.find((item) => item.item_id === participant.itemId)
-    if (!row) return false
-    return row.draft_id === participant.draftId && (row.draft_revision ?? 1) === participant.baseRevision
-  })
-}
-
-async function confirmBatchAcceptAll(): Promise<void> {
-  // US-348: the dialog shows one frozen intent, and what it shows is what the
-  // request sends. The function-level guard (not only the disabled state) keeps
-  // a second invocation from replacing an open confirmation with a different
-  // scope.
-  if (acceptAllDialogOpen.value || saveInFlight.value) return
-  acceptAllRecheckNotice.value = ''
-  const intent = buildAcceptAllIntent()
-  if (!intent) return
-  acceptAllDialogOpen.value = true
-  try {
-    const copy = batchAcceptAllConfirmCopy(intent.counts, intent.titles)
-    const ok = await confirmDialog.value?.confirm({
-      title: copy.title,
-      message: copy.message,
-      confirmLabel: copy.confirmLabel,
-      items: copy.items,
-      itemsLabel: copy.itemsLabel,
-    })
-    if (!ok) return
-    if (!acceptAllIntentIsCurrent(intent)) {
-      // The frozen set or a bound version moved while the dialog was open. Send
-      // nothing, keep the scene, and leave a persistent explanation next to the
-      // entry instead of a toast; the user confirms again explicitly.
-      acceptAllRecheckNotice.value = '完整批次的资格或草案版本已变化，本次未发送任何请求；请核对后重新确认全部。'
-      await nextTick()
-      acceptAllRecheckElement.value?.focus()
-      return
-    }
-    // Send exactly the frozen participants; submitBatchSaveConfirm still
-    // re-checks every one of them and freezes the request for an unknown result.
-    const rows = intent.participants
-      .map((participant) => items.value.find((item) => item.item_id === participant.itemId))
-      .filter((row): row is BatchItem => Boolean(row))
-    await submitBatchSaveConfirm(rows, null)
-  } finally {
-    acceptAllDialogOpen.value = false
-  }
-}
-
-function selectForBatch(itemId: string): void {
-  toggleItemSelection(itemId, true)
-}
-
 function onDraftChanged(
   itemId: string,
   state: { request: RequestSnapshot; draftId: string; draftRevision: number },
@@ -1505,11 +1440,6 @@ function onDetailDirty(dirty: boolean): void {
   if (!item) return
   journey.dispatch({ type: 'set_dirty', itemId: item.item_id ?? '', dirty })
   draftSessions.get(item.item_id ?? '')?.setDirty(dirty)
-}
-
-function onDraftDeleted(itemId: string): void {
-  deleteBatchCard(itemId)
-  notification.info('已删除批量卡片', '当前批量卡片已从本批结果中移除。')
 }
 
 function onDraftExpired(itemId: string): void {
@@ -1548,10 +1478,13 @@ async function flushDetailModify(): Promise<void> {
   await scheduler.flush()
 }
 
+/** #150：字幕组只在右栏编辑；这里仍用同一个调度器保证 CAS 与修订同步。 */
 function onSubtitleGroupChange(value: string): void {
   const item = detailItem.value
-  if (!item) return
-  applyCardSubtitleGroup(item, value)
+  const scheduler = item ? ensureScheduler(item) : null
+  if (!scheduler || !value) return
+  draftApplyErrors.value = { ...draftApplyErrors.value, [item?.item_id ?? '']: '' }
+  scheduler.setSubtitleGroup(value)
 }
 
 function onFilterChange(state: PreviewEditState): void {
@@ -1624,6 +1557,18 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 
 <template>
   <PanelSection title="批量工作台" class="batch-workbench-panel">
+    <!-- #145：工作台页头沿用设计图的层级——深海蓝大标题在左，「返回搜索首屏」在右；
+         它只切屏与聚焦输入，绝不清除下方未保存的审核现场。 -->
+    <template #actions>
+      <BaseButton
+        v-if="props.hideInput"
+        id="batch-back-to-search"
+        variant="secondary"
+        @click="emit('back-to-search')"
+      >
+        ↑ 返回搜索首屏
+      </BaseButton>
+    </template>
     <form v-if="!props.hideInput" id="batch-parse-form" class="batch-parse-form" @submit.prevent="parseBatch()">
       <label v-if="!props.hideInput" for="batch-raw-input">批量番剧名称</label>
       <AnimeTitleInput
@@ -1667,7 +1612,9 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
       />
       <EmptyState
         v-else-if="!items.length"
-        message="粘贴多行番剧名称后获取解析结果。"
+        :message="parseStarted
+          ? '整批解析已完成，但服务端没有返回任何条目；请核对输入后重新搜索。'
+          : '粘贴多行番剧名称后获取解析结果。'"
       />
       <template v-else>
         <div class="batch-review-layout">
@@ -1675,51 +1622,94 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                筛选入口始终可达；滚动区只包含卡片本身，卡片焦点环不会被裁掉。 -->
           <div class="batch-review-list-column">
             <div class="batch-review-controls">
+              <!-- #149：状态筛选 + 放大镜标题搜索浮层 + 只看需处理。浮层绝对定位，
+                   打开/关闭都不推挤筛选控件、卡片或底栏。 -->
               <div class="batch-review-filters" aria-label="批量结果筛选">
-              <label class="batch-review-search">
-                标题搜索
-                <input id="batch-review-search" v-model="reviewQuery" type="search" placeholder="搜索标题" />
-              </label>
-              <label>
-                状态
-                <select id="batch-review-status" v-model="reviewStatus">
-                  <option value="">全部状态</option>
-                  <option v-for="status in ['FAILED', 'EMPTY', 'FOUND', 'DRAFT', 'SAVED_PENDING_LOCATE', 'SAVED_PENDING_CONFIRM', 'CONFIRMED']" :key="status" :value="status">
-                    {{ batchStatusLabel(status) }}
-                  </option>
-                </select>
-              </label>
-              <CheckboxRow id="batch-review-exceptions" label="只看异常" :checked="exceptionsOnly" @update:checked="(value: boolean) => (exceptionsOnly = value)" />
-              <BaseButton id="batch-review-clear" variant="secondary" :disabled="!reviewQuery && !reviewStatus && !exceptionsOnly" @click="clearReviewFilters">
-                清除条件
-              </BaseButton>
-              <BaseButton id="batch-review-sort-exceptions" variant="secondary" @click="sortExceptionsFirst">
-                按异常排序
-              </BaseButton>
-            </div>
-            <p class="batch-review-count" role="status">共 {{ items.length }} 部，当前显示 {{ visibleItems.length }} 部{{ exceptionSorted ? '；已按异常排序' : '' }}</p>
-            <p id="batch-parse-progress" class="batch-parse-progress" role="status">
-              解析完成：{{ items.length }} / {{ parseCount }} 部；异常条目已置顶，条目顺序已固定。
-            </p>
-            <div class="batch-review-navigation">
-              <BaseButton
-                id="batch-next-exception"
-                variant="secondary"
-                :disabled="!nextBatchException(items, currentItemId)"
-                @click="goToNextException"
-              >
-                下一异常
-              </BaseButton>
-              <span v-if="focusAnnouncement" role="status" aria-live="polite">{{ focusAnnouncement }}</span>
-              <span v-else class="field-help">无异常时不可用</span>
-            </div>
-            <p v-if="detailItem && !visibleItems.some((item) => item.item_id === detailItem?.item_id)" class="batch-filter-hidden" role="status">
-              当前条目已被筛选隐藏，详情仍保持显示。
-            </p>
-            <!-- US-355: 筛选无匹配是「当前条件没有命中」，不是空批次；数据和勾选都还在。 -->
-            <p v-if="items.length && !visibleItems.length" id="batch-review-no-match" class="batch-review-no-match" role="status">
-              没有符合当前筛选条件的条目；本批次仍有 {{ items.length }} 部，数据、勾选与右栏详情均未改变。请调整或清除筛选条件后继续。
-            </p>
+                <label class="batch-review-status-field">
+                  <span class="visually-hidden">状态</span>
+                  <select id="batch-review-status" v-model="reviewStatus">
+                    <option value="">全部状态</option>
+                    <option v-for="status in ['FAILED', 'EMPTY', 'FOUND', 'DRAFT', 'SAVED_PENDING_LOCATE', 'SAVED_PENDING_CONFIRM', 'CONFIRMED']" :key="status" :value="status">
+                      {{ batchStatusLabel(status) }}
+                    </option>
+                  </select>
+                </label>
+                <div class="batch-review-search-field">
+                  <button
+                    id="batch-review-search-toggle"
+                    ref="searchToggle"
+                    type="button"
+                    class="icon-button batch-review-search-toggle"
+                    :class="{ 'is-active': searchFilterActive }"
+                    :aria-expanded="searchExpanded ? 'true' : 'false'"
+                    aria-controls="batch-review-search-popover"
+                    :aria-label="searchFilterActive ? '标题搜索（已筛选）' : '标题搜索'"
+                    title="标题搜索"
+                    @click="toggleTitleSearch"
+                  >
+                    <span class="batch-search-glyph" aria-hidden="true"></span>
+                    <span v-if="searchFilterActive" class="batch-review-search-dot" aria-hidden="true"></span>
+                  </button>
+                  <div
+                    v-if="searchExpanded"
+                    id="batch-review-search-popover"
+                    class="batch-review-search-popover"
+                    role="dialog"
+                    aria-label="标题搜索"
+                    @keydown="onTitleSearchKeydown"
+                  >
+                    <span class="batch-search-glyph is-muted" aria-hidden="true"></span>
+                    <input
+                      id="batch-review-search"
+                      ref="searchInput"
+                      v-model="reviewQuery"
+                      type="search"
+                      placeholder="搜索番剧标题"
+                      aria-label="搜索番剧标题"
+                    />
+                    <button
+                      id="batch-review-search-close"
+                      type="button"
+                      class="icon-button batch-review-search-close"
+                      aria-label="关闭标题搜索"
+                      title="关闭标题搜索"
+                      @click="closeTitleSearch({ restoreFocus: true })"
+                    >
+                      <span class="batch-close-glyph" aria-hidden="true"></span>
+                    </button>
+                  </div>
+                </div>
+                <span class="batch-review-filter-divider" aria-hidden="true"></span>
+                <button
+                  id="batch-review-needs-processing"
+                  type="button"
+                  class="batch-review-toggle"
+                  role="switch"
+                  :aria-checked="needsProcessingOnly ? 'true' : 'false'"
+                  @click="needsProcessingOnly = !needsProcessingOnly"
+                >
+                  <span class="batch-review-toggle-track" aria-hidden="true"><span class="batch-review-toggle-knob"></span></span>
+                  只看需处理
+                </button>
+              </div>
+              <!-- #145：默认层只保留设计图中的筛选控件与卡片；条目总数与解析完成状态对
+                   读屏保留，但不占视觉空间。 -->
+              <p class="batch-review-count visually-hidden" role="status">共 {{ items.length }} 部，当前显示 {{ visibleItems.length }} 部</p>
+              <p id="batch-parse-progress" class="batch-parse-progress visually-hidden" role="status">
+                解析完成：{{ items.length }} / {{ parseCount }} 部；条目顺序已固定。
+              </p>
+              <!-- #158：删除「下一异常」入口后，这一行只保留保存结果的就地播报（首个失败/
+                   首个未处理条目的定位），不再为已删除按钮预留说明或空白。 -->
+              <div class="batch-review-navigation">
+                <span v-if="focusAnnouncement" class="visually-hidden" role="status" aria-live="polite">{{ focusAnnouncement }}</span>
+              </div>
+              <p v-if="detailItem && !visibleItems.some((item) => item.item_id === detailItem?.item_id)" class="batch-filter-hidden" role="status">
+                当前条目已被筛选隐藏，详情仍保持显示。
+              </p>
+              <!-- US-355: 筛选无匹配是「当前条件没有命中」，不是空批次；数据和勾选都还在。 -->
+              <p v-if="items.length && !visibleItems.length" id="batch-review-no-match" class="batch-review-no-match" role="status">
+                没有符合当前筛选条件的条目；本批次仍有 {{ items.length }} 部，数据、勾选与右栏详情均未改变。请调整或清除筛选条件后继续。
+              </p>
             </div>
             <div
               ref="reviewList"
@@ -1746,35 +1736,23 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
               @click="selectCurrentItem(item)"
               @keydown="onCardKeydown($event, item)"
             >
-              <div class="batch-card-checkbox-cell">
-                <CheckboxRow
-                  class="batch-card-checkbox-row"
-                  :class="{ 'is-selected': selectedItemIds.has(item.item_id ?? '') }"
-                  :label="`选择 ${item.raw_title ?? '批量条目'}`"
-                  :checked="selectedItemIds.has(item.item_id ?? '')"
-                  :disabled="!itemConfirmability(item.item_id ?? '').confirmable || operationLocks(item.item_id ?? '')"
-                  @click.stop
-                  @update:checked="(value: boolean) => toggleItemSelection(item.item_id ?? '', value)"
-                />
-              </div>
-              <button
-                v-if="!['CONFIRMED', 'SAVED_PENDING_LOCATE', 'SAVED_PENDING_CONFIRM'].includes(String(item.status ?? ''))"
-                type="button"
-                class="icon-button batch-card-delete"
-                :aria-label="`删除 ${item.raw_title ?? '批量条目'}`"
-                title="删除"
-                :disabled="operationLocks(item.item_id ?? '')"
-                @click.stop
-                @click="deleteBatchCard(item.item_id ?? '')"
+              <!-- #145：封面是卡片的主要扫描信息之一；只有同源不透明海报路径会被
+                   渲染，缺封面时才退回占位文案。 -->
+              <div
+                class="batch-card-poster"
+                :data-poster-state="cardCoverFor(item).state"
               >
-                ×
-              </button>
-
-              <div class="batch-card-poster">
+                <img
+                  v-if="cardCoverFor(item).url"
+                  class="batch-card-poster-image"
+                  :src="cardCoverFor(item).url ?? undefined"
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                >
                 <span
-                  v-if="canChooseBatchCandidate(item)"
+                  v-else-if="canChooseBatchCandidate(item)"
                   class="batch-card-poster-placeholder"
-                  data-poster-state="unselected"
                   title="待选择真实 MiKan 合集"
                 >
                   待选择
@@ -1782,7 +1760,6 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                 <span
                   v-else
                   class="batch-card-poster-placeholder"
-                  data-poster-state="unavailable"
                   title="暂无封面"
                 >
                   无封面
@@ -1794,16 +1771,14 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
               <div class="batch-card-main">
                 <div class="batch-card-headline">
                   <strong class="batch-card-title">{{ batchCardTitle(item) }}</strong>
-                  <span class="batch-status batch-card-status">{{ batchStatusLabel(item.status) }}</span>
+                  <span
+                    class="batch-status batch-card-status"
+                    :data-tone="batchStatusTone(item.status)"
+                  >{{ batchStatusLabel(item.status) }}</span>
                   <span v-if="batchCardNeedsReview(item)" class="batch-status batch-card-review-status">
                     需人工核对
                   </span>
                 </div>
-                <p class="batch-card-meta">
-                  <span class="batch-card-raw-title">输入：{{ displayValue(item.raw_title) }}</span>
-                  <span v-if="batchCardRequest(item)" class="batch-card-seeds">有效种子数：{{ batchCardSeedSummary(item) }}</span>
-                </p>
-
                 <p
                   v-if="generatingCandidateIdFor(item.item_id ?? '')"
                   class="batch-card-generating-status"
@@ -1839,7 +1814,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                   已勾选，但当前不可确认：{{ itemBlockers(item.item_id ?? '')[0] ?? '暂不可确认' }}；解决后仍会参与保存确认。
                 </p>
                 <p
-                  v-else-if="!['CONFIRMED', 'SAVED_PENDING_LOCATE', 'SAVED_PENDING_CONFIRM', 'FAILED', 'EMPTY'].includes(String(item.status ?? '')) && !itemConfirmability(item.item_id ?? '').confirmable"
+                  v-else-if="cardShowsBlocker(item)"
                   class="batch-card-selection-help"
                 >
                   {{ itemBlockers(item.item_id ?? '')[0] ?? '当前条目暂不可加入批量确认。' }}
@@ -1854,30 +1829,11 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                   已保存，待定位：草案已经保存，确认状态尚未定位。刷新会丢失当前批量现场，核验前请勿重新添加同一部。
                 </p>
 
-                <p class="batch-card-next-step">下一步：{{ cardNextStep(item) }}</p>
+                <p v-if="cardNeedsNextStep(item)" class="batch-card-next-step">下一步：{{ cardNextStep(item) }}</p>
 
-                <div v-if="canExpandBatchCard(item) && batchCardRequest(item)" class="batch-card-subtitle-group" @click.stop>
-                  <label :for="`batch-card-subtitle-${item.item_id}`">字幕组</label>
-                  <select
-                    :id="`batch-card-subtitle-${item.item_id}`"
-                    :value="cardSubtitleGroupValue(item)"
-                    :disabled="operationLocks(item.item_id ?? '') || draftSessions.get(item.item_id ?? '')?.applying.value"
-                    @change="applyCardSubtitleGroup(item, ($event.target as HTMLSelectElement).value)"
-                  >
-                    <option value="">保持当前选择</option>
-                    <option v-for="option in subtitleGroupOptions(item)" :key="option.value" :value="option.value">{{ option.label }}</option>
-                  </select>
-                  <p v-if="draftSessions.get(item.item_id ?? '')?.applying.value" class="field-help" aria-live="polite">正在重新计算资源...</p>
-                  <BaseButton
-                    v-if="draftSessions.get(item.item_id ?? '')?.canRetry.value"
-                    variant="secondary"
-                    :disabled="savingItemIds.has(item.item_id ?? '') || draftSessions.get(item.item_id ?? '')?.applying.value"
-                    @click.stop="retryCardModify(item)"
-                  >重试修改</BaseButton>
-                </div>
-
-                <div class="batch-card-actions">
-                  <!-- Issue 114：每条只呈现与真实原因匹配的一种恢复动作。 -->
+                <!-- 恢复动作（Issue 114）：只在真实失败、结果未知或需要恢复时出现；
+                     正常可审核条目没有额外按钮。 -->
+                <div v-if="recoveryActionFor(item) !== 'NONE' || batchItemTrackingId(item)" class="batch-card-actions">
                   <BaseButton
                     v-if="recoveryActionFor(item) === 'RETRY_CONFIRM'"
                     :id="`batch-retry-accept-${item.item_id}`"
@@ -1914,39 +1870,6 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                     :disabled="recoveryLoadingItemIds.has(item.item_id ?? '') || !batchItemRequestId(item)"
                     @click.stop="retryBatchTrackingLocation(item)"
                   >{{ recoveryLabelFor(item) }}</BaseButton>
-                  <BaseButton
-                    v-if="canChooseBatchCandidate(item)"
-                    :class="{ 'batch-card-expand': true }"
-                    :aria-expanded="detailItemId === item.item_id ? 'true' : 'false'"
-                    aria-controls="batch-detail-pane"
-                    :aria-label="`查看候选：${item.raw_title ?? '批量条目'}`"
-                    :disabled="savingItemIds.has(item.item_id ?? '')"
-                    @click.stop
-                    @click="selectCurrentItem(item)"
-                  >
-                    查看候选
-                  </BaseButton>
-                  <BaseButton
-                    v-else-if="canExpandBatchCard(item)"
-                    class="batch-card-expand"
-                    :aria-expanded="detailItemId === item.item_id ? 'true' : 'false'"
-                    aria-controls="request-detail-panel"
-                    :aria-label="`查看草案：${item.raw_title ?? '批量条目'}`"
-                    :disabled="operationLocks(item.item_id ?? '')"
-                    @click.stop
-                    @click="openDraftDetail(item)"
-                  >
-                    查看草案
-                  </BaseButton>
-                  <BaseButton
-                    v-else
-                    class="batch-card-expand"
-                    disabled
-                    :aria-label="`查看候选：${item.raw_title ?? '批量条目'}`"
-                    title="当前条目没有可选择的候选合集"
-                  >
-                    查看候选
-                  </BaseButton>
                 </div>
 
                 <details class="batch-card-more">
@@ -1958,6 +1881,31 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                     </template>
                   </dl>
                 </details>
+              </div>
+
+              <!-- #149/#156：当前查看由卡片高亮表达，保存范围由右侧复选框表达；两者是
+                   不同控件。整个控制列的点击都不冒泡到卡片的「查看」动作，勾选不会
+                   顺带切换右栏或触发删除。 -->
+              <div class="batch-card-controls" @click.stop>
+                <button
+                  v-if="!['CONFIRMED', 'SAVED_PENDING_LOCATE', 'SAVED_PENDING_CONFIRM'].includes(String(item.status ?? ''))"
+                  type="button"
+                  class="icon-button batch-card-delete"
+                  :aria-label="`删除 ${item.raw_title ?? '批量条目'}`"
+                  title="删除"
+                  :disabled="operationLocks(item.item_id ?? '')"
+                  @click="deleteBatchCard(item.item_id ?? '')"
+                >
+                  ×
+                </button>
+                <CheckboxRow
+                  class="batch-card-checkbox-row"
+                  :class="{ 'is-selected': selectedItemIds.has(item.item_id ?? '') }"
+                  :label="`选择 ${item.raw_title ?? '批量条目'}`"
+                  :checked="selectedItemIds.has(item.item_id ?? '')"
+                  :disabled="!itemConfirmability(item.item_id ?? '').confirmable || operationLocks(item.item_id ?? '')"
+                  @update:checked="(value: boolean) => toggleItemSelection(item.item_id ?? '', value)"
+                />
               </div>
             </article>
               </div>
@@ -1988,11 +1936,15 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
             </template>
             <template v-else-if="detailItem && canExpandBatchCard(detailItem) && batchCardRequest(detailItem)">
               <div class="batch-draft-panel">
+                <!-- #150：右栏使用批量草案信息层级；「加入批量确认」与重复的右栏删除
+                     入口已移除——保存范围由左栏复选框与固定底栏唯一入口表达，删除
+                     仍由左栏卡片的小图标承担。 -->
                 <AnimeDraftEditor
                   ref="detailEditor"
                   :key="`detail-${detailItem.item_id ?? detailItem.raw_title ?? ''}`"
+                  layout="batch"
                   :request="(ensureDraftSession(detailItem)?.request.value ?? batchCardRequest(detailItem)) as RequestSnapshot"
-                  :candidate-summary="selectedCollectionByItem[detailItem.item_id ?? ''] ?? null"
+                  :candidate-summary="detailCollectionSummary"
                   id-prefix="batch-preview"
                   form-id="detail-preview-edit-form"
                   container-id="request-detail-container"
@@ -2008,30 +1960,14 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                   @dirty-change="onDetailDirty"
                   @retry="retryDetailModify"
                   @reset="resetDetailModify"
-                >
-                  <template #review-note>
-                    <p class="field-help preview-mode-note">订阅草案（未保存）：字幕组会立即重新计算，筛选规则在停止输入 1.5 秒后自动更新，目录名只在「保存修改」时提交；随后在固定操作栏统一保存并确认。</p>
-                  </template>
-                </AnimeDraftEditor>
-                <div class="batch-draft-actions" aria-label="批量卡片操作">
-                  <!-- F4: 右栏只负责当前条目的查看与改选，固定操作栏是唯一的
-                       批量「保存并确认」主入口，因此这里不使用主按钮样式。 -->
-                  <BaseButton
-                    id="batch-detail-accept"
-                    variant="secondary"
-                    :disabled="!itemConfirmability(detailItem.item_id ?? '').confirmable"
-                    :title="itemConfirmability(detailItem.item_id ?? '').blockers.join('；')"
-                    @click="selectForBatch(detailItem.item_id ?? '')"
-                  >加入批量确认</BaseButton>
-                  <BaseButton id="batch-detail-delete" variant="danger" :disabled="savingItemIds.has(detailItem.item_id ?? '')" @click="onDraftDeleted(detailItem.item_id ?? '')">删除当前批量卡片</BaseButton>
-                </div>
-                <!-- US-356: 禁用原因常驻可见，不只挂在 title 上。 -->
+                />
+                <!-- US-356: 阻断原因常驻可见，不只挂在 title 上。 -->
                 <p
                   v-if="!itemConfirmability(detailItem.item_id ?? '').confirmable"
                   class="field-help batch-detail-blocker"
                   role="status"
                 >
-                  当前条目暂不可加入批量确认：{{ itemConfirmability(detailItem.item_id ?? '').blockers.join('；') }}。
+                  当前条目暂不可保存确认：{{ itemConfirmability(detailItem.item_id ?? '').blockers.join('；') }}。
                 </p>
               </div>
             </template>
@@ -2045,61 +1981,50 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
           </aside>
         </div>
 
+        <!-- #145：正常审核态只有一行——全选当前可见可确认项、精简已选计数、一个
+             「保存并确认 N 部」主入口。异常状态（结果待核验、资格变化）在此行下方
+             就地补齐说明，不用它们替换这一行的控件。 -->
         <div id="batch-accept-toolbar" class="batch-accept-toolbar">
-          <CheckboxRow
-            id="batch-select-all-checkbox"
-            :label="'全选当前可见可确认项'"
-            :checked="allSelected"
-            :disabled="selectable.length === 0 || saveInFlight"
-            @update:checked="setAllSelected"
-          />
-          <span id="batch-accept-selected-count" class="batch-selected-count" role="group">
-            <span class="batch-count-group" data-scope="complete-batch">完整批次 {{ items.length }} 部；可确认 {{ batchConfirmableCount }} 部；需处理 {{ batchNeedsProcessingCount }} 部</span>
-            <span class="batch-count-group" data-scope="visible">当前可见 {{ visibleItems.length }} 部</span>
-            <span class="batch-count-group" data-scope="selection">已勾选 {{ checkedItemCount }} 部；已选且可确认 {{ selectedEligibleCount }} 项；其中被筛选隐藏仍参与 {{ selectedHiddenCount }} 项；已排除 {{ selectedExcludedCount }} 项</span>
-            <span v-if="processingCount" class="batch-count-group" data-scope="recalculating">重算中 {{ processingCount }} 部</span>
-            <span v-if="saveSummary" id="batch-save-summary" class="batch-count-group" data-scope="last-save">
-              {{ batchSaveConfirmOutcomeSummaryText(saveSummary) }}
+          <div class="batch-accept-row">
+            <CheckboxRow
+              id="batch-select-all-checkbox"
+              :label="'全选当前可见可确认项'"
+              :checked="allSelected"
+              :indeterminate="allSelectionPartial"
+              :disabled="selectable.length === 0 || saveInFlight"
+              @update:checked="setAllSelected"
+            />
+            <span id="batch-accept-selected-count" class="batch-selected-count" role="group">
+              <span class="batch-count-group" data-scope="selection">已选 {{ selectedEligibleCount }} 部</span>
+              <span v-if="selectedHiddenCount" class="batch-count-group" data-scope="visible-selection">
+                当前可见 {{ selectedVisibleCount }} 部（隐藏仍参与）
+              </span>
+              <span v-if="selectedExcludedCount" class="batch-count-group" data-scope="excluded-selection">
+                {{ selectedExcludedCount }} 部暂不可确认，已排除
+              </span>
+              <span v-if="processingCount" class="batch-count-group" data-scope="recalculating">重算中 {{ processingCount }} 部</span>
             </span>
-          </span>
-          <BaseButton
-            v-if="saveOperation?.phase === 'response_unknown'"
-            id="batch-retry-frozen-operation"
-            variant="secondary"
-            :loading="saveInFlight"
-            :disabled="saveInFlight"
-            @click="retryFrozenBatchSaveConfirm"
-          >使用相同操作重试</BaseButton>
-          <div class="notification-actions batch-accept-actions">
             <BaseButton
-              id="batch-accept-submit"
-              variant="primary"
-              :disabled="!canConfirmSelected"
-              :loading="saveInFlight"
-              :aria-describedby="selectedEntryDescription"
-              @click="confirmBatchAcceptSelected"
-            >
-              保存并确认 {{ selectedEligibleCount }} 部
-            </BaseButton>
-            <BaseButton
-              id="batch-accept-all"
+              v-if="saveOperation?.phase === 'response_unknown'"
+              id="batch-retry-frozen-operation"
               variant="secondary"
-              :disabled="!canConfirmAll"
               :loading="saveInFlight"
-              :aria-describedby="allEntryDescription"
-              @click="confirmBatchAcceptAll"
-            >
-              保存并确认全部 {{ batchConfirmableCount }} 部
-            </BaseButton>
+              :disabled="saveInFlight"
+              @click="retryFrozenBatchSaveConfirm"
+            >使用相同操作重试</BaseButton>
+            <div class="notification-actions batch-accept-actions">
+              <BaseButton
+                id="batch-accept-submit"
+                variant="primary"
+                :disabled="!canConfirmSelected"
+                :loading="saveInFlight"
+                :aria-describedby="selectedEntryDescription"
+                @click="confirmBatchAcceptSelected"
+              >
+                保存并确认 {{ selectedEligibleCount }} 部
+              </BaseButton>
+            </div>
           </div>
-          <!-- US-356: 两个入口的范围常驻可见，并同时是按钮的可访问描述。 -->
-          <p
-            id="batch-accept-selected-scope"
-            class="batch-accept-scope"
-            :class="{ 'is-blocked': selectedEligibleCount === 0 }"
-          >
-            {{ batchSelectedScope }}
-          </p>
           <p
             v-if="batchSaveOperationalReason"
             id="batch-accept-selected-reason"
@@ -2119,32 +2044,8 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
           >
             {{ selectedRecheckNotice }}
           </p>
-          <p
-            id="batch-accept-all-scope"
-            class="batch-accept-scope"
-            :class="{ 'is-blocked': batchConfirmableCount === 0 }"
-          >
-            {{ batchAcceptAllScope }}
-          </p>
-          <p
-            v-if="batchSaveOperationalReason"
-            id="batch-accept-all-reason"
-            class="batch-accept-reason"
-            role="status"
-          >
-            保存并确认全部暂不可用：{{ batchSaveOperationalReason }}
-          </p>
-          <!-- US-348: 确认前复核失败时，说明常驻在固定业务区（不是 Toast），
-               并获得焦点；不会自动再次打开确认。 -->
-          <p
-            v-if="acceptAllRecheckNotice"
-            id="batch-accept-all-recheck"
-            ref="acceptAllRecheckElement"
-            class="batch-accept-recheck"
-            role="status"
-            tabindex="-1"
-          >
-            {{ acceptAllRecheckNotice }}
+          <p v-if="saveSummary" id="batch-save-summary" class="batch-accept-scope" role="status">
+            {{ batchSaveConfirmOutcomeSummaryText(saveSummary) }}
           </p>
         </div>
 
@@ -2187,24 +2088,48 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   min-height: 12rem;
   overscroll-behavior: contain;
   overflow-y: auto;
-  padding: 6px;
+  padding: 4px var(--space-2) var(--space-3);
   scroll-padding-bottom: 8px;
+  /* #148：左栏目标是隐藏滚动条而不是隐藏滚动能力——滚轮、触控板、键盘 Tab
+     与读屏导航仍可到达全部卡片，卡片自身可聚焦并用方向键移动。 */
+  scrollbar-width: none;
+}
+
+.batch-card-grid-wrapper::-webkit-scrollbar {
+  display: none;
 }
 
 .batch-review-controls {
   display: grid;
   min-width: 0;
+  padding: 0 var(--space-2) var(--space-3);
 }
 
+/* 只对读屏可见：保留状态播报与测试可读文本，但不占视觉空间。 */
+.visually-hidden {
+  border: 0;
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+/* #145：筛选行按设计图收紧——等高的状态选择框、放大镜按钮、细分隔线与「只看需处理」
+   开关同排；浮层绝对定位，开合都不改变这一行、卡片或底栏的几何。 */
 .batch-review-filters {
-  align-items: end;
+  align-items: center;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.6rem;
-  padding: 0 0 0.5rem;
+  gap: var(--space-2);
+  padding: 0 0 var(--space-2);
+  /* 标题搜索浮层相对本行定位；浮层自身不在布局流内。 */
+  position: relative;
 }
 
-.batch-review-filters label {
+.batch-review-filters label,
+.batch-review-status-field {
   color: var(--color-text-muted);
   display: grid;
   font-size: 0.78rem;
@@ -2213,17 +2138,223 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 
 .batch-review-filters input,
 .batch-review-filters select {
-  background: var(--color-bg);
+  background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   color: var(--color-text);
-  min-height: 2rem;
-  padding: 0.25rem 0.5rem;
+  font-size: var(--font-size-md);
+  min-height: var(--control-height-md);
+  padding: 0 var(--space-3);
 }
 
-.batch-review-filters :deep(.checkbox-row) {
-  align-self: end;
-  min-height: 2rem;
+.batch-review-filters select {
+  /* 固定宽度而不是让内容撑开：筛选行在 1440 主验收画布上必须保持一行
+     （状态筛选 + 放大镜 + 只看需处理），内容更宽时截断显示。 */
+  text-overflow: ellipsis;
+  width: 8.5rem;
+}
+
+/* 放大镜完全由 CSS 画成：不依赖 emoji 字体在各环境的栅格化差异。 */
+.batch-search-glyph {
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  display: inline-block;
+  height: 11px;
+  position: relative;
+  width: 11px;
+}
+
+.batch-search-glyph::after {
+  background: currentColor;
+  content: '';
+  height: 2px;
+  position: absolute;
+  right: -5px;
+  top: 9px;
+  transform: rotate(45deg);
+  width: 6px;
+}
+
+.batch-search-glyph.is-muted {
+  color: var(--color-text-muted);
+}
+
+/* #149：标题搜索默认只是一个放大镜按钮；激活时按钮带一个活动小圆点。 */
+/* 浮层对齐整个筛选行（而不是放大镜按钮），与设计图的搜索框等宽。 */
+.batch-review-search-field {
+  position: static;
+}
+
+.batch-review-search-toggle {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  min-height: var(--control-height-md);
+  min-width: var(--control-height-md);
+  position: relative;
+}
+
+.batch-review-search-toggle.is-active {
+  background: var(--color-primary-subtle);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.batch-review-search-dot {
+  background: var(--color-primary);
+  border-radius: var(--radius-pill);
+  height: 6px;
+  position: absolute;
+  right: 5px;
+  top: 5px;
+  width: 6px;
+}
+
+/* #158：浮层是独立悬浮背景（内边距、圆角、阴影），承载输入框与关闭按钮；输入框
+   自身不描边，避免把输入框边框当成整个浮层。绝对定位：开合都不推挤工具栏/卡片/底栏。 */
+.batch-review-search-popover {
+  align-items: center;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-dialog);
+  display: flex;
+  gap: var(--space-2);
+  left: 0;
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: var(--z-popover);
+}
+
+.batch-review-search-popover input {
+  background: transparent;
+  border: 0;
+  flex: 1 1 auto;
+  font-size: var(--font-size-md);
+  min-height: var(--control-height-sm);
+  min-width: 0;
+  padding: 0;
+}
+
+/* `type="search"` 的原生清除图标会与唯一的关闭按钮形成第二个「叉」的歧义。 */
+.batch-review-search-popover input::-webkit-search-cancel-button,
+.batch-review-search-popover input::-webkit-search-decoration {
+  appearance: none;
+  -webkit-appearance: none;
+  display: none;
+}
+
+/* 输入框自身不画第二个内框，但焦点必须有等价、可见的指示：焦点落在整行输入容器上，
+   用 Token 的 focus-ring 描边，而不是把 outline 去掉后什么都不留。 */
+.batch-review-search-popover:focus-within {
+  border-color: var(--color-focus-ring);
+  box-shadow: var(--focus-ring);
+}
+
+.batch-review-search-popover input:focus-visible {
+  outline: none;
+}
+
+/* 唯一可见的关闭入口：具读屏名称，悬停/聚焦有可见反馈。 */
+.batch-review-search-close {
+  flex: 0 0 auto;
+  min-height: var(--control-height-sm);
+  min-width: var(--control-height-sm);
+}
+
+.batch-review-search-close:hover {
+  background: var(--color-surface-subtle);
+}
+
+/* 关闭叉同样由 CSS 画成，不依赖字体符号。 */
+.batch-close-glyph {
+  display: inline-block;
+  height: 12px;
+  position: relative;
+  width: 12px;
+}
+
+.batch-close-glyph::before,
+.batch-close-glyph::after {
+  background: currentColor;
+  content: '';
+  height: 2px;
+  left: 0;
+  position: absolute;
+  top: 5px;
+  width: 12px;
+}
+
+.batch-close-glyph::before {
+  transform: rotate(45deg);
+}
+
+.batch-close-glyph::after {
+  transform: rotate(-45deg);
+}
+
+.batch-review-filter-divider {
+  align-self: center;
+  background: var(--color-border);
+  height: 1.5rem;
+  width: 1px;
+}
+
+/* #149：只看需处理用开关呈现；轨道 + 滑块是纯装饰，真实状态在 aria-checked。 */
+.batch-review-toggle {
+  align-items: center;
+  background: none;
+  border: 0;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: var(--font-size-md);
+  gap: var(--space-2);
+  min-height: var(--control-height-md);
+  padding: 0;
+}
+
+.batch-review-toggle-track {
+  background: var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  display: inline-block;
+  height: 1.35rem;
+  position: relative;
+  transition: background 0.15s ease;
+  width: 2.4rem;
+}
+
+.batch-review-toggle-knob {
+  background: var(--color-surface);
+  border-radius: 50%;
+  box-shadow: var(--shadow-card);
+  height: 1.1rem;
+  left: 0.125rem;
+  position: absolute;
+  top: 0.125rem;
+  transition: transform 0.15s ease;
+  width: 1.1rem;
+}
+
+.batch-review-toggle[aria-checked='true'] {
+  color: var(--color-text);
+}
+
+.batch-review-toggle[aria-checked='true'] .batch-review-toggle-track {
+  background: var(--color-primary);
+}
+
+.batch-review-toggle[aria-checked='true'] .batch-review-toggle-knob {
+  transform: translateX(1.05rem);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .batch-review-toggle-track,
+  .batch-review-toggle-knob {
+    transition: none;
+  }
 }
 
 .batch-review-count,
@@ -2233,12 +2364,9 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   margin: 0 0 0.5rem;
 }
 
+/* 导航行只剩读屏播报：视觉上不占空间。 */
 .batch-review-navigation {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.6rem;
-  margin-bottom: 0.5rem;
+  display: contents;
 }
 
 .batch-review-navigation [role='status'] {
@@ -2258,34 +2386,62 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   overflow-wrap: anywhere;
 }
 
-/* Issue 113：工作台是第二屏；标题留在屏内顶部，底部操作栏固定在屏内。
- * 左右两栏各自拥有由视口推导的可用高度与可见内部滚动条，滚到边界不带动
- * 整页切屏；三张紧凑卡（US-355 硬性回归）仍必须同屏可见。 */
+/* #145：工作台屏固定为一屏；标题留在屏内顶部，底部操作栏固定在屏内。
+ * 左右两栏各自拥有由视口推导的可用高度与隐藏滚动条，滚到边界不带动整页切屏。 */
 .batch-workbench-panel {
+  /* 设计图里两栏直接坐在暖白画布上，没有包裹整页的「管理表单外框」；
+     面板只保留语义容器与页面标题行。 */
+  background: transparent;
+  border: 0;
   margin-bottom: 0;
+  padding: 0;
+}
+
+/* 页头：深海蓝大标题 + 右侧「返回搜索首屏」；与设计图同一层级。 */
+.batch-workbench-panel :deep(.panel-heading) {
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.batch-workbench-panel :deep(.panel-heading h2) {
+  color: var(--color-primary);
+  font-size: var(--type-display);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--type-display-line-height);
 }
 
 .batch-review-layout {
   align-items: stretch;
   display: grid;
   flex: 1 1 auto;
-  gap: 1rem;
-  grid-template-columns: minmax(260px, 36%) minmax(0, 64%);
+  gap: var(--space-6);
+  /* `fr` 比例让栏间距先从可用宽度里扣除，再按 36/64 分配；用百分比 + gap 会让
+     两条轨道合计 100% 再加间距，右栏因此比页面内容宽出一个 gap。 */
+  grid-template-columns: minmax(260px, 36fr) minmax(0, 64fr);
   /* 不加 min-height: 0：双栏的固有尺寸（筛选区 + 至少一张卡）决定下限，装不下时
      让工作台屏自身滚动，而不是把双栏压进底部操作栏的区域。 */
 }
 
+/* 左栏是设计图里的一张白卡：筛选行固定在卡内顶部，卡片列表在卡内滚动；
+   两者都不显示滚动条。 */
 .batch-review-list-column {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
   display: flex;
   flex-direction: column;
   min-height: 0;
   min-width: 0;
+  padding: var(--space-4) var(--space-2) var(--space-2);
 }
 
 .batch-detail-pane {
-  background: var(--color-bg);
+  background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
   contain: size;
   height: 100%;
   max-height: none;
@@ -2294,8 +2450,17 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   min-width: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 1rem;
+  /* #157：右栏内容内边距按设计图放大（常规桌面 24px，窄屏 16px）；不再用负 margin
+     抵消编辑器内部间距，模块末项与固定底栏都保持可达。 */
+  padding: var(--space-6);
   scroll-padding-bottom: 8px;
+  /* #148：右栏同样隐藏滚动条但保留滚动：栏内控件（字幕组、规则、按钮）在键盘
+     Tab 顺序内，聚焦即可用方向键／PageDown 浏览到底。 */
+  scrollbar-width: none;
+}
+
+.batch-detail-pane::-webkit-scrollbar {
+  display: none;
 }
 
 .batch-detail-title {
@@ -2314,10 +2479,6 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   overflow-wrap: anywhere;
 }
 
-.batch-detail-pane :deep(.batch-draft-panel) {
-  margin: -1rem;
-}
-
 .batch-candidate-list {
   display: grid;
   gap: 0.75rem;
@@ -2334,7 +2495,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 
 .batch-card-grid {
   display: grid;
-  gap: 10px;
+  gap: var(--space-3);
   grid-template-columns: 1fr;
   margin: 0;
   padding: 0;
@@ -2345,20 +2506,29 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   outline-offset: calc(-1 * var(--focus-ring-width));
 }
 
-/* US-355 紧凑左卡：默认层只有标题、中文状态、阻断/错误、下一步与动作；
-   别名与偏好进 .batch-card-more，因此 1440×900 能同屏看到多张完整卡。 */
+/* #145 左卡：封面 / 标题 / 状态芯片 / 当前查看 / 勾选或删除是主要扫描信息。
+   卡片在白色栏内不再各自描边；当前查看项用淡蓝底 + 左缘强调条表达。
+   失败、结果未知与恢复动作永不折叠，允许这些卡片自然增高。 */
 .batch-draft-card {
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
+  --batch-attention-surface: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface));
+  --batch-attention-text: color-mix(in srgb, var(--color-accent) 78%, var(--color-text));
+  align-items: start;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
   display: grid;
-  grid-template-columns: auto 48px minmax(0, 1fr);
-  gap: 3px 6px;
+  gap: var(--space-3);
+  grid-template-columns: 88px minmax(0, 1fr) auto;
+  min-height: 88px;
   min-width: 0;
-  padding: 6px 8px;
+  padding: var(--space-3);
   position: relative;
   /* 卡片被聚焦或滚动定位时保留 8px 焦点环余量。 */
   scroll-margin: 8px;
+}
+
+.batch-draft-card:hover {
+  background: var(--color-surface-subtle);
 }
 
 .batch-draft-card:focus-visible {
@@ -2367,24 +2537,33 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 }
 
 .batch-draft-card.is-current {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 18%, transparent);
+  background: var(--color-surface-selected);
+  box-shadow: inset 3px 0 0 var(--color-primary);
 }
 
 .batch-card-poster {
   align-items: center;
   background: var(--color-bg-muted);
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
   color: var(--color-text-muted);
   display: flex;
-  font-size: 0.68rem;
-  font-weight: 700;
-  grid-column: 2;
+  font-size: 0.72rem;
+  font-weight: var(--font-weight-semibold);
+  grid-column: 1;
   grid-row: 1;
-  height: 44px;
+  height: 64px;
+  justify-content: center;
   overflow: hidden;
   text-align: center;
+  width: 88px;
+}
+
+.batch-card-poster-image {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
 }
 
 .batch-card-poster-placeholder {
@@ -2392,44 +2571,64 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 }
 
 .batch-card-main {
+  align-content: start;
   display: grid;
-  gap: 3px;
-  grid-column: 3;
-  grid-row: 1 / span 2;
+  gap: 6px;
+  /* #145：封面在第 1 列、条目内容在第 2 列、当前查看与勾选控件在第 3 列。 */
+  grid-column: 2;
+  grid-row: 1;
   min-width: 0;
 }
 
+/* 卡片标题占一行，状态（找到候选／草案／需人工核对）在下一行单独显示，不与标题同排。 */
 .batch-card-headline {
-  align-items: baseline;
+  align-items: flex-start;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 6px;
   min-width: 0;
 }
 
 .batch-card-title {
-  font-size: 1rem;
-  font-weight: 600;
-  line-height: 1.35;
+  font-size: var(--type-section-title);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.3;
   overflow-wrap: anywhere;
 }
 
-.batch-card-meta {
-  color: var(--color-text-muted);
-  display: flex;
-  flex-wrap: wrap;
-  font-size: 0.78rem;
-  gap: 0.25rem 0.75rem;
-  margin: 0;
+/* #145：状态用中文芯片表达；语气只分中性 / 待处理 / 危险 / 成功，未知状态码留在
+   中性，不把失败或结果未知画成正常。文字始终与颜色同时呈现。 */
+.batch-status {
+  border-radius: var(--radius-pill);
+  display: inline-block;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.5;
+  padding: 0.05rem var(--space-3);
+  white-space: nowrap;
 }
 
-.batch-card-raw-title,
-.batch-card-seeds,
-.batch-card-generating-status {
-  color: var(--color-text-muted);
-  font-size: 0.78rem;
-  overflow-wrap: anywhere;
+.batch-card-status {
+  background: var(--color-surface-subtle);
+  color: var(--color-text-secondary);
 }
+
+.batch-card-status[data-tone='attention'] {
+  background: var(--batch-attention-surface);
+  color: var(--batch-attention-text);
+}
+
+.batch-card-status[data-tone='danger'] {
+  background: var(--color-danger-surface);
+  color: var(--color-danger);
+}
+
+.batch-card-status[data-tone='success'] {
+  background: var(--color-success-surface);
+  color: var(--color-success);
+}
+
+
 
 /* The generating item is marked in place; the candidates it owns carry the
    aria-busy loading state in the detail pane. */
@@ -2439,9 +2638,8 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 }
 
 .batch-card-review-status {
-  background: #fdf1dd;
-  border: 1px solid #e8c378;
-  color: #8a5a13;
+  background: var(--color-warning-surface);
+  color: var(--color-warning);
 }
 
 /* US-355: 默认层常驻的下一步。 */
@@ -2461,58 +2659,34 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 }
 
 .batch-card-checkbox-row {
-  min-width: 1.25rem;
+  min-width: 0;
 }
 
-/* US-355: 快捷字幕组编辑与右栏共用同一个 scheduler，改完就地重算；它是紧凑层
-   里的快捷动作，因此不进入「辅助信息」折叠。 */
-.batch-card-subtitle-group {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-}
 
-.batch-card-subtitle-group label {
-  color: var(--color-text-muted);
-  font-size: 0.78rem;
-}
 
-.batch-card-subtitle-group select {
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  color: var(--color-text);
-  font-size: 0.82rem;
-  min-height: 1.9rem;
-  min-width: 9rem;
-  padding: 0.15rem 0.4rem;
-}
 
-.batch-card-subtitle-group .field-help,
-.batch-card-subtitle-group .batch-card-reason {
-  flex-basis: 100%;
-}
 
 /* CheckboxRow 把 class 透传到原生 input，因此卡片里的这一格由外层 cell 承担。 */
-.batch-card-checkbox-cell {
-  grid-column: 1;
+.batch-card-controls {
+  align-items: center;
+  align-self: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--space-2);
+  grid-column: 3;
   grid-row: 1;
-  min-width: 1.5rem;
   position: relative;
   z-index: 1;
 }
 
-/* 紧凑列表里的复选框按桌面尺寸呈现（touch 目标尺寸留给移动端布局）。 */
-.batch-card-checkbox-cell :deep(.base-checkbox) {
-  margin-top: 0.1rem;
-  min-height: 1.25rem;
-  min-width: 1.25rem;
+/* 复选框外观统一由共享样式提供（#156）；这里只保留卡片控制列自己的定位。 */
+.batch-card-controls :deep(.base-checkbox) {
+  margin-top: 0;
 }
 
 /* 复选框的可访问名称仍是「选择 <条目>」，视觉上只保留控件本身，避免在紧凑
-   列表里重复条目名称。 */
-.batch-card-checkbox-cell :deep(.checkbox-row-label) {
+   列表里重复条目名称，也避免标签文字把控制列撑宽压住标题。 */
+.batch-card-controls :deep(.checkbox-row-label) {
   border: 0;
   clip-path: inset(50%);
   height: 1px;
@@ -2552,12 +2726,26 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   white-space: normal;
 }
 
+/* #149：删除入口只在悬停或键盘聚焦时可见，避免和勾选控件争夺注意力；触控与
+   无悬停环境始终可见，不让入口变得不可达。 */
 .batch-card-delete {
-  min-height: 30px;
-  min-width: 30px;
-  position: absolute;
-  right: 6px;
-  top: 6px;
+  min-height: 26px;
+  min-width: 26px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.batch-draft-card:hover .batch-card-delete,
+.batch-draft-card:focus-within .batch-card-delete,
+.batch-card-delete:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none), (prefers-reduced-motion: reduce) {
+  .batch-card-delete {
+    opacity: 1;
+    transition: none;
+  }
 }
 
 .batch-card-actions {
@@ -2605,26 +2793,33 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   align-items: center;
   display: flex;
   flex: 0 0 auto;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-  margin-top: 12px;
-  background: var(--color-bg);
-  border-top: 1px solid var(--color-border);
-  box-shadow: 0 -4px 12px color-mix(in srgb, var(--color-text) 10%, transparent);
-  padding: 0.7rem;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 -1px 3px rgb(16 35 63 / 4%);
+  padding: var(--space-1) var(--space-4);
   /* #143：工作台屏固定为一屏，操作栏占据它在屏内的真实高度，因此不再吸顶悬浮，
      双栏的可视区与末项都不被它遮挡。 */
   position: static;
   z-index: 2;
 }
 
+/* #145：正常审核态只有一行——全选复选框、精简已选计数、一个主入口。 */
+.batch-accept-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  width: 100%;
+}
+
 .batch-selected-count {
   color: var(--color-text-muted);
   display: flex;
-  /* 与全选、两个入口同排：计数不抢走整行，两个入口按钮才有机会留在同一行；
-     空间不足时自然换行，范围文案仍各自成行常驻可见。 */
-  /* flex-basis: 0：计数不按自身内容宽度抢占整行，两个入口按钮因此能留在同一行，
-     计数在剩余空间内自行换行；范围文案仍各自成行常驻可见。 */
+  /* 计数不按自身内容宽度抢占整行，主入口因此能留在同一行；空间不足时自然换行。 */
   flex: 1 1 0;
   flex-wrap: wrap;
   font-size: 0.84rem;
@@ -2632,33 +2827,28 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   min-width: 0;
 }
 
-/* US-356: 完整批次 / 当前可见 / 已勾选 / 重算中 / 上次保存各自成组，组内文案自带
-   作用域名称，不再是一行难以分辨的连续数字。 */
+/* US-356: 已选范围 / 隐藏仍参与 / 暂不可确认 / 重算中各自成组，组内文案自带作用域
+   名称，不再是一行难以分辨的连续数字。#145：设计图里基础已选数是纯文本，只有
+   被筛选隐藏或暂不可确认这些附加范围才用紧凑计数芯片。 */
 .batch-count-group {
-  background: var(--color-bg-muted);
-  border-radius: 4px;
-  padding: 0.1rem 0.45rem;
+  border-radius: var(--radius-sm);
 }
 
-/* US-347: the confirm-all scope is stated in visible copy next to its button
-   and is also the button's accessible description. */
-.batch-accept-scope {
-  color: var(--color-text-muted);
-  flex-basis: 100%;
-  font-size: 0.84rem;
-  margin: 0;
-  overflow-wrap: anywhere;
+.batch-count-group:not([data-scope='selection']) {
+  background: var(--color-surface-subtle);
+  color: var(--color-text-secondary);
+  padding: 0.1rem var(--space-2);
 }
 
-.batch-accept-scope.is-blocked {
-  color: #8d2f20;
+.batch-accept-row :deep(.checkbox-row-label) {
+  color: var(--color-text);
+  font-size: var(--font-size-md);
 }
 
-/* US-356: 保存中/待核验时两个入口都不可用，这条常驻原因与各自的条目相邻，
-   不依赖 title。 */
+/* US-356: 保存中/待核验时入口不可用，这条常驻原因紧邻主入口，不依赖 title。 */
 .batch-accept-reason {
+  align-self: stretch;
   color: #8a5a13;
-  flex-basis: 100%;
   font-size: 0.84rem;
   margin: 0;
   overflow-wrap: anywhere;
@@ -2667,8 +2857,8 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 /* US-348: the rejection of a stale confirmation is permanent business-area
    copy, so it is focusable and always shows a visible focus ring. */
 .batch-accept-recheck {
+  align-self: stretch;
   color: #8d2f20;
-  flex-basis: 100%;
   font-size: 0.84rem;
   margin: 0;
   overflow-wrap: anywhere;
@@ -2692,7 +2882,12 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 
 @media (max-width: 1080px) {
   .batch-review-layout {
-    grid-template-columns: minmax(220px, 38%) minmax(0, 62%);
+    grid-template-columns: minmax(220px, 38fr) minmax(0, 62fr);
+  }
+
+  /* #157：窄屏右栏内边距收一档到 16px，保持内容不被挤压成紧凑后台表单。 */
+  .batch-detail-pane {
+    padding: var(--space-4);
   }
 }
 

@@ -1,11 +1,12 @@
-"""#143：批量搜索与工作台切屏、双栏独立滚动的真实 Chromium 门禁。
+"""#143/#148：批量搜索与工作台切屏、双栏独立滚动的真实 Chromium 门禁。
 
-父规格 #139 已确认的目标：
+父规格 #139 已确认的目标，经 #145 于 2026-09-25 修订：
 
 - 批量搜索的加载／失败仍留在搜索首屏；整批搜索完成后完整进入工作台，不停在两屏
   中间；模块外空白区（包括主内容内边距与宽屏两侧留白）可驱动整屏切换，外层滚动条
   永久隐藏；返回按钮平滑返回且不清除未保存审核现场；
-- 左栏「批量条目卡」列表与右栏「当前详情／批量合集候选卡」各有可见内部滚动条；
+- 左栏「批量条目卡」列表与右栏「当前详情／批量合集候选卡」各有独立内部滚动能力，
+  但按 #145 目标隐藏可见滚动条（`scrollbar-width: none` 且不占滚动条槽）；
   鼠标在任一栏内滚到顶或到底后继续滚，仍不切屏；两栏滚动互不干扰；
 - 顶部标题与底部操作栏可见，底部不遮挡任一栏末项；1／12／36 部可遍历和操作。
 
@@ -89,15 +90,25 @@ def test_batch_workbench_is_a_second_screen_with_internal_column_scroll(
         """() => {
           const list = document.querySelector('.batch-card-grid-wrapper')
           const detail = document.querySelector('#batch-detail-pane')
+          // 滚动条槽 = 盒宽 − 内容宽 − 左右边框；隐藏滚动条时应为 0。
+          const gutter = (element) => {
+            const style = getComputedStyle(element)
+            const borders = (parseFloat(style.borderLeftWidth) || 0) + (parseFloat(style.borderRightWidth) || 0)
+            return element.offsetWidth - element.clientWidth - borders
+          }
           return {
             scrollY: window.scrollY,
             listScrollable: list.scrollHeight > list.clientHeight,
             listOverflow: getComputedStyle(list).overflowY,
             listOverscroll: getComputedStyle(list).overscrollBehaviorY,
             listOwner: list.dataset.screenScroll,
+            listScrollbar: getComputedStyle(list).scrollbarWidth,
+            listGutter: gutter(list),
             detailOverflow: getComputedStyle(detail).overflowY,
             detailOverscroll: getComputedStyle(detail).overscrollBehaviorY,
             detailOwner: detail.dataset.screenScroll,
+            detailScrollbar: getComputedStyle(detail).scrollbarWidth,
+            detailGutter: gutter(detail),
             scrollbarWidth: getComputedStyle(document.documentElement).scrollbarWidth,
             documentHeight: document.documentElement.scrollHeight,
             viewportHeight: window.innerHeight,
@@ -105,17 +116,29 @@ def test_batch_workbench_is_a_second_screen_with_internal_column_scroll(
         }"""
     )
     assert metrics["scrollY"] > 100
-    # 双栏各自拥有可见内部滚动条，并被标记为内部滚动所有者（滚轮不参与切屏）。
+    # #148：双栏保留独立内部滚动能力并继续声明为内部滚动所有者（滚轮不参与切屏），
+    # 但可见滚动条被隐藏，且不占用滚动条槽（内容宽度不因滚动条出现/消失而抖动）。
     assert metrics["listScrollable"] is True
     assert metrics["listOverflow"] == "auto"
     assert metrics["listOverscroll"] == "contain"
     assert metrics["listOwner"] == "inner"
+    assert metrics["listScrollbar"] == "none"
+    assert metrics["listGutter"] == 0
     assert metrics["detailOverflow"] == "auto"
     assert metrics["detailOverscroll"] == "contain"
     assert metrics["detailOwner"] == "inner"
+    assert metrics["detailScrollbar"] == "none"
+    assert metrics["detailGutter"] == 0
     assert metrics["scrollbarWidth"] == "none"
-    # 文档高度固定为两屏：长列表不撑长整页。
-    assert metrics["documentHeight"] <= 2 * metrics["viewportHeight"] + 1
+    # #159：文档高度 = 一屏工作台 + 首屏高度（批量首屏按输入行数自然增高，可略高于一屏）；
+    # 工作台屏本身仍固定一屏，长列表不撑长整页。
+    first_height = page.evaluate(
+        "() => document.querySelector('.batch-search-screen').getBoundingClientRect().height"
+    )
+    assert abs(metrics["documentHeight"] - (metrics["viewportHeight"] + first_height)) <= 2, (
+        metrics["documentHeight"],
+        first_height,
+    )
 
     # 固定操作栏在工作台屏内可见。
     expect(page.locator("#batch-accept-toolbar")).to_be_in_viewport()
@@ -155,18 +178,47 @@ def test_module_outside_whitespace_switches_back_to_the_search_screen(
 ) -> None:
     _parse(page, live_server_url, _candidate_items(12), storage_dir)
 
-    # 模块外空白区（面板内边距带）向上滚动：完整回到搜索首屏，不清除现场。
-    wheel_at(page, 60, 260, -400)
+    # 模块外空白区（两栏之间的栏间距）向上滚动：完整回到搜索首屏，不清除现场。
+    # 两栏各自是白卡且栏内是内部滚动所有者，因此这里必须取两栏之间真正不属于
+    # 任一栏的空白，而不是固定像素坐标——左栏加宽后固定坐标会落进卡片列表。
+    gap_x = page.evaluate(
+        """() => {
+          const list = document.querySelector('.batch-review-list-column').getBoundingClientRect()
+          const pane = document.querySelector('#batch-detail-pane').getBoundingClientRect()
+          return (list.right + pane.left) / 2
+        }"""
+    )
+    wheel_at(page, gap_x, 300, -400)
     wait_for_hero_top(page)
     assert page.evaluate("() => window.scrollY") <= 2
     expect(page.locator(".batch-draft-card")).to_have_count(12)
     expect(page.locator("#batch-raw-input")).to_have_count(1)
 
 
+def test_back_button_returns_to_the_search_screen_without_clearing_the_scene(
+    page: Page, live_server_url: str, storage_dir
+) -> None:
+    """#145：工作台页头的「返回搜索首屏」只切屏与聚焦输入，不清除审核现场。"""
+    _parse(page, live_server_url, _candidate_items(12), storage_dir)
+
+    expect(page.locator("#batch-back-to-search")).to_be_visible()
+    page.click("#batch-back-to-search")
+    wait_for_hero_top(page)
+    assert page.evaluate("() => window.scrollY") <= 2
+    expect(page.locator(".batch-draft-card")).to_have_count(12)
+    expect(page.locator("#batch-raw-input")).to_have_count(1)
+    # 焦点在切屏动画收尾后落到输入框：这里用可重试断言，避免与平滑滚动的收尾竞态
+    # （#159 让首屏按输入行数自然增高，滚动时长随之变化）。
+    expect(page.locator("#batch-raw-input")).to_be_focused()
+
+
 def test_detail_pane_scrolls_without_moving_the_list(
     page: Page, live_server_url: str, storage_dir
 ) -> None:
     _parse(page, live_server_url, _draft_items(3), storage_dir)
+    # #145/#150：新的批量草案右栏在 1440×900 下通常刚好装得下，不溢出是正常状态；
+    # 这里用 200% 缩放强制它超过可用高度，验证右栏仍是独立的内部滚动所有者。
+    page.evaluate("() => { document.documentElement.style.zoom = '2' }")
 
     before = page.evaluate(
         """() => {
@@ -233,13 +285,88 @@ def test_boundary_batch_sizes_keep_the_fixed_toolbar_and_last_card_reachable(
 def test_long_list_does_not_grow_the_document(
     page: Page, live_server_url: str, storage_dir
 ) -> None:
+    def _boxes() -> dict[str, float]:
+        return page.evaluate(
+            """() => ({
+                doc: document.documentElement.scrollHeight,
+                first: document.querySelector('.batch-search-screen').getBoundingClientRect().height,
+                screen: document.querySelector('.batch-workbench-screen').getBoundingClientRect().height,
+            })"""
+        )
+
     _parse(page, live_server_url, _compact_items(3), storage_dir)
-    short_height = page.evaluate("() => document.documentElement.scrollHeight")
+    short = _boxes()
 
     _parse(page, live_server_url, _compact_items(36), storage_dir)
-    long_height = page.evaluate("() => document.documentElement.scrollHeight")
-    # 36 部只让左栏内部滚动变长，不让整页增长。
-    assert abs(long_height - short_height) <= 2, (short_height, long_height)
+    long = _boxes()
+
+    # 36 部只让左栏内部滚动变长：工作台屏仍是一屏高。
+    assert abs(long["screen"] - short["screen"]) <= 2, (short, long)
+    # 整页的「工作台部分」不随列表长度增长（首屏高度只取决于输入行数，见 #159）。
+    assert abs((long["doc"] - long["first"]) - (short["doc"] - short["first"])) <= 2, (short, long)
+
+
+def test_hidden_scrollbars_keep_keyboard_navigation_inside_the_columns(
+    page: Page, live_server_url: str, storage_dir
+) -> None:
+    """#148 AC3：滚动条不可见，但键盘仍能到达两栏全部内容且停在栏内。"""
+    _parse(page, live_server_url, _draft_items(36), storage_dir)
+    before = page.evaluate(
+        """() => ({
+            listScrollTop: document.querySelector('.batch-card-grid-wrapper').scrollTop,
+            scrollY: window.scrollY,
+        })"""
+    )
+    assert before["scrollY"] > 100
+
+    # 左栏：卡片自身可聚焦，方向键在可见卡片间移动并让左栏内部滚动。
+    page.locator(".batch-draft-card").first.focus()
+    for _ in range(20):
+        page.keyboard.press("ArrowDown")
+    # 卡片焦点移动触发的是平滑滚动；连续按键会互相取消动画，因此等它真正停稳再断言。
+    wait_for_scroll_idle(page)
+    left = page.evaluate(
+        """() => {
+          const list = document.querySelector('.batch-card-grid-wrapper')
+          const active = document.activeElement
+          return {
+            focusedIsCard: active.classList.contains('batch-draft-card'),
+            listScrollTop: list.scrollTop,
+            scrollY: window.scrollY,
+          }
+        }"""
+    )
+    assert left["focusedIsCard"] is True
+    assert left["listScrollTop"] > before["listScrollTop"], left
+    # 仍在工作台屏内：方向键浏览卡片不会把页面带回搜索首屏。
+    assert left["scrollY"] >= before["scrollY"] - 1, left
+
+    # 右栏：200% 缩放让长草案真实溢出，Tab 前进时由右栏自身滚动承载。
+    page.evaluate("() => { document.documentElement.style.zoom = '2' }")
+    pane = page.locator("#batch-detail-pane")
+    assert page.evaluate(
+        """() => {
+          const pane = document.querySelector('#batch-detail-pane')
+          return pane.scrollHeight > pane.clientHeight
+        }"""
+    ) is True, "200% 缩放下右栏应当溢出并保留内部滚动"
+    page.locator("#batch-detail-pane .base-button, #batch-detail-pane select, #batch-detail-pane input").first.focus()
+    for _ in range(24):
+        if page.evaluate("() => document.querySelector('#batch-detail-pane').scrollTop") > 0:
+            break
+        page.keyboard.press("Tab")
+    right = page.evaluate(
+        """() => {
+          const pane = document.querySelector('#batch-detail-pane')
+          return {
+            scrollTop: pane.scrollTop,
+            activeInside: pane.contains(document.activeElement),
+          }
+        }"""
+    )
+    assert right["activeInside"] is True
+    assert right["scrollTop"] > 0, right
+    assert pane.is_visible()
 
 
 def test_batch_loading_and_failure_stay_on_the_search_screen(
@@ -252,8 +379,15 @@ def test_batch_loading_and_failure_stay_on_the_search_screen(
     # 只输入非法内容：工作台不会出现，滚轮也不切屏。
     page.fill("#batch-raw-input", "   ")
     assert page.evaluate("() => window.scrollY") == 0
+    viewport_height = page.evaluate("() => window.innerHeight")
+    first_height = page.evaluate(
+        "() => document.querySelector('.batch-search-screen').getBoundingClientRect().height"
+    )
     wheel_at(page, 720, 500, 400)
     wait_for_scroll_idle(page)
+    # #159：短输入的空闲批量首屏仍在一屏内（任务区顶端与单番对齐，但行距收一档），
+    # 因此滚轮不会移动页面，也不会切到尚不存在的工作台屏。
+    assert first_height <= viewport_height + 0.5, (first_height, viewport_height)
     assert page.evaluate("() => window.scrollY") == 0
     # 工作台屏尚未切换（v-show 隐藏），因此没有可切屏的第二屏。
     metrics = screen_metrics(page)

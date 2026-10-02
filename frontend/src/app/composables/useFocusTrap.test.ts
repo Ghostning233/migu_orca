@@ -119,4 +119,49 @@ describe('useFocusTrap (US-200)', () => {
     expect(() => trap.activate()).not.toThrow()
     expect(() => trap.deactivate()).not.toThrow()
   })
+
+  it('clears the inert siblings even after the container ref was cleared', () => {
+    // 组件在弹窗打开时被销毁：模板 ref 可能已为空，陷阱必须记住激活时的根元素，
+    // 否则 inert 会跟着下一页一起留下来。
+    mount()
+    const el = ref<HTMLElement | null>(container)
+    const trap = useFocusTrap(el)
+    trap.activate()
+    expect(outside.hasAttribute('inert')).toBe(true)
+
+    el.value = null
+    trap.deactivate()
+    expect(outside.hasAttribute('inert')).toBe(false)
+  })
+
+  it('can release without restoring focus, and never focuses a detached trigger', () => {
+    mount()
+    outside.focus()
+    const el = ref<HTMLElement | null>(container)
+    const trap = useFocusTrap(el)
+    trap.activate()
+
+    trap.deactivate({ restoreFocus: false })
+    expect(outside.hasAttribute('inert')).toBe(false)
+    expect(document.activeElement?.id).not.toBe('outside')
+
+    // 触发入口已脱离 DOM：仍然清掉 inert，但不把焦点丢给一个不在文档里的元素。
+    outside.focus()
+    const second = useFocusTrap(el)
+    second.activate()
+    outside.remove()
+    expect(() => second.deactivate()).not.toThrow()
+    expect(document.activeElement?.id).not.toBe('outside')
+  })
+
+  it('deactivate stays a no-op after the trap was already released', () => {
+    mount()
+    const el = ref<HTMLElement | null>(container)
+    const trap = useFocusTrap(el)
+    trap.activate()
+    trap.deactivate()
+    expect(() => trap.deactivate()).not.toThrow()
+    expect(() => trap.deactivate({ restoreFocus: false })).not.toThrow()
+    expect(trap.isActive()).toBe(false)
+  })
 })

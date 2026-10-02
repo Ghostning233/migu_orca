@@ -57,6 +57,7 @@ import {
   type MikanCandidate,
 } from '@/features/workbench/candidateSearch'
 import { batchItemCount, validateBatchRawInput } from '@/features/workbench/batchWorkbench'
+import type { BatchParseOutcome } from '@/features/workbench/batchWorkbench'
 import { displayValue } from '@/features/requests/requestDetail'
 import type { RequestSnapshot } from '@/features/requests/requestDetail'
 import { currentStorageDir, storageQuery } from '@/features/requests/requestStorage'
@@ -86,7 +87,13 @@ const batchSearchSubmitting = ref(false)
 // 整批拿到稳定结果后才切到工作台。
 const batchProgress = ref<{ completed: number; total: number } | null>(null)
 const batchSearchSettled = ref(false)
+// 子组件报告的「批量数据已稳定可展示」；父组件据此在搜索收尾后唯一一次切屏。
+const batchResultReady = ref(false)
+// 整批解析成功但服务端没有返回任何条目：留在搜索首屏就地说明（不是 MiKan 故障）。
+const batchEmptyResult = ref(false)
 const batchWorkbenchScreen = ref<HTMLElement | null>(null)
+// 批量搜索首屏：批量模式下的「第一屏」切屏目标（与单番 hero 互斥挂载）。
+const batchSearchScreen = ref<HTMLElement | null>(null)
 const selections = ref<Record<AnimeMode, { start: number; end: number }>>({
   single: { start: 0, end: 0 },
   batch: { start: 0, end: 0 },
@@ -124,11 +131,27 @@ const searchStarted = computed(
 const batchCount = computed(() => batchItemCount(batchQuery.value))
 const batchValidationError = computed(() => validateBatchRawInput(batchQuery.value))
 const batchSearchDisabled = computed(() => batchSearchSubmitting.value || Boolean(batchValidationError.value))
+/**
+ * #159：批量首屏与单番英雄区共用「空闲态垂直居中 / 搜索态回到文档流顶部」这一条规则，
+ * 避免进度、失败或空结果出现时任务区被重新居中而产生跳动。
+ */
+const batchSearchActive = computed(
+  () => batchSearchSubmitting.value || Boolean(batchProgress.value) || batchEmptyResult.value,
+)
+
+/**
+ * 模式切换的禁用条件必须包含「批量搜索进行中」：批量请求仍在飞时切到单番，会让
+ * 结果在没有 batch 屏的情况下完成，用户切回来时结果仍然被隐藏、也不会自动进入
+ * 工作台。单番搜索（singleBusy）与批量搜索（batchSearchSubmitting）都不允许切换。
+ */
+const modeSwitchDisabled = computed(() => singleBusy.value || batchSearchSubmitting.value)
 
 async function submitBatchSearch(): Promise<void> {
   if (batchSearchDisabled.value) return
   batchSearchSubmitting.value = true
   batchSearchSettled.value = false
+  batchResultReady.value = false
+  batchEmptyResult.value = false
   // 进度条按输入部数分段，从 0 开始；只有真实完成事件才会推进。
   batchProgress.value = { completed: 0, total: batchCount.value }
   try {
@@ -136,20 +159,41 @@ async function submitBatchSearch(): Promise<void> {
       batchProgress.value = progress
     })
   } finally {
+    // 搜索状态的收尾必须先于切屏：按钮 loading 与进度条都会改变首屏高度，
+    // 在它们撤掉之前取切屏目标会拿到中间态布局。
     batchSearchSubmitting.value = false
     batchProgress.value = null
   }
+  await enterBatchWorkbench()
 }
 
-/** Issue 112/113：整批完成、拿到稳定结果后才切到第二屏并移焦点。 */
-function onBatchParseSettled(): void {
+/**
+ * 子组件只表达「批量数据已稳定可展示」；是否切屏、何时切屏由父组件唯一决定，
+ * 避免子组件与父组件同时抢焦点或滚动。
+ *
+ * 只有「至少有一个可展示条目」才允许进入工作台：`items=[]` 表示服务端没有返回任何
+ * 条目（不是 MiKan 故障），此时留在搜索首屏就地说明，而不是切进一个空工作台。
+ * 全部条目都是 EMPTY/FAILED 仍算有条目，必须进入工作台逐项处理。
+ */
+function onBatchParseSettled(outcome: BatchParseOutcome): void {
+  batchResultReady.value = !outcome.failed && outcome.itemCount > 0
+  batchEmptyResult.value = !outcome.failed && outcome.itemCount === 0
+}
+
+/**
+ * Issue 112/113：整批完成且搜索状态收尾后，唯一一次进入第二屏。
+ *
+ * `goToSecondScreen()` 会先等第二屏的文档 top 与高度连续两帧稳定，再在最终布局上取
+ * 切屏目标；焦点也在这个时点之后落到工作台标题，因此不再需要叠加 `nextTick()`。
+ * 失败、空 items 或当前不在 batch 模式时保持 false／不变，仍然留在搜索首屏。
+ */
+async function enterBatchWorkbench(): Promise<void> {
+  if (!batchResultReady.value || mode.value !== 'batch' || batchSearchSettled.value) return
   batchSearchSettled.value = true
-  void nextTick(async () => {
-    // 这一屏刚由 v-show 显示；隐藏时无法聚焦，因此在这里把焦点落到工作台标题。
-    document
-      .querySelector<HTMLElement>('#panel-section-批量工作台')
-      ?.focus({ preventScroll: true })
-    await screenScroll.goToSecondScreen()
+  await screenScroll.goToSecondScreen({
+    onReady: () => {
+      document.querySelector<HTMLElement>('#panel-section-批量工作台')?.focus({ preventScroll: true })
+    },
   })
 }
 
@@ -248,12 +292,27 @@ const hasUnsavedSingleWork = computed(() => hasResults.value || draftRequest.val
  * 失败、无候选、整批未完成）时不会切屏。滚动属于文档，模块外空白区同样可切屏；
  * 批量左右栏以 `data-screen-scroll="inner"` 声明为内部滚动所有者。
  */
+// 首屏同样按模式取：单番 hero 与批量搜索屏互斥挂载。批量模式下 heroScreen 为空，
+// 若只绑单番 hero，「返回搜索首屏」与「模块外空白向上滚」都没有切屏目标。
+const firstScreen = computed<HTMLElement | null>(() =>
+  mode.value === 'single' ? heroScreen.value : batchSearchScreen.value,
+)
 const secondScreen = computed<HTMLElement | null>(() =>
   mode.value === 'single' ? workbenchScreen.value : batchWorkbenchScreen.value,
 )
 const screenScroll = useAddAnimeScreenScroll({
-  firstScreen: heroScreen,
+  firstScreen,
   secondScreen,
+})
+
+/**
+ * 结果已就绪但当时不在 batch 模式（例如某个合法入口在请求完成后才切回批量）时，
+ * 切回批量必须明确恢复已完成的结果，而不是依赖偶然的焦点滚动。`enterBatchWorkbench`
+ * 是幂等的：已经进入过（`batchSearchSettled` 为真）时不会重复切屏。
+ */
+watch(mode, (value) => {
+  if (value !== 'batch') return
+  void enterBatchWorkbench()
 })
 
 /**
@@ -263,6 +322,15 @@ const screenScroll = useAddAnimeScreenScroll({
 async function backToSearch(): Promise<void> {
   await screenScroll.goToFirstScreen()
   singleSearchForm.value?.focusInput()
+}
+
+/**
+ * #145：批量工作台页头的「返回搜索首屏」——只切屏与聚焦批量输入，绝不清除下方
+ * 未保存的候选、草案、筛选与勾选现场（与单番返回入口同一语义）。
+ */
+async function backToBatchSearch(): Promise<void> {
+  await screenScroll.goToFirstScreen()
+  batchInput.value?.focusInput()
 }
 
 // #141：候选切到草案时工作台内容会变长（也可能被滚动锚定带动），
@@ -405,8 +473,15 @@ async function searchCandidates(): Promise<void> {
     await nextTick()
     if (searchResult.value?.candidates?.length) {
       // Issue 110：成功后自动进入下方工作台，并把键盘焦点移到结果标题。
-      document.querySelector<HTMLElement>('#candidate-search-heading')?.focus({ preventScroll: true })
-      await screenScroll.goToSecondScreen()
+      // 焦点与滚动都发生在第二屏的最终稳定布局就位之后（`onReady`），因此取到的
+      // 切屏目标一定是最新坐标，也不会让焦点把一个还在收尾的布局带偏。
+      await screenScroll.goToSecondScreen({
+        onReady: () => {
+          document
+            .querySelector<HTMLElement>('#candidate-search-heading')
+            ?.focus({ preventScroll: true })
+        },
+      })
     } else {
       // 失败或无候选都留在搜索首屏就地恢复；不抢焦点（Stage 42 无障碍保证），
       // 用户仍停在输入或原控件上，可直接修正后重试。
@@ -562,7 +637,7 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
         <p class="single-home-subtitle">输入番剧名称 → 人工选择真实 MiKan 合集 → 审核并保存确认。</p>
       </div>
 
-      <AnimeModeSwitch :model-value="mode" :disabled="singleBusy" @update:model-value="changeMode" />
+      <AnimeModeSwitch :model-value="mode" :disabled="modeSwitchDisabled" @update:model-value="changeMode" />
 
       <SingleAnimeSearchForm
         ref="singleSearchForm"
@@ -738,17 +813,19 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
   <div v-show="mode === 'batch'" class="add-anime-screens batch-screens">
     <!-- 首屏只在批量模式下挂载：单番容器已提供自己的标题、模式切换与步骤，
          两者同时存在会产生重复的 id 与导航语义。 -->
-    <section v-if="mode === 'batch'" class="add-screen batch-search-screen">
-      <h1 id="workbench-heading" class="workbench-title">添加番剧</h1>
-      <AnimeModeSwitch :model-value="mode" :disabled="singleBusy" @update:model-value="changeMode" />
-      <p v-if="reuseSource" id="reuse-handoff-summary" class="field-help" role="status">
-        已载入复制方案起点：{{ reuseSource.title }}（公开合集编号 {{ reuseSource.mikanBangumiId }}）。请重新搜索并选择真实合集。
-      </p>
-      <ol class="journey-steps" aria-label="添加番剧步骤">
-        <li class="is-current">输入名称</li>
-        <li>选择真实合集</li>
-        <li>审核并保存确认</li>
-      </ol>
+    <section
+      v-if="mode === 'batch'"
+      ref="batchSearchScreen"
+      class="add-screen batch-search-screen"
+      :class="{ 'is-searching': batchSearchActive }"
+    >
+      <!-- #159：批量首屏与单番首屏共用同一套标题层级、中心轴与模式切换锚点；只有输入
+           形态（多行文本框）按任务保留自然高度。 -->
+      <div class="batch-search-intro">
+        <h1 id="workbench-heading" class="workbench-title">添加番剧</h1>
+        <p class="batch-search-subtitle">粘贴番剧名称 → 逐部选择真实 MiKan 合集 → 审核并保存确认。</p>
+      </div>
+      <AnimeModeSwitch :model-value="mode" :disabled="modeSwitchDisabled" @update:model-value="changeMode" />
 
       <form
         id="batch-parse-form"
@@ -766,9 +843,16 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
       />
       <p class="field-help" id="batch-raw-input-help">每行一个番剧简称或不完整标题；系统会逐项解析并搜索候选合集，结果需人工审核。</p>
       <p id="batch-input-count" class="batch-input-count" role="status">
-        当前 {{ batchCount }} 部；可输入 1～36 部。{{ batchValidationError || '输入有效，可以开始搜索。' }}
+        当前 {{ batchCount }} 部；可输入 1～36 部。
       </p>
+      <!-- #159：非法输入只在下面这一条 role="alert" 里说明一次；容量提示行不重复同一句
+           错误文案，任务区因此不会被同一句话撑成两行。 -->
       <p v-if="batchValidationError" id="batch-input-validation" class="field-error" role="alert">{{ batchValidationError }}</p>
+      <!-- #145 F：整批成功但服务端没有返回任何条目 → 留在搜索首屏就地说明，
+           既不进入空工作台，也不把它描述成 MiKan 故障。 -->
+      <p v-if="batchEmptyResult" id="batch-empty-result" class="field-help" role="status">
+        整批解析已完成，但服务端没有返回任何条目；请核对输入后重新搜索。
+      </p>
       <!-- Issue 112：按实际完成部数推进的分段进度；不做时间估算。 -->
       <div v-if="batchProgress" id="batch-search-progress" class="batch-search-progress">
         <p class="batch-progress-label" role="status" aria-live="polite">
@@ -792,6 +876,16 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
         </BaseButton>
       </div>
       </form>
+
+      <p v-if="reuseSource" id="reuse-handoff-summary" class="field-help" role="status">
+        已载入复制方案起点：{{ reuseSource.title }}（公开合集编号 {{ reuseSource.mikanBangumiId }}）。请重新搜索并选择真实合集。
+      </p>
+
+      <ol class="journey-steps batch-search-steps" aria-label="添加番剧步骤">
+        <li class="is-current">输入名称</li>
+        <li>选择真实合集</li>
+        <li>审核并保存确认</li>
+      </ol>
     </section>
 
     <!-- 第二屏：批量双栏工作台。整批完成、拿到稳定结果后才显示并切入。 -->
@@ -808,6 +902,7 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
         v-model:raw-input="batchQuery"
         hide-input
         @restore-search-focus="batchInput?.focusInput()"
+        @back-to-search="backToBatchSearch"
         @parse-settled="onBatchParseSettled"
       />
     </section>
@@ -826,6 +921,21 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
  * 不再有第二条内部纵向滚动轴。 */
 .add-anime-screens {
   display: block;
+  /* #159：单番首屏空闲态的获批任务区高度（Stage 47 基线，全部由冻结 Token 推导）：
+     标题 48 + 说明间距 8 + 说明 24 + 模式切换间距 24 + 模式切换 62
+     （--control-height-mode-switch）+ 表单间距 32 +（标签 22.4 + 字段间距 8 + 输入 52）
+     + 说明间距 16 + 说明 22.4 + 步骤间距 40 + 步骤 64。批量首屏用它把任务区顶端对齐
+     到单番的居中位置：批量内容自然更高，直接居中会让标题与模式切换整体上移约 108px。
+     这是页面专属的几何镜像，单番首屏改变间距时必须同步；实际偏差由
+     tests/browser/test_app_add_mode_continuity.py 在 1280/1440/1920 上逐视口复核。 */
+  --first-screen-task-height: calc(
+    (var(--type-display) * var(--type-display-line-height)) + var(--space-2)
+      + (var(--type-body) * var(--line-height-body)) + var(--space-6)
+      + var(--control-height-mode-switch) + var(--space-8)
+      + (var(--font-size-sm) * var(--line-height-body)) + var(--space-2) + var(--control-height-lg)
+      + var(--space-4) + (var(--font-size-sm) * var(--line-height-body))
+      + var(--space-10) + var(--space-16)
+  );
 }
 
 .add-screen {
@@ -882,7 +992,8 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
   text-align: center;
 }
 
-.single-home-hero .workbench-title {
+.single-home-hero .workbench-title,
+.batch-search-screen .workbench-title {
   display: -webkit-box;
   /* 固定单行高度 = display 字号 × display 行高 Token（40 × 1.2 = 48px）。 */
   height: calc(var(--type-display) * var(--type-display-line-height));
@@ -894,7 +1005,8 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
   -webkit-line-clamp: 1;
 }
 
-.single-home-subtitle {
+.single-home-subtitle,
+.batch-search-subtitle {
   display: -webkit-box;
   /* 固定单行高度 = 正文字号 × 正文行高 Token（15 × 1.6 = 24px）。 */
   height: calc(var(--type-body) * var(--line-height-body));
@@ -907,13 +1019,23 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
   -webkit-line-clamp: 1;
 }
 
-.single-home-hero > .anime-mode-switch {
+.single-home-hero > .anime-mode-switch,
+.batch-search-screen > .anime-mode-switch {
   margin-top: var(--space-6);
 }
 
-.single-home-hero > .workbench-search-form {
+.single-home-hero > .workbench-search-form,
+.batch-search-screen > .batch-parse-form {
   width: 100%;
   margin-top: var(--space-8);
+  /* #159：批量任务区比单番多出文本框、容量提示与主操作；行距收一档，让空闲态的
+     任务区连同 24px 顶端锚点仍在一屏内，不把旅程步骤挤到首屏之外。 */
+  gap: var(--space-2);
+}
+
+/* 任务区内的说明行由栅格间距分隔，不再叠加 field-help 自带的外边距。 */
+.batch-search-screen > .batch-parse-form > .field-help {
+  margin-block: 0;
 }
 
 .single-home-help {
@@ -1088,13 +1210,56 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 }
 
 .batch-search-screen {
-  /* Issue 113：批量搜索首屏独占一屏，内容在 720px 容器内居中。 */
+  /* #159：批量首屏与单番英雄区共用 720px 任务宽度、水平中心轴与任务区顶端锚点；
+     只有输入形态（多行文本框）按任务保留自然高度。间距与单番一样由各子项的
+     Token 边距决定，不用 flex gap 叠加出第二套节奏。 */
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
-  justify-content: center;
+  align-items: center;
+  gap: 0;
+  /* 顶端锚点：把批量任务区顶端放在单番空闲态居中后的同一位置（内容更高时自然向下
+     延伸，不影响标题与模式切换的位置）。视口装不下时归零，与单番一样自然滚动。 */
+  justify-content: flex-start;
+  padding-block-start: max(
+    0px,
+    calc(
+      (100vh - var(--size-shell-header) - var(--space-6) * 2 - var(--first-screen-task-height)) / 2
+    )
+  );
   width: min(100%, 720px);
+  min-height: calc(100vh - var(--size-shell-header) - var(--space-6) * 2);
   margin-inline: auto;
+}
+
+/* 搜索一旦开始（loading／逐部进度／空结果）任务区回到文档流顶部，与单番首屏同一
+   条规则，避免居中与结果面板之间来回跳变。 */
+.batch-search-screen.is-searching {
+  justify-content: flex-start;
+  min-height: auto;
+  padding-top: var(--space-2);
+}
+
+.batch-search-intro {
+  display: grid;
+  gap: var(--space-2);
+  width: 100%;
+  text-align: center;
+}
+
+.batch-search-screen > #reuse-handoff-summary {
+  width: 100%;
+  margin: var(--space-4) 0 0;
+}
+
+.batch-search-screen .journey-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--space-16);
+  margin: var(--space-10) 0 0;
+  text-align: center;
+  list-style-position: inside;
 }
 
 .batch-workbench-screen {
@@ -1111,6 +1276,10 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
   /* 退化滚动时不自带可见滚动条：避免滚动条出现/消失改变内容宽度造成抖动；
      双栏内部的可见滚动条不受影响。 */
   scrollbar-width: none;
+  /* 批量工作台不再有包裹双栏的外框；仍需保留轻微水平留白，避免页头、两栏与
+     底栏直接贴住添加页内容边界。此留白属于工作台屏，不影响两栏各自的滚动所有权。 */
+  box-sizing: border-box;
+  padding-inline: var(--space-3);
   width: 100%;
 }
 
@@ -1167,6 +1336,12 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+/* 批量首屏的任务区是居中列：主搜索操作与输入区、说明同处一条中心轴，
+   不再贴在表单左缘。 */
+.batch-search-screen > .batch-parse-form > .notification-actions {
+  justify-content: center;
 }
 
 @media (max-width: 720px) {

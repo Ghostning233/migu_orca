@@ -1,0 +1,185 @@
+{
+  "draft-workbench": {
+    "current_card": {
+      "height": 102.1875,
+      "right": 505.078125,
+      "width": 444.078125,
+      "x": 61,
+      "y": 511.1875
+    },
+    "detail": {
+      "height": 614,
+      "right": 1396,
+      "width": 849.921875,
+      "x": 546.078125,
+      "y": 180
+    },
+    "heading": {
+      "height": 48,
+      "right": 244,
+      "width": 200,
+      "x": 44,
+      "y": 96
+    },
+    "list": {
+      "height": 524,
+      "right": 513.078125,
+      "width": 460.078125,
+      "x": 53,
+      "y": 261
+    },
+    "primary_action": {
+      "height": 44,
+      "right": 1379,
+      "width": 124,
+      "x": 1255,
+      "y": 827
+    },
+    "resource_box": {
+      "height": 155,
+      "right": 1371,
+      "width": 799.921875,
+      "x": 571.078125,
+      "y": 536.390625
+    },
+    "toolbar": {
+      "height": 54,
+      "right": 1396,
+      "width": 1352,
+      "x": 44,
+      "y": 822
+    }
+  },
+  "resource-detail-effective": {
+    "dialog": {
+      "height": 700,
+      "right": 1104,
+      "width": 768,
+      "x": 336,
+      "y": 100
+    },
+    "dialog_footer": {
+      "height": 57,
+      "right": 1079,
+      "width": 718,
+      "x": 361,
+      "y": 722
+    },
+    "dialog_title": {
+      "height": 33.59375,
+      "right": 473.015625,
+      "width": 112.015625,
+      "x": 361,
+      "y": 121
+    },
+    "first_resource": {
+      "height": 56,
+      "right": 1079,
+      "width": 718,
+      "x": 361,
+      "y": 271.59375
+    },
+    "resource_list": {
+      "height": 434.40625,
+      "right": 1079,
+      "width": 718,
+      "x": 361,
+      "y": 271.59375
+    },
+    "tabs": {
+      "height": 45,
+      "right": 1079,
+      "width": 718,
+      "x": 361,
+      "y": 170.59375
+    }
+  },
+  "resource-detail-excluded": {
+    "dialog": {
+      "height": 700,
+      "right": 1104,
+      "width": 768,
+      "x": 336,
+      "y": 100
+    },
+    "dialog_footer": {
+      "height": 57,
+      "right": 1079,
+      "width": 718,
+      "x": 361,
+      "y": 722
+    },
+    "dialog_title": {
+      "height": 33.59375,
+      "right": 473.015625,
+      "width": 112.015625,
+      "x": 361,
+      "y": 121
+    },
+    "first_resource": {
+      "height": 56,
+      "right": 1079,
+      "width": 718,
+      "x": 361,
+      "y": 271.59375
+    },
+    "resource_list": {
+      "height": 434.40625,
+      "right": 1079,
+      "width": 718,
+      "x": 361,
+      "y": 271.59375
+    },
+    "tabs": {
+      "height": 45,
+      "right": 1079,
+      "width": 718,
+      "x": 361,
+      "y": 170.59375
+    }
+  },
+  "title-search": {
+    "detail": {
+      "height": 614,
+      "right": 1396,
+      "width": 849.921875,
+      "x": 546.078125,
+      "y": 180
+    },
+    "heading": {
+      "height": 48,
+      "right": 244,
+      "width": 200,
+      "x": 44,
+      "y": 96
+    },
+    "list": {
+      "height": 494.5,
+      "right": 513.078125,
+      "width": 460.078125,
+      "x": 53,
+      "y": 290.5
+    },
+    "search_input": {
+      "height": 36,
+      "right": 456.078125,
+      "width": 363.078125,
+      "x": 93,
+      "y": 258
+    },
+    "search_popover": {
+      "height": 46,
+      "right": 505.078125,
+      "width": 444.078125,
+      "x": 61,
+      "y": 253
+    },
+    "toolbar": {
+      "height": 54,
+      "right": 1396,
+      "width": 1352,
+      "x": 44,
+      "y": 822
+    }
+  }
+}

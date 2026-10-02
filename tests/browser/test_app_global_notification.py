@@ -170,6 +170,46 @@ class TestAppGlobalNotificationFloating:
         assert after is not None
         _assert_same_box(anchor, after)
 
+    def test_auto_closed_toast_never_moves_the_page(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        """通用页面回归：提示条**自动关闭**时必须保留关闭前此刻的视口。
+
+        单番页面同样适用：成功提示出现时页面还在搜索首屏，之后自动切到候选工作台；
+        10 秒后提示条自动关闭，绝不能把页面恢复成提示出现时的搜索首屏位置（用户会
+        被迫重新向下滚动）。这条回归证明修复不只偶然适用于批量工作台。
+        """
+        page.set_viewport_size({"width": 1440, "height": 900})
+        page.route(
+            "**/api/v1/mikan/candidates",
+            lambda route: route.fulfill(
+                status=200, content_type="application/json", body=_one_candidate_json()
+            ),
+        )
+        set_storage_preferences(page, storage_dir)
+        _goto_workbench(page, live_server_url)
+        _search(page)
+
+        toast = page.locator(".global-notification")
+        expect(toast).to_contain_text("候选搜索完成", timeout=5000)
+        # 成功后的自动切屏是文档级平滑滚动，先等它停稳再记录位置。
+        wait_for_screen_scroll(page)
+        assert page.evaluate("() => window.scrollY") > 100
+        before = page.evaluate("() => window.scrollY")
+        assert page.evaluate(
+            "() => document.documentElement.style.scrollBehavior"
+        ) == "auto", "提示条可见期间应当启用滚动锚定保护"
+
+        # 不做任何点击：等待 success 提示（10s）自动关闭。
+        expect(toast).to_have_count(0, timeout=15000)
+        page.wait_for_timeout(300)
+
+        after = page.evaluate("() => window.scrollY")
+        assert abs(after - before) <= 2, (before, after)
+        # 保护环境在关闭后也要恢复，否则会永久改掉全局滚动行为。
+        assert page.evaluate("() => document.documentElement.style.scrollBehavior") == ""
+        assert page.evaluate("() => document.documentElement.style.overflowAnchor") == ""
+
     def test_mouse_click_on_the_close_control_dismisses_the_toast(
         self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:

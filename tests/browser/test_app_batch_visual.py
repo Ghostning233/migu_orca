@@ -96,8 +96,9 @@ class TestAppBatchVisualFixtures:
         scenario = self._scenario(page, live_server_url, storage_dir)
         scenario.enter_figure_06()
 
-        expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选且可确认 2 项")
-        expect(page.locator("#batch-accept-selected-count")).to_contain_text("完整批次 6 部")
+        # #145：底栏精简为一行——已选数量 + 唯一「保存并确认 N 部」主入口。
+        expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选 2 部")
+        expect(page.locator("#batch-accept-submit")).to_contain_text("保存并确认 2 部")
         submit = page.locator("#batch-accept-submit")
         expect(submit).to_be_visible()
         assert "primary-button" in (submit.get_attribute("class") or "")
@@ -114,11 +115,13 @@ class TestAppBatchVisualFixtures:
         scenario = self._scenario(page, live_server_url, storage_dir)
         scenario.enter_figure_06()
 
+        scenario.open_title_search()
         page.fill("#batch-review-search", "迷宫")
         expect(page.locator(".batch-draft-card")).to_have_count(1)
         counts = page.locator("#batch-accept-selected-count")
-        expect(counts).to_contain_text("已选且可确认 2 项")
-        expect(counts).to_contain_text("其中被筛选隐藏仍参与 1 项")
+        expect(counts).to_contain_text("已选 2 部")
+        expect(counts).to_contain_text("当前可见 1 部（隐藏仍参与）")
+        expect(page.locator("#batch-accept-selected-scope")).to_have_count(0)
 
     @pytest.mark.parametrize("count", [1, 12, 36])
     def test_constructor_keeps_one_twelve_thirty_six_boundaries(

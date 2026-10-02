@@ -31,8 +31,43 @@ export const WHEEL_GESTURE_IDLE_MS = 180
 /** 滚轮/触控板手势结束后仍允许停靠收敛的时间窗。 */
 export const WHEEL_SETTLE_WINDOW_MS = 600
 
+/** 判定第二屏几何「连续两帧稳定」的像素容差。 */
+export const SCREEN_GEOMETRY_EPSILON = 0.5
+
+/** 切屏目标的几何：相对文档的 top 与渲染高度。 */
+export interface ScreenGeometry {
+  top: number
+  height: number
+}
+
+/**
+ * 连续两帧的几何是否在容差内稳定。
+ *
+ * 必须同时比较**文档 top 与高度**：只比高度会把「第一屏收尾导致第二屏整体位移」的
+ * 中间态误判为稳定，从而用过期坐标切屏。
+ */
+export function screenGeometryIsStable(
+  previous: ScreenGeometry | null,
+  current: ScreenGeometry | null,
+  epsilon: number = SCREEN_GEOMETRY_EPSILON,
+): boolean {
+  if (!previous || !current) return false
+  return (
+    Math.abs(current.top - previous.top) <= epsilon
+    && Math.abs(current.height - previous.height) <= epsilon
+  )
+}
+
 /** 等待切屏真正停到目标位置的有界兜底时长。 */
 export const SCREEN_SWITCH_SETTLE_MS = 1500
+
+/**
+ * 等待第二屏「真实可见 + 文档位置连续两帧不变」的有界兜底时长。
+ *
+ * 用可观察条件收口而不是叠加任意 `nextTick()`/固定延时；后台标签页里
+ * `requestAnimationFrame` 不触发，因此保留这个计时器兜底。
+ */
+export const SCREEN_READY_DEADLINE_MS = 1000
 
 export type ScreenKey = 'first' | 'second'
 
@@ -93,7 +128,17 @@ export interface AddAnimeScreenScrollController {
   /** 完整、平滑地回到搜索首屏；动画结束后 resolve（减少动态效果时立即返回）。 */
   goToFirstScreen: () => Promise<void>
   /** 完整、平滑地进入工作台顶部。 */
-  goToSecondScreen: () => Promise<void>
+  goToSecondScreen: (options?: GoToSecondScreenOptions) => Promise<void>
+}
+
+export interface GoToSecondScreenOptions {
+  /**
+   * 第二屏已经真实可见、文档位置也稳定之后、计算切屏目标之前执行一次。
+   *
+   * 这是「把焦点移到结果标题」这类一次性准备的入口：它必须发生在最终布局上，
+   * 因此在同一个等待条件里执行，而不是由调用方再叠一层 `nextTick()`。
+   */
+  onReady?: () => void
 }
 
 function prefersReducedMotion(): boolean {
@@ -142,9 +187,20 @@ export function useAddAnimeScreenScroll(
   let lastWheelAt = 0
   let scrollIdleTimer: ReturnType<typeof setTimeout> | undefined
 
+  /** 第二屏当前的文档几何；未挂载或没有渲染高度时返回 null。 */
+  function secondScreenGeometry(): ScreenGeometry | null {
+    const element = options.secondScreen.value
+    if (!element) return null
+    const rect = element.getBoundingClientRect()
+    if (rect.height <= 0) return null
+    return { top: rect.top + window.scrollY, height: rect.height }
+  }
+
   function screenTop(key: ScreenKey): number | null {
     const element = key === 'first' ? options.firstScreen.value : options.secondScreen.value
-    if (!element) return null
+    // 未挂载或 `v-show` 隐藏（`display: none`）的屏不是切屏目标：它的盒模型为零，
+    // 直接用 rect 会算出一个虚假的顶位（例如 -scrollPaddingTop）并骗过切屏判断。
+    if (!element || element.getBoundingClientRect().height <= 0) return null
     return element.getBoundingClientRect().top + window.scrollY - scrollPaddingTop()
   }
 
@@ -174,6 +230,51 @@ export function useAddAnimeScreenScroll(
           return
         }
         previous = position
+        requestAnimationFrame(check)
+      }
+      requestAnimationFrame(check)
+    })
+  }
+
+  /**
+   * 等第二屏进入「可切屏」的稳定布局。
+   *
+   * 切屏目标必须取自最终稳定布局，因此等待条件同时覆盖：第二屏存在并渲染出高度、
+   * 它的**文档坐标 top** 与高度连续两帧在合理误差内不变。只看高度不足以证明稳定——
+   * 第一屏的进度条/loading 收尾时第二屏高度可能不变，但它的文档 top 仍会变化，
+   * 提前取目标就会用过期坐标造成错误切屏或回跳。
+   *
+   * 这里用可观察几何收口，不做 sleep、也不叠加任意 `nextTick()`；后台标签页里
+   * `requestAnimationFrame` 不触发，因此保留 `SCREEN_READY_DEADLINE_MS` 计时器兜底，
+   * 超时后安全返回（找不到目标就不滚动），绝不永久锁定滚动。
+   */
+  function waitForSecondScreenReady(deadline = SCREEN_READY_DEADLINE_MS): Promise<void> {
+    // 没有真实布局信息（jsdom 等测试环境）时几何稳定性不可观测：直接返回，
+    // 既不误判成「已稳定」，也不无意义地等满兜底时长。
+    if (document.documentElement.clientHeight <= 0) return Promise.resolve()
+    return new Promise((resolve) => {
+      const startedAt = performance.now()
+      let finished = false
+      let previous: ScreenGeometry | null = null
+      const finish = (): void => {
+        if (finished) return
+        finished = true
+        clearTimeout(timer)
+        resolve()
+      }
+      const timer = setTimeout(finish, deadline)
+      const check = (): void => {
+        if (finished) return
+        const geometry = secondScreenGeometry()
+        if (screenGeometryIsStable(previous, geometry)) {
+          finish()
+          return
+        }
+        previous = geometry
+        if (performance.now() - startedAt >= deadline) {
+          finish()
+          return
+        }
         requestAnimationFrame(check)
       }
       requestAnimationFrame(check)
@@ -277,6 +378,15 @@ export function useAddAnimeScreenScroll(
 
   return {
     goToFirstScreen: () => goToScreen('first'),
-    goToSecondScreen: () => goToScreen('second'),
+    /**
+     * 程序化进入工作台：第二屏真的可见之后再按最终布局取目标切屏。
+     *
+     * 滚轮驱动的切屏不走这条等待（第二屏本来就已渲染稳定），保持手势响应即时。
+     */
+    goToSecondScreen: async (readyOptions?: GoToSecondScreenOptions) => {
+      await waitForSecondScreenReady()
+      readyOptions?.onReady?.()
+      await goToScreen('second')
+    },
   }
 }

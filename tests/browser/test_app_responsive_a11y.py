@@ -9,6 +9,12 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import set_storage_preferences
+from tests.browser.screen_support import wait_for_screen_scroll
+from tests.browser.test_app_batch_workbench import (
+    _batch_item,
+    _preview_request,
+    _route_parse,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -371,7 +377,8 @@ class TestCrossFeatureResponsive:
 
         page.fill("#batch-raw-input", "萌王S4")
         page.click("#batch-parse-submit")
-        trigger = page.locator(".batch-card-expand", has_text="查看候选")
+        # #145：卡片本体是查看入口（不再有独立的「查看候选」按钮）。
+        trigger = page.locator(".batch-draft-card").first
         expect(trigger).to_be_visible()
         trigger.click()
 
@@ -379,6 +386,104 @@ class TestCrossFeatureResponsive:
         expect(choices).to_be_visible()
         expect(page.locator("#batch-candidate-choices")).to_have_count(0)
         expect(choices.locator(".candidate-select")).to_be_visible()
+
+    def _enter_batch_draft(self, page: Page, live_server_url: str, storage_dir: Path) -> None:
+        """Enter the batch draft workbench with one real DRAFT card."""
+        _route_parse(
+            page,
+            [
+                _batch_item(
+                    "item-1",
+                    "番剧一",
+                    status="DRAFT",
+                    canonical_title="番剧一 第一季",
+                    preview_request=_preview_request("番剧一", "req-a11y-1"),
+                )
+            ],
+        )
+        set_storage_preferences(page, storage_dir)
+        _goto(page, live_server_url, "/app/add")
+        page.wait_for_selector("#anime-mode-switch", timeout=5000)
+        page.click("#anime-mode-batch")
+        page.wait_for_selector("#batch-parse-form", timeout=5000)
+        page.set_viewport_size({"width": 1440, "height": 900})
+        page.fill("#batch-raw-input", "番剧一")
+        page.click("#batch-parse-submit")
+        expect(page.locator(".batch-draft-card")).to_have_count(1)
+        wait_for_screen_scroll(page)
+
+    def test_title_search_popover_keeps_a_visible_focus_indicator(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        """缺陷回归：浮层输入框去掉 outline 后必须仍有等价可见的焦点指示。
+
+        断言的是「聚焦后浮层本身出现可见变化」，因此旧实现（只写 `outline: none`、
+        不给任何替代指示）会失败。
+        """
+        self._enter_batch_draft(page, live_server_url, storage_dir)
+
+        page.click("#batch-review-search-toggle")
+        popover = page.locator("#batch-review-search-popover")
+        expect(popover).to_be_visible()
+
+        style = """() => {
+            const popover = document.querySelector('#batch-review-search-popover')
+            const input = document.querySelector('#batch-review-search')
+            const computed = getComputedStyle(popover)
+            return {
+                inputFocused: document.activeElement === input,
+                borderColor: computed.borderColor,
+                boxShadow: computed.boxShadow,
+                inputOutlineWidth: getComputedStyle(input).outlineWidth,
+            }
+        }"""
+
+        page.evaluate("() => { const input = document.querySelector('#batch-review-search'); if (input) input.blur() }")
+        blurred = page.evaluate(style)
+        expect(popover).to_be_visible()
+        page.locator("#batch-review-search").focus()
+        focused = page.evaluate(style)
+
+        assert focused["inputFocused"] is True, focused
+        # 输入框自身不画内框，但容器必须给出可见的焦点指示（边框或焦点环变化）。
+        assert (focused["borderColor"], focused["boxShadow"]) != (
+            blurred["borderColor"],
+            blurred["boxShadow"],
+        ), (blurred, focused)
+        assert focused["boxShadow"] != "none", focused
+
+    def test_batch_draft_editor_keeps_a_resolvable_accessible_name(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        """缺陷回归：批量编辑器视觉隐藏面板标题后，aria-labelledby 不得指向
+        display:none 的元素，编辑区域必须仍有可解析的可访问名称。"""
+        self._enter_batch_draft(page, live_server_url, storage_dir)
+        page.locator(".batch-draft-card").first.click()
+        editor = page.locator(".batch-draft-editor")
+        expect(editor).to_be_visible()
+        expect(editor).to_contain_text("字幕与筛选")
+
+        labelled = page.evaluate(
+            """() => {
+                const editor = document.querySelector('.batch-draft-editor')
+                const id = editor.getAttribute('aria-labelledby')
+                const heading = id ? document.getElementById(id) : null
+                return {
+                    id,
+                    exists: Boolean(heading),
+                    text: heading ? heading.textContent.trim() : '',
+                    display: heading ? getComputedStyle(heading).display : null,
+                    visibility: heading ? getComputedStyle(heading).visibility : null,
+                    inAccessibilityTree: Boolean(heading) && heading.closest('[aria-hidden="true"]') === null,
+                }
+            }"""
+        )
+        assert labelled["id"], labelled
+        assert labelled["exists"] is True, labelled
+        assert labelled["text"], labelled
+        assert labelled["display"] != "none", labelled
+        assert labelled["visibility"] != "hidden", labelled
+        assert labelled["inAccessibilityTree"] is True, labelled
 
 
 class TestReducedMotionAndFeedback:

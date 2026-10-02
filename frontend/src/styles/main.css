@@ -339,12 +339,91 @@ html.add-anime-scroll .app-header {
   border-color: var(--color-danger-hover);
 }
 
+/* 图标按钮（Issue 149）：无边框、触控目标友好、悬停/聚焦有可见反馈。
+   批量工作台的搜索放大镜/清空/删除与资源明细弹窗的关闭都复用它。 */
+.icon-button {
+  align-items: center;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  justify-content: center;
+  min-height: 2rem;
+  min-width: 2rem;
+  padding: 0;
+}
+
+.icon-button:hover:not(:disabled) {
+  background: var(--color-bg-muted);
+  color: var(--color-text);
+}
+
+.icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 /* US-200: shared form primitives (BaseInput/BaseTextarea/BaseSelect live in
    their component scoped styles; the `[hidden]` rule below preserves the
    legacy HTML `hidden` attribute semantics that the new components rely on
    for auth-mode toggling). */
 [hidden] {
   display: none !important;
+}
+
+/* 全站复选框的统一外观（票 156）。CheckboxRow 与页面里的原生 checkbox（我的追番列表、
+ * 外部修改开关、候选季数确认）共用这一份实现；radio 与其他控件不受影响。
+ * `appearance: none` 只改绘制，不改原生语义：键盘 Space、读屏名称、label 关联、
+ * checked/indeterminate/disabled 都由浏览器维持。 */
+input[type='checkbox'].base-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: var(--color-surface);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  border: var(--control-border-width) solid var(--control-checkbox-border);
+  border-radius: var(--control-checkbox-radius);
+  block-size: var(--control-checkbox-size);
+  flex: 0 0 auto;
+  inline-size: var(--control-checkbox-size);
+  margin: 0;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-easing-standard),
+    border-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+input[type='checkbox'].base-checkbox:hover:not(:disabled) {
+  border-color: var(--color-primary);
+}
+
+input[type='checkbox'].base-checkbox:checked,
+input[type='checkbox'].base-checkbox:indeterminate {
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+input[type='checkbox'].base-checkbox:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23ffffff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round' d='M3.4 8.6l3.1 3.1 6.1-6.2'/%3E%3C/svg%3E");
+}
+
+input[type='checkbox'].base-checkbox:indeterminate {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23ffffff' stroke-width='2.4' stroke-linecap='round' d='M4 8h8'/%3E%3C/svg%3E");
+}
+
+input[type='checkbox'].base-checkbox:disabled {
+  background-color: var(--color-surface-subtle);
+  border-color: var(--color-border);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+input[type='checkbox'].base-checkbox:checked:disabled,
+input[type='checkbox'].base-checkbox:indeterminate:disabled {
+  background-color: var(--color-text-disabled);
+  border-color: var(--color-text-disabled);
 }
 
 button:focus-visible,

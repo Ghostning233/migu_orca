@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -1679,7 +1680,7 @@ class TestAppWorkbenchCandidateLoadingFeedback:
         # Candidate stage: no effective-resource count is displayed yet.
         expect(card_a).not_to_contain_text("有效种子数")
 
-        card_a.locator(".batch-card-expand").click()
+        card_a.click()
         detail = page.locator("#batch-detail-pane")
         expect(detail).to_contain_text("候选合集")
         clicked = detail.locator(".candidate-select").nth(0)
@@ -1699,9 +1700,8 @@ class TestAppWorkbenchCandidateLoadingFeedback:
         # The other item stays fully usable: open its candidates and generate
         # from one of them while item-a is still in flight.
         expect(card_b).not_to_contain_text("正在生成订阅草案")
-        expand_b = card_b.locator(".batch-card-expand")
-        expect(expand_b).to_be_enabled()
-        expand_b.click()
+        expect(card_b).to_be_visible()
+        card_b.click()
         expect(detail).to_contain_text("候选乙一")
         idle = detail.locator(".candidate-select").nth(0)
         idle_sibling = detail.locator(".candidate-select").nth(1)
@@ -1730,7 +1730,7 @@ class TestAppWorkbenchCandidateLoadingFeedback:
         # Switch the detail pane back to item-a while both are generating: its
         # own list still shows item-a's clicked candidate as loading, its
         # sibling as suspended, and exactly one candidate button is busy.
-        card_a.locator(".batch-card-expand").click()
+        card_a.click()
         expect(detail).to_contain_text("候选甲一")
         clicked_a = detail.locator(".candidate-select").nth(0)
         expect(clicked_a).to_have_attribute("aria-busy", "true")
@@ -2343,14 +2343,22 @@ class TestAppWorkbenchDraftAutoRecompute:
 
         # Switch the detail to item-b: item-a's pending debounce window dies
         # with the surface the user left.
-        page.locator(".batch-draft-card[data-item-id='item-b'] .batch-card-title").click()
+        # #145：卡片本体就是查看入口（标题是卡片内的文本，点击同样落在卡片上）。
+        page.locator(".batch-draft-card[data-item-id='item-b']").click()
+        expect(page.locator(".batch-draft-card[data-item-id='item-b']")).to_have_class(
+            re.compile(r"is-current")
+        )
         expect(page.locator("#batch-detail-pane")).to_contain_text("咒术回战")
         page.wait_for_timeout(2000)
         assert len(bodies) == 1, "切换批量详情必须取消待发送的防抖窗口"
 
         # Fulfilling the late item-a response must not touch the item-b detail
         # that replaced it, and must update item-a's own card atomically.
-        seeds_before = page.locator(".batch-draft-card[data-item-id='item-a'] .batch-card-seeds").inner_text()
+        # #145：输入与有效种子数移到卡片按需展开的「辅助信息」里；这里直接读折叠层文本，
+        # 不点击 summary（点击会冒泡成「切换当前条目」，破坏本用例要验证的现场）。
+        card_a = page.locator(".batch-draft-card[data-item-id='item-a']")
+        seeds_before = card_a.locator(".batch-card-facts").text_content()
+        assert seeds_before and "有效种子数" in seeds_before
         held[0].fulfill(
             status=200,
             content_type="application/json",
@@ -2365,10 +2373,9 @@ class TestAppWorkbenchDraftAutoRecompute:
         page.wait_for_timeout(500)
         expect(page.locator("#batch-detail-pane")).to_contain_text("咒术回战")
         expect(page.locator("#batch-detail-pane")).not_to_contain_text("葬送的芙莉莲")
-        card_group = page.locator(".batch-draft-card[data-item-id='item-a'] .batch-card-subtitle-group select")
-        assert card_group.input_value() == self.SECOND_GROUP
-        seeds_after = page.locator(".batch-draft-card[data-item-id='item-a'] .batch-card-seeds").inner_text()
-        assert seeds_after != seeds_before, "item-a card resource summary did not refresh with its new group"
+        expect(card_a.locator(".batch-card-status")).to_contain_text("草案")
+        seeds_after = card_a.locator(".batch-card-facts").text_content()
+        assert seeds_after != seeds_before, "item-a card auxiliary facts did not refresh with its new group"
         # The dropped debounce never turns into a follow-up CAS.
         assert len(bodies) == 1
         assert "draft-344-a" not in page.url

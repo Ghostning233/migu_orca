@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   decideWheelIntent,
   resolveScreenRest,
+  screenGeometryIsStable,
   SCREEN_EDGE_EPSILON,
 } from '@/app/composables/useAddAnimeScreenScroll'
 
@@ -96,5 +97,20 @@ describe('resolveScreenRest', () => {
 
   it('没有工作台屏时不做收敛', () => {
     expect(resolveScreenRest(120, HERO_TOP, null)).toBeNull()
+  })
+})
+
+describe('screenGeometryIsStable', () => {
+  it('要求文档 top 与高度同时稳定，而不是只看高度', () => {
+    expect(screenGeometryIsStable({ top: 780, height: 780 }, { top: 780, height: 780 })).toBe(true)
+    // 第一屏进度条收尾：第二屏高度不变、文档 top 变了 —— 这不是稳定布局。
+    expect(screenGeometryIsStable({ top: 780, height: 780 }, { top: 620, height: 780 })).toBe(false)
+    // 高度本身在变（图片/字体撑开）同样不算稳定。
+    expect(screenGeometryIsStable({ top: 780, height: 780 }, { top: 780, height: 820 })).toBe(false)
+    // 还没有测量到第二屏时不算稳定。
+    expect(screenGeometryIsStable(null, { top: 780, height: 780 })).toBe(false)
+    expect(screenGeometryIsStable({ top: 780, height: 780 }, null)).toBe(false)
+    // 亚像素抖动在容差内仍然算稳定。
+    expect(screenGeometryIsStable({ top: 780, height: 780 }, { top: 780.4, height: 780.4 })).toBe(true)
   })
 })
