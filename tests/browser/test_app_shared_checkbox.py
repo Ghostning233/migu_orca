@@ -19,6 +19,8 @@ from typing import Any
 import pytest
 from playwright.sync_api import Page, expect
 
+from tests.browser.conftest import set_storage_preferences
+from tests.browser.saved_tracking_fixtures import _summary
 from tests.browser.screen_support import wait_for_screen_scroll
 from tests.browser.test_app_batch_workbench import (
     _compact_items,
@@ -27,6 +29,7 @@ from tests.browser.test_app_batch_workbench import (
 )
 from tests.browser.test_app_tracking_batch_submit import _open as _open_tracking
 from tests.browser.test_app_tracking_batch_submit import _pending, _processing
+from tests.browser.test_app_tracking_workbench import _item, _plan_snapshot
 from tests.browser.test_app_workbench import _candidate, _candidate_result_json
 from tests.browser.visual_support import install_shell_status_routes, prepare_canvas, require_dist
 
@@ -291,3 +294,101 @@ def test_candidate_season_confirmation_uses_the_shared_box(page: Page, live_serv
     page.click(".candidate-season-confirmation")
     expect(page.locator(".candidate-season-confirmation input")).to_be_checked()
     expect(page.locator(".candidate-card .candidate-select")).to_be_enabled()
+
+def test_saved_plan_and_external_delete_checkboxes_use_the_shared_box(
+    page: Page, live_server_url: str, storage_dir: Path
+) -> None:
+    """已保存方案（TrackingInspector 的 saved 模式）与「同时删除外部订阅」也走共享方框。"""
+    require_dist()
+    set_storage_preferences(page, storage_dir)
+    page.emulate_media(reduced_motion="reduce")
+    item = {
+        **_item("tracking-a", "葬送的芙莉莲"),
+        "request_id": "request-plan",
+        "status": "PENDING_SUBMIT",
+        "status_label": "待提交",
+        "status_group": "PENDING",
+        "available_actions": [],
+    }
+    # external_mapping 非空 → 删除方案流程会给出「同时删除外部订阅」复选框。
+    detail = {
+        **item,
+        "origin": "single",
+        "batch_id": None,
+        "created_at": "2026-09-01T00:00:00Z",
+        "last_synced_at": None,
+        "safe_info": None,
+        "current_operation": None,
+        "revalidation_issues": [],
+        "external_mapping": {"match_reason": "标题", "enabled": True, "external_deleted": False},
+        "audit_events": [],
+        "warnings": [],
+    }
+
+    def handler(route: Any, request: Any) -> None:
+        path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+        if request.method == "GET" and path == "/settings/autobangumi":
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "configured": True,
+                        "credential_present": True,
+                        "connection_ref": "11111111-1111-4111-8111-111111111111",
+                        "configuration_revision": 1,
+                        "connection_status": "CONFIGURED",
+                    },
+                }
+            )
+            return
+        if request.method == "GET" and path == "/tracking/items":
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1, pending=1), "warnings": []}})
+            return
+        if request.method == "GET" and path == "/tracking/items/tracking-a":
+            route.fulfill(json={"ok": True, "result": detail})
+            return
+        if request.method == "GET" and path == "/requests/request-plan":
+            route.fulfill(json={"ok": True, "result": _plan_snapshot("芙莉莲")})
+            return
+        route.continue_()
+
+    page.route("**/api/v1/**", handler)
+    page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+    page.wait_for_selector("#tracking-edit-plan")
+    page.locator("#tracking-edit-plan").click()
+    page.wait_for_selector("#tracking-plan-editor")
+    page.evaluate(
+        "() => document.querySelectorAll('#tracking-plan-editor details')"
+        ".forEach((el) => { el.open = true; })"
+    )
+
+    # 已保存方案的五项复选框都使用共享 18px 方框。
+    saved_ids = (
+        "tracking-plan-clear-must-contain",
+        "tracking-plan-clear-must-not-contain",
+        "tracking-plan-use-regex",
+        "tracking-plan-case-sensitive",
+        "tracking-plan-clear-folder-name",
+    )
+    for input_id in saved_ids:
+        _assert_shared_box(_box(page, f"#{input_id}"), input_id)
+
+    # 标签点击与原生键盘 Space 都能切换（清空目录名只在 saved 模式出现）。
+    _first_label(page, "tracking-plan-clear-folder-name").click()
+    assert _box(page, "#tracking-plan-clear-folder-name")["checked"] is True
+    page.locator("#tracking-plan-clear-folder-name").focus()
+    page.keyboard.press(" ")
+    assert _box(page, "#tracking-plan-clear-folder-name")["checked"] is False
+    _first_label(page, "tracking-plan-use-regex").click()
+    assert _box(page, "#tracking-plan-use-regex")["checked"] is True
+
+    # 「同时删除 Auto Bangumi 中的受控外部订阅」也在盘点范围内。
+    page.locator("#tracking-delete-plan").click()
+    page.wait_for_selector("#tracking-delete-plan-external")
+    _assert_shared_box(_box(page, "#tracking-delete-plan-external"), "tracking-delete-plan-external")
+    _first_label(page, "tracking-delete-plan-external").click()
+    assert _box(page, "#tracking-delete-plan-external")["checked"] is True
+    page.locator("#tracking-delete-plan-external").focus()
+    page.keyboard.press(" ")
+    assert _box(page, "#tracking-delete-plan-external")["checked"] is False
+

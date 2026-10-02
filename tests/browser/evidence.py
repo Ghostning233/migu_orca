@@ -525,16 +525,30 @@ def _cmd_verify(_args: argparse.Namespace) -> int:
 
 
 def _cmd_preview(args: argparse.Namespace) -> int:
-    """用同一份已校验 dist 启动 Flask，供人工交互预览（不连接任何真实外部服务）。"""
+    """用同一份已校验 dist + 固定安全 fixture 启动**隔离**的人工交互预览。
+
+    预览进程不读写真实验运行数据与部署配置（临时 config/storage），``/api/v1`` 只应答
+    与截图同源的固定 fixture，其余接口在本地 fail closed，不连接真实 MiKan／Auto Bangumi／
+    qBittorrent，也不产生任何保存/提交/删除写。
+    """
     try:
-        verify_build()
+        stamp = verify_build()
     except EvidenceError as error:
         print(f"不通过：{error}", file=sys.stderr)
         return 1
-    from apps.base import create_app
+    from tests.browser.preview_fixtures import PREVIEW_BATCH_ID, create_preview_app
 
-    app = create_app()
-    print(f"人工预览：http://{args.host}:{args.port}/app/add（Ctrl+C 结束）")
+    app, temp_root = create_preview_app()
+    print("人工预览（隔离临时目录 + 固定安全 fixture）：")
+    print(f"  单番首屏 / 批量首屏：http://{args.host}:{args.port}/app/add")
+    print(f"  固定批量草案现场：http://{args.host}:{args.port}/app/workbench?batch_id={PREVIEW_BATCH_ID}")
+    print(
+        "  构建产物："
+        f"{stamp['artifact']['digest'][:12]}（HEAD={stamp['git']['head'][:12]} dirty={stamp['git']['dirty']}，已校验与当前源码一致）"
+    )
+    print(f"  隔离目录（临时，可随时删除）：{temp_root}")
+    print("  说明：AB 未配置、追番列表为空；批量/候选/海报为固定安全 fixture；")
+    print("        未覆盖的 /api/v1 接口在本地 fail closed，不产生外部调用。")
     app.run(host=args.host, port=args.port, debug=False, use_reloader=False)
     return 0
 

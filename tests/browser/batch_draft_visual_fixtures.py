@@ -28,6 +28,13 @@ from playwright.sync_api import Page, expect
 from tests.browser.add_anime_visual_fixtures import install_poster_route
 from tests.browser.batch_visual_fixtures import batch_candidate as _visual_candidate
 from tests.browser.conftest import issue_draft_id, set_storage_preferences
+from tests.browser.evidence import (
+    FixtureDescriptor,
+    LoadedResourceRecorder,
+    ScenarioDescriptor,
+    capture_evidence,
+    write_manifest,
+)
 from tests.browser.screen_support import wait_for_screen_scroll
 from tests.browser.test_app_batch_workbench import (
     _batch_item,
@@ -265,12 +272,23 @@ def canary_values(
     return tuple(values)
 
 
+REVIEW_FIXTURE = FixtureDescriptor(
+    fixture_id="batch-draft-review-153",
+    description="固定安全批次：离线草案、确定性海报与安全资源样例；不连接真实 MiKan／AB／qB。",
+    mock_routes=("/api/v1/batches/parse", "/api/v1/requests", "/api/v1/mikan/posters"),
+)
+"""候选图所属的固定 fixture 标识（写进每张图的证据清单）。"""
+
+
 class BatchDraftVisualScenario:
     """#153 各状态共享的构造器。"""
 
     def __init__(self, page: Page, base_url: str) -> None:
         self.page = page
         self.base_url = base_url
+        # #155：候选图与截图一样要能证明「页面真的加载了本次构建的产物」。
+        self.recorder = LoadedResourceRecorder(base_url)
+        self.recorder.attach(page)
         self.items: list[dict[str, Any]] = batch_draft_items()
         self.console_messages: list[str] = []
         self.external_calls: list[str] = []
@@ -537,11 +555,40 @@ class BatchDraftVisualScenario:
     def review_screenshots_enabled(self) -> bool:
         return os.environ.get("MIGU_ORCA_CAPTURE_REVIEW") == "1"
 
+    def review_artifact_manifest(self, name: str, shot: Path) -> dict[str, Any]:
+        """为一张候选图组装安全证据清单（#155）：构建、实际加载资源与截图摘要。
+
+        无论是否落盘都先校验：dist 必须是当前源码的构建，页面加载的 ``/app`` 资源必须
+        与 dist 逐字节一致；不满足就直接失败，不产出「看起来像证据」的图。
+        """
+        from urllib.parse import urlparse
+
+        state = name.removesuffix(".png")
+        return capture_evidence(
+            self.page,
+            shot,
+            base_url=self.base_url,
+            scenario=ScenarioDescriptor(
+                f"batch-draft-{state}-1440x900",
+                f"批量草案工作台候选图（{state}）",
+                (
+                    "以 1440×900、reduced-motion 进入固定批量草案工作台",
+                    f"推进到 {state} 状态并关闭页面级提示条",
+                    "等待字体/图片与双帧稳定后截图，并校验实际加载产物与 dist 一致",
+                ),
+            ),
+            fixture=REVIEW_FIXTURE,
+            resources=self.recorder.records(),
+            route=urlparse(self.page.url).path or "/app/add",
+        )
+
     def write_review_screenshot(self, name: str, shot: Path) -> Path | None:
-        """把候选图写到仓库内 pending 审核目录（仅在显式要求时）。"""
+        """把候选图与证据清单写到仓库内 pending 审核目录（仅在显式要求时）。"""
         if not self.review_screenshots_enabled():
             return None
+        manifest = self.review_artifact_manifest(name, shot)
         REVIEW_DIR.mkdir(parents=True, exist_ok=True)
         target = REVIEW_DIR / name
         target.write_bytes(shot.read_bytes())
+        write_manifest(manifest, REVIEW_DIR, Path(name).stem)
         return target

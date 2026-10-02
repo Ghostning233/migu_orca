@@ -636,6 +636,41 @@ class TestBatchDraftWorkbenchVisual:
             payload = target.read_bytes()
             for canary in canary_values(scenario.items, scenario.created_draft_ids):
                 assert canary.encode() not in payload
+            # #155：候选图必须随附证据清单（构建 + 实际加载资源 + 截图摘要），
+            # 且清单同样不得携带候选上下文等能力标识。
+            manifest_path = target.parent / f"{target.stem}.evidence.json"
+            assert manifest_path.is_file(), target
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            assert manifest["screenshot"]["sha256"]
+            assert manifest["build"]["artifact_digest"]
+            assert manifest["fixture"]["id"] == "batch-draft-review-153"
+            assert any(
+                resource["path"].startswith("/app/assets/")
+                for resource in manifest["page"]["loaded_resources"]
+            )
+            rendered = manifest_path.read_text(encoding="utf-8")
+            for canary in canary_values(scenario.items, scenario.created_draft_ids):
+                assert canary not in rendered
+
+    def test_review_capture_manifest_is_verifiable_without_repo_writes(
+        self, page: Page, live_server_url: str, storage_dir: Path, tmp_path: Path
+    ) -> None:
+        """#155：候选图清单在落盘开关关闭时也能组装并通过产物一致性校验。"""
+        scenario = self._scenario(page, live_server_url, storage_dir)
+        scenario.enter_draft_workbench()
+        shot = self._capture_state(scenario, "draft-workbench", tmp_path)
+
+        manifest = scenario.review_artifact_manifest("draft-workbench.png", shot)
+        assert manifest["scenario"]["id"] == "batch-draft-draft-workbench-1440x900"
+        assert manifest["fixture"]["id"] == "batch-draft-review-153"
+        assert manifest["screenshot"]["sha256"]
+        assert manifest["runtime"]["viewport"] == {"width": CANVAS[0], "height": CANVAS[1]}
+        assert any(
+            resource["path"].startswith("/app/assets/")
+            for resource in manifest["page"]["loaded_resources"]
+        )
+        if not scenario.review_screenshots_enabled():
+            assert scenario.write_review_screenshot("draft-workbench.png", shot) is None
 
 
 def test_fixture_covers_the_designed_batch_states() -> None:

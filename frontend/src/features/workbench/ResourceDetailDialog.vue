@@ -72,7 +72,19 @@ function onTabKeydown(event: KeyboardEvent): void {
   const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End']
   if (!keys.includes(event.key)) return
   event.preventDefault()
-  const next: ResourceTab = event.key === 'ArrowLeft' || event.key === 'Home' ? 'effective' : 'excluded'
+  const tabs: ResourceTab[] = ['effective', 'excluded']
+  const current = Math.max(0, tabs.indexOf(activeTab.value))
+  let next: ResourceTab
+  if (event.key === 'Home') {
+    next = tabs[0] ?? 'effective'
+  } else if (event.key === 'End') {
+    next = tabs[tabs.length - 1] ?? 'effective'
+  } else if (event.key === 'ArrowLeft') {
+    // 首项继续向左回到末项（两项之间循环）。
+    next = tabs[(current - 1 + tabs.length) % tabs.length] ?? 'effective'
+  } else {
+    next = tabs[(current + 1) % tabs.length] ?? 'effective'
+  }
   activeTab.value = next
   void nextTick(() => {
     const element = dialogEl.value?.querySelector<HTMLButtonElement>(`#${idPrefix.value}-tab-${next}`)

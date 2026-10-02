@@ -62,7 +62,7 @@ describe('ResourceDetailDialog (#151)', () => {
     expect(document.querySelector('#resource-detail-tab-excluded')?.getAttribute('aria-selected')).toBe('true')
   })
 
-  it('moves between the two tabs with the arrow keys', async () => {
+  it('moves between the two tabs with the arrow keys, wrapping at both ends', async () => {
     const { wrapper } = mountDialog()
     await wrapper.find('#open-resources').trigger('click')
     await nextTick()
@@ -73,6 +73,26 @@ describe('ResourceDetailDialog (#151)', () => {
     expect(document.querySelector('#resource-detail-tab-excluded')?.getAttribute('aria-selected')).toBe('true')
     document.querySelector<HTMLElement>('#resource-detail-tab-excluded')
       ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }))
+    await nextTick()
+    expect(document.querySelector('#resource-detail-tab-effective')?.getAttribute('aria-selected')).toBe('true')
+
+    // 首尾继续按方向键要循环，而不是停在边界。
+    document.querySelector<HTMLElement>('#resource-detail-tab-effective')
+      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }))
+    await nextTick()
+    expect(document.querySelector('#resource-detail-tab-excluded')?.getAttribute('aria-selected')).toBe('true')
+    document.querySelector<HTMLElement>('#resource-detail-tab-excluded')
+      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
+    await nextTick()
+    expect(document.querySelector('#resource-detail-tab-effective')?.getAttribute('aria-selected')).toBe('true')
+
+    // Home/End 跳到首/末项。
+    document.querySelector<HTMLElement>('#resource-detail-tab-effective')
+      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
+    await nextTick()
+    expect(document.querySelector('#resource-detail-tab-excluded')?.getAttribute('aria-selected')).toBe('true')
+    document.querySelector<HTMLElement>('#resource-detail-tab-excluded')
+      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }))
     await nextTick()
     expect(document.querySelector('#resource-detail-tab-effective')?.getAttribute('aria-selected')).toBe('true')
   })

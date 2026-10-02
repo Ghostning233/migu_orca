@@ -35,14 +35,30 @@ uv run python -m tests.browser.evidence verify
 
 因此浏览器套件前必须跑第 1 步；仅检查 `index.html` 是否存在或依赖 mtime 不再被接受。
 
-## 3. 人工交互预览（同一份 dist）
+## 3. 人工交互预览（同一份 dist + 固定安全 fixture，默认隔离）
 
 ```bash
 uv run python -m tests.browser.evidence preview
 ```
 
-先用同一构建戳校验 dist，再以 Flask 启动 `http://127.0.0.1:5000/app/add`。预览与截图
-使用同一份产物，不需要真实 MiKan/Auto Bangumi/qBittorrent 凭据，也不做任何外部写。
+先用同一构建戳校验 dist，再用**隔离的固定 fixture 服务**启动：
+
+- 单番／批量首屏：`http://127.0.0.1:5000/app/add`
+- 固定批量草案现场（截图里的同一 fixture）：
+  `http://127.0.0.1:5000/app/workbench?batch_id=batch-draft-visual-153-preview`
+
+隔离与安全边界（实现见 `tests/browser/preview_fixtures.py`）：
+
+- 预览进程把 `MIGU_ORCA_WEB_CONFIG_ROOT` 与 Web storage root 指向新建的临时目录，
+  不读也不写 `.migu_orca/storage`、部署配置或其他真实运行数据；
+- `/api/v1` 只应答固定 fixture：连接摘要固定「未配置」、追番列表为空、批量解析返回
+  仓库内固定批次（含待选／失败／未确认草案）、候选与海报为确定性 fixture；
+- 未覆盖的 `/api/v1` 接口在本地 fail closed（`preview_read_only`），**不转发**给真实
+  handler，因此预览不会触发真实 MiKan 查询、Auto Bangumi／qBittorrent 连接或任何
+  保存／提交／删除写；需要真实凭据或外部写的能力在预览中不可用。
+
+因此「预览的画面」与「截图的画面」来自同一份已校验 dist + 同一批固定 fixture，
+不需要真实凭据，也不会碰到用户的真实数据。
 
 ## 4. 截图随附证据清单
 
@@ -54,6 +70,10 @@ uv run python -m tests.browser.evidence preview
 4. `capture_evidence(page, screenshot, base_url=…, scenario=…, fixture=…, resources=recorder.records())`
    组装清单并校验「页面实际加载的 `/app/assets/*` 与 dist 逐字节一致」；
 5. `write_manifest(manifest, directory, stem)` 与截图同目录写出 `<stem>.evidence.json`。
+
+候选图导出（`MIGU_ORCA_CAPTURE_REVIEW=1` 写 `pending-batch-draft/`）走同一条路径：
+`BatchDraftVisualScenario.review_artifact_manifest()` 在落盘前校验构建与实际加载产物，
+`write_review_screenshot()` 同时写出 PNG 与 `<stem>.evidence.json`。
 
 清单字段：schema 版本、取证时间、Git HEAD/分支/脏状态、构建时间与产物摘要、源码指纹
 （摘要 + 覆盖文件数）、Node/npm 与 Chromium 版本、viewport/`devicePixelRatio`/
@@ -70,4 +90,5 @@ reduced-motion、fixture 标识与 mock 路由、场景标识/标题/操作步�
 - 稳定截图 CSS（隐藏光标/插入符、关闭动画与过渡）只服务于取景，默认动效与
   reduced-motion 另行验收；关闭动画不能代替动效验收；
 - 截图不证明点击行为：交互（如标题搜索关闭按钮）必须在真实 Chromium 中逐次真实点击；
-- 新候选图连续三次稳定并逐张人工批准后才能成为金样；本工具不批准、不替换任何金样。
+- 新候选图连续三次稳定并逐张人工批准后才能成为金样；本工具不批准、不替换任何金样；
+- 人工预览不提供写能力：未覆盖接口 fail closed，预览中的「保存/提交/删除」不会产生外部写。
