@@ -41,16 +41,20 @@
 
 ## 记录与替换
 
+任何截图（金样记录或候选图导出）都必须先构建带证据戳的最新前端；浏览器用例会拒绝
+陈旧或未标记的 `dist`（见[截图证据与构建新鲜度](../../../../../development/visual-evidence.md)）：
+
 ```bash
+uv run python -m tests.browser.evidence build   # 构建 + 写 frontend/.evidence/build-evidence.json
 MIGU_ORCA_RECORD_VISUAL_BASELINE=1 \
   uv run pytest tests/browser/test_app_add_anime_visual.py -q
 ```
 
 批量草案修订（#153）的候选图由同一套固定安全 fixture 生成，默认只写 pytest `tmp_path`；
-只有显式要求时才写 `pending-batch-draft/`（2026-09-26 第二轮视觉校准后重新生成，仍未获批）：
+只有显式要求时才写 `pending-batch-draft/`（2026-09-26 第二轮视觉校准后重新生成，仍未获批）。
+导出时每张图都会随附 `<state>.evidence.json`（构建摘要 + 页面实际加载产物校验）：
 
 ```bash
-cd frontend && npm run build && cd ..
 MIGU_ORCA_CAPTURE_REVIEW=1 \
   uv run pytest tests/browser/test_app_batch_draft_visual.py::TestBatchDraftWorkbenchVisual::test_review_candidates_are_written_only_when_requested -q
 uv run pytest tests/browser/test_app_batch_draft_visual.py -q   # 三态连续三次稳定 + 几何矩阵

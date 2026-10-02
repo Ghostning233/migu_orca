@@ -30,7 +30,7 @@ from tests.browser.evidence import (
     capture_evidence,
     write_manifest,
 )
-from tests.browser.preview_fixtures import PREVIEW_BATCH_ID, create_preview_app
+from tests.browser.preview_fixtures import PREVIEW_BATCH_ID, PreviewFixtureApp, create_preview_app
 from tests.browser.visual_support import capture_canvas, prepare_canvas, require_dist
 
 pytestmark = pytest.mark.browser
@@ -141,3 +141,74 @@ def test_preview_reproduces_the_fixed_batch_draft_scene(preview_server, page: Pa
     assert any(
         resource["path"].startswith("/app/assets/") for resource in payload["page"]["loaded_resources"]
     )
+
+class _SentinelApp:
+    """生产 handler 的替身：一旦被调用就说明 fixture 包装被绕过。"""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def __call__(self, environ, start_response):  # noqa: ANN001 - WSGI 签名
+        self.calls.append(str(environ.get("PATH_INFO") or ""))
+        payload = json.dumps({"ok": True, "result": {"sentinel": True}}).encode("utf-8")
+        start_response(
+            "200 OK",
+            [("Content-Type", "application/json"), ("Content-Length", str(len(payload)))],
+        )
+        return [payload]
+
+
+@pytest.fixture
+def sentinel_preview_server() -> object:
+    """把 fixture 包装套在替身应用外面，用来证明任何编码/规范化路径都到不了生产 handler。"""
+    sentinel = _SentinelApp()
+    app = PreviewFixtureApp(sentinel)
+    port = _find_free_port()
+    server = make_server("127.0.0.1", port, app)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{port}", sentinel
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "//api/v1/mikan/candidates",
+        "/%2Fapi/v1/mikan/candidates",
+        "/app/../api/v1/mikan/candidates",
+        "/app/%2e%2e/%2e%2e/api/v1/mikan/candidates",
+        "/./api/v1/settings/autobangumi",
+        "/api/v1/requests/../settings/autobangumi",
+    ),
+)
+def test_preview_shim_is_not_bypassable_by_path_encoding(sentinel_preview_server, path: str) -> None:
+    """#155 复审：重复斜杠、%2F、.. 等写法都必须留在 fixture 包装内，绝不落到生产 handler。"""
+    url, sentinel = sentinel_preview_server
+
+    for method in ("GET", "POST"):
+        response = requests.request(method, f"{url}{path}", json={"query": "x"}, timeout=10)
+        # 要么命中固定 fixture 的纯读应答（200），要么 fail closed（409）；都不得经过生产 handler。
+        assert response.status_code in (200, 409), (method, path, response.status_code)
+        if response.status_code == 200:
+            assert response.json().get("result") is not None, (method, path, response.text)
+        else:
+            assert response.json()["error"]["code"] == "preview_read_only", (method, path, response.text)
+        assert "sentinel" not in response.text, (method, path, response.text)
+        assert sentinel.calls == [], (method, path, sentinel.calls)
+
+    # 明确不在 fixture 覆盖内的写路径：任何编码写法都必须 fail closed。
+    for encoded in ("//api/v1/requests/save-confirm", "/%2Fapi/v1/requests/save-confirm"):
+        posted = requests.post(f"{url}{encoded}", json={"confirm": True}, timeout=10)
+        assert posted.status_code == 409, (encoded, posted.status_code)
+        assert posted.json()["error"]["code"] == "preview_read_only"
+        assert sentinel.calls == [], (encoded, sentinel.calls)
+
+    # 普通 SPA 路径仍然转发给生产应用（外壳与静态资源必须可用）。
+    page = requests.get(f"{url}/app/add", timeout=10)
+    assert page.status_code == 200
+    assert page.headers["Content-Type"].startswith("application/json")
+    assert sentinel.calls == ["/app/add"], sentinel.calls

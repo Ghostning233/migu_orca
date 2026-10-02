@@ -19,10 +19,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 from apps.base import create_app
 from apps.migu_orca_web.drafts import draft_store
@@ -69,6 +71,38 @@ _READ_ONLY_ERROR = {
     "code": "preview_read_only",
     "message": "预览模式：该接口未被固定安全 fixture 覆盖，已在本地 fail closed；不产生外部写。",
 }
+
+# 只有这些路径可以交给生产 Flask 应用（SPA 外壳、静态资源与探针）；其余一律不进生产路由。
+_FORWARD_EXACT = frozenset({"/", "/index", "/settings", "/Settings", "/healthz", "/readiness", "/favicon.ico"})
+_MULTI_SLASH_RE = re.compile(r"/{2,}")
+
+
+def canonical_request_path(raw: str) -> str:
+    """把请求路径规范化成可比对的形式。
+
+    WSGI 的 ``PATH_INFO`` 已按 URL 解码，因此 ``/%2Fapi/v1/...`` 会变成 ``//api/v1/...``；
+    再加上 ``..``/``.`` 与重复斜杠，直接做前缀判断会被绕过。这里统一：先把反斜杠视作
+    分隔符，丢弃空段与 ``.``、消解 ``..``，再拼回以 ``/`` 开头的路径。
+    """
+    decoded = unquote(raw or "/").replace("\\", "/")
+    segments: list[str] = []
+    for segment in decoded.split("/"):
+        if segment in ("", "."):
+            continue
+        if segment == "..":
+            if segments:
+                segments.pop()
+            continue
+        segments.append(segment)
+    return "/" + "/".join(segments)
+
+
+def _is_api_path(path: str) -> bool:
+    return path == "/api" or path.startswith("/api/")
+
+
+def _may_reach_production(path: str) -> bool:
+    return path in _FORWARD_EXACT or path == "/app" or path.startswith("/app/")
 
 
 def _json_response(payload: dict[str, Any], *, status: int = 200) -> tuple[bytes, int, str]:
@@ -120,20 +154,30 @@ class PreviewFixtureApp:
     # -- WSGI --------------------------------------------------------------
 
     def __call__(self, environ: dict[str, Any], start_response: Callable[..., Any]) -> Any:
-        path = str(environ.get("PATH_INFO") or "")
-        if path.startswith("/api/v1"):
+        # PATH_INFO 与原始 request-target 都做规范化，任一落到 API 命名空间就按 API 处理；
+        # 只有明确属于 SPA/探针的路径才允许转发给生产应用（fail closed by default）。
+        path = canonical_request_path(str(environ.get("PATH_INFO") or "/"))
+        raw_target = str(environ.get("RAW_URI") or environ.get("REQUEST_URI") or "")
+        raw_path = canonical_request_path(raw_target.split("?", 1)[0]) if raw_target else path
+        if _is_api_path(path) or _is_api_path(raw_path):
             method = str(environ.get("REQUEST_METHOD") or "GET").upper()
             payload, status, content_type = self._respond(path, method, environ)
-            start_response(
-                f"{status} {'OK' if status < 400 else 'ERROR'}",
-                [
-                    ("Content-Type", f"{content_type}; charset=utf-8"),
-                    ("Content-Length", str(len(payload))),
-                    ("Cache-Control", "no-store"),
-                ],
+        elif _may_reach_production(path) and _may_reach_production(raw_path):
+            return self.app(environ, start_response)
+        else:
+            payload, status, content_type = _json_response(
+                {"ok": False, "error": dict(_READ_ONLY_ERROR), "result": None},
+                status=409,
             )
-            return [payload]
-        return self.app(environ, start_response)
+        start_response(
+            f"{status} {'OK' if status < 400 else 'ERROR'}",
+            [
+                ("Content-Type", f"{content_type}; charset=utf-8"),
+                ("Content-Length", str(len(payload))),
+                ("Cache-Control", "no-store"),
+            ],
+        )
+        return [payload]
 
     # -- fixture routes ----------------------------------------------------
 
