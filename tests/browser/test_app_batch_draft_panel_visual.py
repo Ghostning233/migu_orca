@@ -292,3 +292,42 @@ def test_1440_review_captures_ship_with_evidence_manifests(
     assert len(digests) == len(payloads), sorted(digests)
     assert file_digest(tmp_path / "batch-draft-default-1440x900.png") == payloads["default"]["screenshot"]["sha256"]
 
+def test_modules_are_separated_by_blank_space_and_card_status_keeps_its_own_row(
+    page: Page, live_server_url: str
+) -> None:
+    """左栏卡片状态单独一行；右栏三个模块之间去掉分割线，改用留白分隔。"""
+    _open_batch_draft(page, live_server_url)
+    layout = page.evaluate(
+        """() => {
+          const box = (selector) => {
+            const element = document.querySelector(selector)
+            if (!element) return null
+            const rect = element.getBoundingClientRect()
+            const style = getComputedStyle(element)
+            return { top: rect.top, bottom: rect.bottom, left: rect.left, borderBottomWidth: style.borderBottomWidth }
+          }
+          const sections = Array.from(document.querySelectorAll('#batch-detail-pane .batch-draft-section'))
+          const card = document.querySelector('.batch-draft-card[data-item-id="item-00"]')
+          const title = card.querySelector('.batch-card-title').getBoundingClientRect()
+          const chip = card.querySelector('.batch-card-status').getBoundingClientRect()
+          return {
+            sectionBorders: sections.map((section) => getComputedStyle(section).borderBottomWidth),
+            filterBox: box('.batch-draft-filter-form'),
+            resourceBox: box('.batch-resource-box'),
+            advanced: box('.batch-draft-advanced'),
+            cardTitleBottom: title.bottom,
+            cardTitleLeft: title.left,
+            cardChipTop: chip.top,
+            cardChipLeft: chip.left,
+          }
+        }"""
+    )
+    # 模块之间没有分割线（分区自身不再画 border-bottom）。
+    assert layout["sectionBorders"] == ["0px", "0px"], layout["sectionBorders"]
+    # 用留白分隔：模块盒子之间至少 24px 空白。
+    assert layout["resourceBox"]["top"] - layout["filterBox"]["bottom"] >= 24, layout
+    assert layout["advanced"]["top"] - layout["resourceBox"]["bottom"] >= 24, layout
+    # 状态芯片在标题下方单独一行，左缘与标题对齐（不与标题同排）。
+    assert layout["cardChipTop"] >= layout["cardTitleBottom"] - 1, layout
+    assert abs(layout["cardChipLeft"] - layout["cardTitleLeft"]) <= 1, layout
+

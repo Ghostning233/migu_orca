@@ -764,13 +764,12 @@ defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
   color: var(--color-warning);
 }
 
-/* #145：分区之间是发丝分隔线，不是一个分区一个描边盒子；这样右栏读起来是
-   「审核详情」而不是四个等权表单块。 */
+/* 「字幕与筛选」「资源结果」「高级设置」之间不用分割线：靠留白（分区上下内边距）区分模块，
+   每个模块自身仍是一张带描边的盒子。 */
 .batch-draft-section {
-  border-bottom: 1px solid var(--color-border);
   display: grid;
   gap: var(--space-3);
-  padding: var(--space-4) 0;
+  padding: var(--space-5) 0;
 }
 
 .batch-section-heading {

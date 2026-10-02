@@ -58,6 +58,7 @@ _MEASURE = """
     mode: read('#anime-mode-switch'),
     form: read('#mikan-candidate-search-form, #batch-parse-form'),
     input: read('#mikan-candidate-query, #batch-raw-input'),
+    submit: read('#mikan-candidate-search-submit, #batch-parse-submit'),
     steps: read('.journey-steps'),
     isSearching: Boolean(document.querySelector('.batch-search-screen.is-searching')),
     scrollY: window.scrollY,
@@ -127,6 +128,13 @@ def _assert_shared_task_geometry(single: dict[str, Any], batch: dict[str, Any], 
     assert not problems, json.dumps(problems, ensure_ascii=False, indent=2)
 
 
+def _assert_batch_submit_centred(metrics: dict[str, Any], center_x: float) -> None:
+    """批量首屏的主搜索操作与输入区、说明共用一条中心轴（不再贴表单左缘）。"""
+    submit = metrics.get("submit")
+    assert submit is not None, "batch submit missing"
+    assert abs(submit["centerX"] - center_x) <= TOLERANCE, submit
+
+
 def _assert_input_shapes(single: dict[str, Any], batch: dict[str, Any]) -> None:
     """输入形态允许自然高度差异，但批量文本框必须保留多行高度。"""
     single_input = single.get("input")
@@ -152,6 +160,7 @@ def test_single_and_batch_first_screens_share_the_centred_task_axis(
     batch = _switch_to_batch(page)
     _assert_shared_task_geometry(single, batch, CANVAS[0] / 2)
     _assert_input_shapes(single, batch)
+    _assert_batch_submit_centred(batch, CANVAS[0] / 2)
     # 空闲态不套用搜索态；切换模式不把页面跳走。
     assert batch["isSearching"] is False
     assert batch["scrollY"] == 0
@@ -168,6 +177,7 @@ def test_single_and_batch_first_screens_share_the_centred_task_axis(
     assert page.input_value("#batch-raw-input") == "甲\n乙"
     _assert_shared_task_geometry(single, batch_again, CANVAS[0] / 2)
     _assert_input_shapes(single, batch_again)
+    _assert_batch_submit_centred(batch_again, CANVAS[0] / 2)
 
 
 @pytest.mark.parametrize(("width", "height"), [(1280, 800), (1920, 1080)])
@@ -184,6 +194,7 @@ def test_batch_first_screen_centres_without_horizontal_overflow(
     assert _centered_problems("batch", batch, width / 2) == []
     _assert_shared_task_geometry(single, batch, width / 2)
     _assert_input_shapes(single, batch)
+    _assert_batch_submit_centred(batch, width / 2)
     assert batch["bodyScrollWidth"] <= batch["viewportWidth"] + 1
     expect(page.locator("#batch-parse-submit")).to_be_visible()
 
@@ -200,6 +211,7 @@ def test_batch_first_screen_holds_under_two_hundred_percent_zoom(
     batch = _switch_to_batch(page)
     assert batch["bodyScrollWidth"] <= batch["viewportWidth"] + 1
     assert batch["title"] is not None and batch["title"]["x"] >= 0
+    _assert_batch_submit_centred(batch, 720 / 2)
     expect(page.locator("#batch-parse-submit")).to_be_visible()
     expect(page.locator("#batch-raw-input")).to_be_visible()
 
@@ -257,12 +269,14 @@ def test_mode_switch_geometry_is_identical_under_reduced_motion(
     _open_single(page, live_server_url)
     single_default = page.evaluate(_MEASURE)
     batch_default = _switch_to_batch(page)
+    _assert_batch_submit_centred(batch_default, CANVAS[0] / 2)
 
     page.emulate_media(reduced_motion="reduce")
     page.locator("#anime-mode-single").click()
     page.wait_for_selector("#mikan-candidate-search-form", timeout=10_000)
     single_reduced = page.evaluate(_MEASURE)
     batch_reduced = _switch_to_batch(page)
+    _assert_batch_submit_centred(batch_reduced, CANVAS[0] / 2)
 
     for name in ("title", "subtitle", "mode", "form", "steps"):
         for key in ("centerX", "y", "height"):

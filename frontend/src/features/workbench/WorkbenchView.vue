@@ -1338,6 +1338,12 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
   gap: 0.5rem;
 }
 
+/* 批量首屏的任务区是居中列：主搜索操作与输入区、说明同处一条中心轴，
+   不再贴在表单左缘。 */
+.batch-search-screen > .batch-parse-form > .notification-actions {
+  justify-content: center;
+}
+
 @media (max-width: 720px) {
   .detail-grid {
     grid-template-columns: 1fr;

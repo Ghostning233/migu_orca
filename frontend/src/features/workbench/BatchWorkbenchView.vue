@@ -2580,13 +2580,12 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
   min-width: 0;
 }
 
-/* #158：标题与状态（找到候选／草案／需人工核对）优先同排；空间不足时才自然换行，
-   不把每个芯片都单独堆成一行。 */
+/* 卡片标题占一行，状态（找到候选／草案／需人工核对）在下一行单独显示，不与标题同排。 */
 .batch-card-headline {
-  align-items: center;
+  align-items: flex-start;
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px var(--space-2);
+  flex-direction: column;
+  gap: 6px;
   min-width: 0;
 }
 
