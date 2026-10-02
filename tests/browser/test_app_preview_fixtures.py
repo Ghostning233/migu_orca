@@ -11,13 +11,16 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import threading
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 import requests
+from flask import Flask, request
 from playwright.sync_api import Page, expect
 from werkzeug.serving import make_server
 
@@ -72,6 +75,17 @@ def test_preview_isolates_runtime_data_and_fails_closed(preview_server) -> None:
 
     tracking = requests.get(f"{url}/api/v1/tracking/items", timeout=10).json()
     assert tracking["result"]["items"] == []
+
+    health = requests.get(f"{url}/healthz", timeout=10)
+    readiness = requests.get(f"{url}/readiness", timeout=10)
+    assert health.status_code == 200
+    assert readiness.status_code == 200
+
+    # 保留 Flask /app → /app/ 的普通外壳入口与合法尾斜杠。
+    app_root = requests.get(f"{url}/app", timeout=10)
+    app_root_slash = requests.get(f"{url}/app/", timeout=10)
+    assert app_root.status_code == 200
+    assert app_root_slash.status_code == 200
 
     batch = requests.post(f"{url}/api/v1/batches/parse", json={"raw_input": "任意"}, timeout=10).json()
     assert batch["result"]["batch_id"]
@@ -143,19 +157,25 @@ def test_preview_reproduces_the_fixed_batch_draft_scene(preview_server, page: Pa
     )
 
 class _SentinelApp:
-    """生产 handler 的替身：一旦被调用就说明 fixture 包装被绕过。"""
+    """仅供本机测试的 Flask 路由哨兵，不注册或调用任何产品 handler。"""
 
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.app = Flask(__name__)
+
+        @self.app.get("/api/v1/requests/<path:request_id>")
+        def request_detail(request_id: str) -> tuple[dict[str, object], int]:
+            self.calls.append(f"request:{request_id}")
+            return {"sentinel": True}, 200
+
+        @self.app.route("/<path:path>", defaults={"path": ""}, methods=["GET", "POST", "DELETE"])
+        @self.app.route("/<path:path>", methods=["GET", "POST", "DELETE"])
+        def catch_all(path: str) -> tuple[dict[str, object], int]:
+            self.calls.append(str(request.environ.get("PATH_INFO") or ""))
+            return {"sentinel": True}, 200
 
     def __call__(self, environ, start_response):  # noqa: ANN001 - WSGI 签名
-        self.calls.append(str(environ.get("PATH_INFO") or ""))
-        payload = json.dumps({"ok": True, "result": {"sentinel": True}}).encode("utf-8")
-        start_response(
-            "200 OK",
-            [("Content-Type", "application/json"), ("Content-Length", str(len(payload)))],
-        )
-        return [payload]
+        return self.app.wsgi_app(environ, start_response)
 
 
 @pytest.fixture
@@ -212,3 +232,71 @@ def test_preview_shim_is_not_bypassable_by_path_encoding(sentinel_preview_server
     assert page.status_code == 200
     assert page.headers["Content-Type"].startswith("application/json")
     assert sentinel.calls == ["/app/add"], sentinel.calls
+
+
+def test_preview_rejects_dot_segments_that_canonicalize_to_spa_path(sentinel_preview_server) -> None:
+    """原始 Flask 路径匹配必须与包装层的规范化判断一致。"""
+    url, sentinel = sentinel_preview_server
+    parsed = urlsplit(url)
+    connection = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=10)
+    target = "/api/v1/requests/x/../../../../app/add"
+
+    # putrequest 保留原始 request-target 的未编码点段，不让客户端先规范化 URL。
+    connection.putrequest("GET", target)
+    connection.endheaders()
+    response = connection.getresponse()
+    body = response.read().decode("utf-8")
+    connection.close()
+
+    assert response.status == 409, body
+    assert json.loads(body)["error"]["code"] == "preview_read_only"
+    assert sentinel.calls == [], sentinel.calls
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/api/v1/tracking/items",
+        "/api/v1/tracking/items/item-1/delete",
+        "/api/v1/tracking/items/item-1/%2e%2e/%2e%2e/requests/save-confirm",
+        "/api/v1/requests/x/../../../../tracking/items/item-1/delete",
+    ),
+)
+def test_preview_dot_segment_tracking_writes_fail_closed(sentinel_preview_server, path: str) -> None:
+    url, sentinel = sentinel_preview_server
+
+    response = requests.post(f"{url}{path}", json={"confirm": True}, timeout=10)
+
+    assert response.status_code == 409, (path, response.status_code, response.text)
+    assert response.json()["error"]["code"] == "preview_read_only"
+    assert sentinel.calls == [], sentinel.calls
+
+
+@pytest.mark.parametrize(
+    ("path_info", "raw_uri"),
+    (
+        ("/app/add", "/api/v1/tracking/items/item-1/delete"),
+        ("/api/v1/tracking/items/item-1/delete", "/app/add"),
+    ),
+)
+def test_preview_path_info_and_raw_uri_disagreement_fails_closed(path_info: str, raw_uri: str) -> None:
+    sentinel = _SentinelApp()
+    preview = PreviewFixtureApp(sentinel)
+    captured: dict[str, object] = {}
+
+    def start_response(status: str, headers: list[tuple[str, str]]) -> None:
+        captured["status"] = status
+        captured["headers"] = headers
+
+    environ = {
+        "PATH_INFO": path_info,
+        "RAW_URI": raw_uri,
+        "REQUEST_METHOD": "POST",
+        "CONTENT_LENGTH": "0",
+    }
+
+    body = b"".join(preview(environ, start_response))
+
+    assert captured["status"].startswith("409"), captured
+    assert json.loads(body)["error"]["code"] == "preview_read_only"
+    assert sentinel.calls == []

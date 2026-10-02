@@ -330,4 +330,3 @@ def test_modules_are_separated_by_blank_space_and_card_status_keeps_its_own_row(
     # 状态芯片在标题下方单独一行，左缘与标题对齐（不与标题同排）。
     assert layout["cardChipTop"] >= layout["cardTitleBottom"] - 1, layout
     assert abs(layout["cardChipLeft"] - layout["cardTitleLeft"]) <= 1, layout
-

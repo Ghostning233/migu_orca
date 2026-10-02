@@ -3,8 +3,9 @@
 本目录保存「添加番剧」页面族在**真实 Chromium** 上渲染的视觉回归截图。
 2026-09-25 用户审核后，单番三张为获批金样；批量四张未获批准，移入
 `pending-batch/` 留作 #145 改造前的参考，不参与像素与锚点金样门禁。
-批量草案工作台按 #145 修订后的四张候选图在 `pending-batch-draft/`，**等待用户审核**：
-在用户逐张接受之前它们不是回归基准，也不得替换或新增金样。
+2026-10-02 用户审核了 #145 批量草案工作台的**当前实际界面**并批准其布局方向；本目录
+`batch-draft/` 保存随后由固定 fixture + 真实 Chromium 重录的四张获批基准、证据清单与
+实测 DOM 锚点。`pending-batch-draft/` 的 2026-09-26 候选图原样保留作历史参考，没有被晋升或覆盖。
 基准不是设计位图，也不是运行产物：它们是固定 fixture 下的页面截图，用于让「明显像素
 偏差、关键几何偏差」自动失败。
 
@@ -16,15 +17,18 @@
 | `single-candidates-four.png` | 单番四张候选卡工作台 |
 | `single-draft-review.png` | 单番未保存草案审核（长内容单轴滚动） |
 | `anchors.json` | 三个获批单番场景的关键锚点实测几何（门禁目标，容差 ≤2 CSS px） |
+| `batch-draft/draft-workbench.png` | 2026-10-02 用户批准的批量草案工作台默认态 |
+| `batch-draft/title-search.png` | 获批状态：标题搜索浮层展开 |
+| `batch-draft/resource-detail-effective.png` | 获批状态：资源明细（有效资源页签） |
+| `batch-draft/resource-detail-excluded.png` | 获批状态：资源明细（已排除页签） |
+| `batch-draft/anchors.json` | 四个获批批量草案状态的真实 DOM 锚点测量 |
+| `batch-draft/*.evidence.json` | 每张获批批量图对应的构建、fixture、加载资源与截图摘要 |
 | `pending-batch/batch-candidates.png` | 未批准：批量候选工作台（12 部） |
 | `pending-batch/batch-candidate-loading.png` | 未批准：批量右栏当前候选加载 |
 | `pending-batch/batch-items-one.png` | 未批准：批量工作台仅一部条目 |
 | `pending-batch/batch-items-thirty-six.png` | 未批准：批量工作台三十六部条目 |
 | `pending-batch/anchors.json` | 上述四张旧批量截图的参考几何，不是金样门禁目标 |
-| `pending-batch-draft/draft-workbench.png` | 待审核：#145 批量草案工作台默认态（当前查看 + 两项勾选） |
-| `pending-batch-draft/title-search.png` | 待审核：标题搜索放大镜浮层展开 |
-| `pending-batch-draft/resource-detail-effective.png` | 待审核：资源明细（有效资源页签） |
-| `pending-batch-draft/resource-detail-excluded.png` | 待审核：资源明细（已排除页签） |
+| `pending-batch-draft/*.png` | 历史：2026-09-26 批量草案候选截图，非当前批准基准 |
 
 ## 门禁口径（已冻结）
 
@@ -35,7 +39,11 @@
 - 任一 RGB 通道差值 >12 计为显著差异像素，显著差异比例必须 **≤0.5%**。
 - 具名动态掩码总面积 **≤5%**；三个获批单番场景都**不使用掩码**（实际 0%）。
 - 三个获批单番场景的关键锚点与尺寸偏差 **≤2 CSS px**。
-- 七个场景连续三次截图必须稳定（`test_add_anime_scene_captures_are_stable`）；批量行为与几何由
+- 四个获批批量草案状态同样执行显著差异像素 **≤0.5%**、锚点 **≤2 CSS px**，掩码为 0%；
+  缺图、缺清单或缺锚点即失败。
+- 获批单番与批量草案场景连续三次截图必须稳定；批量门禁为
+  `test_approved_batch_draft_baseline_pixels_anchors_and_stability`。
+- 七张当前获批截图连续三次截图必须稳定；批量行为与几何由
   `test_app_batch_two_column.py`、`test_app_batch_candidate_cards.py` 等定向用例约束。
 - 缺基准即失败，不会静默生成；门槛不得按单次 PR 反向调宽。
 
@@ -51,18 +59,19 @@ MIGU_ORCA_RECORD_VISUAL_BASELINE=1 \
 ```
 
 批量草案修订（#153）的候选图由同一套固定安全 fixture 生成，默认只写 pytest `tmp_path`；
-只有显式要求时才写 `pending-batch-draft/`（2026-09-26 第二轮视觉校准后重新生成，仍未获批）。
-导出时每张图都会随附 `<state>.evidence.json`（构建摘要 + 页面实际加载产物校验）：
+普通候选导出仍由 `MIGU_ORCA_CAPTURE_REVIEW=1` 写入 `pending-batch-draft/`，不得覆盖获批基准。
+2026-10-02 用户批准当前实际界面后，使用单独的
+`MIGU_ORCA_RECORD_BATCH_DRAFT_BASELINE=1` 将真实 Chromium 截图、清单与 DOM 锚点记录到
+`batch-draft/`；正常门禁只比较，不自动更新基准。每张图都随附 `<state>.evidence.json`：
 
 ```bash
-MIGU_ORCA_CAPTURE_REVIEW=1 \
-  uv run pytest tests/browser/test_app_batch_draft_visual.py::TestBatchDraftWorkbenchVisual::test_review_candidates_are_written_only_when_requested -q
-uv run pytest tests/browser/test_app_batch_draft_visual.py -q   # 三态连续三次稳定 + 几何矩阵
+MIGU_ORCA_RECORD_BATCH_DRAFT_BASELINE=1 \
+  uv run pytest tests/browser/test_app_batch_draft_visual.py::TestBatchDraftWorkbenchVisual::test_record_approved_batch_draft_baseline_only_when_explicitly_requested -q
+uv run pytest tests/browser/test_app_batch_draft_visual.py -q   # 获批四状态像素/锚点门禁、三次稳定 + 几何矩阵
 ```
 
-批准或替换基准必须**与实现改动分开审阅**：用户逐张查看真实浏览器画面，明确接受或指出
-需要修订的场景后，才将对应截图记为获批金样。Agent 的读图检查、自动测试通过与生成效果图
-均不能代替这一步；不得用整卡掩码、删除断言或直接更新金样来让失败用例转绿。
+今后的新界面或替换仍须由用户审核当前真实页面后另行批准。Agent 读图、自动测试通过与生成效果图
+不能代替用户批准；不得用整卡掩码、删除断言或直接更新基准来让失败用例转绿。
 
 ## 审核记录
 
@@ -83,7 +92,7 @@ uv run pytest tests/browser/test_app_batch_draft_visual.py -q   # 三态连续�
 
 - 2026-09-25（#145／#153）：批量草案工作台按 2026-09-25 获批设计修订实现后，用固定安全
   fixture（`tests/browser/batch_draft_visual_fixtures.py`）在 1440×900 生成四张候选图到
-  `pending-batch-draft/`。Agent 已核对每张截图的业务信息与安全投影，并证明三态各自连续三次
+  `pending-batch-draft/`。当时 Agent 已核对每张截图的业务信息与安全投影，并证明三态各自连续三次
   截图彼此差异只在栅格化噪声带内；**这仍不构成用户批准**，金样替换另需用户逐张审核。
 - 2026-09-25 用户审核第一版候选图后的修订：删除草案右栏的「订阅草案（未保存）」提示；
   底栏不再出现独立的范围长句（隐藏勾选改由同一行的计数芯片「当前可见 M 部（隐藏仍参与）」
@@ -126,8 +135,9 @@ uv run pytest tests/browser/test_app_batch_draft_visual.py -q   # 三态连续�
     「批量工作台」而不是效果图里沿用候选阶段的
     「批量候选工作台」（该 id 是同屏焦点锚点，改名会牵动多处验收）。
 
-  以上候选图**仍不是金样**，必须由用户逐张审核后才可能进入基准；本目录的获批单番金样与
-  `pending-batch/` 旧批量图均未改动。
+  当时生成的候选图保存在 `pending-batch-draft/`，其“等待审核”是当时状态；2026-10-02
+  用户审核当前实际界面通过后，另行建立 `batch-draft/` 基准。旧候选图与 `pending-batch/`
+  均保留未改动。
 
 - 2026-10-02（#155～#159 修订）：共享复选框改为 18px 可见方框（选中态沿用 primary），
   点击区域由标签与外层布局提供（`--control-checkbox-hit` = 44px 目标 Token），底栏
@@ -135,4 +145,8 @@ uv run pytest tests/browser/test_app_batch_draft_visual.py -q   # 三态连续�
   独立悬浮背景 + 唯一的具名关闭按钮；批量草案右栏内边距 24/16px、资源结果装入描边盒子、
   高级设置收紧、资源入口默认 primary 蓝。截图取证流程见
   [截图证据与构建新鲜度](../../../../../development/visual-evidence.md)：此后每轮截图随附
-  证据清单（`*.evidence.json`），本目录图仍是候选，未获批为金样。
+  证据清单（`*.evidence.json`）。用户同日审核当前实际界面通过，明确接受状态独立成行、模块
+  间留白，以及批量搜索首屏主按钮水平居中；这些当前界面决定覆盖旧的状态同排/紧凑分区/按钮
+  位置文字。底部操作行中主按钮垂直居中属于既有对齐要求。四张真实 Chromium 截图与实际 DOM 锚点
+  据此记录在 `batch-draft/`；旧
+  `pending-batch-draft/` 只作历史，不作为本轮批准证据。

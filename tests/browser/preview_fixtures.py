@@ -156,13 +156,31 @@ class PreviewFixtureApp:
     def __call__(self, environ: dict[str, Any], start_response: Callable[..., Any]) -> Any:
         # PATH_INFO 与原始 request-target 都做规范化，任一落到 API 命名空间就按 API 处理；
         # 只有明确属于 SPA/探针的路径才允许转发给生产应用（fail closed by default）。
-        path = canonical_request_path(str(environ.get("PATH_INFO") or "/"))
+        path_info = str(environ.get("PATH_INFO") or "/")
+        path = canonical_request_path(path_info)
         raw_target = str(environ.get("RAW_URI") or environ.get("REQUEST_URI") or "")
-        raw_path = canonical_request_path(raw_target.split("?", 1)[0]) if raw_target else path
-        if _is_api_path(path) or _is_api_path(raw_path):
+        raw_path_info = raw_target.split("?", 1)[0] if raw_target else path_info
+        raw_path = canonical_request_path(raw_path_info)
+        canonical_forward_path = path_info == path and raw_path_info == path
+        safe_trailing_slash = (
+            path != "/"
+            and path_info == f"{path}/"
+            and raw_path_info == path_info
+        )
+        if path != raw_path:
+            payload, status, content_type = _json_response(
+                {"ok": False, "error": dict(_READ_ONLY_ERROR), "result": None},
+                status=409,
+            )
+        elif _is_api_path(path):
             method = str(environ.get("REQUEST_METHOD") or "GET").upper()
             payload, status, content_type = self._respond(path, method, environ)
-        elif _may_reach_production(path) and _may_reach_production(raw_path):
+        elif (
+            _may_reach_production(path)
+            and (canonical_forward_path or safe_trailing_slash)
+        ):
+            # Flask/Werkzeug 路由匹配 PATH_INFO；只允许规范白名单路径及其单个尾斜杠，
+            # 点段、重复斜杠、编码分隔符等歧义写法一律 fail closed。
             return self.app(environ, start_response)
         else:
             payload, status, content_type = _json_response(
@@ -184,19 +202,19 @@ class PreviewFixtureApp:
     def _respond(
         self, path: str, method: str, environ: dict[str, Any]
     ) -> tuple[bytes, int, str]:
-        if path.startswith("/api/v1/settings/autobangumi"):
+        if path == "/api/v1/settings/autobangumi" and method == "GET":
             return _json_response({"ok": True, "result": dict(_UNCONFIGURED_CONNECTION)})
-        if path.startswith("/api/v1/tracking/items"):
+        if path == "/api/v1/tracking/items" and method == "GET":
             return _json_response({"ok": True, "result": {"items": [], "summary": None, "warnings": []}})
-        if path.startswith("/api/v1/mikan/posters/"):
+        if path.startswith("/api/v1/mikan/posters/") and method == "GET":
             bangumi_id = path.rsplit("/", 1)[-1]
             if not bangumi_id:
                 return _json_response({"ok": False, "error": dict(_READ_ONLY_ERROR), "result": None}, status=404)
             return poster_png(bangumi_id), 200, "image/png"
-        if path.startswith("/api/v1/mikan/candidates") and method == "POST":
+        if path == "/api/v1/mikan/candidates" and method == "POST":
             query = self._json_field(environ, "query") or PREVIEW_SINGLE_QUERY
             return _candidate_envelope(str(query))
-        if path.startswith("/api/v1/batches/parse") and method == "POST":
+        if path == "/api/v1/batches/parse" and method == "POST":
             return self.parse_body.encode("utf-8"), 200, "application/json"
         if path == "/api/v1/requests" and method == "POST":
             return self._create_preview_draft(environ)

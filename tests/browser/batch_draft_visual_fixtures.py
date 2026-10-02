@@ -9,8 +9,9 @@
 另外通过 ``repeat_items`` 构造 1／12／36 部的边界批次。全部数据来自仓库内的规则/
 fixture（``generate_request`` 的离线输入），不访问真实 MiKan、Auto Bangumi 或
 qBittorrent，也不读取或写入真实用户运行数据。截图、diff 与诊断值只写 pytest
-``tmp_path``；只有显式设置 ``MIGU_ORCA_CAPTURE_REVIEW=1`` 时才把候选图写到仓库内的
-pending 审核目录。
+``tmp_path``；显式设置 ``MIGU_ORCA_CAPTURE_REVIEW=1`` 时只把候选图写到历史 pending 审核目录；
+本轮用户已批准的四张当前界面图由单独的 ``MIGU_ORCA_RECORD_BATCH_DRAFT_BASELINE=1``
+写入 ``batch-draft/``，正常回归只读该目录。
 """
 
 from __future__ import annotations
@@ -45,6 +46,7 @@ from tests.browser.visual_support import install_shell_status_routes, prepare_ca
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REVIEW_DIR = REPO_ROOT / "docs/design/assets/frontend-ux/acceptance-baseline/add-anime/pending-batch-draft"
+BASELINE_DIR = REPO_ROOT / "docs/design/assets/frontend-ux/acceptance-baseline/add-anime/batch-draft"
 
 BATCH_ID = "batch-draft-visual-153"
 
@@ -555,6 +557,9 @@ class BatchDraftVisualScenario:
     def review_screenshots_enabled(self) -> bool:
         return os.environ.get("MIGU_ORCA_CAPTURE_REVIEW") == "1"
 
+    def approved_baseline_recording_enabled(self) -> bool:
+        return os.environ.get("MIGU_ORCA_RECORD_BATCH_DRAFT_BASELINE") == "1"
+
     def review_artifact_manifest(self, name: str, shot: Path) -> dict[str, Any]:
         """为一张候选图组装安全证据清单（#155）：构建、实际加载资源与截图摘要。
 
@@ -583,7 +588,7 @@ class BatchDraftVisualScenario:
         )
 
     def write_review_screenshot(self, name: str, shot: Path) -> Path | None:
-        """把候选图与证据清单写到仓库内 pending 审核目录（仅在显式要求时）。"""
+        """把候选图与证据清单写到 pending 审核目录（仅在显式请求时）。"""
         if not self.review_screenshots_enabled():
             return None
         manifest = self.review_artifact_manifest(name, shot)
@@ -591,4 +596,15 @@ class BatchDraftVisualScenario:
         target = REVIEW_DIR / name
         target.write_bytes(shot.read_bytes())
         write_manifest(manifest, REVIEW_DIR, Path(name).stem)
+        return target
+
+    def write_approved_baseline_screenshot(self, name: str, shot: Path) -> Path | None:
+        """仅在独立记录开关开启时更新本轮用户批准的批量草案金样。"""
+        if not self.approved_baseline_recording_enabled():
+            return None
+        manifest = self.review_artifact_manifest(name, shot)
+        BASELINE_DIR.mkdir(parents=True, exist_ok=True)
+        target = BASELINE_DIR / name
+        target.write_bytes(shot.read_bytes())
+        write_manifest(manifest, BASELINE_DIR, Path(name).stem)
         return target

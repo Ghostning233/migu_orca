@@ -376,4 +376,3 @@ def test_single_batch_and_progress_captures_ship_with_evidence_manifests(
         digests.add(payload["screenshot"]["sha256"])
     assert len(digests) == len(payloads), sorted(digests)
     assert file_digest(tmp_path / "single-first-screen-idle-1440x900.png") == payloads["single"]["screenshot"]["sha256"]
-

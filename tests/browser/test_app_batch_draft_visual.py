@@ -1,4 +1,4 @@
-"""#153：批量草案工作台的真实 Chromium 验收与视觉基准候选。
+"""#153：批量草案工作台的真实 Chromium 验收与获批视觉基准门禁。
 
 覆盖（父规格 #145 的验收目标）：
 
@@ -7,12 +7,17 @@
 - 1／12／36 部、1280×800／1440×900／1920×1080 与 200% 缩放下的单行底栏、
   末项可达、滚动条不可见但导航可用；
 - 资源明细弹窗的页签、焦点恢复与工作台滚动位置；
-- 固定安全 fixture 各状态连续三次稳定，才允许作为视觉回归基准候选提交用户审核。
+- 固定安全 fixture 各状态连续三次截图稳定；当前四个获批状态另有像素和 DOM 锚点硬门禁。
 
-截图、diff 与诊断值只写 pytest ``tmp_path``。只有显式设置
-``MIGU_ORCA_CAPTURE_REVIEW=1`` 时，才会把候选图写到
-``docs/design/assets/frontend-ux/acceptance-baseline/add-anime/pending-batch-draft/``
-供用户审核；在用户明确认可前它们不是回归基准，也不得直接替换既有基准。
+用户已于 2026-10-02 审核当前实际界面并通过。四张 Chromium 金样、证据清单与 DOM 锚点
+位于 `batch-draft/`，由独立 record 开关显式写入；普通候选开关只写旧的 `pending-batch-draft/`。
+当前获批界面要求状态芯片独立成行、模块间留白清楚、资源指标/安全样例在同一描边盒内且无额外
+分割线。批量搜索首屏主按钮水平居中也已获用户审核通过；底部操作行主按钮垂直居中是既有要求。
+
+常规截图、diff 与诊断值只写 pytest ``tmp_path``。显式设置
+``MIGU_ORCA_CAPTURE_REVIEW=1`` 时，候选图只写入
+``docs/design/assets/frontend-ux/acceptance-baseline/add-anime/pending-batch-draft/``；
+本轮获批基准仅由独立 ``MIGU_ORCA_RECORD_BATCH_DRAFT_BASELINE=1`` 记录入口写入。
 
 本轮视觉锚点（实施前先记录，用于选择可维护的几何约束而不是复刻旧实现）
 -----------------------------------------------------------------------
@@ -20,6 +25,12 @@
 设计源图为 1586×992，主验收画布 1440×900，比例 0.908；下文的「归一化」值按比例
 换算，只用于确定目标区间，不宣称逐像素一致。设计图是视觉方向，业务安全语义仍以
 产品契约与失败/恢复状态要求为准。
+
+以下视觉锚点是 2026-09-26 的设计推导历史记录；与用户 2026-10-02 审核通过的实际页面不一致时，
+以当前页面金样、DOM 锚点及 §5 明确更新的验收口径为准。当前资源结果使用统一盒子与模块留白，
+不再要求多余发丝线或指标间竖分割线。
+
+历史设计推导：
 
 壳层
   * 两栏是画布上的两张白卡，没有包裹整页的「管理表单外框」；页头是深海蓝大标题
@@ -34,9 +45,9 @@
     ≥ 18px —— 明显大于旧实现的 48×44 紧凑占位，但保留设计图的比例关系。
 
 右栏（设计 x 610..1560 → 归一化宽约 863）
-  * 合集身份 → 字幕与筛选 → 资源结果 → 折叠的高级设置；分区之间是发丝分隔线，
-    不是四个等权描边盒子。
-  * 资源结果四项指标带 CSS 绘制图标与竖向分隔；集数两项继续固定「未开发」。
+  * 合集身份 → 字幕与筛选 → 资源结果 → 折叠的高级设置；这些层级顺序仍适用，旧的分区发丝线
+    与资源指标竖分隔线不再是当前视觉要求。
+  * 资源结果四项指标使用 CSS 图标，集数两项继续固定「未开发」；实际界面获批规则见上文。
 
 底栏（设计高约 48）
   * 白底 + 1px 顶边 + 极弱投影，一行：全选 + 「已选 N 部」纯文本 + 深海蓝主按钮。
@@ -49,6 +60,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -59,6 +71,7 @@ from PIL import Image
 from playwright.sync_api import Page, expect
 
 from tests.browser.batch_draft_visual_fixtures import (
+    BASELINE_DIR,
     BATCH_ID,
     CHECKED_ITEM_IDS,
     CLICKED_ITEM_ID,
@@ -79,6 +92,7 @@ from tests.browser.visual_support import (
     anchor_summary,
     browser_surface,
     capture_canvas,
+    collect_anchor_boxes,
     compare_with_design,
     report_json,
     stability_noise_pixels,
@@ -93,6 +107,47 @@ CAPTURE_STATES: tuple[str, ...] = (
     "resource-detail-effective",
     "resource-detail-excluded",
 )
+
+APPROVED_ANCHORS: dict[str, dict[str, str]] = {
+    "draft-workbench": {
+        "heading": ".batch-workbench-panel .panel-heading h2",
+        "toolbar": "#batch-accept-toolbar",
+        "list": ".batch-card-grid-wrapper",
+        "detail": "#batch-detail-pane",
+        "current_card": '.batch-draft-card[data-item-id="item-01"]',
+        "resource_box": ".batch-resource-box",
+        "primary_action": "#batch-accept-submit",
+    },
+    "title-search": {
+        "heading": ".batch-workbench-panel .panel-heading h2",
+        "toolbar": "#batch-accept-toolbar",
+        "list": ".batch-card-grid-wrapper",
+        "detail": "#batch-detail-pane",
+        "search_popover": "#batch-review-search-popover",
+        "search_input": "#batch-review-search",
+    },
+    "resource-detail-effective": {
+        "dialog": ".resource-dialog",
+        "dialog_title": ".resource-dialog-title",
+        "tabs": ".resource-dialog-tabs",
+        "resource_list": "#batch-resource-detail-panel-effective",
+        "first_resource": "#batch-resource-detail-panel-effective .resource-dialog-item:first-child",
+        "dialog_footer": ".resource-dialog-footer",
+    },
+    "resource-detail-excluded": {
+        "dialog": ".resource-dialog",
+        "dialog_title": ".resource-dialog-title",
+        "tabs": ".resource-dialog-tabs",
+        "resource_list": "#batch-resource-detail-panel-excluded",
+        "first_resource": "#batch-resource-detail-panel-excluded .resource-dialog-item:first-child",
+        "dialog_footer": ".resource-dialog-footer",
+    },
+}
+
+MAX_BASELINE_DIFF_RATIO = 0.005
+MAX_BASELINE_MASK_RATIO = 0.05
+BASELINE_ANCHOR_TOLERANCE = 2.0
+BASELINE_STABILITY_REPEATS = 3
 
 
 class TestBatchDraftWorkbenchVisual:
@@ -607,10 +662,9 @@ class TestBatchDraftWorkbenchVisual:
     def test_review_candidates_are_written_only_when_requested(
         self, page: Page, live_server_url: str, storage_dir: Path, tmp_path: Path
     ) -> None:
-        """AC：仅显式请求时写候选图到 pending 审核目录供用户审核。
+        """MIGU_ORCA_CAPTURE_REVIEW 仍只将候选图写入 pending 审核目录。
 
-        默认（CI 与普通本地运行）只截图到 ``tmp_path``；候选图在用户明确认可前
-        不是视觉回归基准，也不得直接替换基准。
+        默认（CI 与普通本地运行）只截图到 ``tmp_path``；此入口不更新获批基准。
         """
         scenario = self._scenario(page, live_server_url, storage_dir)
         scenario.enter_draft_workbench()
@@ -627,7 +681,8 @@ class TestBatchDraftWorkbenchVisual:
         if not scenario.review_screenshots_enabled():
             assert written == []
             return
-        assert written, "显式请求审核截图时应当写出候选图"
+        assert {target.name for target in written} == {f"{state}.png" for state in CAPTURE_STATES}
+        assert all(target.parent == REVIEW_DIR for target in written)
         for target in written:
             assert target.is_file()
             with Image.open(target) as image:
@@ -651,6 +706,108 @@ class TestBatchDraftWorkbenchVisual:
             rendered = manifest_path.read_text(encoding="utf-8")
             for canary in canary_values(scenario.items, scenario.created_draft_ids):
                 assert canary not in rendered
+
+    def test_record_approved_batch_draft_baseline_only_when_explicitly_requested(
+        self, page: Page, live_server_url: str, storage_dir: Path, tmp_path: Path
+    ) -> None:
+        """单独的 record 开关受控写获批基准；普通候选开关不会覆盖它。"""
+        scenario = self._scenario(page, live_server_url, storage_dir)
+        scenario.enter_draft_workbench()
+
+        captured: dict[str, Path] = {}
+        recorded_anchors: dict[str, dict[str, dict[str, float]]] = {}
+        for state in CAPTURE_STATES:
+            captured[state] = self._capture_state(scenario, state, tmp_path)
+            anchors = collect_anchor_boxes(page, APPROVED_ANCHORS[state])
+            assert all(box is not None for box in anchors.values()), (state, anchors)
+            recorded_anchors[state] = anchors  # type: ignore[assignment]
+
+        written = [
+            target
+            for state, shot in captured.items()
+            if (target := scenario.write_approved_baseline_screenshot(f"{state}.png", shot)) is not None
+        ]
+        if not scenario.approved_baseline_recording_enabled():
+            assert written == []
+            return
+
+        assert {target.name for target in written} == {f"{state}.png" for state in CAPTURE_STATES}
+        assert all(target.parent == BASELINE_DIR for target in written)
+        (BASELINE_DIR / "anchors.json").write_text(
+            json.dumps(recorded_anchors, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        for target in written:
+            with Image.open(target) as image:
+                assert image.size == CANVAS
+            manifest_path = target.parent / f"{target.stem}.evidence.json"
+            assert manifest_path.is_file(), target
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            assert manifest["fixture"]["id"] == "batch-draft-review-153"
+            assert manifest["screenshot"]["sha256"] == hashlib.sha256(target.read_bytes()).hexdigest()
+
+    def test_approved_batch_draft_baseline_pixels_anchors_and_stability(
+        self, page: Page, live_server_url: str, storage_dir: Path, tmp_path: Path
+    ) -> None:
+        """四张获批基准必须存在，像素差异≤0.5%、DOM锚点≤2px且三次截图稳定。"""
+        anchors_path = BASELINE_DIR / "anchors.json"
+        assert anchors_path.is_file(), f"缺少批量草案获批锚点基准：{anchors_path}"
+        expected_anchors = json.loads(anchors_path.read_text(encoding="utf-8"))
+        assert set(expected_anchors) == set(CAPTURE_STATES)
+
+        scenario = self._scenario(page, live_server_url, storage_dir)
+        scenario.enter_draft_workbench()
+        canvas_pixels = CANVAS[0] * CANVAS[1]
+
+        for state in CAPTURE_STATES:
+            baseline = BASELINE_DIR / f"{state}.png"
+            manifest_path = BASELINE_DIR / f"{state}.evidence.json"
+            assert baseline.is_file(), f"缺少获批批量草案像素基准：{baseline}"
+            assert manifest_path.is_file(), f"缺少获批批量草案证据清单：{manifest_path}"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            assert manifest["fixture"]["id"] == "batch-draft-review-153"
+            assert manifest["screenshot"]["sha256"] == hashlib.sha256(baseline.read_bytes()).hexdigest()
+
+            actual_anchors: list[dict[str, dict[str, float] | None]] = []
+            shots: list[Path] = []
+            for run in range(BASELINE_STABILITY_REPEATS):
+                shot = self._capture_state(scenario, state, tmp_path, suffix=f"-baseline-run{run}")
+                anchors = collect_anchor_boxes(page, APPROVED_ANCHORS[state])
+                assert set(anchors) == set(expected_anchors[state]), (state, anchors)
+                for name, box in anchors.items():
+                    expected = expected_anchors[state][name]
+                    assert box is not None, (state, name)
+                    for field in ("x", "y", "width", "height"):
+                        assert abs(box[field] - expected[field]) <= BASELINE_ANCHOR_TOLERANCE, (
+                            state,
+                            name,
+                            field,
+                            box,
+                            expected,
+                        )
+                stats = compare_images(
+                    read_image(baseline, error_code="baseline_unreadable"),
+                    read_image(shot, error_code="actual_unreadable"),
+                    mask_area_limit=MAX_BASELINE_MASK_RATIO,
+                    diff_path=tmp_path / f"{state}-baseline-run{run}-diff.png",
+                )
+                assert stats.mask_ratio == 0.0, (state, stats.as_report())
+                assert stats.mask_ratio <= MAX_BASELINE_MASK_RATIO, (state, stats.as_report())
+                assert stats.diff_ratio <= MAX_BASELINE_DIFF_RATIO, (state, stats.as_report())
+                actual_anchors.append(anchors)
+                shots.append(shot)
+
+            assert actual_anchors[0] == actual_anchors[1] == actual_anchors[2], state
+            for index in range(1, len(shots)):
+                first, second = shots[index - 1], shots[index]
+                stability = compare_images(
+                    read_image(first, error_code="previous_unreadable"),
+                    read_image(second, error_code="actual_unreadable"),
+                )
+                assert stability.diff_pixels <= stability_noise_pixels(canvas_pixels), (
+                    state,
+                    stability.as_report(),
+                )
 
     def test_review_capture_manifest_is_verifiable_without_repo_writes(
         self, page: Page, live_server_url: str, storage_dir: Path, tmp_path: Path

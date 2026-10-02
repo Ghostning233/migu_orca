@@ -391,4 +391,3 @@ def test_saved_plan_and_external_delete_checkboxes_use_the_shared_box(
     page.locator("#tracking-delete-plan-external").focus()
     page.keyboard.press(" ")
     assert _box(page, "#tracking-delete-plan-external")["checked"] is False
-
