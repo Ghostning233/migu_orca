@@ -536,12 +536,15 @@ def _cmd_preview(args: argparse.Namespace) -> int:
     except EvidenceError as error:
         print(f"不通过：{error}", file=sys.stderr)
         return 1
-    from tests.browser.preview_fixtures import PREVIEW_BATCH_ID, create_preview_app
+    from werkzeug.serving import run_simple
+
+    from tests.browser.preview_fixtures import create_preview_app, preview_urls
 
     app, temp_root = create_preview_app()
+    first_screen_url, draft_scene_url = preview_urls(args.host, args.port)
     print("人工预览（隔离临时目录 + 固定安全 fixture）：")
-    print(f"  单番首屏 / 批量首屏：http://{args.host}:{args.port}/app/add")
-    print(f"  固定批量草案现场：http://{args.host}:{args.port}/app/workbench?batch_id={PREVIEW_BATCH_ID}")
+    print(f"  单番首屏 / 批量首屏：{first_screen_url}")
+    print(f"  固定批量草案现场：{draft_scene_url}")
     print(
         "  构建产物："
         f"{stamp['artifact']['digest'][:12]}（HEAD={stamp['git']['head'][:12]} dirty={stamp['git']['dirty']}，已校验与当前源码一致）"
@@ -549,7 +552,7 @@ def _cmd_preview(args: argparse.Namespace) -> int:
     print(f"  隔离目录（临时，可随时删除）：{temp_root}")
     print("  说明：AB 未配置、追番列表为空；批量/候选/海报为固定安全 fixture；")
     print("        未覆盖的 /api/v1 接口在本地 fail closed，不产生外部调用。")
-    app.run(host=args.host, port=args.port, debug=False, use_reloader=False)
+    run_simple(args.host, args.port, app, use_reloader=False, use_debugger=False)
     return 0
 
 

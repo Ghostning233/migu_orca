@@ -29,16 +29,26 @@ from apps.migu_orca_web.drafts import draft_store
 from apps.migu_orca_web.services import set_web_storage_root
 from tests.browser.add_anime_visual_fixtures import poster_png
 from tests.browser.batch_draft_visual_fixtures import (
+    BATCH_ID,
     SELECTIONS,
     batch_draft_items,
     batch_parse_envelope,
     raw_input_for,
     with_public_resources,
 )
-from tests.browser.batch_visual_fixtures import BATCH_ID, batch_candidate, preview_request
+from tests.browser.batch_visual_fixtures import batch_candidate, preview_request
 from tests.browser.conftest import issue_draft_id
 
 PREVIEW_BATCH_ID = f"{BATCH_ID}-preview"
+"""预览批量解析返回的批次标识（与截图 fixture 同一批）。"""
+
+
+def preview_urls(host: str, port: int) -> tuple[str, str]:
+    """返回 ``(首屏 URL, 固定批量草案现场 URL)``，供 CLI 与文档共用。"""
+    return (
+        f"http://{host}:{port}/app/add",
+        f"http://{host}:{port}/app/workbench?batch_id={PREVIEW_BATCH_ID}",
+    )
 PREVIEW_SINGLE_QUERY = "星海旅途"
 
 _SINGLE_CANDIDATES: tuple[tuple[str, str, int, int], ...] = (
