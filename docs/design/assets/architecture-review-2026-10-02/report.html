@@ -1,0 +1,819 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MiGuOrca 架构评审 · 深化机会（2026-10-02）</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose", flowchart: { curve: "basis" } });
+    </script>
+    <style>
+      .seam { stroke-dasharray: 4 4; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      .hatch {
+        background-image: repeating-linear-gradient(45deg, #e2e8f0 0 6px, #f8fafc 6px 12px);
+      }
+      .card-shadow { box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -12px rgba(15, 23, 42, 0.18); }
+      .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+      pre.mermaid { background: transparent; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans antialiased">
+    <main class="max-w-6xl mx-auto px-6 py-12 space-y-14">
+      <!-- ================= HEADER ================= -->
+      <header class="space-y-6">
+        <div class="flex flex-wrap items-baseline justify-between gap-4 border-b border-slate-300 pb-5">
+          <div>
+            <h1 class="font-serif text-4xl tracking-tight">MiGuOrca 架构评审</h1>
+            <p class="text-slate-500 mt-1 text-sm">深化机会 · 2026-10-02 · 已合入 main：<span class="mono">054de35</span>（PR #154）· 评审时提交 <span class="mono">50420cc</span></p>
+          </div>
+          <div class="text-right text-xs text-slate-500 leading-relaxed">
+            <div>Python 3.13 + Flask/Pydantic · Vue 3 + TS strict</div>
+            <div>56,525 行 Python · 33,691 行 前端 · 22,289 行 浏览器测试</div>
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-slate-300 bg-white p-3 text-xs text-slate-600">
+          本页是 Agent 可读主文档的可视化版本；规格与边界以
+          <span class="mono">docs/design/architecture-review-2026-10-02.md</span> 为准，它包含「供下游 Agent 的交接边界」一节。
+        </div>
+
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-xs">
+          <div class="rounded-lg border border-slate-200 bg-white p-3">
+            <div class="uppercase tracking-wider text-slate-400 mb-2">图例</div>
+            <div class="space-y-1.5">
+              <div class="flex items-center gap-2"><span class="inline-block w-4 h-3 border-2 border-slate-700 bg-white"></span> 模块</div>
+              <div class="flex items-center gap-2"><svg width="18" height="8"><line x1="1" y1="4" x2="17" y2="4" stroke="#475569" stroke-width="2" class="seam" /></svg> 缝隙（seam）</div>
+              <div class="flex items-center gap-2"><svg width="18" height="8"><line x1="1" y1="4" x2="17" y2="4" stroke="#dc2626" stroke-width="2" /></svg> 泄漏 / 重复写</div>
+              <div class="flex items-center gap-2"><span class="inline-block w-4 h-3 deep"></span> 深模块（deep）</div>
+            </div>
+          </div>
+          <div class="rounded-lg border border-slate-200 bg-white p-3">
+            <div class="uppercase tracking-wider text-slate-400 mb-2">术语</div>
+            <p class="text-slate-600 leading-relaxed">模块 · 接口 · 实现 · 深度 · 浅模块 · 深模块 · 缝隙 · 适配器 · 杠杆（leverage） · 局部性（locality）</p>
+          </div>
+          <div class="rounded-lg border border-slate-200 bg-white p-3">
+            <div class="uppercase tracking-wider text-slate-400 mb-2">排序依据</div>
+            <p class="text-slate-600 leading-relaxed">按近期改动热度加权：<span class="mono">BatchWorkbenchView.vue</span> 是 32 次提交 / 15 个 Issue 的唯一落点。</p>
+          </div>
+          <div class="rounded-lg border border-slate-200 bg-white p-3">
+            <div class="uppercase tracking-wider text-slate-400 mb-2">候选数</div>
+            <p class="text-slate-600 leading-relaxed">8 个候选：5 个 <span class="text-emerald-700 font-medium">Strong</span> · 3 个 <span class="text-amber-700 font-medium">Worth exploring</span></p>
+          </div>
+        </div>
+      </header>
+
+      <section id="candidates" class="space-y-12">
+
+        <!-- ============================================================ 1 -->
+        <article id="c1" class="rounded-2xl border border-slate-200 bg-white card-shadow overflow-hidden">
+          <div class="p-7 space-y-6">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <h2 class="font-serif text-2xl">1 · 把批量审核生命周期收进一个「批量审核会话」模块</h2>
+              <div class="flex gap-2 shrink-0">
+                <span class="rounded-full bg-emerald-100 text-emerald-800 text-xs font-semibold px-3 py-1">Strong</span>
+                <span class="rounded-full bg-slate-100 text-slate-600 text-xs px-3 py-1">in-process</span>
+              </div>
+            </div>
+
+            <div class="mono text-xs text-slate-600 space-y-0.5">
+              <div>frontend/src/features/workbench/BatchWorkbenchView.vue <span class="text-slate-400">(2910 行：script 1556 / template 500 / style 851)</span></div>
+              <div>frontend/src/app/composables/useBatchReviewJourney.ts</div>
+              <div>frontend/src/features/workbench/batchWorkbench.ts <span class="text-slate-400">(814 行 / 69 个导出)</span></div>
+              <div>frontend/src/features/workbench/BatchWorkbenchView.test.ts <span class="text-slate-400">(2263 行)</span></div>
+            </div>
+
+            <!-- before / after -->
+            <div class="grid gap-4 lg:grid-cols-2">
+              <div class="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                <div class="uppercase tracking-wider text-xs text-slate-400 mb-3">Before · 三个持有者，两条写路径</div>
+                <pre class="mermaid">
+flowchart TB
+  BW["BatchWorkbenchView.vue<br/>script 1556 行 · 69 个函数 · 21 computed"]
+  RBJ["useBatchReviewJourney<br/>30 个 action 的 reducer"]
+  PURE["batchWorkbench.ts<br/>69 个导出"]
+  SNAP["items 快照<br/>items[].status 字符串"]
+  BW -->|"31 次 dispatch"| RBJ
+  BW -->|"约 30 个具名导入"| PURE
+  BW -.->|"手工改写状态"| SNAP
+  RBJ -.->|"phase / selected"| SNAP
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#dc2626;
+  class BW leak
+                </pre>
+              </div>
+              <div class="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                <div class="uppercase tracking-wider text-xs text-slate-400 mb-3">After · 一个深模块，一个接口</div>
+                <div class="space-y-3 pt-1">
+                  <div class="deep rounded-lg text-slate-100 p-4">
+                    <div class="uppercase tracking-wider text-[10px] text-slate-400">deep module</div>
+                    <div class="font-medium text-sm mt-1">批量审核会话</div>
+                    <div class="mt-3 space-y-1 text-[11px] text-slate-300">
+                      <div class="border border-slate-600 rounded px-2 py-1">parse → 候选 → 草案 → 保存 → 恢复</div>
+                      <div class="border border-slate-600 rounded px-2 py-1">条目 phase · selection · idempotency key</div>
+                      <div class="border border-slate-600 rounded px-2 py-1">手改 items[].status 的镜像逻辑</div>
+                    </div>
+                    <div class="mt-3 text-[11px] text-slate-400">接口：会话快照 + 条目级命令</div>
+                  </div>
+                  <div class="flex items-center gap-2 text-xs text-slate-500">
+                    <svg width="20" height="10"><line x1="1" y1="5" x2="19" y2="5" stroke="#475569" stroke-width="2" class="seam" /></svg>
+                    视图只剩渲染 + DOM 接线
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="grid gap-4 md:grid-cols-3 text-sm">
+              <div class="rounded-lg border-l-4 border-red-400 bg-red-50/50 p-3">
+                <div class="text-xs uppercase tracking-wider text-red-700 mb-1">Problem</div>
+                <p class="text-slate-700">一部番剧从名称输入到追番交接的生命周期由三个模块共同持有，SFC 还必须手工改写条目快照去镜像状态机的 phase，同一次转换写两遍。</p>
+              </div>
+              <div class="rounded-lg border-l-4 border-indigo-400 bg-indigo-50/50 p-3">
+                <div class="text-xs uppercase tracking-wider text-indigo-700 mb-1">Solution</div>
+                <p class="text-slate-700">让一个批量审核会话模块持有条目生命周期与派生状态；视图只订阅它并调用条目级命令，不再自己推算转换结果。</p>
+              </div>
+              <div class="rounded-lg border-l-4 border-emerald-400 bg-emerald-50/50 p-3">
+                <div class="text-xs uppercase tracking-wider text-emerald-700 mb-1">Wins</div>
+                <ul class="text-slate-700 space-y-1 list-disc list-inside">
+                  <li>局部性：转换集中一处</li>
+                  <li>手写状态镜像消失</li>
+                  <li>测试穿过会话接口，不再 mount 2910 行视图</li>
+                  <li>删掉只写不读的状态</li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm space-y-2">
+              <div class="text-xs uppercase tracking-wider text-slate-500">证据</div>
+              <ul class="text-slate-700 space-y-1 list-disc list-inside">
+                <li><span class="mono">BatchWorkbenchView.vue:155</span> 的 <span class="mono">parseBlocked</span> 同时读 5 个本地 ref；<span class="mono">:186-188</span> 的 <span class="mono">saveInFlight / savingItemIds</span> 与状态机的 <span class="mono">saving</span> phase 并存。</li>
+                <li><span class="mono">:1235</span> 与 <span class="mono">:1311</span> 在 dispatch 之后又 <span class="mono">items.value = items.value.map(...)</span> 把快照改成 <span class="mono">RESPONSE_UNKNOWN</span>；<span class="mono">:1270-1303</span> 同样的双写覆盖 4 种失败形态。</li>
+                <li><span class="mono">:168 inputItemOrder</span> 只写一次、零读取；<span class="mono">:157 parseResult</span> 三写零读。</li>
+                <li>测试侧：<span class="mono">BatchWorkbenchView.test.ts</span> mount 整个 SFC、mock <span class="mono">@/api/client</span>，用 53 个 id 选择器与 31 个 class 选择器断言，并在 <span class="mono">:231</span> 直接取 <span class="mono">wrapper.vm.parseBatch</span>。</li>
+                <li>历史：该文件 32 次提交、15 个 Issue（#56 → #159），其中 3 次是纯视觉/文案改动也落在同一文件。</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <!-- ============================================================ 2 -->
+        <article id="c2" class="rounded-2xl border border-slate-200 bg-white card-shadow overflow-hidden">
+          <div class="p-7 space-y-6">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <h2 class="font-serif text-2xl">2 · 把「审核资格」收成一个模块</h2>
+              <div class="flex gap-2 shrink-0">
+                <span class="rounded-full bg-emerald-100 text-emerald-800 text-xs font-semibold px-3 py-1">Strong</span>
+                <span class="rounded-full bg-slate-100 text-slate-600 text-xs px-3 py-1">in-process</span>
+              </div>
+            </div>
+
+            <div class="mono text-xs text-slate-600 space-y-0.5">
+              <div>frontend/src/features/workbench/BatchWorkbenchView.vue <span class="text-slate-400">:289-313</span></div>
+              <div>frontend/src/features/workbench/SingleAnimeReviewPanel.vue <span class="text-slate-400">:123-140</span></div>
+              <div>frontend/src/app/composables/useBatchReviewJourney.ts <span class="text-slate-400">:206-208</span></div>
+            </div>
+
+            <div class="grid gap-4 lg:grid-cols-2">
+              <div class="rounded-xl border border-slate-200 bg-slate-50/60 p-4 text-xs">
+                <div class="uppercase tracking-wider text-slate-400 mb-3">Before · 同一组规则，三份实现</div>
+                <div class="grid gap-3 sm:grid-cols-2">
+                  <div class="rounded border border-slate-300 bg-white p-2">
+                    <div class="mono text-[10px] text-slate-500 mb-1">itemConfirmability()</div>
+                    <div class="space-y-0.5 text-slate-600">
+                      <div>有尚未应用的编辑…自动更新</div>
+                      <div>有尚未应用的编辑…目录名</div>
+                      <div>有尚未应用的编辑</div>
+                      <div class="bg-red-100 text-red-800 rounded px-1">正在重新计算资源</div>
+                      <div class="bg-red-100 text-red-800 rounded px-1">请选择有效字幕组</div>
+                      <div>没有有效资源</div>
+                    </div>
+                  </div>
+                  <div class="rounded border border-slate-300 bg-white p-2">
+                    <div class="mono text-[10px] text-slate-500 mb-1">saveBlockers()</div>
+                    <div class="space-y-0.5 text-slate-600">
+                      <div>有尚未应用的编辑…自动更新</div>
+                      <div>有尚未应用的编辑…目录名</div>
+                      <div>有尚未应用的编辑</div>
+                      <div class="bg-red-100 text-red-800 rounded px-1">正在重新计算订阅方案</div>
+                      <div class="bg-red-100 text-red-800 rounded px-1">尚未选择字幕组</div>
+                      <div>没有有效资源</div>
+                    </div>
+                  </div>
+                </div>
+                <div class="mt-3 text-slate-500">第三份：<span class="mono">batchItemCanConfirm()</span> 只判 phase 与 dirty。红底两行已经漂移。</div>
+              </div>
+              <div class="rounded-xl border border-slate-200 bg-slate-50/60 p-4 text-xs">
+                <div class="uppercase tracking-wider text-slate-400 mb-3">After · 一份规则，一份文案</div>
+                <div class="deep rounded-lg text-slate-100 p-4">
+                  <div class="uppercase tracking-wider text-[10px] text-slate-400">deep module</div>
+                  <div class="font-medium text-sm mt-1">审核资格</div>
+                  <div class="mt-3 text-[11px] text-slate-300 space-y-1">
+                    <div class="border border-slate-600 rounded px-2 py-1">输入：草案会话 + 编辑调度器状态</div>
+                    <div class="border border-slate-600 rounded px-2 py-1">输出：confirmable + 固定中文 blockers</div>
+                  </div>
+                </div>
+                <div class="mt-3 space-y-1.5 text-slate-600">
+                  <div>→ 批量条目卡 / 批量详情</div>
+                  <div>→ 单番审核面板</div>
+                  <div class="text-slate-400">只有一个地方决定「为什么还不能确认」</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="grid gap-4 md:grid-cols-3 text-sm">
+              <div class="rounded-lg border-l-4 border-red-400 bg-red-50/50 p-3">
+                <div class="text-xs uppercase tracking-wider text-red-700 mb-1">Problem</div>
+                <p class="text-slate-700">单番与批量各写一份「可否确认」规则，同一批固定中文原因已经开始漂移，第三个判据又独立存在于状态机里。</p>
+              </div>
+              <div class="rounded-lg border-l-4 border-indigo-400 bg-indigo-50/50 p-3">
+                <div class="text-xs uppercase tracking-wider text-indigo-700 mb-1">Solution</div>
+                <p class="text-slate-700">把资格判断做成一个模块，输入草案会话与调度器状态，输出 confirmable 与阻断原因；三个界面共用它。</p>
+              </div>
+              <div class="rounded-lg border-l-4 border-emerald-400 bg-emerald-50/50 p-3">
+                <div class="text-xs uppercase tracking-wider text-emerald-700 mb-1">Wins</div>
+                <ul class="text-slate-700 space-y-1 list-disc list-inside">
+                  <li>规则一份，口径不再分叉</li>
+                  <li>文案只有一个源</li>
+                  <li>资格判断可脱离视图单测</li>
+                  <li>杠杆：一个接口，三个消费面</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- ============================================================ 3 -->
+        <article id="c3" class="rounded-2xl border border-slate-200 bg-white card-shadow overflow-hidden">
+          <div class="p-7 space-y-6">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <h2 class="font-serif text-2xl">3 · 集数证据只留一份投影</h2>
+              <div class="flex gap-2 shrink-0">
+                <span class="rounded-full bg-emerald-100 text-emerald-800 text-xs font-semibold px-3 py-1">Strong</span>
+                <span class="rounded-full bg-slate-100 text-slate-600 text-xs px-3 py-1">in-process</span>
+              </div>
+            </div>
+
+            <div class="mono text-xs text-slate-600 space-y-0.5">
+              <div>frontend/src/features/workbench/candidateSearch.ts <span class="text-slate-400">:87-90</span></div>
+              <div>frontend/src/features/workbench/batchWorkbench.ts <span class="text-slate-400">:355, :453-457</span></div>
+              <div>frontend/src/features/workbench/CandidateCard.vue <span class="text-slate-400">:115</span> · AnimeDraftEditor.vue <span class="text-slate-400">:505</span></div>
+              <div>frontend/src/features/tracking/TrackingInspector.vue <span class="text-slate-400">:579</span></div>
+            </div>
+
+            <div class="grid gap-4 lg:grid-cols-2">
+              <div class="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                <div class="uppercase tracking-wider text-xs text-slate-400 mb-3">Before · 两份逐字相同的实现 + 一次恒为未知的调用</div>
+                <div class="space-y-2 text-[11px] mono">
+                  <div class="rounded border border-red-300 bg-red-50 p-2 text-red-900">
+                    candidateSearch.ts:87<br />
+                    Number.isInteger(total) &amp;&amp; total &gt; 0 ? 总集数：N 集 : 总集数：未知
+                  </div>
+                  <div class="rounded border border-red-300 bg-red-50 p-2 text-red-900">
+                    batchWorkbench.ts:453<br />
+                    Number.isInteger(total) &amp;&amp; total &gt; 0 ? 总集数：N 集 : 总集数：未知
+                  </div>
+                  <div class="rounded border border-amber-300 bg-amber-50 p-2 text-amber-900">
+                    batchWorkbench.ts:355<br />
+                    batchEpisodeProgressText(<span class="font-bold">undefined</span>).replace('总集数：', '')
+                    <div class="mt-1 font-sans">→ 规则永远不生效，卡片上的「总集数」恒为「未知」</div>
+                  </div>
+                </div>
+                <div class="mt-3 text-xs text-slate-500">另有 4 个渲染点各自处理缺值：CandidateCard、AnimeDraftEditor、ResourceSummary、TrackingInspector。</div>
+              </div>
+              <div class="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                <div class="uppercase tracking-wider text-xs text-slate-400 mb-3">After · 一份「集数证据」投影</div>
+                <div class="deep rounded-lg text-slate-100 p-4 text-[11px]">
+                  <div class="uppercase tracking-wider text-[10px] text-slate-400">deep module</div>
+                  <div class="font-medium text-sm mt-1">集数证据投影</div>
+                  <div class="mt-3 space-y-1 text-slate-300">
+                    <div class="border border-slate-600 rounded px-2 py-1">输入：候选 / 草案 / 详情的证据字段</div>
+                    <div class="border border-slate-600 rounded px-2 py-1">预期总集数 · 已更新集数</div>
+                    <div class="border border-slate-600 rounded px-2 py-1">无可信值 → 未知，绝不推算</div>
+                  </div>
+                </div>
+                <div class="mt-3 grid grid-cols-2 gap-1 text-[11px] text-slate-600">
+                  <div class="rounded border border-slate-300 bg-white px-2 py-1">候选卡</div>
+                  <div class="rounded border border-slate-300 bg-white px-2 py-1">草案编辑器</div>
+                  <div class="rounded border border-slate-300 bg-white px-2 py-1">资源摘要</div>
+                  <div class="rounded border border-slate-300 bg-white px-2 py-1">追番详情</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="grid gap-4 md:grid-cols-3 text-sm">
+              <div class="rounded-lg border-l-4 border-red-400 bg-red-50/50 p-3">
+                <div class="text-xs uppercase tracking-wider text-red-700 mb-1">Problem</div>
+                <p class="text-slate-700">领域词汇里定义好的「预期总集数」规则有两份逐字实现，其中一处在调用时传 <span class="mono">undefined</span> 让规则永不生效，另有四个渲染点各自处理缺值。</p>
+              </div>
+              <div class="rounded-lg border-l-4 border-indigo-400 bg-indigo-50/50 p-3">
+                <div class="text-xs uppercase tracking-wider text-indigo-700 mb-1">Solution</div>
+                <p class="text-slate-700">让一个集数证据投影模块从证据字段推出显示值，所有面消费同一个接口。</p>
+              </div>
+              <div class="rounded-lg border-l-4 border-emerald-400 bg-emerald-50/50 p-3">
+                <div class="text-xs uppercase tracking-wider text-emerald-700 mb-1">Wins</div>
+                <ul class="text-slate-700 space-y-1 list-disc list-inside">
+                  <li>规则一份，恒为未知的调用消失</li>
+                  <li>测试直接打投影接口</li>
+                  <li>单番与批量口径一致</li>
+                  <li>杠杆：一处规则，四个消费面</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- ============================================================ 4 -->
+        <article id="c4" class="rounded-2xl border border-slate-200 bg-white card-shadow overflow-hidden">
+          <div class="p-7 space-y-6">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <h2 class="font-serif text-2xl">4 · 把追番外部写会话收成一个模块</h2>
+              <div class="flex gap-2 shrink-0">
+                <span class="rounded-full bg-emerald-100 text-emerald-800 text-xs font-semibold px-3 py-1">Strong</span>
+                <span class="rounded-full bg-slate-100 text-slate-600 text-xs px-3 py-1">in-process</span>
+              </div>
+            </div>
+
+            <div class="mono text-xs text-slate-600 space-y-0.5">
+              <div>frontend/src/features/tracking/trackingProjection.ts <span class="text-slate-400">(1292 行 / 118 个导出)</span></div>
+              <div>frontend/src/features/tracking/trackingManagement.ts <span class="text-slate-400">(772 行 / 52 个导出)</span></div>
+              <div>frontend/src/features/tracking/batchSelection.ts</div>
+              <div>frontend/src/features/tracking/TrackingView.vue <span class="text-slate-400">(1640 行) · TrackingInspector.vue (1020 行)</span></div>
+            </div>
+
+            <div class="grid gap-4 lg:grid-cols-2">
+              <div class="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                <div class="uppercase tracking-wider text-xs text-slate-400 mb-3">Before · 一个概念，三个纯规则模块，78 个具名导入</div>
+                <svg viewBox="0 0 380 210" class="w-full">
+                  <rect x="8" y="10" width="96" height="46" fill="#fff" stroke="#94a3b8" stroke-width="1.5" rx="4" />
+                  <text x="56" y="30" text-anchor="middle" font-size="9" fill="#334155">trackingProjection</text>
+                  <text x="56" y="43" text-anchor="middle" font-size="8" fill="#64748b">118 个导出 · 51</text>
+                  <rect x="8" y="82" width="96" height="46" fill="#fff" stroke="#94a3b8" stroke-width="1.5" rx="4" />
+                  <text x="56" y="102" text-anchor="middle" font-size="9" fill="#334155">trackingManagement</text>
+                  <text x="56" y="115" text-anchor="middle" font-size="8" fill="#64748b">52 个导出 · 13</text>
+                  <rect x="8" y="154" width="96" height="46" fill="#fff" stroke="#94a3b8" stroke-width="1.5" rx="4" />
+                  <text x="56" y="174" text-anchor="middle" font-size="9" fill="#334155">batchSelection</text>
+                  <text x="56" y="187" text-anchor="middle" font-size="8" fill="#64748b">批量提交选择 · 14</text>
+
+                  <path d="M104 33 C 160 33, 170 90, 216 95" fill="none" stroke="#dc2626" stroke-width="1.6" />
+                  <path d="M104 105 C 150 105, 170 100, 216 100" fill="none" stroke="#dc2626" stroke-width="1.6" />
+                  <path d="M104 177 C 160 177, 170 112, 216 107" fill="none" stroke="#dc2626" stroke-width="1.6" />
+                  <text x="158" y="72" text-anchor="middle" font-size="8" fill="#dc2626">78 个具名导入</text>
+
+                  <rect x="216" y="56" width="150" height="92" fill="#f8fafc" stroke="#dc2626" stroke-width="2" rx="4" />
+                  <text x="291" y="80" text-anchor="middle" font-size="10" fill="#0f172a">TrackingView.vue</text>
+                  <text x="291" y="96" text-anchor="middle" font-size="8" fill="#64748b">1640 行</text>
+                  <text x="291" y="112" text-anchor="middle" font-size="8" fill="#64748b">意图 → 请求体 → 会话</text>
+                  <text x="291" y="126" text-anchor="middle" font-size="8" fill="#64748b">→ 冲突/恢复 → 回查收敛</text>
+                  <text x="291" y="140" text-anchor="middle" font-size="8" fill="#dc2626">编排只在这里</text>
+                </svg>
+              </div>
+              <div class="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                <div class="uppercase tracking-wider text-xs text-slate-400 mb-3">After · 一个会话模块，两个页面只读快照</div>
+                <div class="deep rounded-lg text-slate-100 p-4 text-[11px]">
+                  <div class="uppercase tracking-wider text-[10px] text-slate-400">deep module</div>
+                  <div class="font-medium text-sm mt-1">追番外部写会话</div>
+                  <div class="mt-3 space-y-1 text-slate-300">
+                    <div class="border border-slate-600 rounded px-2 py-1">提交方式：下载现有资源 / 持续追番</div>
+                    <div class="border border-slate-600 rounded px-2 py-1">意图 · 幂等键 · expected revision</div>
+                    <div class="border border-slate-600 rounded px-2 py-1">明确失败 / 结果待确认 / 冲突</div>
+                    <div class="border border-slate-600 rounded px-2 py-1">写后回查与收敛</div>
+                  </div>
+                  <div class="mt-3 text-[11px] text-slate-400">接口：会话快照 + 意图命令</div>
+                </div>
+                <div class="mt-3 grid grid-cols-2 gap-1 text-[11px] text-slate-600">
+                  <div class="rounded border border-slate-300 bg-white px-2 py-1">追番页</div>
+                  <div class="rounded border border-slate-300 bg-white px-2 py-1">追番检查器</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="grid gap-4 md:grid-cols-3 text-sm">
+              <div class="rounded-lg border-l-4 border-red-400 bg-red-50/50 p-3">
+                <div class="text-xs uppercase tracking-wider text-red-700 mb-1">Problem</div>
+                <p class="text-slate-700">一个概念（外部写的意图、幂等键、冲突与结果）散在三个纯规则模块里，页面顶部要具名导入 78 个符号才能拼出编排，且存在两套并行的会话状态机。</p>
+              </div>
+              <div class="rounded-lg border-l-4 border-indigo-400 bg-indigo-50/50 p-3">
+                <div class="text-xs uppercase tracking-wider text-indigo-700 mb-1">Solution</div>
+                <p class="text-slate-700">让一个追番外部写会话模块拥有从意图到收敛的全过程，导出一个窄接口；页面只渲染快照并发出意图。</p>
+              </div>
+              <div class="rounded-lg border-l-4 border-emerald-400 bg-emerald-50/50 p-3">
+                <div class="text-xs uppercase tracking-wider text-emerald-700 mb-1">Wins</div>
+                <ul class="text-slate-700 space-y-1 list-disc list-inside">
+                  <li>78 个具名导入收成少量</li>
+                  <li>两套会话状态机合一</li>
+                  <li>幂等与绑定只在一处演进</li>
+                  <li>测试打会话接口，不 mount 页面</li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm space-y-2">
+              <div class="text-xs uppercase tracking-wider text-slate-500">证据</div>
+              <ul class="text-slate-700 space-y-1 list-disc list-inside">
+                <li><span class="mono">TrackingView.vue:20-106</span> 三个具名导入块分别导入 51 / 13 / 14 个符号，共 78 个。</li>
+                <li><span class="mono">trackingProjection.ts:657</span> 与 <span class="mono">:1112</span> 定义了两套平行会话：<span class="mono">TrackingWriteSession</span> 与 <span class="mono">TrackingManagementSession</span>。</li>
+                <li><span class="mono">trackingManagement.ts:603-653</span> 五个构造器各只有一行，只是给 <span class="mono">createManagementSession</span> 固定一个 state 参数。</li>
+                <li>测试重心错位：<span class="mono">trackingProjection.test.ts</span> 718 行 + <span class="mono">trackingManagement.test.ts</span> 717 行覆盖纯函数，而真正编排所在的 <span class="mono">TrackingView.test.ts</span> 只有 10KB。</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <!-- ============================================================ 5 -->
+        <article id="c5" class="rounded-2xl border border-slate-200 bg-white card-shadow overflow-hidden">
+          <div class="p-7 space-y-6">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <h2 class="font-serif text-2xl">5 · 本地存储原语收敛成一份</h2>
+              <div class="flex gap-2 shrink-0">
+                <span class="rounded-full bg-emerald-100 text-emerald-800 text-xs font-semibold px-3 py-1">Strong</span>
+                <span class="rounded-full bg-slate-100 text-slate-600 text-xs px-3 py-1">local-substitutable</span>
+              </div>
+            </div>
+
+            <div class="mono text-xs text-slate-600 space-y-0.5">
+              <div>src/storage_engine/controllers/ <span class="text-slate-400">8 个 *_repository.py（queue / operation / tracking / ab_result / correction / request / idempotency / preference）</span></div>
+              <div>src/tracking_engine/models/tracking.py <span class="text-slate-400">:313-319, :391</span> · operation.py <span class="text-slate-400">:52-55, :255</span></div>
+            </div>
+
+            <div class="grid gap-4 lg:grid-cols-2">
+              <div class="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                <div class="uppercase tracking-wider text-xs text-slate-400 mb-3">Before · 每个 repository 带一套自己的原语</div>
+                <div class="space-y-1">
+                  <div class="flex items-stretch gap-1 h-7">
+                    <div class="w-24 shrink-0 text-[10px] text-slate-500 flex items-center mono">queue</div>
+                    <div class="flex-1 hatch border-l-4 border-red-400 rounded-r px-2 flex items-center text-[10px] text-slate-600">路径逃逸 · 原子写 · 按 key 锁</div>
+                  </div>
+                  <div class="flex items-stretch gap-1 h-7">
+                    <div class="w-24 shrink-0 text-[10px] text-slate-500 flex items-center mono">operation</div>
+                    <div class="flex-1 hatch border-l-4 border-red-400 rounded-r px-2 flex items-center text-[10px] text-slate-600">路径逃逸 · 原子写 · 按 key 锁 · 脱敏</div>
+                  </div>
+                  <div class="flex items-stretch gap-1 h-7">
+                    <div class="w-24 shrink-0 text-[10px] text-slate-500 flex items-center mono">tracking</div>
+                    <div class="flex-1 hatch border-l-4 border-red-400 rounded-r px-2 flex items-center text-[10px] text-slate-600">路径逃逸 · 原子写 · 按 key 锁 · 脱敏</div>
+                  </div>
+                  <div class="flex items-stretch gap-1 h-7">
+                    <div class="w-24 shrink-0 text-[10px] text-slate-500 flex items-center mono">ab_result</div>
+                    <div class="flex-1 hatch border-l-4 border-red-400 rounded-r px-2 flex items-center text-[10px] text-slate-600">路径逃逸 · 原子写</div>
+                  </div>
+                  <div class="flex items-stretch gap-1 h-7">
+                    <div class="w-24 shrink-0 text-[10px] text-slate-500 flex items-center mono">correction</div>
+                    <div class="flex-1 hatch border-l-4 border-red-400 rounded-r px-2 flex items-center text-[10px] text-slate-600">路径逃逸 · 原子写 · 脱敏</div>
+                  </div>
+                  <div class="flex items-stretch gap-1 h-7">
+                    <div class="w-24 shrink-0 text-[10px] text-slate-500 flex items-center mono">request</div>
+                    <div class="flex-1 hatch border-l-4 border-red-400 rounded-r px-2 flex items-center text-[10px] text-slate-600">路径逃逸 · 原子写</div>
+                  </div>
+                  <div class="flex items-stretch gap-1 h-7">
+                    <div class="w-24 shrink-0 text-[10px] text-slate-500 flex items-center mono">idempotency</div>
+                    <div class="flex-1 hatch border-l-4 border-red-400 rounded-r px-2 flex items-center text-[10px] text-slate-600">路径逃逸 · 原子写</div>
+                  </div>
+                  <div class="flex items-stretch gap-1 h-7">
+                    <div class="w-24 shrink-0 text-[10px] text-slate-500 flex items-center mono">preference</div>
+                    <div class="flex-1 hatch border-l-4 border-red-400 rounded-r px-2 flex items-center text-[10px] text-slate-600">路径逃逸 · 原子写 · 脱敏</div>
+                  </div>
+                </div>
+                <div class="mt-3 text-[11px] text-red-700">路径逃逸判定共 8 份逐字相同；它是安全策略，收紧一次要改 8 处。</div>
+              </div>
+              <div class="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                <div class="uppercase tracking-wider text-xs text-slate-400 mb-3">After · 一份原语，repository 只留记录语义</div>
+                <div class="deep rounded-lg text-slate-100 p-3 text-[11px] mb-2">
+                  <div class="uppercase tracking-wider text-[10px] text-slate-400">deep module</div>
+                  <div class="font-medium text-sm mt-1">本地存储原语</div>
+                  <div class="mt-2 flex flex-wrap gap-1 text-[10px] text-slate-300">
+                    <span class="border border-slate-600 rounded px-1.5 py-0.5">路径约束</span>
+                    <span class="border border-slate-600 rounded px-1.5 py-0.5">原子写</span>
+                    <span class="border border-slate-600 rounded px-1.5 py-0.5">按 key 锁</span>
+                    <span class="border border-slate-600 rounded px-1.5 py-0.5">脱敏判定</span>
+                    <span class="border border-slate-600 rounded px-1.5 py-0.5">时间戳</span>
+                  </div>
+                </div>
+                <div class="space-y-1">
+                  <div class="rounded border-l-4 border-slate-400 bg-white h-6 flex items-center px-2 text-[10px] text-slate-600">queue：队列记录语义</div>
+                  <div class="rounded border-l-4 border-slate-400 bg-white h-6 flex items-center px-2 text-[10px] text-slate-600">operation：外部写操作语义</div>
+                  <div class="rounded border-l-4 border-slate-400 bg-white h-6 flex items-center px-2 text-[10px] text-slate-600">tracking：追番记录语义</div>
+                  <div class="rounded border-l-4 border-slate-400 bg-white h-6 flex items-center px-2 text-[10px] text-slate-600">…其余 5 个</div>
+                </div>
+                <div class="mt-3 text-[11px] text-slate-500">安全策略只在一处生效。</div>
+              </div>
+            </div>
+
+            <div class="grid gap-4 md:grid-cols-3 text-sm">
+              <div class="rounded-lg border-l-4 border-red-400 bg-red-50/50 p-3">
+                <div class="text-xs uppercase tracking-wider text-red-700 mb-1">Problem</div>
+                <p class="text-slate-700">八个 repository 各自复制同一组存储原语，其中路径逃逸判定是安全策略；一处收紧要同步八处，漏一处就是一个逃逸点。</p>
+              </div>
+              <div class="rounded-lg border-l-4 border-indigo-400 bg-indigo-50/50 p-3">
+                <div class="text-xs uppercase tracking-wider text-indigo-700 mb-1">Solution</div>
+                <p class="text-slate-700">抽出本地存储原语模块（路径约束、原子写、按 key 锁、脱敏判定、时间戳），repository 只保留各自的记录语义。</p>
+              </div>
+              <div class="rounded-lg border-l-4 border-emerald-400 bg-emerald-50/50 p-3">
+                <div class="text-xs uppercase tracking-wider text-emerald-700 mb-1">Wins</div>
+                <ul class="text-slate-700 space-y-1 list-disc list-inside">
+                  <li>删 8 份重复实现</li>
+                  <li>安全策略一处生效</li>
+                  <li>原语可独立测试</li>
+                  <li>局部性：修复一次，处处修复</li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm space-y-2">
+              <div class="text-xs uppercase tracking-wider text-slate-500">证据</div>
+              <ul class="text-slate-700 space-y-1 list-disc list-inside">
+                <li><span class="mono">_is_relative_to</span> 在 8 个文件中逐字重复：<span class="mono">queue_repository.py:152</span>、<span class="mono">operation_repository.py:568</span>、<span class="mono">tracking_repository.py:444</span>、<span class="mono">ab_result_repository.py:199</span>、<span class="mono">correction_repository.py:354</span>、<span class="mono">request_repository.py:261</span>、<span class="mono">idempotency_repository.py:248</span>、<span class="mono">preference_repository.py:564</span>。</li>
+                <li>原子写同构：<span class="mono">tracking_repository.py:335-360</span> 与 <span class="mono">operation_repository.py:408-435</span>；按 key 锁同构：<span class="mono">:410-423</span> 与 <span class="mono">:532-545</span>；<span class="mono">temp + os.replace</span> 共 5 处。</li>
+                <li>脱敏正则两份：<span class="mono">tracking.py:313-319</span> 与 <span class="mono">preference_repository.py:58-71</span>；时间戳两份：<span class="mono">tracking.py:391</span> 与 <span class="mono">operation.py:255</span>。</li>
+                <li>版本字段各自为政：<span class="mono">preference_repository.py:27</span>、<span class="mono">correction_repository.py:19</span>、<span class="mono">tracking.py:44</span>、<span class="mono">operation.py:52-55</span>。</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <!-- ============================================================ 6 -->
+        <article id="c6" class="rounded-2xl border border-slate-200 bg-white card-shadow overflow-hidden">
+          <div class="p-7 space-y-6">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <h2 class="font-serif text-2xl">6 · 契约的请求半端只剩一个源</h2>
+              <div class="flex gap-2 shrink-0">
+                <span class="rounded-full bg-amber-100 text-amber-800 text-xs font-semibold px-3 py-1">Worth exploring</span>
+                <span class="rounded-full bg-slate-100 text-slate-600 text-xs px-3 py-1">ports &amp; adapters</span>
+              </div>
+            </div>
+
+            <div class="mono text-xs text-slate-600 space-y-0.5">
+              <div>src/apps/migu_orca_web/schemas.py <span class="text-slate-400">(1048 行)</span> · openapi_gen.py <span class="text-slate-400">:423 起 1443 行手写注册表</span></div>
+              <div>docs/api/openapi.json <span class="text-slate-400">(27,993 行)</span> · frontend/src/api/generated/api.ts <span class="text-slate-400">(13,495 行)</span></div>
+              <div>src/apps/migu_orca_web/api_contract.py <span class="text-slate-400">:1253 ok_result</span></div>
+            </div>
+
+            <div class="grid gap-4 lg:grid-cols-2">
+              <div class="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                <div class="uppercase tracking-wider text-xs text-slate-400 mb-3">Before · 请求体两个源，响应校验入口没有调用者</div>
+                <pre class="mermaid">
+flowchart LR
+  PYD["schemas.py<br/>Pydantic 请求模型"]
+  REG["openapi_gen._ENDPOINTS<br/>手写 JSON Schema"]
+  JSON["docs/api/openapi.json"]
+  TS["generated/api.ts"]
+  OK["api_contract.ok_result<br/>运行时响应校验"]
+  X["无"]
+  PYD -. "无人比对" .-> REG
+  PYD --> VAL["路由 model_validate"]
+  REG --> JSON
+  JSON --> TS
+  OK -. "0 个调用者（死代码）" .-> X
+  classDef dead stroke:#94a3b8,color:#94a3b8;
+  classDef risk stroke:#dc2626,stroke-width:2px,color:#dc2626;
+  class OK,X dead
+  class REG risk
+                </pre>
+              </div>
+              <div class="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                <div class="uppercase tracking-wider text-xs text-slate-400 mb-3">After · 请求体从模型派生，校验入口接回运行时</div>
+                <pre class="mermaid">
+flowchart LR
+  PYD["schemas.py<br/>Pydantic 请求模型"]
+  REG["openapi_gen<br/>（派生，不手写）"]
+  JSON["openapi.json"]
+  TS["generated/api.ts"]
+  RT["路由运行时校验"]
+  PYD --> REG
+  PYD --> RT
+  REG --> JSON
+  JSON --> TS
+  classDef deep fill:#0f172a,color:#e2e8f0,stroke:#0f172a;
+  class PYD deep
+                </pre>
+              </div>
+            </div>
+
+            <div class="grid gap-4 md:grid-cols-3 text-sm">
+              <div class="rounded-lg border-l-4 border-red-400 bg-red-50/50 p-3">
+                <div class="text-xs uppercase tracking-wider text-red-700 mb-1">Problem</div>
+                <p class="text-slate-700">请求体有两个手写源：Pydantic 模型与注册表里手写的 JSON Schema，没有任何测试比对二者；同时运行时的响应白名单校验入口零调用者。</p>
+              </div>
+              <div class="rounded-lg border-l-4 border-indigo-400 bg-indigo-50/50 p-3">
+                <div class="text-xs uppercase tracking-wider text-indigo-700 mb-1">Solution</div>
+                <p class="text-slate-700">让注册表的请求体从 schemas.py 派生，并把响应白名单校验接回运行时（或删掉这个死入口）。</p>
+              </div>
+              <div class="rounded-lg border-l-4 border-emerald-400 bg-emerald-50/50 p-3">
+                <div class="text-xs uppercase tracking-wider text-emerald-700 mb-1">Wins</div>
+                <ul class="text-slate-700 space-y-1 list-disc list-inside">
+                  <li>一处改动到达四个产物</li>
+                  <li>文档不再可能与校验器分叉</li>
+                  <li>响应白名单运行时生效</li>
+                  <li>删掉零调用者的死代码</li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm">
+              <div class="text-xs uppercase tracking-wider text-amber-700 mb-1">与既有约束的关系</div>
+              <p class="text-slate-700">不推翻 <span class="mono">AGENTS.md</span> 的「契约同步」规则，也不动 inventory / OpenAPI / 生成客户端之间的既有校验；只是把「源」从两处收回一处。</p>
+            </div>
+
+            <div class="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm space-y-2">
+              <div class="text-xs uppercase tracking-wider text-slate-500">证据</div>
+              <ul class="text-slate-700 space-y-1 list-disc list-inside">
+                <li>同一接口两份定义：<span class="mono">schemas.py:395-414 SavedTrackingSubmitInput</span>（8 字段、<span class="mono">extra=forbid</span>）与 <span class="mono">openapi_gen.py:1054-1083</span>（同 8 字段、同 enum、同 default）。</li>
+                <li>既有测试只比对端点覆盖与漂移：<span class="mono">test_openapi_generation.py:44/65/123</span>，没有比对请求体形状。</li>
+                <li><span class="mono">api_contract.ok_result(result, dto)</span> 在全仓库无任何调用者，响应 DTO 白名单目前只在测试中生效。</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <!-- ============================================================ 7 -->
+        <article id="c7" class="rounded-2xl border border-slate-200 bg-white card-shadow overflow-hidden">
+          <div class="p-7 space-y-6">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <h2 class="font-serif text-2xl">7 · 给「造一个真实方案」一个自己的缝隙</h2>
+              <div class="flex gap-2 shrink-0">
+                <span class="rounded-full bg-amber-100 text-amber-800 text-xs font-semibold px-3 py-1">Worth exploring</span>
+                <span class="rounded-full bg-slate-100 text-slate-600 text-xs px-3 py-1">local-substitutable</span>
+              </div>
+            </div>
+
+            <div class="mono text-xs text-slate-600 space-y-0.5">
+              <div>src/apps/migu_orca_entry/controllers/entry_controller.py <span class="text-slate-400">:54 generate_request（9 个关键字参数，返回 dict[str, Any]）</span></div>
+              <div>src/apps/migu_orca_web/services.py <span class="text-slate-400">:18 import 私有 _build_history_event</span> · routes_requests.py <span class="text-slate-400">:16</span></div>
+              <div>src/storage_engine/controllers/storage_config_test.py <span class="text-slate-400">:7</span> · request_repository_test.py <span class="text-slate-400">:7</span></div>
+              <div>tests/api_contract/ 与 tests/browser/ 的多个夹具模块</div>
+            </div>
+
+            <div class="grid gap-4 lg:grid-cols-2">
+              <div class="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                <div class="uppercase tracking-wider text-xs text-slate-400 mb-3">Before · 28 个文件、75 处调用、两个方向都通的依赖</div>
+                <pre class="mermaid">
+flowchart TB
+  GR["generate_request<br/>位于 CLI controller"]
+  WEB["apps/migu_orca_web<br/>services.py / routes_requests.py"]
+  ENG["storage_engine 单元测试"]
+  CNT["tests/api_contract · tests/browser"]
+  CLI["CLI main()"]
+  WEB -->|"import 另一个 app 的私有函数"| GR
+  ENG -->|"engine 测试依赖 apps"| GR
+  CNT --> GR
+  CLI --> GR
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#dc2626;
+  class WEB,ENG leak
+                </pre>
+              </div>
+              <div class="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                <div class="uppercase tracking-wider text-xs text-slate-400 mb-3">After · 编排下沉，CLI 与 Web 都变成薄适配器</div>
+                <pre class="mermaid">
+flowchart TB
+  DEEP["方案生成（engine 层深模块）<br/>名称 → 候选 → 草案快照"]
+  CLI["CLI adapter"]
+  HTTP["Web adapter"]
+  FIX["测试夹具 adapter<br/>静态数据源"]
+  CLI --> DEEP
+  HTTP --> DEEP
+  FIX --> DEEP
+  classDef deep fill:#0f172a,color:#e2e8f0,stroke:#0f172a;
+  class DEEP deep
+                </pre>
+              </div>
+            </div>
+
+            <div class="grid gap-4 md:grid-cols-3 text-sm">
+              <div class="rounded-lg border-l-4 border-red-400 bg-red-50/50 p-3">
+                <div class="text-xs uppercase tracking-wider text-red-700 mb-1">Problem</div>
+                <p class="text-slate-700">造一个方案的唯一入口是 CLI 控制器函数：9 个关键字参数、CLI 语义的 <span class="mono">source_mode</span>、返回无类型 dict；Web app 反向 import 另一个 app 的私有函数，engine 单测 import apps 造成层次倒置。</p>
+              </div>
+              <div class="rounded-lg border-l-4 border-indigo-400 bg-indigo-50/50 p-3">
+                <div class="text-xs uppercase tracking-wider text-indigo-700 mb-1">Solution</div>
+                <p class="text-slate-700">把方案生成编排下沉到 engine 层的深模块；CLI 与 Web 退化为薄适配器，测试通过同一接口的静态数据源适配器造夹具。</p>
+              </div>
+              <div class="rounded-lg border-l-4 border-emerald-400 bg-emerald-50/50 p-3">
+                <div class="text-xs uppercase tracking-wider text-emerald-700 mb-1">Wins</div>
+                <ul class="text-slate-700 space-y-1 list-disc list-inside">
+                  <li>Web 不再 import CLI 私有函数</li>
+                  <li>engine 测试不再依赖 apps</li>
+                  <li>9 个参数收窄成清晰入口</li>
+                  <li>夹具与生产走同一接口</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- ============================================================ 8 -->
+        <article id="c8" class="rounded-2xl border border-slate-200 bg-white card-shadow overflow-hidden">
+          <div class="p-7 space-y-6">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <h2 class="font-serif text-2xl">8 · AB 管理客户端：缝隙是真的，构造没被封住</h2>
+              <div class="flex gap-2 shrink-0">
+                <span class="rounded-full bg-amber-100 text-amber-800 text-xs font-semibold px-3 py-1">Worth exploring</span>
+                <span class="rounded-full bg-slate-100 text-slate-600 text-xs px-3 py-1">ports &amp; adapters</span>
+              </div>
+            </div>
+
+            <div class="mono text-xs text-slate-600 space-y-0.5">
+              <div>src/ab_engine/controllers/ab_client.py <span class="text-slate-400">:11 AutoBangumiClient Protocol</span></div>
+              <div>src/ab_engine/controllers/ab_management_client.py <span class="text-slate-400">:10 import 私有 _api_endpoint</span></div>
+              <div>tracking_submission_service.py <span class="text-slate-400">:188</span> · tracking_recovery_service.py <span class="text-slate-400">:185</span> · tracking_saved_management_service.py <span class="text-slate-400">:50</span></div>
+              <div>tracking_saved_recovery_service.py <span class="text-slate-400">:77</span> · tracking_saved_sync_service.py <span class="text-slate-400">:31</span> · tracking_sync_service.py <span class="text-slate-400">:99</span></div>
+            </div>
+
+            <div class="grid gap-4 lg:grid-cols-2">
+              <div class="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                <div class="uppercase tracking-wider text-xs text-slate-400 mb-3">Before · 每个调用方自己装具体传输</div>
+                <svg viewBox="0 0 380 200" class="w-full">
+                  <rect x="130" y="6" width="120" height="40" fill="#fff" stroke="#475569" stroke-width="1.5" rx="4" />
+                  <text x="190" y="24" text-anchor="middle" font-size="9" fill="#334155">AutoBangumiClient</text>
+                  <text x="190" y="37" text-anchor="middle" font-size="8" fill="#64748b">Protocol（真缝隙）</text>
+
+                  <rect x="128" y="76" width="124" height="34" fill="#fee2e2" stroke="#dc2626" stroke-width="2" rx="4" />
+                  <text x="190" y="90" text-anchor="middle" font-size="9" fill="#991b1b">UrlopenAutoBangumi…()</text>
+                  <text x="190" y="102" text-anchor="middle" font-size="8" fill="#991b1b">6 处 new</text>
+
+                  <g font-size="8" fill="#334155">
+                    <rect x="4" y="130" width="112" height="18" fill="#fff" stroke="#94a3b8" rx="3" /><text x="60" y="143" text-anchor="middle">tracking_submission</text>
+                    <rect x="4" y="152" width="112" height="18" fill="#fff" stroke="#94a3b8" rx="3" /><text x="60" y="165" text-anchor="middle">tracking_recovery</text>
+                    <rect x="4" y="174" width="112" height="18" fill="#fff" stroke="#94a3b8" rx="3" /><text x="60" y="187" text-anchor="middle">saved_recovery</text>
+                    <rect x="264" y="130" width="112" height="18" fill="#fff" stroke="#94a3b8" rx="3" /><text x="320" y="143" text-anchor="middle">saved_management</text>
+                    <rect x="264" y="152" width="112" height="18" fill="#fff" stroke="#94a3b8" rx="3" /><text x="320" y="165" text-anchor="middle">saved_sync</text>
+                    <rect x="264" y="174" width="112" height="18" fill="#fff" stroke="#94a3b8" rx="3" /><text x="320" y="187" text-anchor="middle">tracking_sync</text>
+                  </g>
+                  <path d="M60 130 C 60 118, 128 112, 150 106" fill="none" stroke="#dc2626" stroke-width="1.4" />
+                  <path d="M60 160 C 80 150, 120 130, 150 112" fill="none" stroke="#dc2626" stroke-width="1.4" />
+                  <path d="M60 184 C 90 170, 130 140, 152 116" fill="none" stroke="#dc2626" stroke-width="1.4" />
+                  <path d="M320 130 C 320 118, 252 112, 230 106" fill="none" stroke="#dc2626" stroke-width="1.4" />
+                  <path d="M320 160 C 300 150, 260 130, 230 112" fill="none" stroke="#dc2626" stroke-width="1.4" />
+                  <path d="M320 184 C 290 170, 250 140, 228 116" fill="none" stroke="#dc2626" stroke-width="1.4" />
+                  <path d="M190 46 L 190 74" stroke="#475569" stroke-width="1.5" />
+                </svg>
+              </div>
+              <div class="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                <div class="uppercase tracking-wider text-xs text-slate-400 mb-3">After · 由 AB 模块按已保存连接解析</div>
+                <div class="deep rounded-lg text-slate-100 p-4 text-[11px]">
+                  <div class="uppercase tracking-wider text-[10px] text-slate-400">deep module</div>
+                  <div class="font-medium text-sm mt-1">AB 客户端装配</div>
+                  <div class="mt-3 space-y-1 text-slate-300">
+                    <div class="border border-slate-600 rounded px-2 py-1">输入：已保存连接引用 + revision（lease）</div>
+                    <div class="border border-slate-600 rounded px-2 py-1">输出：AutoBangumiClient 接口</div>
+                    <div class="border border-slate-600 rounded px-2 py-1">传输选择与重试留在实现内</div>
+                  </div>
+                </div>
+                <div class="mt-3 space-y-1 text-[11px] text-slate-600">
+                  <div>→ 6 个调用方只依赖接口</div>
+                  <div>→ 测试替换一个入口，而不是打 6 个补丁</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="grid gap-4 md:grid-cols-3 text-sm">
+              <div class="rounded-lg border-l-4 border-red-400 bg-red-50/50 p-3">
+                <div class="text-xs uppercase tracking-wider text-red-700 mb-1">Problem</div>
+                <p class="text-slate-700">生产与测试两个适配器证明缝隙是真的，但每个调用方都要自己 new 具体传输，管理客户端还 import 传输层的私有函数；同一 AB 提交在三处装配。</p>
+              </div>
+              <div class="rounded-lg border-l-4 border-indigo-400 bg-indigo-50/50 p-3">
+                <div class="text-xs uppercase tracking-wider text-indigo-700 mb-1">Solution</div>
+                <p class="text-slate-700">由 AB 模块提供「按已保存连接引用解析管理客户端」的唯一入口，传输选择留在实现内，调用方只拿接口。</p>
+              </div>
+              <div class="rounded-lg border-l-4 border-emerald-400 bg-emerald-50/50 p-3">
+                <div class="text-xs uppercase tracking-wider text-emerald-700 mb-1">Wins</div>
+                <ul class="text-slate-700 space-y-1 list-disc list-inside">
+                  <li>6 处 new 收成一处</li>
+                  <li>私有函数不再跨模块</li>
+                  <li>三处装配合一</li>
+                  <li>测试替换一个入口</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <!-- ===================== ALSO NOTICED ===================== -->
+      <section class="rounded-2xl border border-slate-200 bg-white p-7 space-y-4">
+        <h2 class="font-serif text-xl">也发现，但没有单列成卡</h2>
+        <ul class="text-sm text-slate-700 space-y-2 list-disc list-inside">
+          <li><span class="font-medium">过滤规则匹配器两份实现</span>：<span class="mono">rss_engine/controllers/rss_controller.py:183-232</span> 与 <span class="mono">request_engine/controllers/request_controller.py:424-497</span> 是同一套「包含/排除 + 正则 + 大小写」算法，只差错误码与字段名。删除任一份都会把复杂度集中到一处。</li>
+          <li><span class="mono">src/shared/</span> <span class="font-medium">里存在只有单一使用者的假设性缝隙</span>：<span class="mono">logging.py</span> 仅 <span class="mono">entry_controller.py:35</span> 使用，<span class="mono">management_contract.py</span> 的 docstring 自称被下层共享、实际只有 Web 与 extensions 引用。真契约只有 <span class="mono">errors.py</span>、<span class="mono">models.py</span>、<span class="mono">title_season.py</span>。</li>
+          <li><span class="font-medium">一次保存确认要跨 7 个模块、约 11 跳</span>：<span class="mono">routes_requests.py:408</span> → <span class="mono">drafts.py:359</span> → <span class="mono">save_confirm_service.py:176</span> → <span class="mono">services.py:693/722</span> → <span class="mono">entry_controller.py:205/330</span> → <span class="mono">tracking_handoff.py:69</span>；<span class="mono">save_confirm_service</span> 入度为 6，是事实枢纽。</li>
+        </ul>
+      </section>
+
+      <!-- ===================== TOP RECOMMENDATION ===================== -->
+      <section id="top-recommendation">
+        <div class="rounded-2xl border-2 border-emerald-300 bg-gradient-to-br from-emerald-50 to-white p-8 space-y-4 card-shadow">
+          <div class="flex flex-wrap items-center gap-3">
+            <span class="rounded-full bg-emerald-600 text-white text-xs font-semibold px-3 py-1">建议先做</span>
+            <h2 class="font-serif text-2xl"><a href="#c1" class="underline decoration-emerald-400 decoration-2 underline-offset-4">1 · 把批量审核生命周期收进一个「批量审核会话」模块</a></h2>
+          </div>
+          <p class="text-slate-700 max-w-3xl">
+            这是全仓最热的一点：<span class="mono">BatchWorkbenchView.vue</span> 一个文件承载 32 次提交、15 个 Issue，测试文件与之 1:1 增长到 2263 行。它同时是候选 2 与候选 3 的宿主——一旦会话模块成形，「审核资格」和「集数证据」就是从它的接口上顺手摘出来的两个模块，而不是三次独立的迁移。
+          </p>
+          <div class="flex flex-wrap gap-4 text-sm text-emerald-900">
+            <span>局部性：同一次状态转换只写一遍</span>
+            <span>杠杆：一个会话接口，卡片/详情/保存/恢复共用</span>
+            <span>测试：从 mount 2910 行视图退回会话接口</span>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
