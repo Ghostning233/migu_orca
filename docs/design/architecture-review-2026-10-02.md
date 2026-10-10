@@ -136,6 +136,10 @@ idempotency key，以及现在散在 `:1235`/`:1270-1303` 的手写镜像逻辑�
 
 **强度**：Strong ｜ **依赖类别**：in-process
 
+> **2026-10-03 口径更新**：占位词已定为「未开发」，「未知」不再作为界面占位；由
+> [#165](https://github.com/Ghostning233/migu_orca/issues/165) 承载，术语见 `CONTEXT.md` 的「界面占位表述」。
+> 下方代码引文与「未知」字样是评审当时（`054de35`）的记录。
+
 **涉及文件**
 
 - `frontend/src/features/workbench/candidateSearch.ts:87-90`
@@ -143,14 +147,14 @@ idempotency key，以及现在散在 `:1235`/`:1270-1303` 的手写镜像逻辑�
 - `frontend/src/features/workbench/CandidateCard.vue:115`、`AnimeDraftEditor.vue:505`
 - `frontend/src/features/tracking/TrackingInspector.vue:579`
 
-**问题**：`CONTEXT.md` 定义的「预期总集数」规则（无可信值即未知，不从资源标题、种子数量或有效资源数推算）
+**问题**：`CONTEXT.md` 定义的「预期总集数」规则（缺少可信数值即不可得，不从资源标题、种子数量或有效资源数推算）
 有两份逐字实现，其中一处调用时传 `undefined` 让规则永不生效；另有四个渲染点各自处理缺值。
 
 **方案**：让一个集数证据投影模块从候选/草案/详情的证据字段推出显示值，所有面消费同一个接口。
 
 **收益**
 
-- 规则一份，恒为未知的调用消失
+- 规则一份，恒为「未开发」的调用消失
 - 测试直接打投影接口
 - 单番与批量口径一致
 - 杠杆：一处规则，四个消费面
@@ -163,7 +167,7 @@ batchWorkbench.ts:453      Number.isInteger(total) && total > 0 ? `总集数：$
 batchWorkbench.ts:355      batchEpisodeProgressText(undefined).replace('总集数：', '')   // 规则恒不生效
 ```
 
-`batchWorkbench.ts:355` 消费方拿到的是「总集数」标签 + 恒为「未知」的值；`ResourceSummary.vue` 与
+`batchWorkbench.ts:355` 消费方拿到的是「总集数」标签 + 恒为「未开发」的值；`ResourceSummary.vue` 与
 `TrackingInspector.vue:579` 另有各自的缺值分支。
 
 ---
@@ -461,7 +465,7 @@ After：编排下沉到 engine 层深模块，CLI adapter / Web adapter / 测试
 - 不在 `grilling` 与 Issue 规格完成前写实现代码；本文件没有批准任何重构。
 - 不改变根 `AGENTS.md` 与 `apps/migu_orca_web/AGENTS.md` 的不可破坏边界：真实 MiKan 合集仍须用户最终选择、
   草案权威在服务端、方案确认与外部提交是两次不同确认、未知结果不等于确定失败、外部删除固定 `file=false`、
-  无可信服务端值时总集数与已更新集数都显示未知。
+  缺少可信数值时总集数与已更新集数显示「未开发」。
 - 不重新争论 [ADR-0001](../adr/0001-at-least-once-existing-resource-submission.md)（下载现有资源的
   至少一次语义）。候选 4 只整理会话模块的位置，不改变该语义。
 - 不把候选 6 当成「放松契约校验」的理由；它的方向是收窄源，不是取消校验。

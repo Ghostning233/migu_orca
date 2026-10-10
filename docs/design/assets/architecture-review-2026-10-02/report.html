@@ -261,9 +261,15 @@ flowchart TB
               <div>frontend/src/features/tracking/TrackingInspector.vue <span class="text-slate-400">:579</span></div>
             </div>
 
+            <div class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+              2026-10-03 口径更新：占位词已定为「未开发」，「未知」不再作为界面占位；由
+              <span class="mono">#165</span> 承载，术语见 <span class="mono">CONTEXT.md</span> 的「界面占位表述」。
+              下方代码引文是评审当时（<span class="mono">054de35</span>）的记录。
+            </div>
+
             <div class="grid gap-4 lg:grid-cols-2">
               <div class="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
-                <div class="uppercase tracking-wider text-xs text-slate-400 mb-3">Before · 两份逐字相同的实现 + 一次恒为未知的调用</div>
+                <div class="uppercase tracking-wider text-xs text-slate-400 mb-3">Before · 两份逐字相同的实现 + 一次恒为未开发的调用</div>
                 <div class="space-y-2 text-[11px] mono">
                   <div class="rounded border border-red-300 bg-red-50 p-2 text-red-900">
                     candidateSearch.ts:87<br />
@@ -276,7 +282,7 @@ flowchart TB
                   <div class="rounded border border-amber-300 bg-amber-50 p-2 text-amber-900">
                     batchWorkbench.ts:355<br />
                     batchEpisodeProgressText(<span class="font-bold">undefined</span>).replace('总集数：', '')
-                    <div class="mt-1 font-sans">→ 规则永远不生效，卡片上的「总集数」恒为「未知」</div>
+                    <div class="mt-1 font-sans">→ 规则永远不生效，卡片上的「总集数」恒为「未开发」</div>
                   </div>
                 </div>
                 <div class="mt-3 text-xs text-slate-500">另有 4 个渲染点各自处理缺值：CandidateCard、AnimeDraftEditor、ResourceSummary、TrackingInspector。</div>
@@ -289,7 +295,7 @@ flowchart TB
                   <div class="mt-3 space-y-1 text-slate-300">
                     <div class="border border-slate-600 rounded px-2 py-1">输入：候选 / 草案 / 详情的证据字段</div>
                     <div class="border border-slate-600 rounded px-2 py-1">预期总集数 · 已更新集数</div>
-                    <div class="border border-slate-600 rounded px-2 py-1">无可信值 → 未知，绝不推算</div>
+                    <div class="border border-slate-600 rounded px-2 py-1">缺少可信值 → 未开发，绝不推算</div>
                   </div>
                 </div>
                 <div class="mt-3 grid grid-cols-2 gap-1 text-[11px] text-slate-600">
@@ -313,7 +319,7 @@ flowchart TB
               <div class="rounded-lg border-l-4 border-emerald-400 bg-emerald-50/50 p-3">
                 <div class="text-xs uppercase tracking-wider text-emerald-700 mb-1">Wins</div>
                 <ul class="text-slate-700 space-y-1 list-disc list-inside">
-                  <li>规则一份，恒为未知的调用消失</li>
+                  <li>规则一份，恒为「未开发」的调用消失</li>
                   <li>测试直接打投影接口</li>
                   <li>单番与批量口径一致</li>
                   <li>杠杆：一处规则，四个消费面</li>
