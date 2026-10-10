@@ -32,7 +32,12 @@ import { useRoute, useRouter } from 'vue-router'
 import { api, toApiError } from '@/api/client'
 import { useLeaveGuard } from '@/app/composables/useLeaveGuard'
 import { useDraftSession, type DraftSession } from '@/app/composables/useDraftSession'
-import { toSafeBatchError, useBatchReviewJourney } from '@/app/composables/useBatchReviewJourney'
+import {
+  toSafeBatchError,
+  useBatchReviewJourney,
+  type BatchReviewEffect,
+  type BatchReviewNotifyEvent,
+} from '@/app/composables/useBatchReviewJourney'
 import { useNotificationStore } from '@/app/stores/notification'
 import ConfirmDialog from '@/components/feedback/ConfirmDialog.vue'
 import EmptyState from '@/components/feedback/EmptyState.vue'
@@ -111,10 +116,70 @@ const route = useRoute()
 const router = useRouter()
 const notification = useNotificationStore()
 const confirmDialog = ref<InstanceType<typeof ConfirmDialog> | null>(null)
-// The journey owns route-local review order, current item and selection. The
+// The journey module owns route-local review order, current item, selection and
+// the client lifecycle (parse error, batch id, per-item draft generation). The
 // API result below is only the public source snapshot used to render cards;
-// lifecycle decisions are dispatched through this reactive state machine.
-const journey = useBatchReviewJourney()
+// every lifecycle decision goes through a named command on the module.
+const {
+  snapshot: batchReview,
+  beginParse,
+  rejectParseInput,
+  finishParse,
+  failParse,
+  restoreBatchId,
+  beginDraftCreate,
+  failDraftCreate,
+  finishDraftCreate,
+  clearDraftCreateErrors,
+  selectItem,
+  setSelected,
+  setDraft,
+  setDraftDirty,
+  beginApply,
+  finishApply,
+  failApply,
+  retryApply,
+  invalidateDraft,
+  beginSave,
+  finishSaveItem,
+  failSaveItem,
+  markSaveResponseUnknown,
+  finishAccept,
+  locateTracking,
+  markTrackingNotFound,
+  failTrackingVerification,
+  removeItem,
+  resetRoute,
+} = useBatchReviewJourney()
+
+/**
+ * #160：命令只返回「数据效应」；路由、通知与焦点都由视图执行，中文文案映射
+ * 也只留在视图（模块说发生了什么，这里决定怎么说）。
+ */
+function notifyBatchReviewEvent(event: BatchReviewNotifyEvent): void {
+  switch (event.type) {
+    case 'parse_input_rejected':
+      notification.error('校验失败', event.message)
+      return
+    case 'parse_succeeded':
+      notification.success('批量搜索完成', `已返回 ${event.itemCount} 个条目的候选搜索状态。`)
+      return
+    case 'parse_empty':
+      // 服务端成功但没有返回条目：这是「空结果」，不是 MiKan 故障。
+      notification.info('批量解析完成', '服务端没有返回任何条目；请核对输入后重新搜索。')
+      return
+    case 'parse_failed':
+      notification.error('批量草案获取失败', event.message)
+      return
+  }
+}
+
+function runBatchReviewEffects(effects: readonly BatchReviewEffect[]): void {
+  for (const effect of effects) {
+    if (effect.kind === 'navigate') syncBatchIdToUrl(effect.batchId)
+    else notifyBatchReviewEvent(effect.event)
+  }
+}
 
 const props = withDefaults(defineProps<{ rawInput?: string; hideInput?: boolean }>(), { rawInput: '', hideInput: false })
 const emit = defineEmits<{
@@ -152,37 +217,32 @@ watch(() => props.rawInput, (value) => {
 
 watch(rawInput, (value) => emit('update:rawInput', value))
 const parseLoading = ref(false)
-const parseBlocked = computed(() => parseLoading.value || Boolean(saveOperation.value) || saveInFlight.value || savingItemIds.value.size > 0 || draftCreateItemIds.value.size > 0)
-const parseError = ref('')
+const parseBlocked = computed(() => parseLoading.value || Boolean(saveOperation.value) || saveInFlight.value || savingItemIds.value.size > 0 || batchReview.value.draftCreateItemIds.size > 0)
 const parseResult = ref<BatchParseResult | null>(null)
 const items = ref<BatchItem[]>([])
-const batchId = ref('')
 const loadingMessage = ref('')
 const parseCount = ref(0)
 const currentItemId = computed<string | null>({
-  get: () => journey.state.currentItemId,
+  get: () => batchReview.value.state.currentItemId,
   set: (value) => {
-    if (value && journey.state.items[value]) journey.dispatch({ type: 'set_current', itemId: value })
+    if (value && batchReview.value.state.items[value]) selectItem(value)
   },
 })
 const inputItemOrder = ref<Map<string, number>>(new Map())
 
 // Selection / accept state.
 const selectedItemIds = computed<Set<string>>({
-  get: () => new Set(Object.values(journey.state.items).filter((item) => item.selected).map((item) => item.itemId)),
+  get: () => new Set(Object.values(batchReview.value.state.items).filter((item) => item.selected).map((item) => item.itemId)),
   set: (next) => {
-    for (const item of Object.values(journey.state.items)) {
+    for (const item of Object.values(batchReview.value.state.items)) {
       const selected = next.has(item.itemId)
-      if (selected !== item.selected) journey.dispatch({ type: 'set_selected', itemId: item.itemId, selected })
+      if (selected !== item.selected) setSelected(item.itemId, selected)
     }
   },
 })
-const draftCreateItemIds = ref<Set<string>>(new Set())
 // US-343: the candidate each item is currently generating a draft from, and the
-// sanitized failure that stays beside that candidate. Both are keyed by item so
-// one item's generation can never mark another item as loading or failing.
-const draftCreateCandidateIds = ref<Record<string, string>>({})
-const draftCreateErrors = ref<Record<string, Record<string, string>>>({})
+// sanitized failure that stays beside that candidate, are module state keyed by
+// item, so one item's generation can never mark another item as loading.
 const saveInFlight = ref(false)
 const acceptFeedback = ref<Record<string, string>>({})
 const savingItemIds = ref<Set<string>>(new Set())
@@ -253,8 +313,8 @@ function ensureScheduler(item: BatchItem): DraftEditScheduler | null {
     onSending: () => {
       // Keep the review journal in step with the transport: a send may follow
       // a previous failure, so both transitions are attempted.
-      journey.dispatch({ type: 'retry_apply', itemId })
-      journey.dispatch({ type: 'begin_apply', itemId })
+      retryApply(itemId)
+      beginApply(itemId)
     },
     onApplied: () => {
       onDraftChanged(itemId, {
@@ -266,7 +326,7 @@ function ensureScheduler(item: BatchItem): DraftEditScheduler | null {
     onInvalid: () => onDraftExpired(itemId),
     onFailed: () => {
       draftApplyErrors.value = { ...draftApplyErrors.value, [itemId]: '订阅草案修改失败，请稍后重试。' }
-      journey.dispatch({ type: 'apply_failed', itemId, error: session.error.value })
+      failApply(itemId, session.error.value)
     },
   })
   editSchedulers.set(itemId, { session, scheduler })
@@ -288,7 +348,7 @@ interface BatchItemConfirmability {
 /** The single qualification gate shared by cards, detail and save actions. */
 function itemConfirmability(itemId: string): BatchItemConfirmability {
   const item = items.value.find((candidate) => candidate.item_id === itemId)
-  const journeyItem = journey.state.items[itemId]
+  const journeyItem = batchReview.value.state.items[itemId]
   const blockers: string[] = []
   if (!item || !canExpandBatchCard(item) || !batchCardRequest(item)) blockers.push('需先生成可审核草案')
   const session = item ? ensureDraftSession(item) : null
@@ -316,7 +376,7 @@ function itemConfirmability(itemId: string): BatchItemConfirmability {
 function hasUnsafeBatchWork(): boolean {
   return Boolean(
     parseLoading.value ||
-    draftCreateItemIds.value.size > 0 ||
+    batchReview.value.draftCreateItemIds.size > 0 ||
     saveInFlight.value ||
     savingItemIds.value.size > 0 ||
     recoveryLoadingItemIds.value.size > 0 ||
@@ -335,12 +395,9 @@ function clearBatchRouteLocalState(): void {
   for (const session of draftSessions.values()) session.invalidate()
   draftSessions.clear()
   saveOperation.value = null
-  draftCreateItemIds.value = new Set()
-  draftCreateCandidateIds.value = {}
-  draftCreateErrors.value = {}
   selectedCollectionByItem.value = {}
   selectedItemIds.value = new Set()
-  journey.dispatch({ type: 'clear_route' })
+  resetRoute()
 }
 
 // Review filters affect visibility only. The parsed order remains frozen until
@@ -696,15 +753,14 @@ function syncBatchIdToUrl(batchIdValue: string): void {
 
 async function parseBatch(onProgress?: (progress: BatchParseProgress) => void): Promise<void> {
   if (parseLoading.value) return
-  if (saveOperation.value || savingItemIds.value.size > 0 || saveInFlight.value || draftCreateItemIds.value.size > 0) {
+  if (saveOperation.value || savingItemIds.value.size > 0 || saveInFlight.value || batchReview.value.draftCreateItemIds.size > 0) {
     notification.error('批量审核处理中', '批量保存结果待核验，请先完成当前操作。')
     return
   }
   const validationError = validateBatchRawInput(rawInput.value)
   if (validationError) {
-    parseError.value = validationError
     parseResult.value = null
-    notification.error('校验失败', validationError)
+    runBatchReviewEffects(rejectParseInput(validationError).effects)
     return
   }
   if (items.value.length && hasUnsafeBatchWork() && !selectedDialogOpen.value) {
@@ -722,11 +778,10 @@ async function parseBatch(onProgress?: (progress: BatchParseProgress) => void): 
       return
     }
   }
-  parseError.value = ''
   clearBatchRouteLocalState()
   parseStarted.value = true
   parseLoading.value = true
-  journey.dispatch({ type: 'parse_started' })
+  beginParse()
   const count = batchItemCount(rawInput.value)
   parseCount.value = count
   loadingMessage.value = `正在逐项搜索 ${count} 个批量条目的 MiKan 候选；整体结果将在批量完成后统一展示，较大的批量可能需要数分钟，请耐心等待。`
@@ -747,15 +802,13 @@ async function parseBatch(onProgress?: (progress: BatchParseProgress) => void): 
     })
     parseResult.value = result
     previousRawInput.value = rawInput.value
-    journey.dispatch({ type: 'parse_succeeded', result })
+    const parsed = finishParse(result)
     const parsedItems = result.items ?? []
     inputItemOrder.value = new Map(
       parsedItems.map((item, index) => [item.item_id ?? '', index]),
     )
     items.value = orderBatchItemsForReview(parsedItems)
     for (const item of items.value) ensureDraftSession(item)
-    batchId.value = result.batch_id ?? ''
-    syncBatchIdToUrl(batchId.value)
     selectedItemIds.value = new Set()
     detailItemId.value = null
     currentItemId.value = items.value[0]?.item_id ?? null
@@ -765,25 +818,16 @@ async function parseBatch(onProgress?: (progress: BatchParseProgress) => void): 
     savingItemIds.value = new Set()
     seasonConfirmations.value = {}
     const itemCount = items.value.length
-    if (itemCount) {
-      notification.success('批量搜索完成', `已返回 ${itemCount} 个条目的候选搜索状态。`)
-    } else {
-      // 服务端成功但没有返回条目：这是「空结果」，不是 MiKan 故障。
-      notification.info('批量解析完成', '服务端没有返回任何条目；请核对输入后重新搜索。')
-    }
+    runBatchReviewEffects(parsed.effects)
     await nextTick()
     // 整批完成、拿到稳定结果：只声明「数据已稳定可展示」以及有多少条目。切屏、切屏
     // 目标与焦点都由父组件在搜索状态收尾、第二屏稳定之后唯一决定，子组件不抢占屏幕
     // 所有权；items=[] 由父组件留在搜索首屏就地说明，不进入空工作台。
     emit('parse-settled', { itemCount, failed: false })
   } catch (error) {
-    void error
-    journey.dispatch({ type: 'parse_failed', error })
     parseResult.value = null
     items.value = []
-    batchId.value = ''
-    parseError.value = mikanFailureMessage(error, '批量候选解析')
-    notification.error('批量草案获取失败', parseError.value)
+    runBatchReviewEffects(failParse(mikanFailureMessage(error, '批量候选解析')).effects)
   } finally {
     parseLoading.value = false
   }
@@ -816,37 +860,22 @@ function setAllSelected(selected: boolean): void {
 
 /** The candidate an item is currently generating a draft from, if any. */
 function generatingCandidateIdFor(itemId: string): string | null {
-  return draftCreateCandidateIds.value[itemId] ?? null
+  return batchReview.value.draftCreateCandidateIds[itemId] ?? null
 }
 
 /** The sanitized generation failures of one item's candidates. */
 function candidateErrorsFor(itemId: string): Record<string, string> {
-  return draftCreateErrors.value[itemId] ?? {}
-}
-
-function setItemCandidateError(itemId: string, bangumiId: string, message: string | null): void {
-  const itemErrors = { ...(draftCreateErrors.value[itemId] ?? {}) }
-  if (message) itemErrors[bangumiId] = message
-  else delete itemErrors[bangumiId]
-  if (Object.keys(itemErrors).length) {
-    draftCreateErrors.value = { ...draftCreateErrors.value, [itemId]: itemErrors }
-    return
-  }
-  const next = { ...draftCreateErrors.value }
-  delete next[itemId]
-  draftCreateErrors.value = next
+  return batchReview.value.draftCreateErrors[itemId] ?? {}
 }
 
 async function generateDraftFromCandidate(candidate: BatchCandidate): Promise<void> {
   const item = detailItem.value
   const itemId = item?.item_id ?? ''
-  if (!item || !itemId || operationLocks(itemId) || draftCreateItemIds.value.has(itemId)) return
+  if (!item || !itemId || operationLocks(itemId) || batchReview.value.draftCreateItemIds.has(itemId)) return
   const bangumiId = candidate.bangumi_id
-  draftCreateItemIds.value = new Set(draftCreateItemIds.value).add(itemId)
   // Only this item's clicked candidate is marked as loading; a retry clears the
   // previous failure instead of stacking it.
-  draftCreateCandidateIds.value = { ...draftCreateCandidateIds.value, [itemId]: bangumiId }
-  setItemCandidateError(itemId, bangumiId, null)
+  beginDraftCreate(itemId, bangumiId)
   try {
     const payload = buildBatchCandidateCreatePayload(candidate, {
       storageDir: currentStorageDir(),
@@ -867,7 +896,7 @@ async function generateDraftFromCandidate(candidate: BatchCandidate): Promise<vo
       ...selectedCollectionByItem.value,
       [itemId]: selectedCollectionSummary(candidate, seasonConfirmations.value[candidate.bangumi_id] ?? null),
     }
-    journey.dispatch({ type: 'set_draft', itemId: item.item_id ?? '', draftId, revision: draftRevision })
+    setDraft(item.item_id ?? '', draftId, draftRevision)
     items.value = items.value.map((current) =>
       current.item_id === item.item_id
         ? { ...current, status: 'DRAFT', preview_request: request, draft_id: draftId, draft_revision: draftRevision }
@@ -876,22 +905,15 @@ async function generateDraftFromCandidate(candidate: BatchCandidate): Promise<vo
     ensureDraftSession({ ...item, preview_request: request, draft_id: draftId, draft_revision: draftRevision })
     // The item left the candidate step atomically; its candidate feedback goes
     // with it.
-    const nextErrors = { ...draftCreateErrors.value }
-    delete nextErrors[itemId]
-    draftCreateErrors.value = nextErrors
+    clearDraftCreateErrors(itemId)
     notification.success('订阅草案已生成', '已根据所选 MiKan 合集生成当前批量条目的订阅草案。')
   } catch (error) {
     void error
     const message = mikanFailureMessage(error, '从 MiKan 合集生成订阅草案')
     notification.error('生成订阅草案失败', message)
-    setItemCandidateError(itemId, bangumiId, message)
+    failDraftCreate(itemId, bangumiId, message)
   } finally {
-    const next = new Set(draftCreateItemIds.value)
-    next.delete(itemId)
-    draftCreateItemIds.value = next
-    const nextCandidates = { ...draftCreateCandidateIds.value }
-    delete nextCandidates[itemId]
-    draftCreateCandidateIds.value = nextCandidates
+    finishDraftCreate(itemId)
   }
 }
 
@@ -911,7 +933,7 @@ function deleteBatchCard(itemId: string): void {
   disposeScheduler(itemId)
   draftSessions.get(itemId)?.invalidate()
   draftSessions.delete(itemId)
-  journey.dispatch({ type: 'remove_item', itemId })
+  removeItem(itemId)
   const next = new Set(selectedItemIds.value)
   next.delete(itemId)
   selectedItemIds.value = next
@@ -1102,7 +1124,7 @@ async function locateBatchTracking(item: BatchItem): Promise<'found' | 'not_foun
     items.value = items.value.map((row) => row.item_id === item.item_id
       ? { ...row, status: 'CONFIRMED', tracking_id: match.tracking_id }
       : row)
-    journey.dispatch({ type: 'tracking_located', itemId: item.item_id ?? '', requestId, trackingId: match.tracking_id ?? '' })
+    locateTracking(item.item_id ?? '', requestId, match.tracking_id ?? '')
     setRecoveryFeedback(item.item_id ?? '', '已定位到真实追番记录。')
     if (router.hasRoute('tracking')) await router.replace(routeLocation('tracking', { tracking_id: match.tracking_id }))
     return 'found'
@@ -1127,7 +1149,7 @@ async function retrySavedConfirmation(item: BatchItem): Promise<void> {
     items.value = items.value.map((row) => row.item_id === itemId
       ? { ...row, status: 'CONFIRMED', request_id: requestId, tracking_id: null }
       : row)
-    journey.dispatch({ type: 'accept_succeeded', itemId, requestId })
+    finishAccept(itemId, requestId)
     const located = await locateBatchTracking({ ...item, request_id: requestId })
     if (located === 'not_found') setRecoveryFeedback(itemId, '方案已确认，但暂未定位到追番记录；可稍后重试定位。')
     if (located === 'failed') setRecoveryFeedback(itemId, '确认已完成，但定位暂不可用；请稍后重试定位。')
@@ -1144,9 +1166,8 @@ async function retrySavedConfirmation(item: BatchItem): Promise<void> {
     items.value = items.value.map((row) => row.item_id === itemId
       ? { ...row, status: located === 'failed' ? 'RESPONSE_UNKNOWN' : 'SAVED_PENDING_CONFIRM' }
       : row)
-    journey.dispatch(located === 'failed'
-      ? { type: 'tracking_verification_failed', itemId }
-      : { type: 'tracking_not_found', itemId })
+    if (located === 'failed') failTrackingVerification(itemId)
+    else markTrackingNotFound(itemId)
     setRecoveryFeedback(itemId, verificationRequired
       ? located === 'failed' ? '确认结果暂无法核验，请重试定位；不会重复确认。' : '确认结果已核验，但暂未找到追番记录；请明确重试确认。'
       : '确认未完成，请根据安全错误提示处理后再试。')
@@ -1165,7 +1186,7 @@ async function retryBatchTrackingLocation(item: BatchItem): Promise<void> {
     const current = items.value.find((row) => row.item_id === itemId)
     if (current?.status === 'RESPONSE_UNKNOWN') {
       items.value = items.value.map((row) => row.item_id === itemId ? { ...row, status: 'SAVED_PENDING_CONFIRM' } : row)
-      journey.dispatch({ type: 'tracking_not_found', itemId })
+      markTrackingNotFound(itemId)
       setRecoveryFeedback(itemId, '确认结果已核验，但暂未找到追番记录；可明确重试确认。')
     } else setRecoveryFeedback(itemId, '暂未定位到追番记录，请稍后重试定位。')
   }
@@ -1174,7 +1195,7 @@ async function retryBatchTrackingLocation(item: BatchItem): Promise<void> {
 }
 
 async function submitBatchSaveConfirm(rows: BatchItem[], itemIds: string[] | null): Promise<void> {
-  if (!batchId.value) {
+  if (!batchReview.value.batchId) {
     notification.error('保存确认失败', '缺少批次标识，请重新获取批量草案。')
     return
   }
@@ -1190,7 +1211,7 @@ async function submitBatchSaveConfirm(rows: BatchItem[], itemIds: string[] | nul
       return
     }
     rows = eligibleRows
-    const accepted = journey.dispatch({ type: 'begin_save', itemIds: rows.map((row) => row.item_id ?? '') })
+    const { accepted } = beginSave(rows.map((row) => row.item_id ?? ''))
     if (!accepted) {
       notification.error('保存确认失败', '当前条目状态已变化，请重新检查后再试。')
       return
@@ -1213,7 +1234,7 @@ async function submitBatchSaveConfirm(rows: BatchItem[], itemIds: string[] | nul
     } else {
       const descriptors: BatchSaveConfirmDescriptor[] = rows.map((row) => {
         const itemId = row.item_id ?? ''
-        const key = journey.state.items[itemId]?.idempotencyKey
+        const key = batchReview.value.state.items[itemId]?.idempotencyKey
         return { item_id: itemId, draft_id: row.draft_id ?? '', base_revision: row.draft_revision ?? 1, idempotency_key: key ?? '' }
       })
       if (!descriptors.length || descriptors.some((item) => !item.draft_id)) {
@@ -1224,14 +1245,14 @@ async function submitBatchSaveConfirm(rows: BatchItem[], itemIds: string[] | nul
       saveOperation.value = { itemIds: rows.map((row) => row.item_id ?? ''), body, phase: 'sending' }
     }
     const result = await api.post<BatchSaveConfirmResult>(`/api/v1/batches/{batch_id}/save-confirm`, {
-      path: { batch_id: batchId.value },
+      path: { batch_id: batchReview.value.batchId },
       body,
     })
     const resultItems = validateBatchSaveResult(result, rows.map((row) => row.item_id ?? ''))
     if (!resultItems) {
       saveSummary.value = null
       if (saveOperation.value) saveOperation.value = { ...saveOperation.value, phase: 'response_unknown' }
-      journey.dispatch({ type: 'save_response_unknown', itemIds: rows.map((row) => row.item_id ?? '') })
+      markSaveResponseUnknown(rows.map((row) => row.item_id ?? ''))
       items.value = items.value.map((item) => savingItemIds.value.has(item.item_id ?? '') ? { ...item, status: 'RESPONSE_UNKNOWN' } : item)
       notification.error('保存确认结果待核验', '响应未知，请使用相同操作重试。')
       return
@@ -1242,8 +1263,8 @@ async function submitBatchSaveConfirm(rows: BatchItem[], itemIds: string[] | nul
     for (const row of rows) {
       const itemId = row.item_id ?? ''
       const resultItem = resultById.get(itemId)
-      if (resultItem && batchSaveConfirmSucceeded(resultItem)) journey.dispatch({ type: 'save_succeeded', itemId, result: resultItem })
-      else if (resultItem) journey.dispatch({ type: 'save_failed', itemId, error: resultItem })
+      if (resultItem && batchSaveConfirmSucceeded(resultItem)) finishSaveItem(itemId, resultItem)
+      else if (resultItem) failSaveItem(itemId, resultItem)
     }
     notification.show(
       applied.summary.failed > 0 && applied.summary.confirmed === 0 ? 'error' : 'success',
@@ -1270,7 +1291,7 @@ async function submitBatchSaveConfirm(rows: BatchItem[], itemIds: string[] | nul
       items.value = items.value.map((item) => item.item_id === row?.item_id
         ? { ...item, status: 'SAVED_PENDING_CONFIRM', draft_id: null, draft_revision: null, request_id: requestId }
         : item)
-      journey.dispatch({ type: 'save_failed', itemId: row?.item_id ?? '', error })
+      failSaveItem(row?.item_id ?? '', error)
       setRecoveryFeedback(row?.item_id ?? '', '订阅方案已保存但确认未完成；不会重复保存，可直接重试确认。')
     }
     const source = error && typeof error === 'object' ? error as { network?: unknown; nonJson?: unknown; status?: unknown; type?: unknown } : {}
@@ -1278,7 +1299,7 @@ async function submitBatchSaveConfirm(rows: BatchItem[], itemIds: string[] | nul
     const responseUnknown = source.network === true || source.nonJson === true || status >= 500 ||
       ['network_error', 'request_timeout', 'upstream_timeout', 'cancelled'].includes(String(source.type))
     if (!responseUnknown) {
-      if (!validSavedFailure) rows.forEach((row) => journey.dispatch({ type: 'save_failed', itemId: row.item_id ?? '', error }))
+      if (!validSavedFailure) rows.forEach((row) => failSaveItem(row.item_id ?? '', error))
       if (!validSavedFailure) {
         const safeType = toSafeBatchError(error).type
         const nextFailures = { ...saveFailureTypes.value }
@@ -1307,7 +1328,7 @@ async function submitBatchSaveConfirm(rows: BatchItem[], itemIds: string[] | nul
     } else {
       saveSummary.value = null
       if (saveOperation.value) saveOperation.value = { ...saveOperation.value, phase: 'response_unknown' }
-      journey.dispatch({ type: 'save_response_unknown', itemIds: rows.map((row) => row.item_id ?? ''), error })
+      markSaveResponseUnknown(rows.map((row) => row.item_id ?? ''), error)
       items.value = items.value.map((item) => savingItemIds.value.has(item.item_id ?? '') ? { ...item, status: 'RESPONSE_UNKNOWN' } : item)
       notification.error('保存确认结果待核验', '响应未知，请使用相同操作重试。')
     }
@@ -1363,7 +1384,7 @@ function buildSelectedIntent(): BatchSelectedIntent | null {
   }))
   if (participants.some((participant) => !participant.itemId || !participant.draftId)) return null
   return {
-    batchId: batchId.value,
+    batchId: batchReview.value.batchId,
     participants,
     itemIds: participants.map((participant) => participant.itemId),
     counts: batchConfirmScope.value,
@@ -1374,7 +1395,7 @@ function buildSelectedIntent(): BatchSelectedIntent | null {
 
 /** True only while the frozen N intent is exactly what would be sent now. */
 function selectedIntentIsCurrent(intent: BatchSelectedIntent): boolean {
-  if (batchId.value !== intent.batchId) return false
+  if (batchReview.value.batchId !== intent.batchId) return false
   const rows = selectedEligibleItems.value
   if (rows.length !== intent.participants.length) return false
   return intent.participants.every((participant) => {
@@ -1421,7 +1442,7 @@ function onDraftChanged(
   itemId: string,
   state: { request: RequestSnapshot; draftId: string; draftRevision: number },
 ): void {
-  journey.dispatch({ type: 'apply_succeeded', itemId, draftId: state.draftId, revision: state.draftRevision })
+  finishApply(itemId, { draftId: state.draftId, revision: state.draftRevision })
   items.value = items.value.map((current) =>
     current.item_id === itemId
       ? {
@@ -1438,14 +1459,14 @@ function onDraftChanged(
 function onDetailDirty(dirty: boolean): void {
   const item = detailItem.value
   if (!item) return
-  journey.dispatch({ type: 'set_dirty', itemId: item.item_id ?? '', dirty })
+  setDraftDirty(item.item_id ?? '', dirty)
   draftSessions.get(item.item_id ?? '')?.setDirty(dirty)
 }
 
 function onDraftExpired(itemId: string): void {
   disposeScheduler(itemId)
   draftSessions.get(itemId)?.invalidate()
-  journey.dispatch({ type: 'invalidate_draft', itemId })
+  invalidateDraft(itemId)
   const nextSelected = new Set(selectedItemIds.value)
   nextSelected.delete(itemId)
   selectedItemIds.value = nextSelected
@@ -1514,7 +1535,7 @@ function resetDetailModify(): void {
   if (!scheduler) return
   detailEditor.value?.reset()
   scheduler.restore()
-  journey.dispatch({ type: 'set_dirty', itemId: item?.item_id ?? '', dirty: false })
+  setDraftDirty(item?.item_id ?? '', false)
   draftApplyErrors.value = { ...draftApplyErrors.value, [item?.item_id ?? '']: '' }
 }
 
@@ -1536,7 +1557,7 @@ useLeaveGuard({
 onMounted(() => {
   const fromQuery = typeof route.query.batch_id === 'string' ? route.query.batch_id : ''
   if (fromQuery) {
-    batchId.value = fromQuery
+    restoreBatchId(fromQuery)
     // The queue panel (US-206) will restore the queue on refresh; the batch
     // card grid itself is never persisted server-side, so a refresh can only
     // restore the queue context, not the cards.
@@ -1582,8 +1603,8 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
       <p v-if="!props.hideInput" class="field-help" id="batch-parse-help">
         每行一个番剧简称或不完整标题；系统会逐项解析并搜索候选合集，结果需人工审核。
       </p>
-      <p v-if="parseError" id="batch-parse-error" class="field-error" role="alert">
-        {{ parseError }}
+      <p v-if="batchReview.parseError" id="batch-parse-error" class="field-error" role="alert">
+        {{ batchReview.parseError }}
       </p>
       <div class="notification-actions">
         <BaseButton id="batch-parse-submit" type="submit" variant="primary" :loading="parseLoading" :disabled="parseBlocked">
@@ -1593,7 +1614,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
     </form>
 
     <div
-      v-if="parseStarted || parseLoading || parseError || items.length"
+      v-if="parseStarted || parseLoading || batchReview.parseError || items.length"
       id="batch-parse-result"
       class="batch-parse-result"
       aria-live="polite"
@@ -1604,7 +1625,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
         原文：{{ rawInput }}；本次提交规模：{{ parseCount }} 部；整体搜索进行中，暂不展示逐项进度。
       </p>
       <ErrorState
-        v-else-if="parseError && !items.length"
+        v-else-if="batchReview.parseError && !items.length"
         title="批量草案获取失败"
         message="批量草案获取失败。请稍后重试。"
         retry-label="重试"

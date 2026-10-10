@@ -1,11 +1,27 @@
 /**
- * API-free state core for the batch review workbench (US-284).
+ * API-free state core for the batch review workbench (US-284, #160/#161).
+ *
+ * The module owns the batch review session: the journey reducer below plus the
+ * client-lifecycle facts that are decided by that lifecycle (parse error,
+ * batch id, per-item draft generation state). It never performs IO.
+ *
+ * Callers use two surfaces only:
+ *
+ *   - `snapshot`: a read-only view of everything the surfaces render from;
+ *   - named commands (`beginParse` / `finishParse` / `fail` / `reset*` /
+ *     `set*`): each returns `{ accepted, effects }`. Effects are **data** —
+ *     `navigate` / `notify` — and the caller maps them to routing, toast copy,
+ *     focus or a confirmation dialog. Copy and IO stay out of this module.
+ *
+ * The reducer symbols (`reduceBatchReview`, `createBatchReviewState`,
+ * `canTransitionBatchItem`, …) remain exported as the module's implementation
+ * detail, pinned by `useBatchReviewJourney.test.ts`.
  *
  * Item identity, review order, selection and the current detail item are
  * deliberately separate pieces of state. Capabilities and idempotency keys
  * remain in this route-local object and are never serialised by this module.
  */
-import { shallowRef } from 'vue'
+import { computed, ref, shallowRef, type ComputedRef } from 'vue'
 import type { operations } from '@/api/generated/api'
 import { isPublicRouteIdentifier } from '@/app/router/catalog'
 
@@ -306,18 +322,237 @@ export function reduceBatchReview(state: BatchReviewState, action: BatchReviewAc
   }
 }
 
-export interface BatchReviewJourney { state: BatchReviewState; dispatch: (action: BatchReviewAction) => boolean; newIdempotencyKey: (itemId: string) => string | null }
+/**
+ * A pending side effect a command hands to its caller. Effects carry data
+ * only: the module never routes, notifies, focuses or prompts by itself.
+ */
+export type BatchReviewEffect =
+  | { readonly kind: 'navigate'; readonly batchId: string }
+  | { readonly kind: 'notify'; readonly event: BatchReviewNotifyEvent }
+
+/**
+ * What happened, as data. `#160`: the Chinese copy for each event stays in the
+ * view, so the module can never become a second copy source.
+ */
+export type BatchReviewNotifyEvent =
+  | { readonly type: 'parse_input_rejected'; readonly message: string }
+  | { readonly type: 'parse_succeeded'; readonly itemCount: number }
+  | { readonly type: 'parse_empty' }
+  | { readonly type: 'parse_failed'; readonly message: string }
+
+export interface BatchReviewCommandResult {
+  /** false = the current state rejected this transition; the caller keeps its scene. */
+  readonly accepted: boolean
+  readonly effects: readonly BatchReviewEffect[]
+}
+
+/** Read-only view of the client lifecycle plus the item state it decides. */
+export interface BatchReviewSnapshot {
+  readonly state: BatchReviewState
+  readonly parseError: string
+  readonly batchId: string
+  readonly draftCreateItemIds: ReadonlySet<string>
+  readonly draftCreateCandidateIds: Readonly<Record<string, string>>
+  readonly draftCreateErrors: Readonly<Record<string, Record<string, string>>>
+}
+
+export interface BatchReviewJourney {
+  readonly snapshot: ComputedRef<BatchReviewSnapshot>
+  beginParse: () => BatchReviewCommandResult
+  rejectParseInput: (message: string) => BatchReviewCommandResult
+  finishParse: (result: ParseBatchTitlesResult) => BatchReviewCommandResult
+  failParse: (message: string) => BatchReviewCommandResult
+  restoreBatchId: (batchId: string) => void
+  beginDraftCreate: (itemId: string, candidateId: string) => BatchReviewCommandResult
+  failDraftCreate: (itemId: string, candidateId: string, message: string) => BatchReviewCommandResult
+  finishDraftCreate: (itemId: string) => BatchReviewCommandResult
+  clearDraftCreateErrors: (itemId: string) => void
+  selectItem: (itemId: string) => BatchReviewCommandResult
+  setSelected: (itemId: string, selected: boolean) => BatchReviewCommandResult
+  setDraft: (itemId: string, draftId: string, revision: number) => BatchReviewCommandResult
+  setDraftDirty: (itemId: string, dirty: boolean) => BatchReviewCommandResult
+  beginApply: (itemId: string) => BatchReviewCommandResult
+  finishApply: (itemId: string, changes?: { draftId?: string; revision?: number }) => BatchReviewCommandResult
+  failApply: (itemId: string, error: unknown) => BatchReviewCommandResult
+  retryApply: (itemId: string) => BatchReviewCommandResult
+  resetApply: (itemId: string) => BatchReviewCommandResult
+  invalidateDraft: (itemId: string) => BatchReviewCommandResult
+  beginSave: (itemIds: readonly string[]) => BatchReviewCommandResult
+  finishSaveItem: (itemId: string, result: BatchSaveResultItem) => BatchReviewCommandResult
+  failSaveItem: (itemId: string, error: unknown) => BatchReviewCommandResult
+  markSaveResponseUnknown: (itemIds: readonly string[], error?: unknown) => BatchReviewCommandResult
+  retrySavedConfirm: (itemId: string) => BatchReviewCommandResult
+  finishAccept: (itemId: string, requestId: string) => BatchReviewCommandResult
+  locateTracking: (itemId: string, requestId: string, trackingId: string) => BatchReviewCommandResult
+  markTrackingNotFound: (itemId: string) => BatchReviewCommandResult
+  failTrackingVerification: (itemId: string) => BatchReviewCommandResult
+  consumeConfirmed: (itemId: string) => BatchReviewCommandResult
+  removeItem: (itemId: string) => BatchReviewCommandResult
+  resetRoute: () => BatchReviewCommandResult
+  newIdempotencyKey: (itemId: string) => string | null
+}
 
 export function useBatchReviewJourney(rawInput = ''): BatchReviewJourney {
   const stateRef = shallowRef(createBatchReviewState(rawInput))
+  const parseErrorRef = ref('')
+  const batchIdRef = ref('')
+  const draftCreateItemIdsRef = ref<ReadonlySet<string>>(new Set<string>())
+  const draftCreateCandidateIdsRef = ref<Readonly<Record<string, string>>>({})
+  const draftCreateErrorsRef = ref<Readonly<Record<string, Record<string, string>>>>({})
+
+  const snapshot = computed<BatchReviewSnapshot>(() => ({
+    state: stateRef.value,
+    parseError: parseErrorRef.value,
+    batchId: batchIdRef.value,
+    draftCreateItemIds: draftCreateItemIdsRef.value,
+    draftCreateCandidateIds: draftCreateCandidateIdsRef.value,
+    draftCreateErrors: draftCreateErrorsRef.value,
+  }))
+
+  function apply(action: BatchReviewAction): BatchReviewCommandResult {
+    const previous = stateRef.value
+    const next = reduceBatchReview(previous, action)
+    if (next !== previous) stateRef.value = next
+    return { accepted: next !== previous, effects: [] }
+  }
+
+  /**
+   * The sanitized generation failure of one candidate. An empty map removes
+   * the item entry entirely, exactly as the previous view-local map did.
+   */
+  function setCandidateError(itemId: string, candidateId: string, message: string | null): void {
+    const itemErrors = { ...(draftCreateErrorsRef.value[itemId] ?? {}) }
+    if (message) itemErrors[candidateId] = message
+    else delete itemErrors[candidateId]
+    if (Object.keys(itemErrors).length) {
+      draftCreateErrorsRef.value = { ...draftCreateErrorsRef.value, [itemId]: itemErrors }
+      return
+    }
+    const next = { ...draftCreateErrorsRef.value }
+    delete next[itemId]
+    draftCreateErrorsRef.value = next
+  }
+
+  function beginParse(): BatchReviewCommandResult {
+    // A new attempt retires the previous failure message before loading starts.
+    parseErrorRef.value = ''
+    return apply({ type: 'parse_started' })
+  }
+
+  function rejectParseInput(message: string): BatchReviewCommandResult {
+    parseErrorRef.value = message
+    return { accepted: true, effects: [{ kind: 'notify', event: { type: 'parse_input_rejected', message } }] }
+  }
+
+  function finishParse(result: ParseBatchTitlesResult): BatchReviewCommandResult {
+    parseErrorRef.value = ''
+    const batchId = result.batch_id ?? ''
+    batchIdRef.value = batchId
+    const applied = apply({ type: 'parse_succeeded', result })
+    const itemCount = result.items?.length ?? 0
+    return {
+      accepted: applied.accepted,
+      effects: [
+        { kind: 'navigate', batchId },
+        {
+          kind: 'notify',
+          event: itemCount ? { type: 'parse_succeeded', itemCount } : { type: 'parse_empty' },
+        },
+      ],
+    }
+  }
+
+  function failParse(message: string): BatchReviewCommandResult {
+    // The reducer's `parse_failed` carries no error payload by design; the
+    // user-facing message lives in this module's lifecycle state instead.
+    parseErrorRef.value = message
+    batchIdRef.value = ''
+    apply({ type: 'parse_failed', error: message })
+    return { accepted: true, effects: [{ kind: 'notify', event: { type: 'parse_failed', message } }] }
+  }
+
+  function restoreBatchId(batchId: string): void {
+    batchIdRef.value = batchId
+  }
+
+  function beginDraftCreate(itemId: string, candidateId: string): BatchReviewCommandResult {
+    draftCreateItemIdsRef.value = new Set(draftCreateItemIdsRef.value).add(itemId)
+    draftCreateCandidateIdsRef.value = { ...draftCreateCandidateIdsRef.value, [itemId]: candidateId }
+    setCandidateError(itemId, candidateId, null)
+    return { accepted: true, effects: [] }
+  }
+
+  function failDraftCreate(itemId: string, candidateId: string, message: string): BatchReviewCommandResult {
+    setCandidateError(itemId, candidateId, message)
+    return { accepted: true, effects: [] }
+  }
+
+  function finishDraftCreate(itemId: string): BatchReviewCommandResult {
+    const next = new Set(draftCreateItemIdsRef.value)
+    next.delete(itemId)
+    draftCreateItemIdsRef.value = next
+    const nextCandidates = { ...draftCreateCandidateIdsRef.value }
+    delete nextCandidates[itemId]
+    draftCreateCandidateIdsRef.value = nextCandidates
+    return { accepted: true, effects: [] }
+  }
+
+  function clearDraftCreateErrors(itemId: string): void {
+    if (!draftCreateErrorsRef.value[itemId]) return
+    const next = { ...draftCreateErrorsRef.value }
+    delete next[itemId]
+    draftCreateErrorsRef.value = next
+  }
+
+  function resetRoute(): BatchReviewCommandResult {
+    draftCreateItemIdsRef.value = new Set<string>()
+    draftCreateCandidateIdsRef.value = {}
+    draftCreateErrorsRef.value = {}
+    return apply({ type: 'clear_route' })
+  }
+
   return {
-    get state() { return stateRef.value },
-    dispatch(action) {
-      const next = reduceBatchReview(stateRef.value, action)
-      if (next === stateRef.value) return false
-      stateRef.value = next
-      return true
-    },
+    snapshot,
+    beginParse,
+    rejectParseInput,
+    finishParse,
+    failParse,
+    restoreBatchId,
+    beginDraftCreate,
+    failDraftCreate,
+    finishDraftCreate,
+    clearDraftCreateErrors,
+    selectItem: (itemId) => apply({ type: 'set_current', itemId }),
+    setSelected: (itemId, selected) => apply({ type: 'set_selected', itemId, selected }),
+    setDraft: (itemId, draftId, revision) => apply({ type: 'set_draft', itemId, draftId, revision }),
+    setDraftDirty: (itemId, dirty) => apply({ type: 'set_dirty', itemId, dirty }),
+    beginApply: (itemId) => apply({ type: 'begin_apply', itemId }),
+    finishApply: (itemId, changes = {}) => apply({
+      type: 'apply_succeeded',
+      itemId,
+      ...(changes.draftId === undefined ? {} : { draftId: changes.draftId }),
+      ...(changes.revision === undefined ? {} : { revision: changes.revision }),
+    }),
+    failApply: (itemId, error) => apply({ type: 'apply_failed', itemId, error }),
+    retryApply: (itemId) => apply({ type: 'retry_apply', itemId }),
+    resetApply: (itemId) => apply({ type: 'reset_apply', itemId }),
+    invalidateDraft: (itemId) => apply({ type: 'invalidate_draft', itemId }),
+    beginSave: (itemIds) => apply({ type: 'begin_save', itemIds }),
+    finishSaveItem: (itemId, result) => apply({ type: 'save_succeeded', itemId, result }),
+    failSaveItem: (itemId, error) => apply({ type: 'save_failed', itemId, error }),
+    markSaveResponseUnknown: (itemIds, error) => apply({
+      type: 'save_response_unknown',
+      itemIds,
+      ...(error === undefined ? {} : { error }),
+    }),
+    retrySavedConfirm: (itemId) => apply({ type: 'retry_saved_confirm', itemId }),
+    finishAccept: (itemId, requestId) => apply({ type: 'accept_succeeded', itemId, requestId }),
+    locateTracking: (itemId, requestId, trackingId) => apply({ type: 'tracking_located', itemId, requestId, trackingId }),
+    markTrackingNotFound: (itemId) => apply({ type: 'tracking_not_found', itemId }),
+    failTrackingVerification: (itemId) => apply({ type: 'tracking_verification_failed', itemId }),
+    consumeConfirmed: (itemId) => apply({ type: 'consume_confirmed', itemId }),
+    removeItem: (itemId) => apply({ type: 'remove_item', itemId }),
+    resetRoute,
     newIdempotencyKey(itemId) {
       const item = stateRef.value.items[itemId]
       if (!batchItemCanConfirm(item)) return null
