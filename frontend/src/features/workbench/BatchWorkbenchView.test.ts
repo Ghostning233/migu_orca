@@ -2466,6 +2466,27 @@ describe('BatchWorkbenchView lifecycle characterization (#161)', () => {
     expect(wrapper.find('.batch-card-status').text()).toContain('已确认待提交')
   })
 
+  it('删除条目时未到期的编辑防抖随它的调度器一起消失', async () => {
+    apiPost.mockResolvedValueOnce(parseResult({ items: [draftRow()] }))
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王S4')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.batch-draft-card').trigger('click')
+    await nextTick()
+
+    // 未应用的过滤修改只活在 1.5s 防抖窗口里；删除条目后它必须一起消失。
+    await wrapper.find('#batch-preview-must-contain').setValue('未应用修改')
+    await nextTick()
+    await wrapper.find('.batch-card-delete').trigger('click')
+    await nextTick()
+
+    await new Promise((resolve) => setTimeout(resolve, 1_700))
+    await flushPromises()
+    expect(apiPost.mock.calls.filter(([path]) => path === '/api/v1/requests/preview-modify')).toHaveLength(0)
+    expect(wrapper.findAll('.batch-draft-card')).toHaveLength(0)
+  })
+
   it('右栏详情编辑接线打通：flush 发一次 preview-modify 并恢复可确认', async () => {
     apiPost.mockResolvedValueOnce(parseResult({ items: [draftRow()] }))
     const { wrapper } = await mountBatch()

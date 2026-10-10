@@ -35,6 +35,9 @@ import { useDraftSession, type DraftSession } from '@/app/composables/useDraftSe
 import {
   toSafeBatchError,
   useBatchReviewJourney,
+  type BatchReviewDraftFacts,
+  type BatchReviewDraftPorts,
+  type BatchReviewDraftViewFacts,
   type BatchReviewEffect,
   type BatchReviewNotifyEvent,
 } from '@/app/composables/useBatchReviewJourney'
@@ -131,6 +134,12 @@ const {
   failDraftCreate,
   finishDraftCreate,
   clearDraftCreateErrors,
+  ensureDraftSession: ensureItemDraftSession,
+  ensureScheduler: ensureItemScheduler,
+  releaseItemEditing,
+  invalidateItemResources,
+  invalidateAllItemResources,
+  disposeAllSchedulers,
   selectItem,
   setSelected,
   setDraft,
@@ -150,7 +159,7 @@ const {
   failTrackingVerification,
   removeItem,
   resetRoute,
-} = useBatchReviewJourney()
+} = useBatchReviewJourney('', createBatchReviewDraftPorts())
 
 /**
  * #160：命令只返回「数据效应」；路由、通知与焦点都由视图执行，中文文案映射
@@ -273,69 +282,85 @@ const seasonConfirmations = ref<Record<string, number | null>>({})
 
 // Draft detail state.
 const detailItemId = ref<string | null>(null)
-// One route-local session per draft item. The card shortcut and the detail
-// editor both use this map, so snapshots, revisions, dirty state and errors
-// cannot diverge between the two surfaces.
-const draftSessions = new Map<string, DraftSession>()
 const draftApplyErrors = ref<Record<string, string>>({})
-// US-344: one edit scheduler per item, paired with the session it was built
-// for. Both surfaces (card shortcut and right-hand detail) drive the same
-// scheduler, so a revision can never be used by two requests at once.
-const editSchedulers = new Map<string, { session: DraftSession; scheduler: DraftEditScheduler }>()
 const detailEditor = ref<InstanceType<typeof AnimeDraftEditor> | null>(null)
 
-function ensureDraftSession(item: BatchItem): DraftSession | null {
+/**
+ * #162：草案会话与编辑调度器两个句柄 Map 归模块所有。视图只提供「怎么造」——
+ * IO 仍在 `useDraftSession` / `useDraftEditScheduler` 内部；条目生命周期决定
+ * 何时创建、替换、失效与销毁。
+ */
+function createBatchReviewDraftPorts(): BatchReviewDraftPorts<DraftSession, DraftEditScheduler> {
+  return {
+    createSession: (facts) => useDraftSession({
+      request: facts.source as RequestSnapshot,
+      draftId: facts.draftId,
+      draftRevision: facts.draftRevision,
+    }),
+    createScheduler: (facts, session) => {
+      const itemId = facts.itemId
+      const fallbackRequest = facts.source as RequestSnapshot
+      return useDraftEditScheduler({
+        session,
+        storageDir: () => storageQuery().storage_dir ?? null,
+        onSending: () => {
+          // Keep the review journal in step with the transport: a send may
+          // follow a previous failure, so both transitions are attempted.
+          retryApply(itemId)
+          beginApply(itemId)
+        },
+        onApplied: () => {
+          onDraftChanged(itemId, {
+            request: (session.request.value ?? fallbackRequest) as RequestSnapshot,
+            draftId: session.draftId.value ?? '',
+            draftRevision: session.draftRevision.value ?? 1,
+          })
+        },
+        onInvalid: () => onDraftExpired(itemId),
+        onFailed: () => {
+          draftApplyErrors.value = { ...draftApplyErrors.value, [itemId]: '订阅草案修改失败，请稍后重试。' }
+          failApply(itemId, session.error.value)
+        },
+      })
+    },
+  }
+}
+
+/** The module's creation input for one item's draft handles. */
+function draftFactsFor(item: BatchItem): BatchReviewDraftFacts | null {
   const itemId = item.item_id
   const request = batchCardRequest(item)
   if (!itemId || !request || !item.draft_id) return null
-  const existing = draftSessions.get(itemId)
-  if (existing && existing.draftId.value === item.draft_id) return existing
-  const session = useDraftSession({
-    request,
-    draftId: item.draft_id,
-    draftRevision: item.draft_revision ?? 1,
-  })
-  draftSessions.set(itemId, session)
-  return session
+  return { itemId, draftId: item.draft_id, draftRevision: item.draft_revision ?? 1, source: request }
+}
+
+/** The item's draft session (created on demand, keyed by item + draft identity). */
+function ensureDraftSession(item: BatchItem): DraftSession | null {
+  const facts = draftFactsFor(item)
+  return facts ? ensureItemDraftSession(facts) : null
 }
 
 /** The item's edit scheduler, recreated whenever its session is replaced. */
 function ensureScheduler(item: BatchItem): DraftEditScheduler | null {
-  const itemId = item.item_id
-  const session = ensureDraftSession(item)
-  if (!itemId || !session) return null
-  const existing = editSchedulers.get(itemId)
-  if (existing && existing.session === session) return existing.scheduler
-  existing?.scheduler.dispose()
-  const scheduler = useDraftEditScheduler({
-    session,
-    storageDir: () => storageQuery().storage_dir ?? null,
-    onSending: () => {
-      // Keep the review journal in step with the transport: a send may follow
-      // a previous failure, so both transitions are attempted.
-      retryApply(itemId)
-      beginApply(itemId)
-    },
-    onApplied: () => {
-      onDraftChanged(itemId, {
-        request: (session.request.value ?? batchCardRequest(item)) as RequestSnapshot,
-        draftId: session.draftId.value ?? '',
-        draftRevision: session.draftRevision.value ?? 1,
-      })
-    },
-    onInvalid: () => onDraftExpired(itemId),
-    onFailed: () => {
-      draftApplyErrors.value = { ...draftApplyErrors.value, [itemId]: '订阅草案修改失败，请稍后重试。' }
-      failApply(itemId, session.error.value)
-    },
-  })
-  editSchedulers.set(itemId, { session, scheduler })
-  return scheduler
+  const facts = draftFactsFor(item)
+  return facts ? ensureItemScheduler(facts) : null
 }
 
-function disposeScheduler(itemId: string): void {
-  editSchedulers.get(itemId)?.scheduler.dispose()
-  editSchedulers.delete(itemId)
+/**
+ * The read-only client facts the save gate consumes. Ensuring both handles
+ * first keeps lazy creation identical to the previous view-local maps.
+ */
+function draftViewFactsFor(item: BatchItem): BatchReviewDraftViewFacts | null {
+  const facts = draftFactsFor(item)
+  if (!facts) return null
+  ensureItemDraftSession(facts)
+  ensureItemScheduler(facts)
+  return batchReview.value.drafts[facts.itemId] ?? null
+}
+
+/** Read-only fact lookup: never creates a session or a scheduler. */
+function draftFactsById(itemId: string): BatchReviewDraftViewFacts | null {
+  return batchReview.value.drafts[itemId] ?? null
 }
 
 
@@ -351,19 +376,20 @@ function itemConfirmability(itemId: string): BatchItemConfirmability {
   const journeyItem = batchReview.value.state.items[itemId]
   const blockers: string[] = []
   if (!item || !canExpandBatchCard(item) || !batchCardRequest(item)) blockers.push('需先生成可审核草案')
+  // #162：判据只读模块快照回吐的客户端事实；句柄的创建/替换/销毁由模块决定。
+  const facts = item ? draftViewFactsFor(item) : null
   const session = item ? ensureDraftSession(item) : null
-  const draftId = session?.draftId.value ?? item?.draft_id
-  const revision = session?.draftRevision.value ?? item?.draft_revision
+  const draftId = facts?.draftId ?? item?.draft_id
+  const revision = facts?.draftRevision ?? item?.draft_revision
   if (!draftId || !draftId.trim()) blockers.push('草案能力无效')
   if (!Number.isInteger(revision) || (revision ?? 0) <= 0) blockers.push('草案版本无效')
-  if (!session || session.invalid.value) blockers.push('订阅草案已失效')
-  const scheduler = item ? ensureScheduler(item) : null
+  if (!facts || facts.invalid) blockers.push('订阅草案已失效')
   // A local edit is never confirmed implicitly: it must reach the server first.
-  if (scheduler?.waiting.value) blockers.push('有尚未应用的编辑，正在等待过滤规则自动更新')
-  else if (scheduler?.folderPending.value) blockers.push('有尚未应用的编辑，等待提交目录名')
-  else if (session?.dirty.value || scheduler?.groupPending.value) blockers.push('有尚未应用的编辑')
-  if (session?.applying.value) blockers.push('正在重新计算资源')
-  if (session?.error.value || session?.canRetry.value) blockers.push('修改失败，请重试或恢复最后一致值')
+  if (facts?.waiting) blockers.push('有尚未应用的编辑，正在等待过滤规则自动更新')
+  else if (facts?.folderPending) blockers.push('有尚未应用的编辑，等待提交目录名')
+  else if (facts?.dirty || facts?.groupPending) blockers.push('有尚未应用的编辑')
+  if (facts?.applying) blockers.push('正在重新计算资源')
+  if (facts?.hasError || facts?.canRetry) blockers.push('修改失败，请重试或恢复最后一致值')
   if (savingItemIds.value.has(itemId) || item?.status === 'RESPONSE_UNKNOWN' || journeyItem?.phase === 'saving' || journeyItem?.phase === 'response_unknown') blockers.push('保存结果待核验')
   const request = item ? batchCardRequest(item) : null
   const selectedGroup = request?.confirmable_config?.selected_subtitle_group
@@ -383,17 +409,14 @@ function hasUnsafeBatchWork(): boolean {
     selectedItemIds.value.size > 0 ||
     items.value.some((item) => {
       if (['CONFIRMED', 'SAVED_PENDING_CONFIRM'].includes(String(item.status ?? ''))) return false
-      const session = draftSessions.get(item.item_id ?? '')
-      return Boolean(canChooseBatchCandidate(item) || session?.draftId.value || session?.dirty.value || session?.applying.value)
+      const facts = draftFactsById(item.item_id ?? '')
+      return Boolean(canChooseBatchCandidate(item) || facts?.draftId || facts?.dirty || facts?.applying)
     }),
   )
 }
 
 function clearBatchRouteLocalState(): void {
-  for (const { scheduler } of editSchedulers.values()) scheduler.dispose()
-  editSchedulers.clear()
-  for (const session of draftSessions.values()) session.invalidate()
-  draftSessions.clear()
+  invalidateAllItemResources()
   saveOperation.value = null
   selectedCollectionByItem.value = {}
   selectedItemIds.value = new Set()
@@ -422,7 +445,7 @@ const reviewFilterKey = computed(() => `${reviewQuery.value}\u0000${reviewStatus
 const searchFilterActive = computed(() => reviewQuery.value.trim().length > 0)
 
 const selectable = computed(() => visibleItems.value.filter((item) => itemConfirmability(item.item_id ?? '').confirmable))
-const processingCount = computed(() => items.value.filter((item) => draftSessions.get(item.item_id ?? '')?.applying.value).length)
+const processingCount = computed(() => items.value.filter((item) => draftFactsById(item.item_id ?? '')?.applying).length)
 const allSelected = computed(
   () => selectable.value.length > 0 && selectable.value.every((item) => selectedItemIds.value.has(item.item_id ?? '')),
 )
@@ -554,9 +577,7 @@ function selectCurrentItem(item: BatchItem): void {
     // US-344: leaving an item cancels its debounce window and drops intent the
     // user can no longer see; a late response for it can never touch the new
     // item because every session and scheduler is keyed by item_id.
-    const leaving = editSchedulers.get(previousId)
-    leaving?.scheduler.cancelTimer()
-    leaving?.scheduler.dropPending()
+    releaseItemEditing(previousId)
   }
   currentItemId.value = nextId
   detailItemId.value = nextId
@@ -591,7 +612,7 @@ function cardNeedsNextStep(item: BatchItem): boolean {
   if (CARD_STUCK_STATUSES.includes(String(item.status ?? ''))) return true
   if (generatingCandidateIdFor(item.item_id ?? '')) return true
   if (recoveryActionFor(item) !== 'NONE') return true
-  return Boolean(draftSessions.get(item.item_id ?? '')?.applying.value)
+  return Boolean(draftFactsById(item.item_id ?? '')?.applying)
 }
 
 /**
@@ -930,9 +951,7 @@ function deleteBatchCard(itemId: string): void {
     ? []
     : [visible[removedIndex + 1]?.item_id, visible[removedIndex - 1]?.item_id]
       .filter((candidate): candidate is string => Boolean(candidate))
-  disposeScheduler(itemId)
-  draftSessions.get(itemId)?.invalidate()
-  draftSessions.delete(itemId)
+  invalidateItemResources(itemId)
   removeItem(itemId)
   const next = new Set(selectedItemIds.value)
   next.delete(itemId)
@@ -1022,7 +1041,16 @@ function applySaveConfirmResult(result: BatchSaveConfirmResult): {
     let updated = row
     for (const item of resultItems) {
       if (item.item_id !== row.item_id) continue
-      if (batchSaveConfirmSucceeded(item)) {
+      // 一个条目在一条结果里只会走到下面的一种结局；四种结局都要让本地草案
+      // 资源失效，因此这里只调用一次单一失效命令（#162）。
+      const succeeded = batchSaveConfirmSucceeded(item)
+      const replayed = !succeeded && batchSaveErrorIsReplayed(item.error_type)
+      const recoveryAllowed = !succeeded && !replayed && batchSaveConfirmRecoveryAllowed(item)
+      const draftInvalidated = !succeeded && !replayed && !recoveryAllowed && batchSaveErrorInvalidatesDraft(item.error_type)
+      if (succeeded || replayed || recoveryAllowed || draftInvalidated) {
+        invalidateItemResources(row.item_id ?? '')
+      }
+      if (succeeded) {
         updated = {
           ...row,
           status: 'CONFIRMED',
@@ -1031,8 +1059,6 @@ function applySaveConfirmResult(result: BatchSaveConfirmResult): {
           request_id: item.request_id,
           tracking_id: item.tracking_id,
         }
-        draftSessions.get(row.item_id ?? '')?.invalidate()
-        draftSessions.delete(row.item_id ?? '')
         const selected = new Set(selectedItemIds.value)
         selected.delete(row.item_id ?? '')
         selectedItemIds.value = selected
@@ -1044,10 +1070,8 @@ function applySaveConfirmResult(result: BatchSaveConfirmResult): {
           ...saveFailureTypes.value,
           [row.item_id ?? '']: String(item.error_type ?? '') || 'save_confirm_failed',
         }
-        if (batchSaveErrorIsReplayed(item.error_type)) {
+        if (replayed) {
           // Issue 130：草案已经被保存；冻结该条目等待核验，不提供重新生成或新键重试。
-          draftSessions.get(row.item_id ?? '')?.invalidate()
-          draftSessions.delete(row.item_id ?? '')
           const selected = new Set(selectedItemIds.value)
           selected.delete(row.item_id ?? '')
           selectedItemIds.value = selected
@@ -1059,13 +1083,9 @@ function applySaveConfirmResult(result: BatchSaveConfirmResult): {
             draft_revision: null,
             request_id: null,
           }
-        } else if (batchSaveConfirmRecoveryAllowed(item)) {
+        } else if (recoveryAllowed) {
           updated = { ...row, status: 'SAVED_PENDING_CONFIRM', draft_id: null, draft_revision: null, request_id: item.request_id }
-          draftSessions.get(row.item_id ?? '')?.invalidate()
-          draftSessions.delete(row.item_id ?? '')
-        } else if (batchSaveErrorInvalidatesDraft(item.error_type)) {
-          draftSessions.get(row.item_id ?? '')?.invalidate()
-          draftSessions.delete(row.item_id ?? '')
+        } else if (draftInvalidated) {
           updated = {
             ...row,
             status: (row.candidates?.length ?? 0) > 0 ? 'FOUND' : 'EMPTY',
@@ -1286,8 +1306,7 @@ async function submitBatchSaveConfirm(rows: BatchItem[], itemIds: string[] | nul
       isPublicRouteIdentifier(requestId)
     if (validSavedFailure && rows.length === 1) {
       const row = rows[0]
-      draftSessions.get(row?.item_id ?? '')?.invalidate()
-      draftSessions.delete(row?.item_id ?? '')
+      invalidateItemResources(row?.item_id ?? '')
       items.value = items.value.map((item) => item.item_id === row?.item_id
         ? { ...item, status: 'SAVED_PENDING_CONFIRM', draft_id: null, draft_revision: null, request_id: requestId }
         : item)
@@ -1310,10 +1329,7 @@ async function submitBatchSaveConfirm(rows: BatchItem[], itemIds: string[] | nul
           const selected = new Set(selectedItemIds.value)
           rows.forEach((row) => selected.delete(row.item_id ?? ''))
           selectedItemIds.value = selected
-          rows.forEach((row) => {
-            draftSessions.get(row.item_id ?? '')?.invalidate()
-            draftSessions.delete(row.item_id ?? '')
-          })
+          rows.forEach((row) => invalidateItemResources(row.item_id ?? ''))
         }
         items.value = items.value.map((item) => rows.some((row) => row.item_id === item.item_id)
           ? batchSaveErrorIsReplayed(safeType)
@@ -1460,12 +1476,11 @@ function onDetailDirty(dirty: boolean): void {
   const item = detailItem.value
   if (!item) return
   setDraftDirty(item.item_id ?? '', dirty)
-  draftSessions.get(item.item_id ?? '')?.setDirty(dirty)
+  ensureDraftSession(item)?.setDirty(dirty)
 }
 
 function onDraftExpired(itemId: string): void {
-  disposeScheduler(itemId)
-  draftSessions.get(itemId)?.invalidate()
+  invalidateItemResources(itemId)
   invalidateDraft(itemId)
   const nextSelected = new Set(selectedItemIds.value)
   nextSelected.delete(itemId)
@@ -1484,7 +1499,6 @@ function onDraftExpired(itemId: string): void {
       draft_revision: null,
     }
   })
-  draftSessions.delete(itemId)
   draftApplyErrors.value = { ...draftApplyErrors.value, [itemId]: '订阅草案已失效，请重新生成。' }
   detailItemId.value = null
 }
@@ -1569,8 +1583,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  for (const { scheduler } of editSchedulers.values()) scheduler.dispose()
-  editSchedulers.clear()
+  // 定时器随组件一起消失；会话本身在路由清理或条目失效时已作废。
+  disposeAllSchedulers()
 })
 
 defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, deleteBatchCard })

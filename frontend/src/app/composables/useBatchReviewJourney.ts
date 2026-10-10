@@ -21,7 +21,7 @@
  * deliberately separate pieces of state. Capabilities and idempotency keys
  * remain in this route-local object and are never serialised by this module.
  */
-import { computed, ref, shallowRef, type ComputedRef } from 'vue'
+import { computed, ref, shallowReactive, shallowRef, type ComputedRef, type Ref } from 'vue'
 import type { operations } from '@/api/generated/api'
 import { isPublicRouteIdentifier } from '@/app/router/catalog'
 
@@ -346,6 +346,65 @@ export interface BatchReviewCommandResult {
   readonly effects: readonly BatchReviewEffect[]
 }
 
+/**
+ * The session facts the module reads. Implementations and their IO belong to the
+ * injected factory (`useDraftSession`), never to this module.
+ */
+export interface BatchReviewDraftSessionFacts {
+  readonly draftId: Ref<string | null>
+  readonly draftRevision: Ref<number | null>
+  readonly dirty: Ref<boolean>
+  readonly applying: Ref<boolean>
+  readonly invalid: Ref<boolean>
+  readonly error: Ref<unknown>
+  readonly canRetry: Readonly<Ref<boolean>>
+  invalidate: () => void
+}
+
+/** The scheduler facts the module reads; timers and requests stay in the implementation. */
+export interface BatchReviewDraftSchedulerFacts {
+  readonly waiting: Ref<boolean>
+  readonly folderPending: ComputedRef<boolean>
+  readonly groupPending: ComputedRef<boolean>
+  dispose: () => void
+  cancelTimer: () => void
+  dropPending: () => void
+}
+
+/**
+ * What the module needs to (re)create one item's handles. `source` is an
+ * opaque caller payload (for example the public Request snapshot); the module
+ * passes it through and never inspects it.
+ */
+export interface BatchReviewDraftFacts {
+  readonly itemId: string
+  readonly draftId: string
+  readonly draftRevision: number
+  readonly source: unknown
+}
+
+export interface BatchReviewDraftPorts<TSession, TScheduler> {
+  createSession: (facts: BatchReviewDraftFacts) => TSession
+  createScheduler: (facts: BatchReviewDraftFacts, session: TSession) => TScheduler
+}
+
+/**
+ * The client facts the save-confirmation gate needs (#162). They are relaxed
+ * from the handles on purpose: surfaces read facts, the module owns handles.
+ */
+export interface BatchReviewDraftViewFacts {
+  readonly draftId: string | null
+  readonly draftRevision: number | null
+  readonly invalid: boolean
+  readonly dirty: boolean
+  readonly applying: boolean
+  readonly hasError: boolean
+  readonly canRetry: boolean
+  readonly waiting: boolean
+  readonly folderPending: boolean
+  readonly groupPending: boolean
+}
+
 /** Read-only view of the client lifecycle plus the item state it decides. */
 export interface BatchReviewSnapshot {
   readonly state: BatchReviewState
@@ -354,9 +413,14 @@ export interface BatchReviewSnapshot {
   readonly draftCreateItemIds: ReadonlySet<string>
   readonly draftCreateCandidateIds: Readonly<Record<string, string>>
   readonly draftCreateErrors: Readonly<Record<string, Record<string, string>>>
+  /** Per-item draft facts, keyed by item id. */
+  readonly drafts: Readonly<Record<string, BatchReviewDraftViewFacts>>
 }
 
-export interface BatchReviewJourney {
+export interface BatchReviewJourney<
+  TSession extends BatchReviewDraftSessionFacts = BatchReviewDraftSessionFacts,
+  TScheduler extends BatchReviewDraftSchedulerFacts = BatchReviewDraftSchedulerFacts,
+> {
   readonly snapshot: ComputedRef<BatchReviewSnapshot>
   beginParse: () => BatchReviewCommandResult
   rejectParseInput: (message: string) => BatchReviewCommandResult
@@ -367,6 +431,14 @@ export interface BatchReviewJourney {
   failDraftCreate: (itemId: string, candidateId: string, message: string) => BatchReviewCommandResult
   finishDraftCreate: (itemId: string) => BatchReviewCommandResult
   clearDraftCreateErrors: (itemId: string) => void
+  ensureDraftSession: (facts: BatchReviewDraftFacts) => TSession | null
+  ensureScheduler: (facts: BatchReviewDraftFacts) => TScheduler | null
+  /** Drop the leaving item's unapplied edit intent without touching its session. */
+  releaseItemEditing: (itemId: string) => void
+  /** The one place an item's draft resources die: dispose, invalidate and forget. */
+  invalidateItemResources: (itemId: string) => void
+  invalidateAllItemResources: () => void
+  disposeAllSchedulers: () => void
   selectItem: (itemId: string) => BatchReviewCommandResult
   setSelected: (itemId: string, selected: boolean) => BatchReviewCommandResult
   setDraft: (itemId: string, draftId: string, revision: number) => BatchReviewCommandResult
@@ -392,13 +464,41 @@ export interface BatchReviewJourney {
   newIdempotencyKey: (itemId: string) => string | null
 }
 
-export function useBatchReviewJourney(rawInput = ''): BatchReviewJourney {
+export function useBatchReviewJourney<
+  TSession extends BatchReviewDraftSessionFacts = BatchReviewDraftSessionFacts,
+  TScheduler extends BatchReviewDraftSchedulerFacts = BatchReviewDraftSchedulerFacts,
+>(rawInput = '', ports?: BatchReviewDraftPorts<TSession, TScheduler>): BatchReviewJourney<TSession, TScheduler> {
   const stateRef = shallowRef(createBatchReviewState(rawInput))
   const parseErrorRef = ref('')
   const batchIdRef = ref('')
   const draftCreateItemIdsRef = ref<ReadonlySet<string>>(new Set<string>())
   const draftCreateCandidateIdsRef = ref<Readonly<Record<string, string>>>({})
   const draftCreateErrorsRef = ref<Readonly<Record<string, Record<string, string>>>>({})
+  // Handles are keyed by item id. The collections are reactive so the snapshot
+  // below re-derives facts the moment a handle is created, replaced or dropped.
+  const draftSessions = shallowReactive(new Map<string, TSession>())
+  const editSchedulers = shallowReactive(new Map<string, { session: TSession; scheduler: TScheduler }>())
+
+  /** Relax handles into the read-only facts surfaces may consume. */
+  function draftViewFacts(): Record<string, BatchReviewDraftViewFacts> {
+    const facts: Record<string, BatchReviewDraftViewFacts> = {}
+    for (const [itemId, session] of draftSessions) {
+      const scheduler = editSchedulers.get(itemId)?.scheduler
+      facts[itemId] = {
+        draftId: session.draftId.value,
+        draftRevision: session.draftRevision.value,
+        invalid: session.invalid.value,
+        dirty: session.dirty.value,
+        applying: session.applying.value,
+        hasError: Boolean(session.error.value),
+        canRetry: session.canRetry.value,
+        waiting: scheduler?.waiting.value ?? false,
+        folderPending: scheduler?.folderPending.value ?? false,
+        groupPending: scheduler?.groupPending.value ?? false,
+      }
+    }
+    return facts
+  }
 
   const snapshot = computed<BatchReviewSnapshot>(() => ({
     state: stateRef.value,
@@ -407,7 +507,46 @@ export function useBatchReviewJourney(rawInput = ''): BatchReviewJourney {
     draftCreateItemIds: draftCreateItemIdsRef.value,
     draftCreateCandidateIds: draftCreateCandidateIdsRef.value,
     draftCreateErrors: draftCreateErrorsRef.value,
+    drafts: draftViewFacts(),
   }))
+
+  /**
+   * One item, one session for one draft identity. A changed draft id means the
+   * previous capability is dead, so it is replaced rather than reused.
+   */
+  function ensureSession(facts: BatchReviewDraftFacts): TSession | null {
+    if (!ports) return null
+    const existing = draftSessions.get(facts.itemId)
+    if (existing && existing.draftId.value === facts.draftId) return existing
+    const session = ports.createSession(facts)
+    draftSessions.set(facts.itemId, session)
+    return session
+  }
+
+  function ensureSchedulerFor(facts: BatchReviewDraftFacts): TScheduler | null {
+    if (!ports) return null
+    const session = ensureSession(facts)
+    if (!session) return null
+    const existing = editSchedulers.get(facts.itemId)
+    if (existing && existing.session === session) return existing.scheduler
+    existing?.scheduler.dispose()
+    const scheduler = ports.createScheduler(facts, session)
+    editSchedulers.set(facts.itemId, { session, scheduler })
+    return scheduler
+  }
+
+  function dropItemResources(itemId: string): void {
+    const handle = editSchedulers.get(itemId)
+    if (handle) {
+      handle.scheduler.dispose()
+      editSchedulers.delete(itemId)
+    }
+    const session = draftSessions.get(itemId)
+    if (session) {
+      session.invalidate()
+      draftSessions.delete(itemId)
+    }
+  }
 
   function apply(action: BatchReviewAction): BatchReviewCommandResult {
     const previous = stateRef.value
@@ -522,6 +661,25 @@ export function useBatchReviewJourney(rawInput = ''): BatchReviewJourney {
     failDraftCreate,
     finishDraftCreate,
     clearDraftCreateErrors,
+    ensureDraftSession: ensureSession,
+    ensureScheduler: ensureSchedulerFor,
+    releaseItemEditing(itemId) {
+      const handle = editSchedulers.get(itemId)
+      if (!handle) return
+      handle.scheduler.cancelTimer()
+      handle.scheduler.dropPending()
+    },
+    invalidateItemResources: dropItemResources,
+    invalidateAllItemResources() {
+      for (const { scheduler } of editSchedulers.values()) scheduler.dispose()
+      editSchedulers.clear()
+      for (const session of draftSessions.values()) session.invalidate()
+      draftSessions.clear()
+    },
+    disposeAllSchedulers() {
+      for (const { scheduler } of editSchedulers.values()) scheduler.dispose()
+      editSchedulers.clear()
+    },
     selectItem: (itemId) => apply({ type: 'set_current', itemId }),
     setSelected: (itemId, selected) => apply({ type: 'set_selected', itemId, selected }),
     setDraft: (itemId, draftId, revision) => apply({ type: 'set_draft', itemId, draftId, revision }),

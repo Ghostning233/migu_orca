@@ -1,6 +1,11 @@
+import { computed, ref } from 'vue'
 import { describe, expect, it } from 'vitest'
 
-import { useBatchReviewJourney, type BatchParseItem, type ParseBatchTitlesResult } from './useBatchReviewJourney'
+import {
+  useBatchReviewJourney,
+  type BatchParseItem,
+  type ParseBatchTitlesResult,
+} from './useBatchReviewJourney'
 
 function item(itemId: string, status: string, extra: Record<string, unknown> = {}): BatchParseItem {
   return {
@@ -161,5 +166,188 @@ describe('useBatchReviewJourney session commands (#161)', () => {
     expect(session.resetRoute().accepted).toBe(true)
     expect(session.snapshot.value.state.items).toEqual({})
     expect(session.snapshot.value.state.phase).toBe('input')
+  })
+})
+
+/** #162：假工厂，记录句柄的创建、失效与销毁；不碰 IO。 */
+function fakeDraftPorts() {
+  const created = { sessions: [] as string[], schedulers: [] as string[] }
+  const sessions: Array<Record<string, unknown>> = []
+  const schedulers: Array<Record<string, unknown>> = []
+  const ports = {
+    createSession: (facts: { itemId: string; draftId: string }) => {
+      created.sessions.push(`${facts.itemId}:${facts.draftId}`)
+      const session = {
+        draftId: ref<string | null>(facts.draftId),
+        draftRevision: ref<number | null>(1),
+        dirty: ref(false),
+        applying: ref(false),
+        invalid: ref(false),
+        error: ref<unknown>(null),
+        canRetry: computed(() => false),
+        invalidated: 0,
+        invalidate() {
+          session.invalidated += 1
+          session.invalid.value = true
+          session.draftId.value = null
+        },
+      }
+      sessions.push(session)
+      return session
+    },
+    createScheduler: (facts: { itemId: string }) => {
+      created.schedulers.push(facts.itemId)
+      const scheduler = {
+        waiting: ref(false),
+        folderPending: computed(() => false),
+        groupPending: computed(() => false),
+        disposed: 0,
+        cancelled: 0,
+        dropped: 0,
+        dispose() { scheduler.disposed += 1 },
+        cancelTimer() { scheduler.cancelled += 1 },
+        dropPending() { scheduler.dropped += 1 },
+      }
+      schedulers.push(scheduler)
+      return scheduler
+    },
+  }
+  return { ports, created, sessions, schedulers }
+}
+
+const draftFacts = (itemId: string, draftId: string) => ({ itemId, draftId, draftRevision: 1, source: null })
+
+describe('useBatchReviewJourney draft handle ownership (#162)', () => {
+  it('creates one session and one scheduler per item and draft identity', () => {
+    const fake = fakeDraftPorts()
+    const session = useBatchReviewJourney('', fake.ports)
+    session.finishParse(parsed([draftItem('a')]))
+
+    const first = session.ensureDraftSession(draftFacts('a', 'draft-a'))
+    const again = session.ensureDraftSession(draftFacts('a', 'draft-a'))
+    const scheduler = session.ensureScheduler(draftFacts('a', 'draft-a'))
+    const schedulerAgain = session.ensureScheduler(draftFacts('a', 'draft-a'))
+
+    expect(again).toBe(first)
+    expect(schedulerAgain).toBe(scheduler)
+    expect(fake.created.sessions).toEqual(['a:draft-a'])
+    expect(fake.created.schedulers).toEqual(['a'])
+  })
+
+  it('replaces the session and disposes the scheduler when the draft identity changes', () => {
+    const fake = fakeDraftPorts()
+    const session = useBatchReviewJourney('', fake.ports)
+    session.finishParse(parsed([draftItem('a')]))
+
+    const first = session.ensureDraftSession(draftFacts('a', 'draft-a'))
+    session.ensureScheduler(draftFacts('a', 'draft-a'))
+    const second = session.ensureDraftSession(draftFacts('a', 'draft-b'))
+    const nextScheduler = session.ensureScheduler(draftFacts('a', 'draft-b'))
+
+    expect(second).not.toBe(first)
+    expect(fake.created.sessions).toEqual(['a:draft-a', 'a:draft-b'])
+    expect(fake.created.schedulers).toEqual(['a', 'a'])
+    expect(fake.schedulers[0]?.disposed).toBe(1)
+    expect(fake.schedulers[1]?.disposed).toBe(0)
+    expect(nextScheduler).toBe(fake.schedulers[1])
+    // 被替换的会话不主动作废：它只是从 Map 里消失（与旧实现一致）。
+    expect(fake.sessions[0]?.invalidated).toBe(0)
+  })
+
+  it('publishes the save-gate facts from the live handles', () => {
+    const fake = fakeDraftPorts()
+    const session = useBatchReviewJourney('', fake.ports)
+    session.finishParse(parsed([draftItem('a')]))
+    session.ensureScheduler(draftFacts('a', 'draft-a'))
+
+    expect(session.snapshot.value.drafts.a).toEqual({
+      draftId: 'draft-a',
+      draftRevision: 1,
+      invalid: false,
+      dirty: false,
+      applying: false,
+      hasError: false,
+      canRetry: false,
+      waiting: false,
+      folderPending: false,
+      groupPending: false,
+    })
+
+    const sessionHandle = fake.sessions[0] as {
+      dirty: { value: boolean }
+      error: { value: unknown }
+    }
+    const schedulerHandle = fake.schedulers[0] as { waiting: { value: boolean } }
+    sessionHandle.dirty.value = true
+    schedulerHandle.waiting.value = true
+    sessionHandle.error.value = { type: 'network_error' }
+    expect(session.snapshot.value.drafts.a).toMatchObject({ dirty: true, waiting: true, hasError: true })
+  })
+
+  it('invalidateItemResources is the single death of an item\'s handles', () => {
+    const fake = fakeDraftPorts()
+    const session = useBatchReviewJourney('', fake.ports)
+    session.finishParse(parsed([draftItem('a'), draftItem('b')]))
+    session.ensureScheduler(draftFacts('a', 'draft-a'))
+    session.ensureScheduler(draftFacts('b', 'draft-b'))
+
+    session.invalidateItemResources('a')
+
+    expect(fake.schedulers[0]?.disposed).toBe(1)
+    expect(fake.sessions[0]?.invalidated).toBe(1)
+    expect(fake.schedulers[1]?.disposed).toBe(0)
+    expect(session.snapshot.value.drafts.a).toBeUndefined()
+    expect(session.snapshot.value.drafts.b).toBeDefined()
+    // 失效后重新进入该条目会拿到全新句柄。
+    expect(session.ensureDraftSession(draftFacts('a', 'draft-a'))).not.toBe(fake.sessions[0])
+  })
+
+  it('route cleanup disposes every scheduler and invalidates every session', () => {
+    const fake = fakeDraftPorts()
+    const session = useBatchReviewJourney('', fake.ports)
+    session.finishParse(parsed([draftItem('a'), draftItem('b')]))
+    session.ensureScheduler(draftFacts('a', 'draft-a'))
+    session.ensureScheduler(draftFacts('b', 'draft-b'))
+
+    session.invalidateAllItemResources()
+
+    expect(fake.schedulers.map((scheduler) => (scheduler as { disposed: number }).disposed)).toEqual([1, 1])
+    expect(fake.sessions.map((entry) => (entry as { invalidated: number }).invalidated)).toEqual([1, 1])
+    expect(session.snapshot.value.drafts).toEqual({})
+  })
+
+  it('unmount only stops the timers and keeps the sessions', () => {
+    const fake = fakeDraftPorts()
+    const session = useBatchReviewJourney('', fake.ports)
+    session.finishParse(parsed([draftItem('a')]))
+    session.ensureScheduler(draftFacts('a', 'draft-a'))
+
+    session.disposeAllSchedulers()
+
+    expect(fake.schedulers[0]?.disposed).toBe(1)
+    expect(fake.sessions[0]?.invalidated).toBe(0)
+    expect(session.snapshot.value.drafts.a).toBeDefined()
+  })
+
+  it('leaving an item drops its unapplied intent without touching the session', () => {
+    const fake = fakeDraftPorts()
+    const session = useBatchReviewJourney('', fake.ports)
+    session.finishParse(parsed([draftItem('a')]))
+    session.ensureScheduler(draftFacts('a', 'draft-a'))
+
+    session.releaseItemEditing('a')
+
+    expect(fake.schedulers[0]?.cancelled).toBe(1)
+    expect(fake.schedulers[0]?.dropped).toBe(1)
+    expect(fake.schedulers[0]?.disposed).toBe(0)
+    expect(session.snapshot.value.drafts.a).toBeDefined()
+  })
+
+  it('without ports the handle commands stay inert', () => {
+    const session = useBatchReviewJourney()
+    session.finishParse(parsed([draftItem('a')]))
+    expect(session.ensureDraftSession(draftFacts('a', 'draft-a'))).toBeNull()
+    expect(session.ensureScheduler(draftFacts('a', 'draft-a'))).toBeNull()
+    expect(session.snapshot.value.drafts).toEqual({})
   })
 })
