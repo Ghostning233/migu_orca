@@ -5,6 +5,7 @@ import {
   useBatchReviewJourney,
   type BatchParseItem,
   type ParseBatchTitlesResult,
+  type SaveConfirmBatchItemsBody,
 } from './useBatchReviewJourney'
 
 function item(itemId: string, status: string, extra: Record<string, unknown> = {}): BatchParseItem {
@@ -349,5 +350,125 @@ describe('useBatchReviewJourney draft handle ownership (#162)', () => {
     expect(session.ensureDraftSession(draftFacts('a', 'draft-a'))).toBeNull()
     expect(session.ensureScheduler(draftFacts('a', 'draft-a'))).toBeNull()
     expect(session.snapshot.value.drafts).toEqual({})
+  })
+})
+
+describe('useBatchReviewJourney save operation (#163)', () => {
+  const body = {
+    items: [{ item_id: 'a', draft_id: 'draft-a', base_revision: 1, idempotency_key: 'key-a' }],
+    storage_dir: null,
+    item_ids: ['a'],
+  } as SaveConfirmBatchItemsBody
+
+  function startedSession() {
+    const session = useBatchReviewJourney()
+    session.finishParse(parsed([draftItem('a')]))
+    return session
+  }
+
+  it('keeps 「结果待确认」 in one place: the frozen request and the item phase', () => {
+    const session = startedSession()
+    expect(session.beginSave(['a'], { confirmed: true }).accepted).toBe(true)
+    // 首次保存：相位与派生的在途事实同时成立。
+    expect(session.snapshot.value.saveInFlight).toBe(true)
+    expect([...session.snapshot.value.savingItemIds]).toEqual(['a'])
+
+    session.beginSaveRequest(['a'], body)
+    expect(session.snapshot.value.saveOperation).toMatchObject({ outcomeUnknown: false, inFlight: true })
+    expect(session.snapshot.value.saveOperation?.body).toBe(body)
+
+    session.markSaveResponseUnknown(['a'])
+    expect(session.snapshot.value.saveOperation).toMatchObject({ outcomeUnknown: true, inFlight: false })
+    expect(session.snapshot.value.state.items.a?.phase).toBe('response_unknown')
+    expect(session.snapshot.value.saveInFlight).toBe(false)
+    expect(session.snapshot.value.savingItemIds.size).toBe(0)
+
+    // 冻结重试要在途判据重新成立（离开守卫据此仍然拦截）。
+    expect(session.beginFrozenSaveRetry().accepted).toBe(true)
+    expect(session.snapshot.value.saveInFlight).toBe(true)
+    expect(session.snapshot.value.saveOperation?.outcomeUnknown).toBe(true)
+    session.finishSaveAttempt()
+    expect(session.snapshot.value.saveInFlight).toBe(false)
+
+    session.clearSaveOperation()
+    expect(session.snapshot.value.saveOperation).toBeNull()
+    expect(session.snapshot.value.saveInFlight).toBe(false)
+  })
+
+  it('refuses the save transition until the caller brings the user answer', () => {
+    const session = startedSession()
+    const asked = session.beginSave(['a'])
+    expect(asked.accepted).toBe(false)
+    expect(asked.effects).toEqual([{ kind: 'needsConfirmation', request: { reason: 'confirm_selected_batch' } }])
+    expect(session.snapshot.value.state.busy).toBeNull()
+    expect(session.snapshot.value.state.items.a?.phase).toBe('draft')
+
+    expect(session.beginSave(['a'], { confirmed: true }).accepted).toBe(true)
+    expect(session.snapshot.value.state.busy).toBe('saving')
+  })
+
+  it('asks before discarding an unsafe parse scene and applies it only on the second call', () => {
+    const session = useBatchReviewJourney()
+    const asked = session.beginParse({ sceneHasUnsafeWork: true })
+    expect(asked).toEqual({
+      accepted: false,
+      effects: [{ kind: 'needsConfirmation', request: { reason: 'discard_batch_scene' } }],
+    })
+    expect(session.snapshot.value.state.busy).toBeNull()
+    expect(session.beginParse({ sceneHasUnsafeWork: true, discardScene: true }).accepted).toBe(true)
+    expect(session.snapshot.value.state.busy).toBe('parsing')
+  })
+
+  it('hands focus and the leave confirmation back as data', () => {
+    const session = useBatchReviewJourney()
+    expect(session.markSelectedRecheckStale().effects).toEqual([
+      { kind: 'focus', target: { target: 'selected_recheck_notice' } },
+    ])
+    expect(session.focusItemAfterSave('a', { failed: true }).effects).toEqual([
+      { kind: 'notify', event: { type: 'focus_first_failed', itemId: 'a' } },
+      { kind: 'focus', target: { target: 'card', itemId: 'a', reveal: true } },
+    ])
+    expect(session.abandonParseStart().effects).toEqual([{ kind: 'focus', target: { target: 'search_input' } }])
+    expect(session.requestRouteReset()).toEqual({
+      accepted: false,
+      effects: [{ kind: 'needsConfirmation', request: { reason: 'leave_batch_review' } }],
+    })
+  })
+
+  it('hands the removal focus hand-off back as data', () => {
+    const session = startedSession()
+    const removal = session.removeItem('a', { focusCandidates: ['b', 'c'] })
+    expect(removal.accepted).toBe(true)
+    expect(removal.effects).toEqual([
+      { kind: 'focus', target: { target: 'card_or_list', candidateItemIds: ['b', 'c'] } },
+    ])
+    expect(session.snapshot.value.state.items.a).toBeUndefined()
+
+    const rejected = session.removeItem('missing')
+    expect(rejected.accepted).toBe(false)
+    expect(rejected.effects).toEqual([])
+  })
+
+  it('owns accept feedback, recovery loading and failure types', () => {
+    const session = useBatchReviewJourney()
+    session.mergeAcceptFeedback({ a: '', b: '确认失败' })
+    expect(session.snapshot.value.acceptFeedback).toEqual({ a: '', b: '确认失败' })
+    session.clearAcceptFeedback('a')
+    expect(session.snapshot.value.acceptFeedback).toEqual({ b: '确认失败' })
+    session.resetAcceptFeedback()
+    expect(session.snapshot.value.acceptFeedback).toEqual({})
+
+    session.setRecoveryLoading('a', true)
+    expect([...session.snapshot.value.recoveryLoadingItemIds]).toEqual(['a'])
+    session.setRecoveryLoading('a', false)
+    expect([...session.snapshot.value.recoveryLoadingItemIds]).toEqual([])
+
+    session.setSaveFailureType('a', 'idempotency_conflict')
+    session.setSaveFailureTypesFor(['b', 'c'], 'network_error')
+    expect(session.snapshot.value.saveFailureTypes).toEqual({
+      a: 'idempotency_conflict', b: 'network_error', c: 'network_error',
+    })
+    session.clearSaveFailure('a')
+    expect(session.snapshot.value.saveFailureTypes).toEqual({ b: 'network_error', c: 'network_error' })
   })
 })

@@ -329,6 +329,26 @@ export function reduceBatchReview(state: BatchReviewState, action: BatchReviewAc
 export type BatchReviewEffect =
   | { readonly kind: 'navigate'; readonly batchId: string }
   | { readonly kind: 'notify'; readonly event: BatchReviewNotifyEvent }
+  | { readonly kind: 'focus'; readonly target: BatchReviewFocusTarget }
+  | { readonly kind: 'needsConfirmation'; readonly request: BatchReviewConfirmationRequest }
+
+/** Where the caller must move focus once a command settled. */
+export type BatchReviewFocusTarget =
+  | { readonly target: 'search_input' }
+  | { readonly target: 'selected_recheck_notice' }
+  | { readonly target: 'card'; readonly itemId: string; readonly reveal: boolean }
+  /** 条目删除后的焦点接力：依次尝试候选条目，最后落到列表标题。 */
+  | { readonly target: 'card_or_list'; readonly candidateItemIds: readonly string[] }
+
+/**
+ * A transition the module refuses to apply without an explicit user answer
+ * (`#160`: 需要用户确认的转换拆成两步). The caller asks, then calls the same
+ * command again with the answer; copy and dialog stay in the view.
+ */
+export type BatchReviewConfirmationRequest =
+  | { readonly reason: 'discard_batch_scene' }
+  | { readonly reason: 'confirm_selected_batch' }
+  | { readonly reason: 'leave_batch_review' }
 
 /**
  * What happened, as data. `#160`: the Chinese copy for each event stays in the
@@ -339,6 +359,9 @@ export type BatchReviewNotifyEvent =
   | { readonly type: 'parse_succeeded'; readonly itemCount: number }
   | { readonly type: 'parse_empty' }
   | { readonly type: 'parse_failed'; readonly message: string }
+  /** 保存确认后已定位到首个失败／未处理条目；标题文案由视图补。 */
+  | { readonly type: 'focus_first_failed'; readonly itemId: string }
+  | { readonly type: 'focus_first_pending'; readonly itemId: string }
 
 export interface BatchReviewCommandResult {
   /** false = the current state rejected this transition; the caller keeps its scene. */
@@ -405,6 +428,19 @@ export interface BatchReviewDraftViewFacts {
   readonly groupPending: boolean
 }
 
+/**
+ * One save-confirm operation. The frozen body is the only authority for a
+ * retry after an undecidable outcome; `outcomeUnknown` is the single source of
+ * the "结果待确认" state. `inFlight` covers the first attempt and the frozen
+ * retry alike, so the leave guard keeps its criterion (#163).
+ */
+export interface BatchReviewSaveOperation {
+  readonly itemIds: readonly string[]
+  readonly body: SaveConfirmBatchItemsBody
+  readonly outcomeUnknown: boolean
+  readonly inFlight: boolean
+}
+
 /** Read-only view of the client lifecycle plus the item state it decides. */
 export interface BatchReviewSnapshot {
   readonly state: BatchReviewState
@@ -415,6 +451,14 @@ export interface BatchReviewSnapshot {
   readonly draftCreateErrors: Readonly<Record<string, Record<string, string>>>
   /** Per-item draft facts, keyed by item id. */
   readonly drafts: Readonly<Record<string, BatchReviewDraftViewFacts>>
+  readonly acceptFeedback: Readonly<Record<string, string>>
+  readonly saveFailureTypes: Readonly<Record<string, string>>
+  readonly recoveryLoadingItemIds: ReadonlySet<string>
+  readonly saveOperation: BatchReviewSaveOperation | null
+  /** Derived: a save-confirm request is in flight (first attempt or frozen retry). */
+  readonly saveInFlight: boolean
+  /** Derived: items the journal still holds in the `saving` phase. */
+  readonly savingItemIds: ReadonlySet<string>
 }
 
 export interface BatchReviewJourney<
@@ -422,7 +466,9 @@ export interface BatchReviewJourney<
   TScheduler extends BatchReviewDraftSchedulerFacts = BatchReviewDraftSchedulerFacts,
 > {
   readonly snapshot: ComputedRef<BatchReviewSnapshot>
-  beginParse: () => BatchReviewCommandResult
+  beginParse: (options?: { sceneHasUnsafeWork?: boolean; discardScene?: boolean }) => BatchReviewCommandResult
+  abandonParseStart: () => BatchReviewCommandResult
+  requestRouteReset: () => BatchReviewCommandResult
   rejectParseInput: (message: string) => BatchReviewCommandResult
   finishParse: (result: ParseBatchTitlesResult) => BatchReviewCommandResult
   failParse: (message: string) => BatchReviewCommandResult
@@ -439,6 +485,17 @@ export interface BatchReviewJourney<
   invalidateItemResources: (itemId: string) => void
   invalidateAllItemResources: () => void
   disposeAllSchedulers: () => void
+  mergeAcceptFeedback: (feedback: Readonly<Record<string, string>>) => BatchReviewCommandResult
+  clearAcceptFeedback: (itemId: string) => BatchReviewCommandResult
+  resetAcceptFeedback: () => BatchReviewCommandResult
+  setSaveFailureType: (itemId: string, errorType: string) => BatchReviewCommandResult
+  setSaveFailureTypesFor: (itemIds: readonly string[], errorType: string) => BatchReviewCommandResult
+  clearSaveFailure: (itemId: string) => BatchReviewCommandResult
+  setRecoveryLoading: (itemId: string, loading: boolean) => BatchReviewCommandResult
+  beginSaveRequest: (itemIds: readonly string[], body: SaveConfirmBatchItemsBody) => BatchReviewCommandResult
+  beginFrozenSaveRetry: () => BatchReviewCommandResult
+  finishSaveAttempt: () => BatchReviewCommandResult
+  clearSaveOperation: () => BatchReviewCommandResult
   selectItem: (itemId: string) => BatchReviewCommandResult
   setSelected: (itemId: string, selected: boolean) => BatchReviewCommandResult
   setDraft: (itemId: string, draftId: string, revision: number) => BatchReviewCommandResult
@@ -449,7 +506,9 @@ export interface BatchReviewJourney<
   retryApply: (itemId: string) => BatchReviewCommandResult
   resetApply: (itemId: string) => BatchReviewCommandResult
   invalidateDraft: (itemId: string) => BatchReviewCommandResult
-  beginSave: (itemIds: readonly string[]) => BatchReviewCommandResult
+  beginSave: (itemIds: readonly string[], options?: { confirmed?: boolean }) => BatchReviewCommandResult
+  markSelectedRecheckStale: () => BatchReviewCommandResult
+  focusItemAfterSave: (itemId: string, options: { failed: boolean }) => BatchReviewCommandResult
   finishSaveItem: (itemId: string, result: BatchSaveResultItem) => BatchReviewCommandResult
   failSaveItem: (itemId: string, error: unknown) => BatchReviewCommandResult
   markSaveResponseUnknown: (itemIds: readonly string[], error?: unknown) => BatchReviewCommandResult
@@ -459,7 +518,7 @@ export interface BatchReviewJourney<
   markTrackingNotFound: (itemId: string) => BatchReviewCommandResult
   failTrackingVerification: (itemId: string) => BatchReviewCommandResult
   consumeConfirmed: (itemId: string) => BatchReviewCommandResult
-  removeItem: (itemId: string) => BatchReviewCommandResult
+  removeItem: (itemId: string, options?: { focusCandidates?: readonly string[] }) => BatchReviewCommandResult
   resetRoute: () => BatchReviewCommandResult
   newIdempotencyKey: (itemId: string) => string | null
 }
@@ -474,6 +533,12 @@ export function useBatchReviewJourney<
   const draftCreateItemIdsRef = ref<ReadonlySet<string>>(new Set<string>())
   const draftCreateCandidateIdsRef = ref<Readonly<Record<string, string>>>({})
   const draftCreateErrorsRef = ref<Readonly<Record<string, Record<string, string>>>>({})
+  const acceptFeedbackRef = ref<Readonly<Record<string, string>>>({})
+  const saveFailureTypesRef = ref<Readonly<Record<string, string>>>({})
+  const recoveryLoadingItemIdsRef = ref<ReadonlySet<string>>(new Set<string>())
+  // shallowRef keeps the frozen request body a plain, inert object: it is the
+  // exact payload the retry must resend, not reactive state.
+  const saveOperationRef = shallowRef<BatchReviewSaveOperation | null>(null)
   // Handles are keyed by item id. The collections are reactive so the snapshot
   // below re-derives facts the moment a handle is created, replaced or dropped.
   const draftSessions = shallowReactive(new Map<string, TSession>())
@@ -508,6 +573,16 @@ export function useBatchReviewJourney<
     draftCreateCandidateIds: draftCreateCandidateIdsRef.value,
     draftCreateErrors: draftCreateErrorsRef.value,
     drafts: draftViewFacts(),
+    acceptFeedback: acceptFeedbackRef.value,
+    saveFailureTypes: saveFailureTypesRef.value,
+    recoveryLoadingItemIds: recoveryLoadingItemIdsRef.value,
+    saveOperation: saveOperationRef.value,
+    saveInFlight: stateRef.value.busy === 'saving' || Boolean(saveOperationRef.value?.inFlight),
+    savingItemIds: new Set(
+      Object.values(stateRef.value.items)
+        .filter((item) => item.phase === 'saving')
+        .map((item) => item.itemId),
+    ),
   }))
 
   /**
@@ -548,6 +623,81 @@ export function useBatchReviewJourney<
     }
   }
 
+  function mergeAcceptFeedback(feedback: Readonly<Record<string, string>>): BatchReviewCommandResult {
+    acceptFeedbackRef.value = { ...acceptFeedbackRef.value, ...feedback }
+    return { accepted: true, effects: [] }
+  }
+
+  function clearAcceptFeedback(itemId: string): BatchReviewCommandResult {
+    if (!(itemId in acceptFeedbackRef.value)) return { accepted: false, effects: [] }
+    const next = { ...acceptFeedbackRef.value }
+    delete next[itemId]
+    acceptFeedbackRef.value = next
+    return { accepted: true, effects: [] }
+  }
+
+  function resetAcceptFeedback(): BatchReviewCommandResult {
+    acceptFeedbackRef.value = {}
+    return { accepted: true, effects: [] }
+  }
+
+  function setSaveFailureType(itemId: string, errorType: string): BatchReviewCommandResult {
+    saveFailureTypesRef.value = { ...saveFailureTypesRef.value, [itemId]: errorType }
+    return { accepted: true, effects: [] }
+  }
+
+  function setSaveFailureTypesFor(itemIds: readonly string[], errorType: string): BatchReviewCommandResult {
+    const next = { ...saveFailureTypesRef.value }
+    for (const itemId of itemIds) next[itemId] = errorType
+    saveFailureTypesRef.value = next
+    return { accepted: true, effects: [] }
+  }
+
+  function clearSaveFailure(itemId: string): BatchReviewCommandResult {
+    if (!saveFailureTypesRef.value[itemId]) return { accepted: false, effects: [] }
+    const next = { ...saveFailureTypesRef.value }
+    delete next[itemId]
+    saveFailureTypesRef.value = next
+    return { accepted: true, effects: [] }
+  }
+
+  function setRecoveryLoading(itemId: string, loading: boolean): BatchReviewCommandResult {
+    const next = new Set(recoveryLoadingItemIdsRef.value)
+    if (loading) next.add(itemId)
+    else next.delete(itemId)
+    recoveryLoadingItemIdsRef.value = next
+    return { accepted: true, effects: [] }
+  }
+
+  function beginSaveRequest(itemIds: readonly string[], body: SaveConfirmBatchItemsBody): BatchReviewCommandResult {
+    saveOperationRef.value = {
+      itemIds: [...itemIds],
+      body,
+      outcomeUnknown: false,
+      inFlight: true,
+    }
+    return { accepted: true, effects: [] }
+  }
+
+  function beginFrozenSaveRetry(): BatchReviewCommandResult {
+    const operation = saveOperationRef.value
+    if (!operation) return { accepted: false, effects: [] }
+    saveOperationRef.value = { ...operation, inFlight: true }
+    return { accepted: true, effects: [] }
+  }
+
+  function finishSaveAttempt(): BatchReviewCommandResult {
+    const operation = saveOperationRef.value
+    if (operation?.inFlight) saveOperationRef.value = { ...operation, inFlight: false }
+    return { accepted: true, effects: [] }
+  }
+
+  function clearSaveOperation(): BatchReviewCommandResult {
+    if (!saveOperationRef.value) return { accepted: false, effects: [] }
+    saveOperationRef.value = null
+    return { accepted: true, effects: [] }
+  }
+
   function apply(action: BatchReviewAction): BatchReviewCommandResult {
     const previous = stateRef.value
     const next = reduceBatchReview(previous, action)
@@ -572,10 +722,25 @@ export function useBatchReviewJourney<
     draftCreateErrorsRef.value = next
   }
 
-  function beginParse(): BatchReviewCommandResult {
+  function beginParse(options: { sceneHasUnsafeWork?: boolean; discardScene?: boolean } = {}): BatchReviewCommandResult {
+    // An unsafe scene is only discarded after the user answers; the command
+    // changes nothing until the caller comes back with that answer.
+    if (options.sceneHasUnsafeWork && !options.discardScene) {
+      return { accepted: false, effects: [{ kind: 'needsConfirmation', request: { reason: 'discard_batch_scene' } }] }
+    }
     // A new attempt retires the previous failure message before loading starts.
     parseErrorRef.value = ''
     return apply({ type: 'parse_started' })
+  }
+
+  /** The user refused to discard the scene: the caller restores its input surface. */
+  function abandonParseStart(): BatchReviewCommandResult {
+    return { accepted: true, effects: [{ kind: 'focus', target: { target: 'search_input' } }] }
+  }
+
+  /** Asking whether the route-local scene may be dropped; no state changes yet. */
+  function requestRouteReset(): BatchReviewCommandResult {
+    return { accepted: false, effects: [{ kind: 'needsConfirmation', request: { reason: 'leave_batch_review' } }] }
   }
 
   function rejectParseInput(message: string): BatchReviewCommandResult {
@@ -653,6 +818,8 @@ export function useBatchReviewJourney<
   return {
     snapshot,
     beginParse,
+    abandonParseStart,
+    requestRouteReset,
     rejectParseInput,
     finishParse,
     failParse,
@@ -669,6 +836,17 @@ export function useBatchReviewJourney<
       handle.scheduler.cancelTimer()
       handle.scheduler.dropPending()
     },
+    mergeAcceptFeedback,
+    clearAcceptFeedback,
+    resetAcceptFeedback,
+    setSaveFailureType,
+    setSaveFailureTypesFor,
+    clearSaveFailure,
+    setRecoveryLoading,
+    beginSaveRequest,
+    beginFrozenSaveRetry,
+    finishSaveAttempt,
+    clearSaveOperation,
     invalidateItemResources: dropItemResources,
     invalidateAllItemResources() {
       for (const { scheduler } of editSchedulers.values()) scheduler.dispose()
@@ -695,21 +873,65 @@ export function useBatchReviewJourney<
     retryApply: (itemId) => apply({ type: 'retry_apply', itemId }),
     resetApply: (itemId) => apply({ type: 'reset_apply', itemId }),
     invalidateDraft: (itemId) => apply({ type: 'invalidate_draft', itemId }),
-    beginSave: (itemIds) => apply({ type: 'begin_save', itemIds }),
+    beginSave(itemIds, options = {}) {
+      // The N-部 intent is never sent before the user answered the dialog.
+      if (!options.confirmed) {
+        return { accepted: false, effects: [{ kind: 'needsConfirmation', request: { reason: 'confirm_selected_batch' } }] }
+      }
+      return apply({ type: 'begin_save', itemIds })
+    },
+    /** The frozen N intent no longer matches the batch: show and focus the notice. */
+    markSelectedRecheckStale() {
+      return {
+        accepted: false,
+        effects: [{ kind: 'focus', target: { target: 'selected_recheck_notice' } }],
+      }
+    },
+    /** The save result decided the next item to look at; the caller owns focus. */
+    focusItemAfterSave(itemId, options) {
+      return {
+        accepted: true,
+        effects: [
+          {
+            kind: 'notify',
+            event: options.failed
+              ? { type: 'focus_first_failed', itemId }
+              : { type: 'focus_first_pending', itemId },
+          },
+          { kind: 'focus', target: { target: 'card', itemId, reveal: true } },
+        ],
+      }
+    },
     finishSaveItem: (itemId, result) => apply({ type: 'save_succeeded', itemId, result }),
     failSaveItem: (itemId, error) => apply({ type: 'save_failed', itemId, error }),
-    markSaveResponseUnknown: (itemIds, error) => apply({
-      type: 'save_response_unknown',
-      itemIds,
-      ...(error === undefined ? {} : { error }),
-    }),
+    markSaveResponseUnknown(itemIds, error) {
+      // 「结果待确认」的唯一权威来源：冻结请求与条目相位在同一次命令里落定。
+      const operation = saveOperationRef.value
+      if (operation) saveOperationRef.value = { ...operation, outcomeUnknown: true, inFlight: false }
+      return apply({
+        type: 'save_response_unknown',
+        itemIds,
+        ...(error === undefined ? {} : { error }),
+      })
+    },
     retrySavedConfirm: (itemId) => apply({ type: 'retry_saved_confirm', itemId }),
     finishAccept: (itemId, requestId) => apply({ type: 'accept_succeeded', itemId, requestId }),
     locateTracking: (itemId, requestId, trackingId) => apply({ type: 'tracking_located', itemId, requestId, trackingId }),
     markTrackingNotFound: (itemId) => apply({ type: 'tracking_not_found', itemId }),
     failTrackingVerification: (itemId) => apply({ type: 'tracking_verification_failed', itemId }),
     consumeConfirmed: (itemId) => apply({ type: 'consume_confirmed', itemId }),
-    removeItem: (itemId) => apply({ type: 'remove_item', itemId }),
+    removeItem(itemId, options = {}) {
+      const applied = apply({ type: 'remove_item', itemId })
+      if (!applied.accepted) return applied
+      // 条目离场必须把焦点交给一个真实元素；候选与兜底由视图元素决定。
+      return {
+        accepted: true,
+        effects: [{
+          kind: 'focus',
+          target: { target: 'card_or_list', candidateItemIds: options.focusCandidates ?? [] },
+        }],
+      }
+    },
     resetRoute,
     newIdempotencyKey(itemId) {
       const item = stateRef.value.items[itemId]

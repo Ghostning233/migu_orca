@@ -2487,6 +2487,42 @@ describe('BatchWorkbenchView lifecycle characterization (#161)', () => {
     expect(wrapper.findAll('.batch-draft-card')).toHaveLength(0)
   })
 
+  it('取消「舍弃现场并搜索」会回滚输入并把焦点交回搜索框', async () => {
+    apiPost.mockResolvedValueOnce(parseResult({ items: [draftRow()] }))
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王S4')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+
+    // 已有审核现场时重新提交：先征求确认，第二个请求绝不能发出。
+    await wrapper.find('#batch-raw-input').setValue('新番剧')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await nextTick()
+    expect(wrapper.find('.confirm-dialog-title').text()).toBe('重新搜索批量条目')
+    await wrapper.find('.confirm-dialog .secondary-button').trigger('click')
+    await flushPromises()
+
+    expect((wrapper.find('#batch-raw-input').element as HTMLTextAreaElement).value).toBe('萌王S4')
+    expect(apiPost).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('restore-search-focus')).toHaveLength(1)
+  })
+
+  it('离开守卫取消「留在此页」时保留现场且不清理', async () => {
+    const { wrapper, router } = await parseDraftScene([draftRow()])
+    await wrapper.find('.batch-draft-card input[type="checkbox"]').setValue(true)
+    await nextTick()
+
+    const navigation = router.push({ path: '/plans' })
+    await flushPromises()
+    await wrapper.find('.confirm-dialog .secondary-button').trigger('click')
+    await flushPromises()
+    await navigation
+
+    expect(router.currentRoute.value.path).toBe('/add')
+    expect(wrapper.find('.batch-draft-card[data-item-id="item-1"] input[type="checkbox"]').attributes('checked')).toBeDefined()
+    expect(wrapper.find('.confirm-dialog').exists()).toBe(false)
+  })
+
   it('右栏详情编辑接线打通：flush 发一次 preview-modify 并恢复可确认', async () => {
     apiPost.mockResolvedValueOnce(parseResult({ items: [draftRow()] }))
     const { wrapper } = await mountBatch()
