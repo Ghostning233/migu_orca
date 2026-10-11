@@ -11,6 +11,7 @@ Bangumi seam, so no external system is ever touched.
 
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 from flask.testing import FlaskClient
@@ -39,6 +40,7 @@ from tracking_engine.models.operation import (
 )
 from tracking_engine.models.tracking import (
     TRACKING_ORIGIN_SAVE_CONFIRM,
+    TRACKING_STATUS_VERIFYING_EXTERNAL,
     TrackingRecord,
 )
 
@@ -410,3 +412,71 @@ def test_batch_defaults_to_continue_tracking(
     assert load_tracking_operation(config, stored.current_operation_id).submission_mode == (
         "CONTINUE_TRACKING"
     )
+
+class _EmptyListAbResponse:
+    def __init__(self, body: bytes) -> None:
+        self._body = body
+
+    def read(self) -> bytes:
+        return self._body
+
+    def __enter__(self) -> _EmptyListAbResponse:
+        return self
+
+    def __exit__(self, *_args: Any) -> None:
+        return None
+
+
+class _EmptyListAbOpener:
+    """A verified 3.1.18 session whose list endpoints answer ``[]`` in bytes."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def open(self, request: Any, timeout: float) -> _EmptyListAbResponse:
+        path = urlsplit(request.full_url).path
+        self.calls.append(f"{request.get_method()} {path}")
+        if path == "/api/v1/auth/login":
+            return _EmptyListAbResponse(b'{"access_token": "ab-session"}')
+        if path == "/api/v1/status":
+            return _EmptyListAbResponse(b'{"version": "3.1.18"}')
+        if path == "/api/v1/rss/subscribe":
+            return _EmptyListAbResponse(b'{"status": true}')
+        if path in ("/api/v1/bangumi/get/all", "/api/v1/rss"):
+            return _EmptyListAbResponse(b"[]")
+        raise AssertionError(f"unexpected Auto Bangumi path: {path}")  # pragma: no cover
+
+
+def test_batch_single_miss_on_a_real_bare_list_keeps_every_item_pending(
+    tmp_path: Path,
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #182: batch shares the single-item rule through the real decoder.
+
+    Two independent writes succeed, the real list endpoints answer a legal bare
+    empty array, and one miss per item stays 结果待确认 instead of turning into a
+    safely retryable failure.
+    """
+    connection, records = _seed_records(tmp_path, 2)
+    opener = _EmptyListAbOpener()
+    monkeypatch.setattr(
+        "ab_engine.controllers.ab_http_client.build_opener", lambda *handlers: opener
+    )
+
+    response = _post(client, _batch_body(connection, records))
+
+    assert response.status_code == 200
+    items = response.get_json()["result"]["items"]
+    assert len(items) == 2
+    assert all(item["ok"] is False for item in items)
+    for entry in items:
+        assert entry["result"]["outcome"] == TRACKING_STATUS_VERIFYING_EXTERNAL
+        assert entry["result"]["failure_category"] == "OUTCOME_UNKNOWN"
+        assert entry["result"]["tracking"]["status"] == TRACKING_STATUS_VERIFYING_EXTERNAL
+    for record in records:
+        stored = load_tracking_record(_config(tmp_path), record.tracking_id)
+        assert stored.external_mapping is None
+        assert stored.last_error is not None
+        assert stored.last_error.get("reason_code") == "NOT_FOUND"
+    assert opener.calls.count("POST /api/v1/rss/subscribe") == 2

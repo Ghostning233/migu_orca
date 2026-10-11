@@ -37,6 +37,32 @@ class RecordingTransport:
         raise AssertionError("management adapter must never use the write transport")
 
 
+class _FakeResponse:
+    def __init__(self, body: bytes) -> None:
+        self._body = body
+
+    def read(self) -> bytes:
+        return self._body
+
+    def __enter__(self) -> _FakeResponse:
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        return None
+
+
+class _FakeOpener:
+    """Serves the raw bytes of one verified 3.1.18 session in request order."""
+
+    def __init__(self, bodies: list[bytes]) -> None:
+        self._bodies = list(bodies)
+        self.requests: list[Any] = []
+
+    def open(self, request: Any, timeout: float) -> _FakeResponse:
+        self.requests.append(request)
+        return _FakeResponse(self._bodies.pop(0))
+
+
 def _config(**overrides: str) -> AutoBangumiConfig:
     values: dict[str, Any] = {
         "base_url": "https://auto-bangumi.example",
@@ -86,6 +112,36 @@ def test_snapshot_logs_one_login_and_only_same_origin_reads() -> None:
     assert transport.calls[3]["headers"]["Cookie"] == "token=session-secret"
     assert subscriptions[0].safe_projection().rss_count == 1
     assert "https://rss.example/feed" not in repr(rss_items[0])
+
+
+def test_real_bare_array_lists_pass_the_decoder_and_management_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Issue #182: the verified 3.1.18 list shape is a bare JSON array.
+
+    This goes through the *real* urllib JSON decoder and the real management
+    adapter, so a wrapper-only fake can no longer hide the transport defect.
+    """
+    bodies = [
+        b'{"access_token": "session-secret"}',
+        b'{"version": "3.1.18"}',
+        b'[{"id": 42, "official_title": "\\u793a\\u4f8b\\u756a\\u5267", "season": 2, "group_name": "\\u5b57\\u5e55\\u7ec4", "rss_ids": [7]}]',
+        b'[{"id": 7, "name": "\\u8ba2\\u9605\\u6e90", "url": "https://rss.example/feed", "aggregate": false, "parser": "rss", "enabled": true}]',
+    ]
+    opener = _FakeOpener(bodies)
+    monkeypatch.setattr(
+        "ab_engine.controllers.ab_http_client.build_opener", lambda *handlers: opener
+    )
+    from ab_engine.controllers.ab_http_client import UrlopenAutoBangumiHttpTransport
+
+    capabilities, subscriptions, rss_items = create_legacy_31_management_client(
+        _config(), transport=UrlopenAutoBangumiHttpTransport()
+    ).read_snapshot()
+
+    assert capabilities.subscription_list == "SUPPORTED"
+    assert [item.external_id for item in subscriptions] == ["42"]
+    assert subscriptions[0].season == 2
+    assert subscriptions[0].rss_ids == ("7",)
+    assert [item.external_id for item in rss_items] == ["7"]
+    assert rss_items[0].url == "https://rss.example/feed"
 
 
 def test_detail_uses_a_fresh_request_scoped_login_and_escapes_id() -> None:

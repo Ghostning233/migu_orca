@@ -35,8 +35,11 @@ class AutoBangumiHttpTransport(Protocol):
         payload: Any | None = None,
         *,
         timeout: float,
-    ) -> dict[str, Any]:
-        """Make one JSON request without following credentialed redirects."""
+    ) -> Any:
+        """Make one JSON request without following credentialed redirects.
+
+        The decoded top-level shape is intentionally not constrained here: the
+        endpoint that knows its contract validates it (issue #182)."""
 
 
 class AutoBangumiLegacyTransport(Protocol):
@@ -50,8 +53,11 @@ class AutoBangumiLegacyTransport(Protocol):
         payload: Any | None = None,
         *,
         timeout: float,
-    ) -> dict[str, Any]:
-        """Make one JSON API request without following redirects."""
+    ) -> Any:
+        """Make one JSON API request without following redirects.
+
+        The decoded top-level shape is intentionally not constrained here: the
+        endpoint that knows its contract validates it (issue #182)."""
 
     def post_json_same_origin(
         self,
@@ -117,7 +123,7 @@ class UrlopenAutoBangumiHttpTransport:
         payload: Any | None = None,
         *,
         timeout: float,
-    ) -> dict[str, Any]:
+    ) -> Any:
         data = None
         request_headers = dict(headers)
         if payload is not None:
@@ -137,7 +143,7 @@ class UrlopenAutoBangumiHttpTransport:
             raise _network_error_to_stage1_error(exc, step="probe_ab_connection") from exc
         except TimeoutError as exc:
             raise _timeout_error("probe_ab_connection") from exc
-        return _decode_response(response_body, step="probe_ab_connection")
+        return _decode_json(response_body, step="probe_ab_connection")
 
     def post_json_same_origin(
         self,
@@ -163,7 +169,7 @@ class UrlopenAutoBangumiHttpTransport:
             raise _network_error_to_stage1_error(exc) from exc
         except TimeoutError as exc:
             raise _timeout_error() from exc
-        return _decode_response(response_body, step="create_ab_subscription")
+        return _decode_object(response_body, step="create_ab_subscription")
 
 
 class _RejectRedirects(HTTPRedirectHandler):
@@ -386,7 +392,7 @@ class LegacyAutoBangumi31Client:
         payload: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         try:
-            return self._transport.request_json(
+            response = self._transport.request_json(
                 method, endpoint, headers, payload, timeout=self._timeout
             )
         except Stage1Error:
@@ -404,6 +410,13 @@ class LegacyAutoBangumi31Client:
                 "probe_ab_connection",
                 {"category": "connection"},
             ) from exc
+        if not isinstance(response, dict):
+            raise Stage1Error(
+                "invalid_ab_response",
+                "Auto Bangumi 响应必须是 JSON 对象",
+                "probe_ab_connection",
+            )
+        return response
 
     def _post_json(
         self,
@@ -485,7 +498,13 @@ def _api_endpoint(base_url: str, path: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}{path}"
 
 
-def _status_version(status: Mapping[str, Any]) -> str:
+def _status_version(status: Any) -> str:
+    if not isinstance(status, Mapping):
+        raise Stage1Error(
+            "invalid_ab_response",
+            "Auto Bangumi 状态响应必须是 JSON 对象",
+            "probe_ab_connection",
+        )
     value = status.get("version")
     if value is None and isinstance(status.get("data"), Mapping):
         value = status["data"].get("version")
@@ -498,11 +517,22 @@ def _status_version(status: Mapping[str, Any]) -> str:
     return value.strip()
 
 
-def _decode_response(response_body: bytes, *, step: str) -> dict[str, Any]:
+def _decode_json(response_body: bytes, *, step: str) -> Any:
+    """Decode one bounded JSON body without assuming its top-level shape.
+
+    The verified 3.1.18 list endpoints answer with a bare JSON array while
+    every other endpoint answers with an object, so the *shape* contract is
+    enforced by the endpoint that knows it (``_decode_object`` here and the
+    management adapter for lists) instead of globally here (issue #182).
+    """
     try:
-        ab_response = json.loads(response_body.decode("utf-8"))
+        return json.loads(response_body.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise Stage1Error("invalid_ab_response", "Auto Bangumi 响应不是合法 JSON", step) from exc
+
+
+def _decode_object(response_body: bytes, *, step: str) -> dict[str, Any]:
+    ab_response = _decode_json(response_body, step=step)
     if not isinstance(ab_response, dict):
         raise Stage1Error("invalid_ab_response", "Auto Bangumi 响应必须是 JSON 对象", step)
     return ab_response

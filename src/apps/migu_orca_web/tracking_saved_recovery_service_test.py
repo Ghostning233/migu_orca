@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from ab_engine.models.management import AutoBangumiCapabilities, ExternalSubscription
+from ab_engine.models.management import AutoBangumiCapabilities, ExternalRss, ExternalSubscription
 from apps.migu_orca_web.schemas import SavedTrackingRecoveryInput
 from apps.migu_orca_web.tracking_recovery_service_test import (
     _accepted_request,
@@ -43,9 +43,12 @@ REF = "abcdefab-cdef-4abc-8def-abcdefabcdef"
 
 
 class ReadOnlyClient:
-    def __init__(self, subscriptions: list[ExternalSubscription] | None = None, *, caps=None):
+    def __init__(self, subscriptions: list[ExternalSubscription] | None = None, *, caps=None, rss_items=None):
         self.reads = 0
         self.subscriptions = subscriptions or []
+        # Issue #182: the verified 3.1.18 snapshot always carries its RSS list,
+        # and the shared confirmation rule needs it to prove the exact identity.
+        self.rss_items = rss_items or []
         self.capabilities = caps or AutoBangumiCapabilities(
             probe_status="VERIFIED", version="3.1.18", adapter="legacy_3_1",
             subscription_list="SUPPORTED", subscription_detail="SUPPORTED",
@@ -54,7 +57,7 @@ class ReadOnlyClient:
 
     def read_snapshot(self):
         self.reads += 1
-        return self.capabilities, self.subscriptions, []
+        return self.capabilities, self.subscriptions, self.rss_items
 
     def __repr__(self):
         return "ReadOnlyClient(reads=%d)" % self.reads
@@ -119,8 +122,8 @@ def test_auto_and_manual_do_not_load_saved_config_or_construct_client(monkeypatc
     assert load_tracking_record(_config(tmp_path), record.tracking_id).audit_events[-1]["action"] == TRACKING_AUDIT_RECOVERY_MANUAL_SUCCEEDED
 
 
-@pytest.mark.parametrize("state", [TRACKING_OPERATION_STATE_IN_PROGRESS, TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN, TRACKING_OPERATION_STATE_RECOVERY_REQUIRED])
-def test_saved_submit_verify_uses_one_bound_snapshot_and_persists_v2_mapping(monkeypatch, tmp_path: Path, state):
+def _bound_submit_scenario(monkeypatch, tmp_path: Path, state: str):
+    """One SUBMIT operation bound to the saved generation, ready to verify."""
     request = _accepted_request(tmp_path)
     record = _seeded_tracking(tmp_path, request)
     config = _config(tmp_path)
@@ -147,10 +150,17 @@ def test_saved_submit_verify_uses_one_bound_snapshot_and_persists_v2_mapping(mon
             transition_tracking_operation(op, state=state, now="2026-09-14T00:00:00+00:00"))
     verifying = _move_record(tmp_path, record, TRACKING_STATUS_VERIFYING_EXTERNAL, current_operation_id=op.operation_id)
     monkeypatch.setattr("apps.migu_orca_web.services._WEB_STORAGE_ROOT", tmp_path)
+    return config, record, saved, op, verifying
+
+
+@pytest.mark.parametrize("state", [TRACKING_OPERATION_STATE_IN_PROGRESS, TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN, TRACKING_OPERATION_STATE_RECOVERY_REQUIRED])
+def test_saved_submit_verify_uses_one_bound_snapshot_and_persists_v2_mapping(monkeypatch, tmp_path: Path, state):
+    config, record, saved, op, verifying = _bound_submit_scenario(monkeypatch, tmp_path, state)
     external = ExternalSubscription("external-1", "芙莉莲", 1, "Group", rss_urls=("https://rss.invalid/feed",), rss_ids=("rss-1",))
+    rss = ExternalRss("rss-1", "芙莉莲", "https://rss.invalid/feed")
     result = run_saved_tracking_recovery(
         _payload(verifying, "VERIFY_EXTERNAL", connection_ref=str(saved.connection_ref), configuration_revision=saved.configuration_revision),
-        config_root=tmp_path / "private", management_client=ReadOnlyClient([external]),
+        config_root=tmp_path / "private", management_client=ReadOnlyClient([external], rss_items=[rss]),
     )
     assert result["outcome"] == TRACKING_STATUS_ACTIVE
     after = load_tracking_record(config, record.tracking_id)
@@ -158,6 +168,31 @@ def test_saved_submit_verify_uses_one_bound_snapshot_and_persists_v2_mapping(mon
     assert after.external_mapping["connection_ref"] == str(saved.connection_ref)
     assert after.external_mapping["subscription_id"] == "external-1"
     assert load_tracking_operation(config, op.operation_id).state == "SUCCEEDED"
+
+
+def test_saved_submit_verify_uses_the_same_rule_as_the_submit_readback(monkeypatch, tmp_path: Path) -> None:
+    """Issue #182: the later check must not add extra season/title requirements.
+
+    A subscription whose title, season and group match the plan but whose RSS
+    list holds no exact identity is exactly what the post-submit read-back calls
+    待确认; the re-check has to reach the same conclusion.
+    """
+    _config_, record, saved, op, verifying = _bound_submit_scenario(
+        monkeypatch, tmp_path, TRACKING_OPERATION_STATE_IN_PROGRESS
+    )
+    # Matching plan text and season, but a different RSS URL: not the exact
+    # server-private identity, so nothing may be claimed.
+    other = ExternalSubscription("external-2", "芙莉莲", 1, "Group", rss_urls=("https://rss.invalid/other",), rss_ids=("rss-9",))
+    other_rss = ExternalRss("rss-9", "芙莉莲", "https://rss.invalid/other")
+
+    result = run_saved_tracking_recovery(
+        _payload(verifying, "VERIFY_EXTERNAL", connection_ref=str(saved.connection_ref), configuration_revision=saved.configuration_revision),
+        config_root=tmp_path / "private", management_client=ReadOnlyClient([other], rss_items=[other_rss]),
+    )
+
+    assert result["outcome"] == TRACKING_STATUS_RECOVERY_REQUIRED
+    assert result["needs_manual"] is True
+    assert load_tracking_record(_config(tmp_path), record.tracking_id).external_mapping is None
 
 
 def test_saved_verify_rejects_wrong_ref_and_missing_config_before_read(monkeypatch, tmp_path: Path):

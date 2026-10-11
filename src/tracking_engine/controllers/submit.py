@@ -269,16 +269,64 @@ __all__ = [
     "SUBMIT_STARTED_MESSAGE",
     "SUBMIT_SUCCEEDED_RESOURCE_WARNING_MESSAGE",
     "SUBMIT_SUCCEEDED_MESSAGE",
+    "CONFIRM_REASON_AMBIGUOUS",
+    "CONFIRM_REASON_AUTHENTICATION",
+    "CONFIRM_REASON_CAPABILITY",
+    "CONFIRM_REASON_CONFIRMED",
+    "CONFIRM_REASON_CONNECTION",
+    "CONFIRM_REASON_CONNECTION_CHANGED",
+    "CONFIRM_REASON_NOT_FOUND",
+    "CONFIRM_REASON_UNREADABLE",
+    "CONFIRM_REASON_VERSION",
     "ConfirmedSubscriptionOutcome",
+    "ExactRssMatch",
     "ADDED_TO_DOWNLOAD_MESSAGE",
     "classify_existing_resource_result",
     "classify_external_submit_result",
+    "confirm_reason_for_error",
     "confirm_subscription_outcome",
     "external_submit_error_type",
     "external_submit_result_id",
+    "match_subscription_by_exact_rss",
     "submit_failure_category",
     "tracking_status_for_operation_state",
 ]
+
+
+#: Safe machine reasons for a confirmation that did not produce a subscription.
+#: The UI renders its own fixed Chinese copy from these codes; none of them
+#: carries an upstream response, URL, credential or path.
+CONFIRM_REASON_CONFIRMED = "CONFIRMED"
+CONFIRM_REASON_NOT_FOUND = "NOT_FOUND"
+CONFIRM_REASON_AMBIGUOUS = "AMBIGUOUS"
+CONFIRM_REASON_UNREADABLE = "UNREADABLE"
+CONFIRM_REASON_CONNECTION = "CONNECTION"
+CONFIRM_REASON_AUTHENTICATION = "AUTHENTICATION"
+CONFIRM_REASON_VERSION = "VERSION"
+CONFIRM_REASON_CAPABILITY = "CAPABILITY"
+CONFIRM_REASON_CONNECTION_CHANGED = "CONNECTION_CHANGED"
+
+#: Stable error_type -> published confirmation reason. Anything unlisted stays
+#: UNREADABLE so an unproven cause is never presented as a specific one.
+_CONFIRM_REASON_BY_ERROR_TYPE = {
+    "ab_connection_failed": CONFIRM_REASON_CONNECTION,
+    "ab_connection_failed_pre_write": CONFIRM_REASON_CONNECTION,
+    "ab_timeout": CONFIRM_REASON_CONNECTION,
+    "ab_timeout_pre_write": CONFIRM_REASON_CONNECTION,
+    "ab_auth_failed": CONFIRM_REASON_AUTHENTICATION,
+    "ab_unsupported_version": CONFIRM_REASON_VERSION,
+    "ab_submit_unsupported": CONFIRM_REASON_VERSION,
+    "ab_management_unsupported": CONFIRM_REASON_CAPABILITY,
+    "invalid_ab_response": CONFIRM_REASON_UNREADABLE,
+    "ab_management_failed": CONFIRM_REASON_UNREADABLE,
+}
+
+
+def confirm_reason_for_error(error_type: str | None) -> str:
+    """Return the proven reason class for one read-only check failure."""
+    if not isinstance(error_type, str):
+        return CONFIRM_REASON_UNREADABLE
+    return _CONFIRM_REASON_BY_ERROR_TYPE.get(error_type, CONFIRM_REASON_UNREADABLE)
 
 
 @dataclass(frozen=True)
@@ -286,38 +334,51 @@ class ConfirmedSubscriptionOutcome:
     """The externally *confirmed* outcome of one persistent-subscription write.
 
     ``classification`` is an operation terminal state; ``external_id`` is the
-    exact controlled subscription the read-back proved, and ``resource_warning``
-    is true when the write body disagreed with that proof.
+    exact controlled subscription the read-back proved, ``resource_warning`` is
+    true when the write body disagreed with that proof, and ``reason`` is the
+    stable safe reason class of the confirmation (``CONFIRMED`` when proven).
     """
 
     classification: str
     external_id: str | None
     resource_warning: bool = False
+    reason: str = CONFIRM_REASON_CONFIRMED
 
 
-def confirm_subscription_outcome(
-    *,
-    ab_result: Any,
-    expected_rss_url: str | None,
-    snapshot: Any,
-) -> ConfirmedSubscriptionOutcome:
-    """Confirm one persistent-subscription write by exact read-back (issue #97).
+@dataclass(frozen=True)
+class ExactRssMatch:
+    """The shared exact-RSS confirmation result for a persistent subscription.
 
-    The Auto Bangumi write body alone never establishes ownership: the caller
-    passes a read-only ``snapshot`` of ``(capabilities, subscriptions, rss)`` and
-    the exact server-private RSS identity from the saved plan. Only an exact RSS
-    URL match proves the controlled subscription, and an ambiguous or unreadable
-    read-back stays ``OUTCOME_UNKNOWN`` so it is never blindly retried.
+    ``status`` is one of ``CONFIRMED``/``MISSING``/``AMBIGUOUS``/``UNREADABLE``;
+    ``subscription`` is the single owning external object only when confirmed.
     """
-    if snapshot is None or not isinstance(expected_rss_url, str) or not expected_rss_url.strip():
-        # Without a readable snapshot or an exact identity there is no proof.
-        return ConfirmedSubscriptionOutcome(TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN, None)
+
+    status: str
+    subscription: Any | None = None
+    rss_id: str | None = None
+
+
+def match_subscription_by_exact_rss(expected_rss_url: Any, snapshot: Any) -> ExactRssMatch:
+    """Apply the single confirmation rule for a persistent subscription (#182).
+
+    Only the exact server-private RSS identity of the saved plan proves the
+    controlled subscription: the snapshot must expose exactly one RSS object
+    with that URL *and* exactly one subscription that owns it. Everything else —
+    an unreadable snapshot, a missing object, repeated RSS objects or several
+    owners — is *not* proof, so it can never be reported as created nor as a
+    definite failure. Both the post-submit read-back and every later read-only
+    check call this one rule so their conclusions cannot drift apart.
+    """
+    if snapshot is None:
+        return ExactRssMatch(CONFIRM_REASON_UNREADABLE)
     try:
         _capabilities, subscriptions, rss_items = snapshot
     except (TypeError, ValueError):
-        return ConfirmedSubscriptionOutcome(TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN, None)
+        return ExactRssMatch(CONFIRM_REASON_UNREADABLE)
     if not isinstance(subscriptions, (list, tuple)) or not isinstance(rss_items, (list, tuple)):
-        return ConfirmedSubscriptionOutcome(TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN, None)
+        return ExactRssMatch(CONFIRM_REASON_UNREADABLE)
+    if not isinstance(expected_rss_url, str) or not expected_rss_url.strip():
+        return ExactRssMatch(CONFIRM_REASON_UNREADABLE)
 
     wanted = expected_rss_url.strip()
     matched_rss_ids = {
@@ -326,11 +387,10 @@ def confirm_subscription_outcome(
         if str(getattr(item, "url", "") or "").strip() == wanted
     }
     matched_rss_ids.discard("")
+    if not matched_rss_ids:
+        return ExactRssMatch(CONFIRM_REASON_NOT_FOUND)
     if len(matched_rss_ids) != 1:
-        # No exact RSS object, or several: nothing may be claimed.
-        if not matched_rss_ids:
-            return ConfirmedSubscriptionOutcome(TRACKING_OPERATION_STATE_FAILED, None)
-        return ConfirmedSubscriptionOutcome(TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN, None)
+        return ExactRssMatch(CONFIRM_REASON_AMBIGUOUS)
 
     rss_id = next(iter(matched_rss_ids))
     owners = [
@@ -344,15 +404,39 @@ def confirm_subscription_outcome(
         }
     ]
     if len(owners) != 1:
-        return ConfirmedSubscriptionOutcome(TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN, None)
+        return ExactRssMatch(CONFIRM_REASON_AMBIGUOUS, rss_id=rss_id)
 
-    owner = owners[0]
-    external_id = str(getattr(owner, "external_id", "") or "") or None
-    if external_id is None:
-        return ConfirmedSubscriptionOutcome(TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN, None)
+    external_id = str(getattr(owners[0], "external_id", "") or "")
+    if not external_id:
+        return ExactRssMatch(CONFIRM_REASON_AMBIGUOUS, rss_id=rss_id)
+    return ExactRssMatch(CONFIRM_REASON_CONFIRMED, subscription=owners[0], rss_id=rss_id)
+
+
+def confirm_subscription_outcome(
+    *,
+    ab_result: Any,
+    expected_rss_url: str | None,
+    snapshot: Any,
+) -> ConfirmedSubscriptionOutcome:
+    """Confirm one persistent-subscription write by exact read-back (issue #97).
+
+    The Auto Bangumi write body alone never establishes ownership: the caller
+    passes a read-only ``snapshot`` of ``(capabilities, subscriptions, rss)`` and
+    the exact server-private RSS identity from the saved plan. Only an exact RSS
+    URL match proves the controlled subscription; everything else — including a
+    legally empty list — stays ``OUTCOME_UNKNOWN`` so a single miss is never
+    mistaken for a safely retryable failure (issue #182).
+    """
+    match = match_subscription_by_exact_rss(expected_rss_url, snapshot)
+    if match.status != CONFIRM_REASON_CONFIRMED or match.subscription is None:
+        return ConfirmedSubscriptionOutcome(
+            TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN, None, reason=match.status
+        )
+    external_id = str(getattr(match.subscription, "external_id", "") or "") or None
     body_success = isinstance(ab_result, dict) and ab_result.get("success") is True
     return ConfirmedSubscriptionOutcome(
         TRACKING_OPERATION_STATE_SUCCEEDED,
         external_id,
         resource_warning=not body_success,
+        reason=CONFIRM_REASON_CONFIRMED,
     )

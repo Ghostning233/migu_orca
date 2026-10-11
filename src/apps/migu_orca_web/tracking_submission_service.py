@@ -86,6 +86,8 @@ from tracking_engine.controllers.revalidate import (
 )
 from tracking_engine.controllers.submit import (
     ADDED_TO_DOWNLOAD_MESSAGE,
+    CONFIRM_REASON_CONFIRMED,
+    CONFIRM_REASON_UNREADABLE,
     SUBMIT_ADOPTED_MESSAGE,
     SUBMIT_FAILED_MESSAGE,
     SUBMIT_FROM_STATUSES,
@@ -96,6 +98,7 @@ from tracking_engine.controllers.submit import (
     SUBMIT_SUCCEEDED_RESOURCE_WARNING_MESSAGE,
     classify_existing_resource_result,
     classify_external_submit_result,
+    confirm_reason_for_error,
     confirm_subscription_outcome,
     external_submit_error_type,
     external_submit_result_id,
@@ -849,8 +852,9 @@ def _submit_through_external(
             else TRACKING_OPERATION_STATE_FAILED
         )
         confirmed_external_id, resource_warning = None, False
+        confirm_reason = None
     else:
-        classification, confirmed_external_id, resource_warning = _confirmed_submit_outcome(
+        classification, confirmed_external_id, resource_warning, confirm_reason = _confirmed_submit_outcome(
             ab_result=ab_result,
             request=request,
             readback_external=readback_external,
@@ -868,6 +872,7 @@ def _submit_through_external(
         confirmed_external_id=confirmed_external_id,
         resource_warning=resource_warning,
         submission_mode=submission_mode,
+        confirm_reason=confirm_reason,
     )
 
 
@@ -917,26 +922,58 @@ def _confirmed_submit_outcome(
     ab_result: Any,
     request: dict[str, Any] | None,
     readback_external: Callable[[], Any] | None,
-) -> tuple[str, str | None, bool]:
+) -> tuple[str, str | None, bool, str]:
     """Decide the persistent-subscription outcome, never trusting the body alone.
 
     With a read-back seam the result is only ever the exact snapshot match
     (issue #97); without one (retry/legacy callers) the historical body
     classification is kept so those paths do not silently change semantics.
+
+    A read-back that cannot prove creation is never upgraded to a failure by
+    itself: only a write the adapter already proved did not create anything
+    stays a definite failure, and every unresolved read-back keeps 待确认 so a
+    single miss is not mistaken for a safe retry (issue #182).
     """
+    write_classification = classify_external_submit_result(ab_result)
     if readback_external is None:
-        return classify_external_submit_result(ab_result), external_submit_result_id(ab_result), False
+        reason = (
+            CONFIRM_REASON_CONFIRMED
+            if write_classification == TRACKING_OPERATION_STATE_SUCCEEDED
+            else CONFIRM_REASON_UNREADABLE
+        )
+        return write_classification, external_submit_result_id(ab_result), False, reason
     try:
         snapshot = readback_external()
+    except Stage1Error as exc:
+        return _unconfirmed_write_outcome(
+            write_classification, confirm_reason_for_error(exc.error_type)
+        )
     except Exception:
-        # An unreadable read-back proves nothing: stay unresolved (AC 6).
-        return TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN, None, False
+        # An unreadable read-back proves nothing: stay unresolved.
+        return _unconfirmed_write_outcome(write_classification, CONFIRM_REASON_UNREADABLE)
     confirmed = confirm_subscription_outcome(
         ab_result=ab_result,
         expected_rss_url=_expected_rss_url(request),
         snapshot=snapshot,
     )
-    return confirmed.classification, confirmed.external_id, confirmed.resource_warning
+    if confirmed.classification == TRACKING_OPERATION_STATE_SUCCEEDED:
+        return (
+            confirmed.classification,
+            confirmed.external_id,
+            confirmed.resource_warning,
+            confirmed.reason,
+        )
+    return _unconfirmed_write_outcome(write_classification, confirmed.reason)
+
+
+def _unconfirmed_write_outcome(
+    write_classification: str,
+    reason: str,
+) -> tuple[str, str | None, bool, str]:
+    """Keep the write's own definite evidence; otherwise stay 待确认 (#182)."""
+    if write_classification == TRACKING_OPERATION_STATE_FAILED:
+        return TRACKING_OPERATION_STATE_FAILED, None, False, reason
+    return TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN, None, False, reason
 
 
 def _finalize_external_outcome(
@@ -953,6 +990,7 @@ def _finalize_external_outcome(
     confirmed_external_id: str | None = None,
     resource_warning: bool = False,
     submission_mode: str | None = None,
+    confirm_reason: str | None = None,
 ) -> dict[str, Any]:
     """Persist the TrackingRecord final status then the operation terminal state."""
     one_time = submission_mode == TRACKING_SUBMISSION_MODE_DOWNLOAD_EXISTING
@@ -990,7 +1028,10 @@ def _finalize_external_outcome(
         safe_message = SUBMIT_OUTCOME_UNKNOWN_MESSAGE
         external_id = None
         op_error_type = external_submit_error_type(ab_result) or "outcome_unknown"
-        reason_code = op_error_type
+        # The proven confirmation reason classifies 待确认 honestly (issue #182):
+        # an empty list, an unreadable read-back and a changed connection are
+        # different facts and must not collapse into one invented cause.
+        reason_code = confirm_reason or op_error_type
         op_state = TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN
 
     next_record = transition_record(

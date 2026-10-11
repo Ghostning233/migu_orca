@@ -75,6 +75,10 @@ from tracking_engine.controllers.recover import (
     classify_auto_recovery,
     recovery_outcome_for_manual,
 )
+from tracking_engine.controllers.submit import (
+    CONFIRM_REASON_CONFIRMED,
+    match_subscription_by_exact_rss,
+)
 from tracking_engine.models.operation import (
     TRACKING_OPERATION_STATE_FAILED,
     TRACKING_OPERATION_STATE_IN_PROGRESS,
@@ -119,7 +123,7 @@ def _verify_external(
     """Read-only recovery against one verified management snapshot."""
     try:
         client = management_client or _management_client(ab_config)
-        capabilities, subscriptions, _rss = client.read_snapshot()
+        capabilities, subscriptions, rss_items = client.read_snapshot()
         operation_kind = _load_current_operation(config, record)
         capability_ok = (capabilities.probe_status == "VERIFIED"
                          and capabilities.subscription_list == "SUPPORTED"
@@ -130,6 +134,7 @@ def _verify_external(
             matches = _external_matches(
                 record, subscriptions, request=request, connection_ref=connection_ref,
                 is_submit=operation_kind is not None and operation_kind.operation == "SUBMIT",
+                rss_items=rss_items,
             )
     except (TimeoutError, ConnectionError, OSError, ValueError):
         return _verification_needs_manual(config, record=record, request=request,
@@ -188,11 +193,25 @@ def _management_client(config: AutoBangumiConfig) -> Legacy31ManagementClient:
 def _external_matches(
     record: TrackingRecord, subscriptions: list[ExternalSubscription], *, request: dict[str, Any] | None = None,
     connection_ref: str | None = None, is_submit: bool = False,
+    rss_items: list[Any] | None = None,
 ) -> list[ExternalSubscription]:
     mapping = record.external_mapping if isinstance(record.external_mapping, dict) else {}
     if connection_ref is not None and not is_submit and (mapping.get("schema_version") != 2 or mapping.get("connection_ref") != connection_ref):
         return []
     external_id = mapping.get("subscription_id")
+    if connection_ref is not None and is_submit:
+        # Issue #182: the later read-only check uses exactly the same confirmation
+        # rule as the post-submit read-back — the server-private exact RSS
+        # identity and its unique owning subscription — so the two can never
+        # reach different conclusions about the same snapshot.
+        match = match_subscription_by_exact_rss(
+            _request_selected_rss_url(request),
+            (None, subscriptions, list(rss_items or ())),
+        )
+        if match.status == CONFIRM_REASON_CONFIRMED and match.subscription is not None:
+            matched = match.subscription
+            return [item for item in subscriptions if item.external_id == matched.external_id]
+        return []
     if connection_ref is not None:
         if not isinstance(request, dict):
             return []
@@ -229,6 +248,15 @@ def _external_matches(
         and " ".join(item.title.split()).casefold() == " ".join(title.split()).casefold()
         and " ".join(item.subtitle_group.split()).casefold() == " ".join(group.split()).casefold()
     ]
+
+
+def _request_selected_rss_url(request: dict[str, Any] | None) -> str | None:
+    """The server-private exact RSS identity of the saved plan, if any."""
+    confirmable = request.get("confirmable_config") if isinstance(request, dict) else None
+    if not isinstance(confirmable, dict):
+        return None
+    value = confirmable.get("selected_rss_url")
+    return value.strip() if isinstance(value, str) and value.strip() else None
 
 
 def _verification_needs_manual(
