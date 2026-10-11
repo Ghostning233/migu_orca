@@ -5,8 +5,56 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '@/api/client'
 import { clearReuseHandoff, consumeReuseHandoff } from '@/features/requests/reuseHandoff'
 import TrackingInspector from './TrackingInspector.vue'
-import { createManagementSession, RECOVERY_NEEDS_MANUAL_NOTICE } from './trackingProjection'
-import type { CapabilityResult, TrackingRecoverySession, TrackingWriteSession } from './trackingProjection'
+import type { CapabilityResult } from './trackingProjection'
+import type {
+  TrackingManagementActionCode,
+  TrackingManagementScope,
+  TrackingWriteSession,
+  TrackingWriteSessionSet,
+} from './useTrackingWriteSession'
+
+/** The fixed manual-conclusion notice, pinned here as characterization. */
+const RECOVERY_NEEDS_MANUAL_NOTICE =
+  '需要人工核验：请先在 Auto Bangumi 中独立核对该追番的实际状态，再选择“标记为成功”或“标记为失败”；本页不会代替你判断，也不会自动提交。'
+
+/** One page-level write session of any family, as the page hands it over. */
+function sessionFixture(overrides: Partial<TrackingWriteSession> = {}): TrackingWriteSession {
+  return {
+    trackingId: 'tracking-1', operation: 'SUBMIT', family: 'SUBMIT', targetScope: null,
+    state: 'ACTIVE', message: '提交成功：已在 Auto Bangumi 创建外部订阅。', issues: [],
+    failureCategory: null, diagnostics: { httpStatus: null, messageZh: null, messageEn: null },
+    needsManual: false, manualNotice: null, keepsIntent: false,
+    ...overrides,
+  }
+}
+
+/** The page's single session entry, with only the families a test provides. */
+function sessions(parts: Partial<TrackingWriteSessionSet> = {}): TrackingWriteSessionSet {
+  return { submit: null, recovery: null, management: null, ...parts }
+}
+
+function managementSessionFixture(options: {
+  operation: TrackingManagementActionCode
+  targetScope: TrackingManagementScope
+  state: TrackingWriteSession['state']
+  message: string
+  needsManual?: boolean
+  trackingId?: string
+}): TrackingWriteSession {
+  return sessionFixture({
+    ...(options.trackingId === undefined ? {} : { trackingId: options.trackingId }),
+    operation: options.operation,
+    family: 'MANAGEMENT',
+    targetScope: options.targetScope,
+    state: options.state,
+    message: options.message,
+    needsManual: options.needsManual ?? false,
+    manualNotice: options.needsManual
+      ? '需要人工核验：请先在 Auto Bangumi 中独立核对该追番的实际状态，再决定是否重新发起修改；本页不会代替你判断，也不会自动重试。'
+      : null,
+    keepsIntent: options.state === 'UNKNOWN',
+  })
+}
 
 vi.mock('@/api/client', () => ({
   api: { get: vi.fn(), post: vi.fn() },
@@ -182,13 +230,8 @@ function capabilities(overrides: Partial<CapabilityResult> = {}): CapabilityResu
   }
 }
 
-function writeSession(overrides: Record<string, unknown> = {}): TrackingWriteSession {
-  return {
-    trackingId: 'tracking-1', action: 'SUBMIT', state: 'ACTIVE',
-    message: '提交成功：已在 Auto Bangumi 创建外部订阅。', issues: [], failureCategory: null,
-    diagnostics: { httpStatus: null, messageZh: null, messageEn: null },
-    ...overrides,
-  } as TrackingWriteSession
+function writeSession(overrides: Partial<TrackingWriteSession> = {}): TrackingWriteSession {
+  return sessionFixture({ family: 'SUBMIT', operation: 'SUBMIT', ...overrides })
 }
 
 /** Mount the inspector with a live page credential session offering SUBMIT. */
@@ -294,7 +337,7 @@ describe('TrackingInspector explicit submission (US-310)', () => {
   })
 
   it('locks the conflicting actions of this item while the write is in flight', async () => {
-    const wrapper = await mountSubmittable({ writeSession: writeSession({ state: 'IN_FLIGHT' }) })
+    const wrapper = await mountSubmittable({ sessions: sessions({ submit: writeSession({ state: 'IN_FLIGHT' }) }) })
     expect(wrapper.find('#tracking-submit').attributes('disabled')).toBeDefined()
     expect(wrapper.find('#tracking-submit').attributes('aria-busy')).toBe('true')
     await wrapper.find('#tracking-submit').trigger('click')
@@ -304,10 +347,10 @@ describe('TrackingInspector explicit submission (US-310)', () => {
   })
 
   it('renders only the fixed write copy and the documented §11.5 issues', async () => {
-    const wrapper = await mountSubmittable({ writeSession: writeSession({
+    const wrapper = await mountSubmittable({ sessions: sessions({ submit: writeSession({
       state: 'VERIFYING_EXTERNAL', message: '外部提交结果未知，正在只读回查；请勿重复提交。',
       issues: [{ code: 'OPERATION_IN_PROGRESS', message: '本地方案尚未通过提交前复核。' }],
-    }) })
+    }) }) })
     const result = wrapper.find('#tracking-submit-result')
     expect(result.text()).toContain('外部提交结果未知')
     expect(result.text()).toContain('请勿重复提交')
@@ -316,7 +359,7 @@ describe('TrackingInspector explicit submission (US-310)', () => {
   })
 
   it('never shows another item write result on this item', async () => {
-    const wrapper = await mountSubmittable({ writeSession: writeSession({ trackingId: 'tracking-2' }) })
+    const wrapper = await mountSubmittable({ sessions: sessions({ submit: writeSession({ trackingId: 'tracking-2' }) }) })
     expect(wrapper.find('#tracking-submit-result').exists()).toBe(false)
   })
 
@@ -380,15 +423,15 @@ describe('TrackingInspector explicit retry (US-311)', () => {
     apiGet.mockResolvedValue(detail({ available_actions: [revalidateAction, retryAction] }) as never)
     const wrapper = await mountInspector('tracking-1', {
       ...LIVE_SESSION,
-      writeSession: writeSession({
-        action: 'RETRY', state: 'SUBMIT_FAILED',
+      sessions: sessions({ submit: writeSession({
+        operation: 'RETRY', state: 'SUBMIT_FAILED',
         message: '提交明确失败，尚未创建外部订阅；可在确认后显式重试。',
-      }),
+      }) }),
     })
     expect(wrapper.find('#tracking-retry').attributes('disabled')).toBeUndefined()
     expect(wrapper.find('#tracking-submit-result').text()).toContain('提交明确失败')
 
-    await wrapper.setProps({ writeSession: writeSession({ action: 'RETRY', state: 'IN_FLIGHT' }) })
+    await wrapper.setProps({ sessions: sessions({ submit: writeSession({ operation: 'RETRY', state: 'IN_FLIGHT' }) }) })
     await flushPromises()
     expect(wrapper.find('#tracking-retry').attributes('disabled')).toBeDefined()
     expect(wrapper.find('#tracking-retry').attributes('aria-busy')).toBe('true')
@@ -421,11 +464,17 @@ const markFailedAction = {
 }
 const recoveryActions = [recoverAutoAction, markSucceededAction, markFailedAction]
 
-function recoverySession(overrides: Record<string, unknown> = {}): TrackingRecoverySession {
-  return {
-    trackingId: 'tracking-1', action: 'RECOVER_AUTO', state: 'RECOVERY_REQUIRED',
-    needsManual: true, message: '结果仍无法确认，保持恢复状态；未确认前不会自动提交。', ...overrides,
-  } as TrackingRecoverySession
+function recoverySessionFixture(overrides: Partial<TrackingWriteSession> = {}): TrackingWriteSession {
+  return sessionFixture({
+    family: 'RECOVERY',
+    operation: 'RECOVER_AUTO',
+    state: 'RECOVERY_REQUIRED',
+    needsManual: true,
+    manualNotice: RECOVERY_NEEDS_MANUAL_NOTICE,
+    keepsIntent: true,
+    message: '结果仍无法确认，保持恢复状态；未确认前不会自动提交。',
+    ...overrides,
+  })
 }
 
 async function mountRecoverable(
@@ -500,7 +549,7 @@ describe('TrackingInspector unknown-result recovery (US-312)', () => {
   })
 
   it('renders the page recovery verdict and the manual-check notice, never the raw state', async () => {
-    const wrapper = await mountRecoverable({ recoverySession: recoverySession() })
+    const wrapper = await mountRecoverable({ sessions: sessions({ recovery: recoverySessionFixture() }) })
     const result = wrapper.find('#tracking-recovery-result')
     expect(result.text()).toContain('结果仍无法确认')
     expect(result.find('#tracking-recovery-manual-notice').text()).toBe(RECOVERY_NEEDS_MANUAL_NOTICE)
@@ -509,7 +558,7 @@ describe('TrackingInspector unknown-result recovery (US-312)', () => {
     expect(wrapper.text()).not.toContain('NEEDS_RECONFIRM')
 
     // A decided verdict never shows the manual-check requirement.
-    await wrapper.setProps({ recoverySession: recoverySession({ state: 'ACTIVE', needsManual: false, message: '恢复完成：已确认该番在 Auto Bangumi 中存在外部订阅。' }) })
+    await wrapper.setProps({ sessions: sessions({ recovery: recoverySessionFixture({ state: 'ACTIVE', needsManual: false, manualNotice: null, keepsIntent: false, message: '恢复完成：已确认该番在 Auto Bangumi 中存在外部订阅。' }) }) })
     await flushPromises()
     expect(wrapper.find('#tracking-recovery-result').text()).toContain('恢复完成')
     expect(wrapper.find('#tracking-recovery-manual-notice').exists()).toBe(false)
@@ -527,8 +576,8 @@ describe('TrackingInspector unknown-result recovery (US-312)', () => {
 
     // In flight for this item, and while its own write is running.
     for (const props of [
-      { ...LIVE_SESSION, recoverySession: recoverySession({ state: 'IN_FLIGHT', needsManual: false }) },
-      { ...LIVE_SESSION, writeSession: writeSession({ state: 'IN_FLIGHT' }) },
+      { ...LIVE_SESSION, sessions: sessions({ recovery: recoverySessionFixture({ state: 'IN_FLIGHT', needsManual: false, manualNotice: null, keepsIntent: false }) }) },
+      { ...LIVE_SESSION, sessions: sessions({ submit: writeSession({ state: 'IN_FLIGHT' }) }) },
     ]) {
       const wrapper = await mountRecoverable(props)
       expect(wrapper.find('#tracking-recover-auto').attributes('disabled')).toBeDefined()
@@ -543,7 +592,7 @@ describe('TrackingInspector unknown-result recovery (US-312)', () => {
   })
 
   it('never shows another item recovery result on this item', async () => {
-    const wrapper = await mountRecoverable({ recoverySession: recoverySession({ trackingId: 'tracking-2' }) })
+    const wrapper = await mountRecoverable({ sessions: sessions({ recovery: recoverySessionFixture({ trackingId: 'tracking-2' }) }) })
     expect(wrapper.find('#tracking-recovery-result').exists()).toBe(false)
   })
 })
@@ -617,10 +666,11 @@ describe('TrackingInspector per-record external delete (US-315)', () => {
 
   it('renders this item delete result in its own panel only', async () => {
     apiGet.mockResolvedValue(detail({ available_actions: [deleteAction] }) as never)
-    const session = createManagementSession(
-      'tracking-1', 'DELETE_EXTERNAL', 'SUBSCRIPTION', 'SUCCEEDED',
-    )
-    const wrapper = await mountInspector('tracking-1', { ...LIVE_SESSION, managementSession: session })
+    const session = managementSessionFixture({
+      operation: 'DELETE_EXTERNAL', targetScope: 'SUBSCRIPTION', state: 'SUCCEEDED',
+      message: '外部删除已完成：Auto Bangumi 已删除该外部对象；MiGuOrca 本地订阅方案、追番记录、审计记录、下载任务和已下载媒体文件均保留。',
+    })
+    const wrapper = await mountInspector('tracking-1', { ...LIVE_SESSION, sessions: sessions({ management: session }) })
     const result = wrapper.find('#tracking-delete-external-result')
     expect(result.text()).toContain('外部删除已完成')
     expect(result.text()).toContain('本次目标：外部番剧订阅')
@@ -630,7 +680,7 @@ describe('TrackingInspector per-record external delete (US-315)', () => {
 
     const other = await mountInspector('tracking-1', {
       ...LIVE_SESSION,
-      managementSession: createManagementSession('tracking-2', 'DELETE_EXTERNAL', 'SUBSCRIPTION', 'SUCCEEDED'),
+      sessions: sessions({ management: managementSessionFixture({ operation: 'DELETE_EXTERNAL', targetScope: 'SUBSCRIPTION', state: 'SUCCEEDED', message: '外部删除已完成：Auto Bangumi 已删除该外部对象；MiGuOrca 本地订阅方案、追番记录、审计记录、下载任务和已下载媒体文件均保留。', trackingId: 'tracking-2' }) }),
     })
     expect(other.find('#tracking-delete-external-result').exists()).toBe(false)
   })
@@ -921,19 +971,17 @@ describe('TrackingInspector unresolved-intent gate (issue #91 AC 6)', () => {
       external_mapping: { match_reason: '标题', enabled: true, external_deleted: false },
     }) as never)
 
-    for (const session of [
-      { trackingId: 'tracking-1', state: 'UNKNOWN', action: 'SUBMIT', message: '', issues: [], failureCategory: null },
-      { trackingId: 'tracking-1', state: 'VERIFYING_EXTERNAL', action: 'SUBMIT', message: '', issues: [], failureCategory: null },
-      { trackingId: 'tracking-1', state: 'RECOVERY_REQUIRED', action: 'SUBMIT', message: '', issues: [], failureCategory: null },
-    ]) {
-      const wrapper = await mountInspector('tracking-1', { writeSession: session })
+    for (const state of ['UNKNOWN', 'VERIFYING_EXTERNAL', 'RECOVERY_REQUIRED'] as const) {
+      const wrapper = await mountInspector('tracking-1', {
+        sessions: sessions({ submit: writeSession({ state, message: '', keepsIntent: true }) }),
+      })
       expect(wrapper.find('#tracking-apply-plan').attributes('disabled')).toBeDefined()
       expect(wrapper.find('#tracking-delete-plan').attributes('disabled')).toBeDefined()
     }
 
     // A definite result releases the gate again.
     const settled = await mountInspector('tracking-1', {
-      writeSession: { trackingId: 'tracking-1', state: 'ACTIVE', action: 'SUBMIT', message: '', issues: [], failureCategory: null },
+      sessions: sessions({ submit: writeSession({ state: 'ACTIVE', message: '' }) }),
     })
     expect(settled.find('#tracking-apply-plan').attributes('disabled')).toBeUndefined()
   })

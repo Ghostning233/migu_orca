@@ -15,14 +15,12 @@
 import { computed } from 'vue'
 
 import BaseButton from '@/components/forms/BaseButton.vue'
+import type { TrackingAction, TrackingItem } from './trackingProjection'
 import {
-  MANAGEMENT_NEEDS_MANUAL_NOTICE,
   isTrackingManagementScope,
-  type TrackingAction,
-  type TrackingItem,
   type TrackingManagementScope,
-  type TrackingManagementSession,
-} from './trackingProjection'
+  type TrackingWriteSession,
+} from './useTrackingWriteSession'
 
 const props = defineProps<{
   item: TrackingItem
@@ -31,7 +29,7 @@ const props = defineProps<{
   /** The server-computed REFRESH_RSS action, with this page's scopes only. */
   refreshRss?: TrackingAction | null
   /** Page-level management result for this item; the page owns the request. */
-  result?: TrackingManagementSession | null
+  result?: TrackingWriteSession | null
   /** Fixed read-only degradation copy for a SET_ENABLED this page cannot send. */
   setEnabledHint: string
   /** Fixed read-only degradation copy for a REFRESH_RSS this page cannot send. */
@@ -130,8 +128,8 @@ function submitRefresh(): void {
       role="status"
     >
       <p class="tracking-management-verdict">{{ result.message }}</p>
-      <p v-if="result.needsManual" id="tracking-management-manual-notice" class="tracking-management-manual">
-        {{ MANAGEMENT_NEEDS_MANUAL_NOTICE }}
+      <p v-if="result.manualNotice" id="tracking-management-manual-notice" class="tracking-management-manual">
+        {{ result.manualNotice }}
       </p>
     </div>
   </div>

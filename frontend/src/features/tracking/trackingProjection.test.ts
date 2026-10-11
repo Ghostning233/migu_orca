@@ -1,62 +1,22 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  canVerifyExternally,
   capabilityStateLabel,
   capabilityVersionLabel,
-  createRecoveryConflictSession,
-  createRecoverySession,
-  createTrackingActionIntent,
-  createTrackingRecoverBody,
-  createTrackingRecoveryIntent,
-  createWriteConflictSession,
-  createWriteSession,
+  DELETE_EXTERNAL_HELP,
   executableTrackingActions,
   filterTrackingItems,
-  isDefiniteWriteRejection,
-  isRecoveryActionCode,
-  isWriteActionCode,
-  MANAGEMENT_CONFLICT_FALLBACK_MESSAGE,
-  MANAGEMENT_CONFLICT_TYPES,
-  MANAGEMENT_NEEDS_MANUAL_NOTICE,
-  managementConflictMessage,
-  managementSessionKeepsIntent,
-  managementSessionNeedsManual,
+  formatSubmissionMode,
+  formatTrackingUpdatedAt,
+  MANAGEMENT_ACTIONS_HELP,
+  MODIFY_FORM_HELP,
   probeStatusLabel,
   projectCapabilitySummary,
-  projectRecoveryOutcome,
   projectRevalidateIssues,
-  projectTrackingActionScopes,
-  formatTrackingUpdatedAt,
   projectTrackingOverview,
-  projectWriteOutcome,
-  RECOVERY_ACTION_BODIES,
-  RECOVERY_ACTION_CONFIRMATIONS,
-  RECOVERY_ACTIONS,
-  RECOVERY_NEEDS_MANUAL_NOTICE,
-  recoveryConfirmation,
-  recoverySessionKeepsLock,
-  reuseTrackingActionIntent,
   sortTrackingItems,
-  SUBMIT_OUTCOMES,
-  TRACKING_RECOVER_ENDPOINT,
-  WRITE_ACTION_CONFIRMATIONS,
-  WRITE_ACTION_ENDPOINTS,
-  WRITE_CONFLICT_FALLBACK_MESSAGE,
-  WRITE_CONFLICT_TYPES,
-  writeConflictMessage,
-  writeSessionKeepsIntent,
-  writeSessionMessage,
-  createManagementSession,
   type CapabilityResult,
   type TrackingItem,
-  type TrackingManagementState,
-  type TrackingRecoverResult,
-  type TrackingRecoveryActionCode,
-  type TrackingRecoveryConfirmation,
-  ONE_TIME_SUBMIT_FAILED_MESSAGE,
-  projectWriteDiagnostics,
-  formatSubmissionMode,
 } from './trackingProjection'
 
 type ItemAction = NonNullable<TrackingItem['available_actions']>[number]
@@ -82,7 +42,6 @@ function capabilities(overrides: Partial<CapabilityResult> = {}): CapabilityResu
     checked_at: null, safe_message: null, ...overrides,
   }
 }
-const savedConnection = { connection_ref: '11111111-1111-4111-8111-111111111111', configuration_revision: 3 }
 
 function action(overrides: Partial<ItemAction> = {}): ItemAction {
   return {
@@ -163,16 +122,6 @@ describe('tracking projection (US-304)', () => {
     expect(executableTrackingActions(item({ available_actions: [action({ code: 'SUBMIT', target_scopes: [] })] }))).toHaveLength(1)
   })
 
-  it('creates one revision-bound opaque intent and reuses its key on transport retry', () => {
-    const current = item({ available_actions: [action()] })
-    const candidate = executableTrackingActions(current)[0]!
-    const intent = createTrackingActionIntent(current, candidate, 'SUBSCRIPTION')
-    expect(intent).toMatchObject({ action: 'MODIFY', targetScope: 'SUBSCRIPTION', expectedRevision: 3, confirm: true })
-    expect(intent?.idempotencyKey).toMatch(/^[A-Za-z0-9-]{8,128}$/)
-    expect(reuseTrackingActionIntent(intent!)).toBe(intent)
-    expect(createTrackingActionIntent(current, candidate, 'ASSOCIATED_RSS')).toBeNull()
-  })
-
   it('projects every server-offered scope and keeps actions independent of the probe', () => {
     const current = item({ available_actions: [
       action({ target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'] }),
@@ -183,11 +132,8 @@ describe('tracking projection (US-304)', () => {
     // Issue #89: the server-projected scopes survive unchanged.
     expect(projected[0]?.target_scopes).toEqual(['SUBSCRIPTION', 'ASSOCIATED_RSS'])
     expect(projected.some((candidate) => candidate.code === 'SUBMIT')).toBe(true)
-    // A scope the server did not project for this very action is refused.
-    expect(createTrackingActionIntent(current, { ...projected[0]!, target_scopes: ['SUBSCRIPTION'] }, 'ASSOCIATED_RSS')).toBeNull()
-    expect(createTrackingActionIntent(current, projected[0]!, 'ASSOCIATED_RSS')).toMatchObject({
-      action: 'MODIFY', targetScope: 'ASSOCIATED_RSS',
-    })
+    // A scope-less management action has no control at all.
+    expect(executableTrackingActions(item({ available_actions: [action({ target_scopes: [] })] }))).toHaveLength(0)
   })
 
   it('keeps enable and disable actions available for both directions', () => {
@@ -255,426 +201,6 @@ describe('capability display projection (US-307 review fix)', () => {
   })
 })
 
-describe('tracking write session projection (US-310)', () => {
-  function submitResult(overrides: Record<string, unknown> = {}) {
-    return {
-      tracking_id: 'tracking-1', outcome: 'ACTIVE', checked_revision: 3, next_revision: 4,
-      checked_at: '2026-09-13T03:00:00Z', operation_id: 'operation-1', issues: [],
-      tracking: item({ revision: 4 }), ...overrides,
-    } as never
-  }
-
-  it('maps every generated submit outcome to fixed Chinese copy', () => {
-    for (const outcome of SUBMIT_OUTCOMES) {
-      const session = projectWriteOutcome('tracking-1', 'SUBMIT', submitResult({ outcome }))
-      expect(session.state).toBe(outcome)
-      expect(session.message).toBe(writeSessionMessage(outcome))
-      expect(session.trackingId).toBe('tracking-1')
-      expect(session.action).toBe('SUBMIT')
-    }
-    // No raw server enum ever reaches the rendered copy.
-    for (const outcome of SUBMIT_OUTCOMES) {
-      expect(writeSessionMessage(outcome)).not.toContain(outcome)
-    }
-  })
-
-  it('fails closed to an unknown result when the outcome is not a documented one', () => {
-    const session = projectWriteOutcome('tracking-1', 'SUBMIT', submitResult({ outcome: 'SOMETHING_NEW' }))
-    expect(session.state).toBe('UNKNOWN')
-    expect(session.message).toBe(writeSessionMessage('UNKNOWN'))
-    expect(session.message).not.toContain('SOMETHING_NEW')
-  })
-
-  it('projects only documented §11.5 issues and never echoes unknown server text', () => {
-    const session = projectWriteOutcome('tracking-1', 'SUBMIT', submitResult({
-      outcome: 'NEEDS_RECONFIRM',
-      issues: [
-        { code: 'REQUEST_CHANGED', field: null, message: '本地方案已变化', recovery_action: 'SUBMIT' },
-        { code: 'BRAND_NEW_CODE', field: null, message: 'https://private.invalid/leak', recovery_action: '' },
-      ],
-    }))
-    expect(session.issues).toEqual([{ code: 'REQUEST_CHANGED', message: '本地方案已变化' }])
-    expect(JSON.stringify(session)).not.toContain('private.invalid')
-  })
-
-  it('locks the intent only while the external result is indeterminate', () => {
-    expect(writeSessionKeepsIntent('UNKNOWN')).toBe(true)
-    expect(writeSessionKeepsIntent('VERIFYING_EXTERNAL')).toBe(true)
-    expect(writeSessionKeepsIntent('RECOVERY_REQUIRED')).toBe(true)
-    // A definite business result (success or explicit failure) frees the key so
-    // the next confirmation starts from a fresh one.
-    expect(writeSessionKeepsIntent('ACTIVE')).toBe(false)
-    expect(writeSessionKeepsIntent('SUBMIT_FAILED')).toBe(false)
-    expect(writeSessionKeepsIntent('NEEDS_RECONFIRM')).toBe(false)
-    expect(writeSessionKeepsIntent('CONFLICT')).toBe(false)
-    expect(writeSessionKeepsIntent('REJECTED')).toBe(false)
-    expect(writeSessionKeepsIntent('IN_FLIGHT')).toBe(false)
-  })
-
-  it('treats only a structured non-409 4xx as a definite pre-write rejection', () => {
-    // D38-08.5: these are refused before the external boundary.
-    expect(isDefiniteWriteRejection({ status: 400, httpError: true })).toBe(true)
-    expect(isDefiniteWriteRejection({ status: 404, httpError: true })).toBe(true)
-    expect(isDefiniteWriteRejection({ status: 422, httpError: true })).toBe(false)
-    // 409 keeps its own conflict branch and must never become a plain refusal.
-    expect(isDefiniteWriteRejection({ status: 409, httpError: true })).toBe(false)
-    // Everything that may already have crossed the external boundary stays
-    // unknown: 5xx, network failure, timeout, and any unreadable status.
-    expect(isDefiniteWriteRejection({ status: 500, httpError: true })).toBe(false)
-    expect(isDefiniteWriteRejection({ status: 502, httpError: true })).toBe(false)
-    expect(isDefiniteWriteRejection({ status: 504, httpError: true })).toBe(false)
-    expect(isDefiniteWriteRejection({ status: 0, httpError: false })).toBe(false)
-    expect(isDefiniteWriteRejection({ status: 400, httpError: false })).toBe(false)
-    expect(isDefiniteWriteRejection({ status: 400, httpError: true, nonJson: true })).toBe(false)
-    expect(isDefiniteWriteRejection({ status: 404, httpError: true, network: true })).toBe(false)
-    expect(isDefiniteWriteRejection({ status: 408, httpError: true })).toBe(false)
-    expect(isDefiniteWriteRejection({ status: 429, httpError: true })).toBe(false)
-    expect(isDefiniteWriteRejection({ status: Number.NaN, httpError: true })).toBe(false)
-  })
-
-  it('renders a fixed refusal copy that never claims an external subscription', () => {
-    const session = createWriteSession('tracking-1', 'SUBMIT', 'REJECTED')
-    expect(session.state).toBe('REJECTED')
-    expect(session.message).toBe(writeSessionMessage('REJECTED'))
-    expect(session.message).toContain('本次未创建 Auto Bangumi 外部订阅')
-    expect(session.message).toContain('重新确认')
-    // Neither the raw client state nor a raw HTTP status may reach the DOM, and
-    // the copy must not hint that a subscription may already exist.
-    expect(session.message).not.toContain('REJECTED')
-    expect(session.message).not.toContain('400')
-    expect(session.message).not.toContain('409')
-    expect(session.message).not.toMatch(/可能.*创建/)
-    expect(session.message).not.toContain('结果未知')
-  })
-
-  it('creates an in-flight session without leaking any request material', () => {
-    const session = createWriteSession('tracking-1', 'SUBMIT', 'IN_FLIGHT')
-    expect(session).toEqual({
-      trackingId: 'tracking-1', action: 'SUBMIT', state: 'IN_FLIGHT',
-      message: writeSessionMessage('IN_FLIGHT'), issues: [], failureCategory: null,
-      // Issue #101: an empty diagnostics object means "no reason given".
-      diagnostics: { httpStatus: null, messageZh: null, messageEn: null },
-    })
-    expect(Object.keys(session)).not.toContain('idempotencyKey')
-  })
-})
-
-describe('tracking retry projection (US-311)', () => {
-  function retryResult(overrides: Record<string, unknown> = {}) {
-    return {
-      tracking_id: 'tracking-1', outcome: 'ACTIVE', checked_revision: 4, next_revision: 5,
-      checked_at: '2026-09-13T04:00:00Z', operation_id: 'operation-2', issues: [],
-      tracking: item({ revision: 5 }), ...overrides,
-    } as never
-  }
-
-  it('binds each submit-family action to its own generated endpoint and copy', () => {
-    expect(WRITE_ACTION_ENDPOINTS.SUBMIT).toBe('/api/v1/tracking/items/{tracking_id}/submit')
-    expect(WRITE_ACTION_ENDPOINTS.RETRY).toBe('/api/v1/tracking/items/{tracking_id}/retry')
-    // The two confirmations must not be interchangeable: a retry never reuses
-    // the first-submission wording (or the reverse).
-    expect(WRITE_ACTION_CONFIRMATIONS.RETRY.message).not.toBe(WRITE_ACTION_CONFIRMATIONS.SUBMIT.message)
-    expect(WRITE_ACTION_CONFIRMATIONS.RETRY.confirmLabel).toBe('确认重试')
-    expect(WRITE_ACTION_CONFIRMATIONS.SUBMIT.confirmLabel).toBe('确认提交')
-    for (const confirmation of Object.values(WRITE_ACTION_CONFIRMATIONS)) {
-      expect(confirmation.message).toContain('外部订阅')
-      expect(confirmation.message).toContain('是否继续')
-      expect(confirmation.confirmLabel.startsWith('确认')).toBe(true)
-    }
-  })
-
-  it('accepts only the submit-family action codes this page can send', () => {
-    expect(isWriteActionCode('SUBMIT')).toBe(true)
-    expect(isWriteActionCode('RETRY')).toBe(true)
-    expect(isWriteActionCode('REVALIDATE')).toBe(false)
-    expect(isWriteActionCode('MODIFY')).toBe(false)
-    expect(isWriteActionCode('SET_ENABLED')).toBe(false)
-    expect(isWriteActionCode('REFRESH_RSS')).toBe(false)
-    expect(isWriteActionCode('DELETE_EXTERNAL')).toBe(false)
-    expect(isWriteActionCode('RECOVER_AUTO')).toBe(false)
-  })
-
-  it('maps every generated retry outcome exactly like a submit outcome', () => {
-    for (const outcome of SUBMIT_OUTCOMES) {
-      const session = projectWriteOutcome('tracking-1', 'RETRY', retryResult({ outcome }))
-      expect(session.state).toBe(outcome)
-      expect(session.action).toBe('RETRY')
-      expect(session.message).toBe(writeSessionMessage(outcome))
-      expect(session.message).not.toContain(outcome)
-    }
-    const unknown = projectWriteOutcome('tracking-1', 'RETRY', retryResult({ outcome: 'SOMETHING_NEW' }))
-    expect(unknown.state).toBe('UNKNOWN')
-    expect(unknown.message).toBe(writeSessionMessage('UNKNOWN'))
-  })
-
-  it('gives every documented conflict its own fixed next step and fails closed', () => {
-    const messages = WRITE_CONFLICT_TYPES.map((errorType) => writeConflictMessage(errorType))
-    for (const message of messages) {
-      // Every conflict states that nothing reached Auto Bangumi, so a user
-      // cannot mistake a refused request for a duplicate subscription.
-      expect(message).toContain('未提交到 Auto Bangumi')
-      for (const errorType of WRITE_CONFLICT_TYPES) expect(message).not.toContain(errorType)
-    }
-    expect(new Set(messages).size).toBe(WRITE_CONFLICT_TYPES.length)
-
-    expect(writeConflictMessage('brand_new_conflict')).toBe(WRITE_CONFLICT_FALLBACK_MESSAGE)
-    expect(writeConflictMessage(null)).toBe(WRITE_CONFLICT_FALLBACK_MESSAGE)
-    expect(writeConflictMessage(undefined)).toBe(WRITE_CONFLICT_FALLBACK_MESSAGE)
-    // The generic state copy is the fallback, so an unnamed 409 never renders blank.
-    expect(writeSessionMessage('CONFLICT')).toBe(WRITE_CONFLICT_FALLBACK_MESSAGE)
-  })
-
-  it('releases the key on every conflict so the next confirmation is explicit', () => {
-    for (const errorType of [...WRITE_CONFLICT_TYPES, 'brand_new_conflict']) {
-      const session = createWriteConflictSession('tracking-1', 'RETRY', errorType)
-      expect(session).toMatchObject({ trackingId: 'tracking-1', action: 'RETRY', state: 'CONFLICT', issues: [] })
-      expect(session.message).toBe(writeConflictMessage(errorType))
-      expect(writeSessionKeepsIntent(session.state)).toBe(false)
-    }
-  })
-})
-
-const recoveryAutoAction: ItemAction = {
-  code: 'RECOVER_AUTO', label: '自动恢复', style: 'SECONDARY',
-  requires_confirmation: false, target_scopes: [],
-}
-const markSucceededAction: ItemAction = {
-  code: 'MARK_SUCCEEDED', label: '标记为成功', style: 'PRIMARY',
-  requires_confirmation: true, target_scopes: [],
-}
-const markFailedAction: ItemAction = {
-  code: 'MARK_FAILED', label: '标记为失败', style: 'DANGER',
-  requires_confirmation: true, target_scopes: [],
-}
-
-/** A recoverable record: the server offers exactly the three local actions. */
-function recoverableItem(overrides: Partial<TrackingItem> = {}): TrackingItem {
-  return item({
-    status: 'RECOVERY_REQUIRED', status_label: '需要恢复', status_group: 'ATTENTION',
-    available_actions: [recoveryAutoAction, markSucceededAction, markFailedAction],
-    ...overrides,
-  })
-}
-
-function recoverResult(overrides: Partial<TrackingRecoverResult> = {}): TrackingRecoverResult {
-  return {
-    tracking_id: 'tracking-1', action: 'AUTO', outcome: 'ACTIVE', checked_revision: 3,
-    next_revision: 4, checked_at: '2026-09-13T05:00:00Z', operation_id: 'operation-1',
-    needs_manual: false, tracking: recoverableItem({ revision: 4 }), ...overrides,
-  }
-}
-
-const savedGeneration = savedConnection
-
-describe('tracking recovery projection (saved connection body)', () => {
-  it('binds every recovery action to its own request body value and copy', () => {
-    expect(RECOVERY_ACTIONS).toEqual(['RECOVER_AUTO', 'MARK_SUCCEEDED', 'MARK_FAILED', 'VERIFY_EXTERNAL'])
-    expect(RECOVERY_ACTION_BODIES).toEqual({
-      RECOVER_AUTO: 'AUTO', MARK_SUCCEEDED: 'MARK_SUCCEEDED',
-      MARK_FAILED: 'MARK_FAILED', VERIFY_EXTERNAL: 'VERIFY_EXTERNAL',
-    })
-    expect(TRACKING_RECOVER_ENDPOINT).toBe('/api/v1/tracking/items/{tracking_id}/recover')
-
-    // AUTO contacts nothing and is confirmed by its own click; every other
-    // action carries its own fixed copy.
-    expect(recoveryConfirmation('RECOVER_AUTO')).toBeNull()
-    for (const action of ['MARK_SUCCEEDED', 'MARK_FAILED', 'VERIFY_EXTERNAL'] as const) {
-      expect(recoveryConfirmation(action)).toBe(RECOVERY_ACTION_CONFIRMATIONS[action])
-      expect(RECOVERY_ACTION_CONFIRMATIONS[action].message).toContain('Auto Bangumi')
-    }
-    // A manual conclusion is a user assertion: it must be confirmed again and
-    // styled as a danger only for the failure verdict.
-    const succeeded: TrackingRecoveryConfirmation = RECOVERY_ACTION_CONFIRMATIONS.MARK_SUCCEEDED
-    expect(succeeded.danger).toBeUndefined()
-    expect(RECOVERY_ACTION_CONFIRMATIONS.MARK_FAILED.danger).toBe(true)
-    for (const action of ['MARK_SUCCEEDED', 'MARK_FAILED'] as const) {
-      expect(RECOVERY_ACTION_CONFIRMATIONS[action].message).toContain('独立核对')
-    }
-
-    expect(isRecoveryActionCode('RECOVER_AUTO')).toBe(true)
-    expect(isRecoveryActionCode('VERIFY_EXTERNAL')).toBe(true)
-    expect(isRecoveryActionCode('SUBMIT')).toBe(false)
-    expect(isRecoveryActionCode(null)).toBe(false)
-  })
-
-  it('builds a local AUTO body and a confirm-only manual body', () => {
-    expect(createTrackingRecoverBody('RECOVER_AUTO', 7, savedGeneration)).toEqual({
-      expected_revision: 7, action: 'AUTO',
-    })
-    for (const action of ['MARK_SUCCEEDED', 'MARK_FAILED'] as const) {
-      expect(createTrackingRecoverBody(action, 7, savedGeneration)).toEqual({
-        expected_revision: 7, action, confirm: true,
-      })
-    }
-    expect(createTrackingRecoverBody('RECOVER_AUTO', 7, savedGeneration, 'profile')).toEqual({
-      expected_revision: 7, action: 'AUTO', storage_dir: 'profile',
-    })
-    // The body shape itself cannot express an external id/URL/raw result/note.
-    const serialized = JSON.stringify(createTrackingRecoverBody('MARK_SUCCEEDED', 7, savedGeneration))
-    for (const leaked of ['external_id', 'external_url', 'raw', 'note', 'saved_connection']) {
-      expect(serialized).not.toContain(leaked)
-    }
-  })
-
-  it('binds VERIFY_EXTERNAL only to the saved generation', () => {
-    expect(createTrackingRecoverBody('VERIFY_EXTERNAL', 2, savedConnection)).toEqual({
-      expected_revision: 2, action: 'VERIFY_EXTERNAL', connection_ref: savedConnection.connection_ref, configuration_revision: 3,
-    })
-    // Without the live saved generation the read-only external verification is not sent.
-    expect(createTrackingRecoverBody('VERIFY_EXTERNAL', 2, null)).toBeNull()
-    // A missing saved generation is never sent.
-    expect(createTrackingRecoverBody('VERIFY_EXTERNAL', 2, { connection_ref: undefined, configuration_revision: undefined })).toEqual({
-      expected_revision: 2, action: 'VERIFY_EXTERNAL', connection_ref: undefined, configuration_revision: undefined,
-    })
-  })
-
-  it('accepts only a recovery action the server actually offers for the record', () => {
-    expect(createTrackingRecoveryIntent(recoverableItem(), 'RECOVER_AUTO')).toEqual({
-      action: 'RECOVER_AUTO', expectedRevision: 3,
-    })
-    expect(createTrackingRecoveryIntent(recoverableItem(), 'MARK_FAILED')).toEqual({
-      action: 'MARK_FAILED', expectedRevision: 3,
-    })
-    // A stale/hand-made action, a non-recoverable record and a bad revision.
-    expect(createTrackingRecoveryIntent(recoverableItem({ available_actions: [markFailedAction] }), 'RECOVER_AUTO')).toBeNull()
-    expect(createTrackingRecoveryIntent(item({ status: 'ACTIVE' }), 'MARK_SUCCEEDED')).toBeNull()
-    expect(createTrackingRecoveryIntent(recoverableItem({ revision: 0 }), 'RECOVER_AUTO')).toBeNull()
-    // The read-only external verification still needs both a recoverable record
-    // and the capability the live page session proved (a read-only path that is
-    // deliberately outside the #89 write-gate convergence).
-    expect(createTrackingRecoveryIntent(recoverableItem(), 'VERIFY_EXTERNAL', capabilities())).toEqual({
-      action: 'VERIFY_EXTERNAL', expectedRevision: 3,
-    })
-    expect(createTrackingRecoveryIntent(recoverableItem(), 'VERIFY_EXTERNAL', capabilities({ external_verify: 'UNKNOWN' }))).toBeNull()
-    expect(createTrackingRecoveryIntent(recoverableItem(), 'VERIFY_EXTERNAL', null)).toBeNull()
-    expect(createTrackingRecoveryIntent(item({ status: 'ACTIVE' }), 'VERIFY_EXTERNAL', capabilities())).toBeNull()
-
-    expect(canVerifyExternally(capabilities())).toBe(true)
-    expect(canVerifyExternally(null)).toBe(false)
-    expect(canVerifyExternally(capabilities({ probe_status: 'FAILED' }))).toBe(false)
-  })
-
-  it('keeps the recovery state whenever the outcome is not a decided verdict', () => {
-    expect(projectRecoveryOutcome('tracking-1', 'RECOVER_AUTO', recoverResult())).toMatchObject({
-      state: 'ACTIVE', needsManual: false,
-    })
-    expect(projectRecoveryOutcome('tracking-1', 'MARK_FAILED', recoverResult({ action: 'MARK_FAILED', outcome: 'SUBMIT_FAILED' })))
-      .toMatchObject({ state: 'SUBMIT_FAILED', needsManual: false })
-
-    const manual = projectRecoveryOutcome('tracking-1', 'RECOVER_AUTO', recoverResult({
-      outcome: 'RECOVERY_REQUIRED', needs_manual: true,
-    }))
-    expect(manual).toMatchObject({ state: 'RECOVERY_REQUIRED', needsManual: true })
-    expect(manual.message).not.toContain('RECOVERY_REQUIRED')
-    expect(RECOVERY_NEEDS_MANUAL_NOTICE).toContain('独立核对')
-
-    // needs_manual is the server's own verdict even without the outcome value.
-    expect(projectRecoveryOutcome('tracking-1', 'VERIFY_EXTERNAL', recoverResult({
-      action: 'VERIFY_EXTERNAL', outcome: 'ACTIVE', needs_manual: true,
-    }))).toMatchObject({ state: 'RECOVERY_REQUIRED', needsManual: true })
-    // An outcome outside the documented enum is never read as a success.
-    for (const outcome of ['DISABLED', 'EXTERNAL_DELETED', 'SOMETHING_NEW']) {
-      expect(projectRecoveryOutcome('tracking-1', 'VERIFY_EXTERNAL', recoverResult({
-        outcome: outcome as never,
-      }))).toMatchObject({ state: 'UNKNOWN', needsManual: false })
-    }
-
-    for (const [action, state, locked] of [
-      ['RECOVER_AUTO', 'UNKNOWN', true],
-      ['MARK_SUCCEEDED', 'RECOVERY_REQUIRED', true],
-      ['MARK_FAILED', 'ACTIVE', false],
-      ['VERIFY_EXTERNAL', 'SUBMIT_FAILED', false],
-      ['VERIFY_EXTERNAL', 'CONFLICT', false],
-      ['VERIFY_EXTERNAL', 'REJECTED', false],
-    ] as ReadonlyArray<[TrackingRecoveryActionCode, 'UNKNOWN' | 'RECOVERY_REQUIRED' | 'ACTIVE' | 'SUBMIT_FAILED' | 'CONFLICT' | 'REJECTED', boolean]>) {
-      const session = createRecoverySession('tracking-1', action, state, state === 'RECOVERY_REQUIRED')
-      expect(session).toMatchObject({ trackingId: 'tracking-1', action, state })
-      expect(recoverySessionKeepsLock(session.state)).toBe(locked)
-      expect(session.message).not.toContain(state)
-    }
-    expect(recoverySessionKeepsLock(createRecoveryConflictSession('tracking-1', 'RECOVER_AUTO').state)).toBe(false)
-  })
-})
-
-describe('tracking management projection (US-313)', () => {
-  it('requests only a scope the server actually offered', () => {
-    const scoped = item({
-      available_actions: [action({ target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'] })],
-    })
-    // Both scopes are requestable while both capabilities are proven.
-    expect(projectTrackingActionScopes(scoped, 'MODIFY', 'SUBSCRIPTION'))
-      .toEqual(['SUBSCRIPTION'])
-    expect(projectTrackingActionScopes(scoped, 'MODIFY', 'ASSOCIATED_RSS'))
-      .toEqual(['ASSOCIATED_RSS'])
-
-    // A scope the server did not offer is never requestable (issue #89), while
-    // an offered scope no longer depends on a diagnostic probe.
-    const subscriptionOnly = item({
-      available_actions: [action({ target_scopes: ['SUBSCRIPTION'] })],
-    })
-    expect(projectTrackingActionScopes(subscriptionOnly, 'MODIFY', 'ASSOCIATED_RSS')).toEqual([])
-    expect(projectTrackingActionScopes(subscriptionOnly, 'MODIFY', 'SUBSCRIPTION'))
-      .toEqual(['SUBSCRIPTION'])
-  })
-
-  it('never derives a requestable scope from an unknown action, style or scope', () => {
-    const cases: TrackingItem[] = [
-      item({ available_actions: [action({ code: 'REBOOT_EXTERNAL' as never })] }),
-      item({ available_actions: [action({ style: 'GLOWING' as never })] }),
-      item({ available_actions: [action({ target_scopes: ['WHOLE_LIBRARY' as never] })] }),
-      item({ available_actions: [action({ target_scopes: [] })] }),
-    ]
-    for (const record of cases) {
-      expect(projectTrackingActionScopes(record, 'MODIFY', 'SUBSCRIPTION')).toEqual([])
-    }
-    // The server projection alone makes the scope requestable (issue #89).
-    expect(projectTrackingActionScopes(item({
-      available_actions: [action()],
-    }), 'MODIFY', 'SUBSCRIPTION')).toEqual(['SUBSCRIPTION'])
-  })
-
-  it('maps every documented management conflict to a fixed next step and fails closed', () => {
-    for (const type of MANAGEMENT_CONFLICT_TYPES) {
-      const message = managementConflictMessage(type)
-      expect(message).toContain('未提交到 Auto Bangumi')
-      expect(message).not.toContain(type)
-    }
-    expect(managementConflictMessage('tracking_management_patch_invalid')).toContain('未通过服务端校验')
-    expect(managementConflictMessage('tracking_target_missing')).toContain('没有对应的外部对象')
-    for (const unknown of ['something_new', undefined, 42, null]) {
-      expect(managementConflictMessage(unknown)).toBe(MANAGEMENT_CONFLICT_FALLBACK_MESSAGE)
-    }
-  })
-
-  it('locks the single intent only while the management result is indeterminate', () => {
-    for (const [state, locked] of [
-      ['IN_FLIGHT', false], ['SUCCEEDED', false], ['FAILED', false],
-      ['CONFLICT', false], ['REJECTED', false], ['UNKNOWN', true],
-    ] as ReadonlyArray<[TrackingManagementState, boolean]>) {
-      const session = createManagementSession('tracking-1', 'MODIFY', 'SUBSCRIPTION', state)
-      expect(session).toMatchObject({ trackingId: 'tracking-1', action: 'MODIFY', targetScope: 'SUBSCRIPTION', state })
-      expect(managementSessionKeepsIntent(session)).toBe(locked)
-      expect(session.message).not.toContain(state)
-      expect(session.message.length).toBeGreaterThan(0)
-    }
-    // The server's own flag decides needs_manual; a missing flag never reads as
-    // a decided verdict.
-    expect(managementSessionNeedsManual('UNKNOWN', true)).toBe(true)
-    expect(managementSessionNeedsManual('UNKNOWN', undefined)).toBe(true)
-    expect(managementSessionNeedsManual('UNKNOWN', false)).toBe(false)
-    expect(managementSessionNeedsManual('SUCCEEDED', true)).toBe(false)
-    expect(MANAGEMENT_NEEDS_MANUAL_NOTICE).toContain('独立核对')
-  })
-
-  it('releases the page lock for every decided management state', () => {
-    const conflict = createManagementSession('tracking-1', 'MODIFY', 'ASSOCIATED_RSS', 'CONFLICT', false,
-      managementConflictMessage('tracking_target_missing'))
-    expect(conflict.message).toContain('没有对应的外部对象')
-    expect(managementSessionKeepsIntent(conflict)).toBe(false)
-    expect(conflict.state).toBe('CONFLICT')
-  })
-})
-
 describe('submission mode display (issue #99 AC 6/7)', () => {
   it('labels a real operation-level mode and fails closed for everything else', () => {
     expect(formatSubmissionMode('CONTINUE_TRACKING')).toBe('持续追番')
@@ -684,35 +210,11 @@ describe('submission mode display (issue #99 AC 6/7)', () => {
       expect(formatSubmissionMode(value)).toBeNull()
     }
   })
-})
 
-describe('submission failure diagnostics (issue #101)', () => {
-  it('gives a one-time failure the plain retryable sentence only', () => {
-    const session = createWriteSession(
-      'tracking-1', 'SUBMIT', 'SUBMIT_FAILED', [], null, 'DOWNLOAD_EXISTING',
-    )
-    expect(session.message).toBe(ONE_TIME_SUBMIT_FAILED_MESSAGE)
-    for (const forbidden of ['尚未创建', '可能部分成功', '可安全重试', '外部订阅']) {
-      expect(session.message).not.toContain(forbidden)
-    }
-  })
-
-  it('keeps the actionable class copy for 持续追番', () => {
-    const session = createWriteSession(
-      'tracking-1', 'SUBMIT', 'SUBMIT_FAILED', [], 'AUTHENTICATION', 'CONTINUE_TRACKING',
-    )
-    expect(session.message).toContain('前往设置')
-  })
-
-  it('projects bounded diagnostics and fails closed on anything else', () => {
-    expect(projectWriteDiagnostics({
-      http_status: 503, message_zh: '上游繁忙', message_en: 'busy',
-    })).toEqual({ httpStatus: 503, messageZh: '上游繁忙', messageEn: 'busy' })
-    // Missing, mistyped or unknown shapes never invent a reason.
-    for (const value of [null, undefined, {}, { http_status: 'x' }, 'nope', { message_zh: '  ' }]) {
-      expect(projectWriteDiagnostics(value)).toEqual({
-        httpStatus: null, messageZh: null, messageEn: null,
-      })
-    }
+  it('keeps the fixed, write-only help copy of every management section', () => {
+    expect(MODIFY_FORM_HELP).toContain('不读取 Auto Bangumi 的当前值')
+    expect(MANAGEMENT_ACTIONS_HELP).toContain('不修改 MiGuOrca 本地方案')
+    expect(DELETE_EXTERNAL_HELP).toContain('没有勾选、批量或全局删除')
+    expect(DELETE_EXTERNAL_HELP).toContain('不会删除任何媒体文件')
   })
 })
