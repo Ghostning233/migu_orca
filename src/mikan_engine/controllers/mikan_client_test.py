@@ -847,6 +847,54 @@ def test_mikan_client_list_rss_sources_falls_back_to_bangumi_rss() -> None:
     assert sources[0].fixture_path == ""
 
 
+@pytest.mark.parametrize("style", [
+    "background-image: url('/images/Bangumi/cover.jpg?width=400&height=560&format=webp');",
+    'background-image: url("/images/Bangumi/cover.jpg?width=400&height=560&format=webp");',
+    "background-image: url(/images/Bangumi/cover.jpg?width=400&height=560&format=webp);",
+    "color: red; BACKGROUND-IMAGE : URL( '/images/Bangumi/cover.jpg?width=400&height=560&format=webp' );",
+])
+def test_direct_bangumi_detail_parses_background_poster(style: str) -> None:
+    from html import escape
+
+    html = (
+        '<h1 class="bangumi-title">BanG Dream! YUME∞MITA</h1>'
+        f'<div class="bangumi-poster" style="{escape(style, quote=True)}"></div>'
+        '<a href="/RSS/Bangumi?bangumiId=1">RSS</a>'
+    )
+    client = create_mikan_client(
+        MikanConfig(search_endpoint="https://mikan.example/Home/Search", timeout_seconds=5),
+        transport=FakeTransport(html),
+    )
+
+    detail = client.get_direct_bangumi_detail("https://mikan.example/Home/Bangumi/1")
+
+    assert detail.poster_url == (
+        "https://mikan.example/images/Bangumi/cover.jpg?width=400&height=560&format=webp"
+    )
+
+
+@pytest.mark.parametrize("element, expected", [
+    ('<div class="bangumi-poster" style="background-image:url(https://cdn.example/cover.jpg)"></div>', "https://cdn.example/cover.jpg"),
+    ('<img class="bangumi-poster" src="/cover.jpg">', "https://mikan.example/cover.jpg"),
+    ('<img class="b-lazy" data-src="/cover.jpg">', "https://mikan.example/cover.jpg"),
+    ('<div class="advertisement" style="background-image:url(/ad.jpg)"></div>', None),
+    ('<div class="bangumi-poster" style="background-image:none"></div>', None),
+    ('<div class="bangumi-poster" style="background-image:url(javascript:alert)"></div>', None),
+    ('<div class="bangumi-poster" style="background-image:url(file:///cover.jpg)"></div>', None),
+    ('<div class="bangumi-poster" style="background-image:url(https://[invalid/cover.jpg)"></div>', None),
+    ('<div class="bangumi-poster" style="background-image:url(https://user:secret@cdn.example/cover.jpg)"></div>', None),
+    ('<div class="bangumi-poster" style="background-image:url(https://cdn.example/co&#10;ver.jpg)"></div>', None),
+])
+def test_bangumi_detail_poster_compatibility_and_rejection(element: str, expected: str | None) -> None:
+    parser = _MikanBangumiPageParser("https://mikan.example/Home/Bangumi/1")
+    parser.feed('<h1 class="bangumi-title">示例</h1>' + element + '<a href="/RSS/Bangumi?bangumiId=1">RSS</a>')
+
+    detail = parser.bangumi_detail()
+
+    assert detail is not None
+    assert detail.poster_url == expected
+
+
 def test_mikan_client_parses_structured_bangumi_detail_fixture() -> None:
     html = _read_fixture("mikan_bangumi_2353_detail.html")
     transport = FakeTransport(html)
