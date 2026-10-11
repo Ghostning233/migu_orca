@@ -97,7 +97,7 @@ Stage 29（US-223～US-226）为统一追番 API 增加稳定的 tracking 错误
 capability 未知、版本不支持、管理读取失败和 sync 部分失败只返回固定 error type、safe counts
 与 capability state；不得把读取失败当空列表，也不得回显上游 URL、Cookie、token、账号、密码、
 header、原始响应或 RSS URL。`VERIFY_EXTERNAL` 的无匹配/歧义保持 `RECOVERY_REQUIRED`，不伪装成
-可重试失败；未知外部写结果的 `RECOVERY_REQUIRED` 规则留给 B-C2。
+可重试失败；结果待确认的外部写 `RECOVERY_REQUIRED` 规则留给 B-C2。
 
 ## 12. Stage 31 外部管理写错误边界（已完成）
 

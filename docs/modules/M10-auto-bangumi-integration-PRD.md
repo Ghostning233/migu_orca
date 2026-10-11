@@ -165,13 +165,13 @@ Cookie，只读访问 status、bangumi list/detail 和 RSS list；3.1.18 以外�
 均 fail closed。capability 与 sync API 只返回严格安全投影，原始对象、URL、Cookie、凭据和响应体
 不得落盘或进入错误/日志。`EXTERNAL_ONLY`、ExternalMapping v1、唯一对账和 `VERIFY_EXTERNAL`
 不改变 Stage 29 的提交/恢复语义。B-C2 才能新增 `MODIFY`、`SET_ENABLED`、`DELETE_EXTERNAL`、
-`REFRESH_RSS`，并必须具备 confirm、幂等键、revision CAS、结果未知恢复和 `file=false` 媒体保护。
+`REFRESH_RSS`，并必须具备 confirm、幂等键、revision CAS、结果待确认恢复和 `file=false` 媒体保护。
 
 ## 12. Stage 31 B-C2 可靠写管理（已完成）
 
 Stage 31 执行 PRD 为 `docs/MiGuOrca_stage31_ab_write_management_PRD.md`（US-237～US-246）。它只对
 password + 精确 3.1.18 开放 `MODIFY`、`SET_ENABLED`、`DELETE_EXTERNAL`、`REFRESH_RSS`，统一经过
-tracking ID、confirm、幂等 operation、revision CAS、写后只读回查和未知结果恢复。番剧停用与
+tracking ID、confirm、幂等 operation、revision CAS、写后只读回查和结果待确认恢复。番剧停用与
 删除由 adapter 固定 `file=false`；禁止真实实例测试、全局 RSS 刷新、批量外部删除、媒体删除和
 正式前端页面。US-237～US-246 已完成；Stage 32 B-D 已按
 `docs/MiGuOrca_stage32_contract_hardening_PRD.md` 完成 US-247～US-256，负责端点生命周期、严格
