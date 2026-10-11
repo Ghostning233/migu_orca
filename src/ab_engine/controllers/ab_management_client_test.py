@@ -306,3 +306,39 @@ def test_rss_update_cannot_replace_url_and_rss_targets_are_numeric() -> None:
     with pytest.raises(Stage1Error):
         client.enable_rss(["rss-not-numeric"])
     assert transport.calls == []
+
+
+def test_snapshot_deadline_bounds_every_sub_request_together() -> None:
+    """Issue #183 review: four serial requests share one remaining budget.
+
+    Each sub-request gets only the time that is actually left, so a 12s endpoint
+    budget is never extended into four fresh per-request timeouts.
+    """
+    clock = {"now": 0.0}
+    timeouts: list[float] = []
+
+    class _Transport:
+        def request_json(self, method, endpoint, headers, payload=None, *, timeout):
+            timeouts.append(timeout)
+            clock["now"] += 4.0  # every request is slow but "successful"
+            if endpoint.endswith("/auth/login"):
+                return {"access_token": "session-secret"}
+            if endpoint.endswith("/status"):
+                return {"version": "3.1.18"}
+            return []
+
+        def post_json_same_origin(self, *args, **kwargs):  # pragma: no cover
+            raise AssertionError("management adapter must never write")
+
+    client = create_legacy_31_management_client(
+        _config(), transport=_Transport(), monotonic=lambda: clock["now"]
+    )
+
+    with pytest.raises(Stage1Error) as error:
+        client.read_snapshot(deadline=12.0)
+
+    assert error.value.error_type == "ab_timeout"
+    # 12 / 4 = three requests fit; the fourth would exceed the deadline.
+    assert len(timeouts) == 3, timeouts
+    assert timeouts == [12.0, 8.0, 4.0]
+    assert clock["now"] == 12.0

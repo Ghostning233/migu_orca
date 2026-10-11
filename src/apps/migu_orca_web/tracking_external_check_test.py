@@ -51,7 +51,7 @@ def test_transient_failure_is_retried_then_succeeds() -> None:
     clock = _Clock()
     calls: list[int] = []
 
-    def read() -> tuple[str]:
+    def read(deadline=None) -> tuple[str]:
         calls.append(len(calls) + 1)
         if len(calls) < 3:
             raise Stage1Error("ab_connection_failed", "连接失败", "check", {"category": "connection"})
@@ -67,7 +67,7 @@ def test_transient_failure_is_retried_then_succeeds() -> None:
 def test_attempt_cap_stops_the_reads() -> None:
     clock = _Clock()
 
-    def read() -> tuple[str]:
+    def read(deadline=None) -> tuple[str]:
         raise Stage1Error("ab_connection_failed", "连接失败", "check", {"category": "connection"})
 
     result = read_snapshot_bounded(read, policy=_policy(clock, max_attempts=2))
@@ -82,7 +82,7 @@ def test_attempt_cap_stops_the_reads() -> None:
 def test_total_budget_stops_before_the_backoff_would_exceed_it() -> None:
     clock = _Clock()
 
-    def read() -> tuple[str]:
+    def read(deadline=None) -> tuple[str]:
         raise Stage1Error("ab_timeout", "超时", "check", {"category": "timeout"})
 
     result = read_snapshot_bounded(
@@ -106,7 +106,7 @@ def test_a_proven_failure_is_not_retried(error_type: str, reason: str) -> None:
     clock = _Clock()
     calls: list[int] = []
 
-    def read() -> tuple[str]:
+    def read(deadline=None) -> tuple[str]:
         calls.append(1)
         raise Stage1Error(error_type, "已证实失败", "check", {})
 
@@ -121,7 +121,7 @@ def test_a_proven_failure_is_not_retried(error_type: str, reason: str) -> None:
 def test_an_unexpected_error_stays_unreadable_and_is_retried_but_bounded() -> None:
     clock = _Clock()
 
-    def read() -> tuple[str]:
+    def read(deadline=None) -> tuple[str]:
         raise RuntimeError("boom")
 
     result = read_snapshot_bounded(read, policy=_policy(clock, max_attempts=2))
@@ -141,7 +141,7 @@ def test_a_read_that_only_answers_after_the_deadline_is_never_accepted() -> None
     """Issue #183 review: the budget bounds the reads, not just the retries."""
     clock = _Clock()
 
-    def read() -> tuple[str]:
+    def read(deadline=None) -> tuple[str]:
         # A slow upstream answers successfully, but only after the deadline.
         clock.now += 5.0
         return ("late",)
@@ -159,3 +159,20 @@ def test_per_attempt_timeout_is_derived_from_the_endpoint_budget() -> None:
     assert attempt_timeout_seconds(policy) == 4.0
     # The whole check must stay inside the browser's default request budget.
     assert CHECK_TOTAL_BUDGET_SECONDS < 15.0
+
+
+def test_every_attempt_receives_the_same_absolute_deadline() -> None:
+    """Issue #183 review: the deadline is shared, never extended per attempt."""
+    clock = _Clock()
+    seen: list[float | None] = []
+
+    def read(deadline=None) -> tuple[str]:
+        seen.append(deadline)
+        clock.now += 3.0
+        raise Stage1Error("ab_connection_failed", "连接失败", "check", {"category": "connection"})
+
+    result = read_snapshot_bounded(read, policy=_policy(clock, max_attempts=3, budget_seconds=9.0))
+
+    assert result.attempts == 3
+    assert seen == [9.0, 9.0, 9.0]
+    assert clock.slept == [1.0, 1.0]

@@ -105,7 +105,7 @@ def test_check_reports_a_legal_miss_as_pending_with_a_proven_reason(monkeypatch,
 
 def test_check_retries_transient_reads_inside_the_injected_budget(monkeypatch, tmp_path: Path) -> None:
     class _FlakyClient(ReadOnlyClient):
-        def read_snapshot(self):
+        def read_snapshot(self, *, deadline=None):
             self.reads += 1
             if self.reads == 1:
                 raise Stage1Error("ab_connection_failed", "连接失败", "check", {"category": "connection"})
@@ -240,7 +240,7 @@ def test_check_holds_the_saved_connection_lease_while_reading(monkeypatch, tmp_p
     blocked: list[str] = []
 
     class _ReplacingClient(ReadOnlyClient):
-        def read_snapshot(self):
+        def read_snapshot(self, *, deadline=None):
             try:
                 repository.save(
                     build_stored_autobangumi_config(

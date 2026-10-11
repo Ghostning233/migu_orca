@@ -144,7 +144,9 @@ def _verify_external(
         return _verification_needs_manual(config, record=record, request=request,
             checked_revision=checked_revision, timestamp=timestamp,
             reason=confirm_reason_for_error(exc.error_type))
-    read = read_snapshot_bounded(client.read_snapshot, policy=policy)
+    read = read_snapshot_bounded(
+        lambda deadline: client.read_snapshot(deadline=deadline), policy=policy
+    )
     if read.snapshot is None:
         # A read that never succeeded proves nothing about the object; only the
         # proven failure class is reported (issue #183).
@@ -269,7 +271,7 @@ def _external_matches(
                 and isinstance(item.title, str) and item.title.strip()
                 and normalize_match_text(item.title) == normalize_match_text(title)
                 and normalize_match_text(item.subtitle_group) == normalize_match_text(group)
-                and selected_url in item.rss_urls]
+                and selected_url in item.rss_urls], None
     if isinstance(external_id, str) and external_id:
         return [item for item in subscriptions if item.external_id == external_id], None
     if connection_ref is not None:

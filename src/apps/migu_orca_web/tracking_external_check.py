@@ -125,11 +125,14 @@ class BoundedSnapshotRead:
 
 
 def read_snapshot_bounded(
-    read_snapshot: Callable[[], Any],
+    read_snapshot: Callable[..., Any],
     *,
     policy: CheckPolicy = DEFAULT_CHECK_POLICY,
 ) -> BoundedSnapshotRead:
     """Read one snapshot with bounded retries and never write anything.
+
+    ``read_snapshot`` must accept ``deadline=<absolute monotonic time>`` so an
+    attempt can pass the still-remaining time into each of its sub-requests.
 
     Retries cover transient read failures only; an authentication, version or
     capability failure is returned immediately so the caller can state the
@@ -142,11 +145,14 @@ def read_snapshot_bounded(
     last_error: Stage1Error | None = None
     last_reason = CONFIRM_REASON_UNREADABLE
     started = policy.monotonic()
+    # One absolute deadline shared by every attempt *and* by every sub-request
+    # inside an attempt: a read may only use the time that is actually left
+    # (issue #183 review), instead of each request getting a fresh slice.
     deadline = started + policy.budget_seconds
     while attempts < policy.max_attempts:
         attempts += 1
         try:
-            snapshot = read_snapshot()
+            snapshot = read_snapshot(deadline=deadline)
         except Stage1Error as exc:
             last_error = exc
             last_reason = confirm_reason_for_error(exc.error_type)

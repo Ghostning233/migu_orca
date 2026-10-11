@@ -202,7 +202,7 @@ def compose_tracking_readback_external(config: Any) -> Callable[[], Any]:
     )
 
     def read_bounded() -> Any:
-        read = read_snapshot_bounded(client.read_snapshot)
+        read = read_snapshot_bounded(lambda deadline: client.read_snapshot(deadline=deadline))
         if read.snapshot is None:
             if read.error is not None:
                 raise read.error

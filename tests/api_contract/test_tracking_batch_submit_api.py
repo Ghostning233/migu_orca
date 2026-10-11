@@ -313,7 +313,7 @@ def _patch_readback(
     write reads back nothing, which the server must treat as a definite failure.
     """
 
-    def read_snapshot() -> Any:
+    def read_snapshot(deadline=None) -> Any:
         classification = classify_external_submit_result(state.get("result"))
         if classification != TRACKING_OPERATION_STATE_SUCCEEDED:
             # A definite failure confirms there is no object; an unresolved write

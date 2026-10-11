@@ -1,7 +1,8 @@
 """Request-scoped Auto Bangumi 3.1.18 management adapter."""
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+import time
+from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 from urllib.parse import quote, urlsplit
@@ -27,15 +28,32 @@ class AutoBangumiManagementClient(Protocol):
 class Legacy31ManagementClient:
     """One-request session adapter; no credential is retained after read_snapshot."""
 
-    def __init__(self, config: AutoBangumiConfig, *, transport: AutoBangumiLegacyTransport, timeout: float = 30) -> None:
+    def __init__(
+        self,
+        config: AutoBangumiConfig,
+        *,
+        transport: AutoBangumiLegacyTransport,
+        timeout: float = 30,
+        monotonic: Callable[[], float] | None = None,
+    ) -> None:
         self._config = config
         self._transport = transport
         self._timeout = timeout
         self._token: str | None = None
+        # One shared deadline for a multi-request read (issue #183 review): every
+        # sub-request gets the *remaining* time, so four serial requests cannot
+        # accumulate four times the endpoint budget.
+        self._deadline: float | None = None
+        self._monotonic = monotonic or time.monotonic
 
-    def read_snapshot(self) -> tuple[AutoBangumiCapabilities, list[ExternalSubscription], list[ExternalRss]]:
+    def read_snapshot(
+        self, *, deadline: float | None = None
+    ) -> tuple[AutoBangumiCapabilities, list[ExternalSubscription], list[ExternalRss]]:
+        """Read one snapshot; ``deadline`` bounds all four requests together."""
         if self._config.auth_mode != "password":
             raise Stage1Error("ab_management_unsupported", "当前 Auto Bangumi 认证模式不支持管理读取", "ab_management")
+        previous_deadline = self._deadline
+        self._deadline = deadline
         try:
             self._authenticate()
             headers = {"Accept": "application/json", "Cookie": self._cookie()}
@@ -58,6 +76,7 @@ class Legacy31ManagementClient:
             )
             return capabilities, subscriptions, rss
         finally:
+            self._deadline = previous_deadline
             self._token = None
 
     def probe_capabilities(self) -> AutoBangumiCapabilities:
@@ -223,8 +242,17 @@ class Legacy31ManagementClient:
         bare JSON array; the shape is still checked by ``_items`` immediately
         after, so nothing becomes shape-agnostic (issue #182).
         """
+        timeout = self._timeout
+        if self._deadline is not None:
+            remaining = self._deadline - self._monotonic()
+            if remaining <= 0:
+                raise Stage1Error(
+                    "ab_timeout", "Auto Bangumi HTTP 请求超时", "ab_management",
+                    {"category": "timeout"},
+                )
+            timeout = min(timeout, remaining)
         try:
-            return self._transport.request_json(method, _api_endpoint(self._config.base_url, path), headers, payload, timeout=self._timeout)
+            return self._transport.request_json(method, _api_endpoint(self._config.base_url, path), headers, payload, timeout=timeout)
         except Stage1Error:
             raise
         except Exception as exc:
@@ -236,6 +264,7 @@ def create_legacy_31_management_client(
     *,
     transport: AutoBangumiLegacyTransport,
     timeout: float = 30,
+    monotonic: Callable[[], float] | None = None,
 ) -> Legacy31ManagementClient:
     """Build one request-scoped management client.
 
@@ -243,7 +272,9 @@ def create_legacy_31_management_client(
     endpoint-level budget pass a derived per-attempt timeout through here
     (issue #183) instead of widening any global default.
     """
-    return Legacy31ManagementClient(config, transport=transport, timeout=timeout)
+    return Legacy31ManagementClient(
+        config, transport=transport, timeout=timeout, monotonic=monotonic
+    )
 
 
 def _unknown_capabilities(adapter: Literal["legacy_3_1", "api_token"], version: str | None) -> AutoBangumiCapabilities:

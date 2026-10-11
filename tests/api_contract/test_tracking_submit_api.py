@@ -553,7 +553,7 @@ def _patch_readback(
     write reads back nothing, which the server must treat as a definite failure.
     """
 
-    def read_snapshot() -> Any:
+    def read_snapshot(deadline=None) -> Any:
         if mode == "unreadable":
             return None
         if mode == "empty":

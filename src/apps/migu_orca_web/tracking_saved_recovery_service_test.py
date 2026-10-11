@@ -55,7 +55,7 @@ class ReadOnlyClient:
             external_verify="SUPPORTED",
         )
 
-    def read_snapshot(self):
+    def read_snapshot(self, *, deadline=None):
         self.reads += 1
         return self.capabilities, self.subscriptions, self.rss_items
 
