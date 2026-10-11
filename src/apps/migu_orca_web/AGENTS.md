@@ -28,7 +28,7 @@
 - 已确认 Request → tracking 复用 `tracking_handoff.py`：ensure 不覆盖既有记录；
   tracking 写失败不回滚已确认方案，不伪造状态，后续访问可补偿。
 - TrackingRecord/TrackingOperation 的 CAS/持久化由 repository 处理，外部写前持久化意图，
-  写后回查并落安全结果；未知结果进入恢复，不能误记成直接可重试失败。
+  写后回查并落安全结果；结果待确认进入恢复，不能误记成直接可重试失败。
 - 旧 submit/batch queue Web 写端点已退役；统一 tracking submission/recovery 是唯一运行时写路径。
   历史 queue 文件仅由迁移所需只读解析器读取，不为清理无用路径而删除历史数据。
 - revalidate/AUTO 恢复纯本地；VERIFY_EXTERNAL 才携带临时 AB 配置做能力校验的只读恢复。
