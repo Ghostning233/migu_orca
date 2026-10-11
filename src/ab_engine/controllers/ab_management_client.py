@@ -22,7 +22,10 @@ _MAX_RSS_PER_SUBSCRIPTION = 100
 
 
 class AutoBangumiManagementClient(Protocol):
-    def read_snapshot(self) -> tuple[AutoBangumiCapabilities, list[ExternalSubscription], list[ExternalRss]]: ...
+    def read_snapshot(
+        self, *, deadline: float | None = None
+    ) -> tuple[AutoBangumiCapabilities, list[ExternalSubscription], list[ExternalRss]]:
+        """Read one snapshot; ``deadline`` bounds every sub-request together."""
 
 
 class Legacy31ManagementClient:

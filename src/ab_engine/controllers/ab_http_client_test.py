@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+import time
 from collections.abc import Mapping
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -247,3 +249,54 @@ def test_submit_classifies_a_duplicate_subscription_with_bounded_upstream_reason
     assert secret not in str(failure.value.details or {})
     # The bounded reason is available to the diagnostics layer only.
     assert failure.value.details == {"message_zh": canary}
+
+
+class _TricklingResponse:
+    """A body that keeps arriving until the strict deadline closes it."""
+
+    def __init__(self) -> None:
+        self.closed = threading.Event()
+
+    def read(self) -> bytes:
+        # Simulate a peer that never stops sending: the read only returns when
+        # the watchdog closes the response, which must happen at the deadline.
+        self.closed.wait(5.0)
+        raise OSError("response closed at the deadline")
+
+    def close(self) -> None:
+        self.closed.set()
+
+    def __enter__(self) -> _TricklingResponse:
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        return None
+
+
+def test_a_trickling_body_cannot_outlive_the_strict_read_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #183 review: the *total* time is bounded, not one socket recv."""
+    response = _TricklingResponse()
+    monkeypatch.setattr(
+        "ab_engine.controllers.ab_http_client.build_opener",
+        lambda *handlers: _AlwaysOpener(response),
+    )
+
+    started = time.monotonic()
+    with pytest.raises(Stage1Error) as error:
+        UrlopenAutoBangumiHttpTransport().request_json(
+            "GET", "https://auto-bangumi.example/api/v1/rss", {}, timeout=0.05
+        )
+    elapsed = time.monotonic() - started
+
+    assert error.value.error_type == "ab_timeout"
+    assert elapsed < 1.0, elapsed
+
+
+class _AlwaysOpener:
+    def __init__(self, response: Any) -> None:
+        self._response = response
+
+    def open(self, request: Any, timeout: float) -> Any:
+        return self._response

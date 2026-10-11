@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import re
+import threading
 from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any, Literal, Protocol
@@ -90,7 +92,9 @@ class UrlopenAutoBangumiHttpTransport:
 
         try:
             with urlopen(request, timeout=timeout) as response:
-                response_body = response.read()
+                response_body = _read_response_body(
+                    response, timeout=timeout, step="create_ab_subscription"
+                )
         except HTTPError as exc:
             raise _http_error_to_stage1_error(exc) from exc
         except URLError as exc:
@@ -136,7 +140,9 @@ class UrlopenAutoBangumiHttpTransport:
         try:
             # Never follow redirects: a token Cookie must not leave the service origin.
             with build_opener(_RejectRedirects()).open(request, timeout=timeout) as response:
-                response_body = response.read()
+                response_body = _read_response_body(
+                    response, timeout=timeout, step="probe_ab_connection"
+                )
         except HTTPError as exc:
             raise _http_error_to_stage1_error(exc, step="probe_ab_connection") from exc
         except URLError as exc:
@@ -162,7 +168,9 @@ class UrlopenAutoBangumiHttpTransport:
         try:
             # A session Cookie must never be forwarded by a redirect.
             with build_opener(_RejectRedirects()).open(request, timeout=timeout) as response:
-                response_body = response.read()
+                response_body = _read_response_body(
+                    response, timeout=timeout, step="create_ab_subscription"
+                )
         except HTTPError as exc:
             raise _http_error_to_stage1_error(exc) from exc
         except URLError as exc:
@@ -488,6 +496,37 @@ def create_auto_bangumi_submit_client(
     if transport is None:
         return create_auto_bangumi_http_client(config)
     return create_auto_bangumi_http_client(config, transport=transport)
+
+
+def _read_response_body(response: Any, *, timeout: float, step: str) -> bytes:
+    """Read one response body under a *strict* wall-clock bound.
+
+    ``urlopen(timeout=...)`` bounds a single socket operation, not the total: a
+    peer that keeps trickling bytes holds ``response.read()`` open far past the
+    timeout, which silently extended the endpoint budget (issue #183 review).  A
+    watchdog closes the response at the deadline, so the read fails as
+    ``ab_timeout`` instead of overrunning the budget.
+    """
+    expired = threading.Event()
+
+    def _expire() -> None:
+        expired.set()
+        # Closing an already broken response is best effort.
+        with contextlib.suppress(Exception):
+            response.close()
+
+    watchdog = threading.Timer(max(float(timeout), 0.001), _expire)
+    watchdog.start()
+    try:
+        return response.read()
+    except Stage1Error:
+        raise
+    except Exception as exc:
+        if expired.is_set():
+            raise _timeout_error(step) from exc
+        raise
+    finally:
+        watchdog.cancel()
 
 
 def _api_endpoint(base_url: str, path: str) -> str:
