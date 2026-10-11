@@ -2261,3 +2261,330 @@ describe('BatchWorkbenchView selection scope (US-356)', () => {
     expect(selectAll().checked).toBe(false)
   })
 })
+
+/**
+ * #161：为四处「测试全绿但行为可能已静默改变」的位置补 characterization 断言。
+ * 这里记录的是**当前**行为（包括值得商榷的 fail-closed 降级），不是期望值；
+ * 任何一项先变红就说明重构改变了对外行为。
+ */
+describe('BatchWorkbenchView lifecycle characterization (#161)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    apiPost.mockReset()
+    vi.mocked(api.get).mockReset()
+  })
+
+  function draftRow(overrides: Record<string, unknown> = {}) {
+    return batchItem({
+      item_id: 'item-1',
+      status: 'DRAFT',
+      preview_request: previewRequest('req-1'),
+      draft_id: 'draft-1',
+      draft_revision: 1,
+      ...overrides,
+    })
+  }
+
+  function confirmRow(overrides: Record<string, unknown> = {}) {
+    return {
+      item_id: 'item-1',
+      request_id: 'req-1',
+      status: 'CONFIRMED',
+      outcome: 'CONFIRMED',
+      error_type: null,
+      error_message: null,
+      tracking_id: null,
+      tracking_ready: false,
+      ...overrides,
+    }
+  }
+
+  /** 解析出一批 DRAFT 条目并把唯一入口停在保存确认前。 */
+  async function parseDraftScene(items: unknown[], rawInput = '萌王S4') {
+    apiPost.mockResolvedValueOnce(parseResult({ items }))
+    const mounted = await mountBatch()
+    await mounted.wrapper.find('#batch-raw-input').setValue(rawInput)
+    await mounted.wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    return mounted
+  }
+
+  it.each([
+    ['状态字段不是字符串', { status: 123 }],
+    ['追番标识不是字符串', { outcome: 'FAILED', status: null, request_id: null, error_type: 'unexpected_error', tracking_id: 123 }],
+    ['就绪标志不是布尔', { tracking_ready: 'yes' }],
+    ['错误类型超过 128 字符', { outcome: 'FAILED', status: null, request_id: null, error_type: 'x'.repeat(129) }],
+    ['普通失败却带请求标识', { outcome: 'FAILED', status: null, error_type: 'unexpected_error', request_id: 'req-1' }],
+  ])('fail-closed: %s 的 200 结果被整批冻结而不是部分应用', async (_label, overrides) => {
+    apiPost
+      .mockResolvedValueOnce(parseResult({ items: [draftRow()] }))
+      .mockResolvedValueOnce(saveConfirmResult({
+        results: [confirmRow(overrides)],
+        summary: { requested: 1, confirmed: 0, failed: 1 },
+      }))
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王S4')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+
+    await saveAllVisible(wrapper)
+
+    expect(wrapper.find('.batch-card-status').text()).toContain('结果待核验')
+    expect(wrapper.find('#batch-retry-frozen-operation').exists()).toBe(true)
+    // 冻结期间条目不可再确认，且响应里的越界值不进入 DOM。
+    expect(wrapper.find('.batch-draft-card input[type="checkbox"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).not.toContain('x'.repeat(129))
+    expect(wrapper.text()).not.toContain('tracking-leak')
+  })
+
+  it('fail-closed: 缺少必需字段的 200 结果同样整批冻结', async () => {
+    const row = confirmRow()
+    delete (row as Record<string, unknown>).tracking_ready
+    apiPost
+      .mockResolvedValueOnce(parseResult({ items: [draftRow()] }))
+      .mockResolvedValueOnce(saveConfirmResult({ results: [row], summary: { requested: 1, confirmed: 1, failed: 0 } }))
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王S4')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+
+    await saveAllVisible(wrapper)
+
+    expect(wrapper.find('.batch-card-status').text()).toContain('结果待核验')
+    expect(wrapper.find('#batch-retry-frozen-operation').exists()).toBe(true)
+  })
+
+  it('fail-closed: 结果长度正确但身份重复时不做任何部分应用', async () => {
+    apiPost
+      .mockResolvedValueOnce(parseResult({
+        items: [
+          draftRow(),
+          draftRow({ item_id: 'item-2', draft_id: 'draft-2', preview_request: previewRequest('req-2') }),
+        ],
+      }))
+      .mockResolvedValueOnce(saveConfirmResult({
+        results: [confirmRow(), confirmRow()],
+        summary: { requested: 2, confirmed: 2, failed: 0 },
+      }))
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('甲\n乙')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+
+    await saveAllVisible(wrapper)
+
+    expect(wrapper.findAll('.batch-card-status').map((node) => node.text())).toEqual(['结果待核验', '结果待核验'])
+    expect(wrapper.find('#batch-retry-frozen-operation').exists()).toBe(true)
+  })
+
+  it('在途的冻结重试不会发出第二个请求，成功后冻结现场才消失', async () => {
+    let resolveRetry!: (value: SaveConfirmResult) => void
+    apiPost
+      .mockResolvedValueOnce(parseResult({ items: [draftRow()] }))
+      .mockResolvedValueOnce(saveConfirmResult({
+        results: [confirmRow({ outcome: 'FAILED', status: null, request_id: null, error_type: 'x'.repeat(129) })],
+        summary: { requested: 1, confirmed: 0, failed: 1 },
+      }))
+      .mockImplementationOnce(() => new Promise<SaveConfirmResult>((resolve) => { resolveRetry = resolve }))
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王S4')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    await saveAllVisible(wrapper)
+
+    const firstFrozenCall = apiPost.mock.calls.find(([path]) => path === '/api/v1/batches/{batch_id}/save-confirm')
+    await wrapper.find('#batch-retry-frozen-operation').trigger('click')
+    await nextTick()
+    const inFlightCalls = apiPost.mock.calls.filter(([path]) => path === '/api/v1/batches/{batch_id}/save-confirm')
+    expect(inFlightCalls).toHaveLength(2)
+    // 冻结操作复用完全相同的请求体，且在途时入口已禁用。
+    expect(inFlightCalls[1]?.[1]).toEqual(firstFrozenCall?.[1])
+    expect(wrapper.find('#batch-retry-frozen-operation').attributes('disabled')).toBeDefined()
+
+    // 函数入口防重：在途期间再次触发不会发出第三个请求。
+    await wrapper.find('#batch-retry-frozen-operation').trigger('click')
+    await nextTick()
+    expect(apiPost.mock.calls.filter(([path]) => path === '/api/v1/batches/{batch_id}/save-confirm')).toHaveLength(2)
+
+    resolveRetry(saveConfirmResult({
+      results: [confirmRow()],
+      summary: { requested: 1, confirmed: 1, failed: 0 },
+    }))
+    await flushPromises()
+    expect(wrapper.find('#batch-retry-frozen-operation').exists()).toBe(false)
+    expect(wrapper.find('.batch-card-status').text()).toContain('已确认待提交')
+  })
+
+  it('离开不安全的批量现场前要求确认，确认后清理并真正离开', async () => {
+    const { wrapper, router } = await parseDraftScene([draftRow()])
+    await wrapper.find('.batch-draft-card input[type="checkbox"]').setValue(true)
+    await nextTick()
+
+    const navigation = router.push({ path: '/plans' })
+    await flushPromises()
+    expect(wrapper.find('.confirm-dialog-title').text()).toBe('离开批量审核')
+
+    await wrapper.find('.confirm-dialog .danger-button').trigger('click')
+    await navigation
+
+    // 清理清单本身由模块级用例记录（resetRoute）；这里记录的是「确认后真的离开」。
+    expect(router.currentRoute.value.path).toBe('/plans')
+    expect(wrapper.find('.confirm-dialog').exists()).toBe(false)
+  })
+
+  it('请求发出前就已是「未完成工作」：在途保存也会触发离开守卫', async () => {
+    let resolveSave!: (value: SaveConfirmResult) => void
+    apiPost
+      .mockResolvedValueOnce(parseResult({ items: [draftRow()] }))
+      .mockImplementationOnce(() => new Promise<SaveConfirmResult>((resolve) => { resolveSave = resolve }))
+    const { wrapper, router } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王S4')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('#batch-select-all-checkbox').setValue(true)
+    await nextTick()
+    await wrapper.find('#batch-accept-submit').trigger('click')
+    await nextTick()
+    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
+    await nextTick()
+
+    // 响应还没回来，但相位已置位：离开必须被拦住。
+    const navigation = router.push({ path: '/plans' })
+    await flushPromises()
+    expect(wrapper.find('.confirm-dialog-title').text()).toBe('离开批量审核')
+    await wrapper.find('.confirm-dialog .secondary-button').trigger('click')
+    await flushPromises()
+    await navigation
+    expect(router.currentRoute.value.path).toBe('/add')
+
+    resolveSave(saveConfirmResult({
+      results: [confirmRow()],
+      summary: { requested: 1, confirmed: 1, failed: 0 },
+    }))
+    await flushPromises()
+    expect(wrapper.find('.batch-card-status').text()).toContain('已确认待提交')
+  })
+
+  it('删除条目时未到期的编辑防抖随它的调度器一起消失', async () => {
+    apiPost.mockResolvedValueOnce(parseResult({ items: [draftRow()] }))
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王S4')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.batch-draft-card').trigger('click')
+    await nextTick()
+
+    // 未应用的过滤修改只活在 1.5s 防抖窗口里；删除条目后它必须一起消失。
+    await wrapper.find('#batch-preview-must-contain').setValue('未应用修改')
+    await nextTick()
+    await wrapper.find('.batch-card-delete').trigger('click')
+    await nextTick()
+
+    await new Promise((resolve) => setTimeout(resolve, 1_700))
+    await flushPromises()
+    expect(apiPost.mock.calls.filter(([path]) => path === '/api/v1/requests/preview-modify')).toHaveLength(0)
+    expect(wrapper.findAll('.batch-draft-card')).toHaveLength(0)
+  })
+
+  it('取消「舍弃现场并搜索」会回滚输入并把焦点交回搜索框', async () => {
+    apiPost.mockResolvedValueOnce(parseResult({ items: [draftRow()] }))
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王S4')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+
+    // 已有审核现场时重新提交：先征求确认，第二个请求绝不能发出。
+    await wrapper.find('#batch-raw-input').setValue('新番剧')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await nextTick()
+    expect(wrapper.find('.confirm-dialog-title').text()).toBe('重新搜索批量条目')
+    await wrapper.find('.confirm-dialog .secondary-button').trigger('click')
+    await flushPromises()
+
+    expect((wrapper.find('#batch-raw-input').element as HTMLTextAreaElement).value).toBe('萌王S4')
+    expect(apiPost).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('restore-search-focus')).toHaveLength(1)
+  })
+
+  it('离开守卫取消「留在此页」时保留现场且不清理', async () => {
+    const { wrapper, router } = await parseDraftScene([draftRow()])
+    await wrapper.find('.batch-draft-card input[type="checkbox"]').setValue(true)
+    await nextTick()
+
+    const navigation = router.push({ path: '/plans' })
+    await flushPromises()
+    await wrapper.find('.confirm-dialog .secondary-button').trigger('click')
+    await flushPromises()
+    await navigation
+
+    expect(router.currentRoute.value.path).toBe('/add')
+    expect(wrapper.find('.batch-draft-card[data-item-id="item-1"] input[type="checkbox"]').attributes('checked')).toBeDefined()
+    expect(wrapper.find('.confirm-dialog').exists()).toBe(false)
+  })
+
+  it('弱闸 ⊂ 强闸：强闸放行的勾选集合发出的保存请求不会被 begin_save 拒绝', async () => {
+    apiPost.mockResolvedValueOnce(parseResult({
+      items: [
+        draftRow(),
+        draftRow({ item_id: 'item-2', draft_id: 'draft-2', preview_request: previewRequest('req-2') }),
+      ],
+    }))
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('甲\n乙')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+
+    // item-2 有未应用编辑：强闸阻断它，但它不是「被 begin_save 拒绝」。
+    await wrapper.find('.batch-draft-card[data-item-id="item-2"]').trigger('click')
+    await nextTick()
+    await wrapper.find('#batch-preview-must-contain').setValue('未应用修改')
+    await nextTick()
+
+    await saveAllVisible(wrapper)
+
+    const saveCall = apiPost.mock.calls.find(([path]) => path === '/api/v1/batches/{batch_id}/save-confirm')
+    expect((saveCall?.[1]?.body as { item_ids: string[] }).item_ids).toEqual(['item-1'])
+    const { useNotificationStore } = await import('@/app/stores/notification')
+    const notification = useNotificationStore()
+    expect(notification.current?.message ?? '').not.toContain('当前条目状态已变化')
+    wrapper.unmount()
+  })
+
+  it('右栏详情编辑接线打通：flush 发一次 preview-modify 并恢复可确认', async () => {
+    apiPost.mockResolvedValueOnce(parseResult({ items: [draftRow()] }))
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王S4')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.batch-draft-card').trigger('click')
+    await nextTick()
+
+    // 未应用的编辑就地阻断，且还没有发出任何请求。
+    await wrapper.find('#batch-preview-must-contain').setValue('未应用修改')
+    await nextTick()
+    expect(wrapper.text()).toContain('有尚未应用的编辑')
+    expect(apiPost).toHaveBeenCalledTimes(1)
+
+    apiPost.mockResolvedValueOnce({
+      draft_id: 'draft-1',
+      draft_revision: 2,
+      request: previewRequest('req-1'),
+    } as never)
+    await wrapper.find('#batch-preview-apply-button').trigger('click')
+    await flushPromises()
+
+    const modifyCalls = apiPost.mock.calls.filter(([path]) => path === '/api/v1/requests/preview-modify')
+    expect(modifyCalls).toHaveLength(1)
+    expect(modifyCalls[0]?.[1]).toMatchObject({
+      body: {
+        draft_id: 'draft-1',
+        base_revision: 1,
+        patch: { filter_rule: expect.objectContaining({ must_contain: '未应用修改' }) },
+      },
+    })
+    // 应用成功回到同一门禁：条目重新可勾选。
+    expect(wrapper.find('.batch-draft-card input[type="checkbox"]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+})

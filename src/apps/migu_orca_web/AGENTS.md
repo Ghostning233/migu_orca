@@ -43,7 +43,7 @@
 
 - 列表/详情/全部信息复用安全 serializer/safe-info；自由文本二次脱敏，不 str(dict/list)。
   只放公开标题/安全计数/相对 profile/安全状态，不回传外部 ID、凭据、原始响应或完整 RSS URL。
-  poster 仅允许同源 opaque 代理路径；无可信集数值时总集数与“已更新集数”都显示“未知”。
+  poster 仅允许同源 opaque 代理路径；缺少可信集数值时总集数与“已更新集数”都显示“未开发”。
 - 候选查询复用共享名称查询计划，HTTP 200+FAILED 与 EMPTY 区分；
   返回安全 machine type/category，外部失败原因不降为一个无信息的通用文案。
 - SPA fallback 仅 `/app/*`，不吞 API、poster、healthz/readiness；当前入口重定向到 add/settings。

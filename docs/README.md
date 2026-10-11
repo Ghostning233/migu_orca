@@ -28,6 +28,7 @@
 - 当前截图与六图对比后的外部规划输入（非执行 PRD）：[添加番剧视觉与信息层级收口分析](design/frontend-ux-external-analysis-2026-09-18.md)
 - 产品定位与总体需求：[主 PRD](MiGuOrca_main_PRD.md)
 - 当前代码架构与目录边界：[架构与目录约定](design/architecture.md)
+- 2026-10-02 架构评审的深化候选、证据与下游交接边界：[架构评审](design/architecture-review-2026-10-02.md)（固定 `054de35` 的快照，不是规格或批准）；可视化版在[同目录资产](design/assets/architecture-review-2026-10-02/report.html)
 - Stage 19 以后方向与已完成阶段：[Future Stages](MiGuOrca_future_stages.md)
 - 未实现事项和触发条件：[Backlog](backlog.md)
 - 尚未承诺排期的可选能力：[可选功能](optional_features.md)
