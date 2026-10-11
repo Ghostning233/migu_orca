@@ -120,7 +120,7 @@ describe('CandidateCollectionList', () => {
       props: { candidates: [candidate({ total_episodes: null })], query: '芙莉莲' },
     })
 
-    expect(wrapper.text()).toContain('总集数：未知')
+    expect(wrapper.text()).toContain('总集数：未开发')
     expect(wrapper.text()).not.toContain('播出进度')
     expect(wrapper.find('.candidate-select').attributes('aria-label')).toContain('葬送的芙莉莲 第四季')
   })

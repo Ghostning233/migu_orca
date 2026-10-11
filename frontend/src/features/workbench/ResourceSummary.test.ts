@@ -19,7 +19,7 @@ describe('ResourceSummary', () => {
     expect(wrapper.text()).toContain('有效资源数1')
     expect(wrapper.text()).toContain('完整资源数2')
     expect(wrapper.text()).toContain('排除资源数1')
-    expect(wrapper.text()).toContain('已更新集数未知')
+    expect(wrapper.text()).toContain('已更新集数未开发')
     expect(wrapper.text()).toContain('命中排除规则：SP')
   })
 

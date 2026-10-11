@@ -6,6 +6,7 @@
 // inspect a Request, duplicate filtering rules, or call an API.
 import { computed } from 'vue'
 import type { CompleteSeedGroup, ExcludedSeed } from '@/features/requests/requestDetail'
+import { EPISODE_PLACEHOLDER } from '@/features/workbench/episodeCount'
 import { safeResourceReason, safeResourceTitle } from '@/features/workbench/resourceProjection'
 
 const props = defineProps<{
@@ -32,7 +33,7 @@ const safeReason = safeResourceReason
       <div class="detail-row"><dt>有效资源数</dt><dd>{{ props.effectiveSeeds.length }}</dd></div>
       <div class="detail-row"><dt>完整资源数</dt><dd>{{ completeTotal() }}</dd></div>
       <div class="detail-row"><dt>排除资源数</dt><dd>{{ props.excludedSeeds.length }}</dd></div>
-      <div class="detail-row"><dt>已更新集数</dt><dd>未知</dd></div>
+      <div class="detail-row"><dt>已更新集数</dt><dd>{{ EPISODE_PLACEHOLDER }}</dd></div>
     </dl>
 
     <details class="seed-details seed-group effective-seed-group" open>

@@ -5,7 +5,6 @@ import {
   buildFallbackCreatePayload,
   candidateSelectionIsBlocked,
   collectPreviewEditPatch,
-  episodeProgressText,
   needsSeasonConfirmation,
   parseSeasonNumber,
   parseSourceLabel,
@@ -54,12 +53,6 @@ describe('candidateSearch validation helpers', () => {
     expect(validateFallbackValue('http://mikan.example/42')).toBeNull()
   })
 
-  it('formats independent total-episode evidence with explicit or unknown totals', () => {
-    expect(episodeProgressText(28)).toBe('总集数：28 集')
-    expect(episodeProgressText(null)).toBe('总集数：未知')
-    expect(episodeProgressText('invalid' as never)).toBe('总集数：未知')
-    expect(episodeProgressText(0)).toBe('总集数：未知')
-  })
 })
 
 describe('candidateSearch parse summary helpers', () => {

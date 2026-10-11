@@ -83,12 +83,6 @@ export function candidateSelectionIsBlocked(candidate: MikanCandidate, confirmed
   return evidence.status === 'NEEDS_CONFIRMATION' && !Number.isInteger(confirmedSeason)
 }
 
-/** Public total-episode evidence; progress is deliberately not inferred here. */
-export function episodeProgressText(totalEpisodes: number | null | undefined): string {
-  const total = Number(totalEpisodes)
-  return Number.isInteger(total) && total > 0 ? `总集数：${total} 集` : '总集数：未知'
-}
-
 /** Season number carried by the candidate's own public season evidence. */
 export function candidateSeasonNumber(candidate: MikanCandidate): number | null {
   const season = Number(candidate.season_evidence?.season)
