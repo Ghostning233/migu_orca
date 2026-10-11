@@ -54,6 +54,7 @@ from apps.migu_orca_web.api_contract import (
     RequestSafeInfoResultDTO,
     RequestSaveConfirmResultDTO,
     TrackingBatchSubmitResultDTO,
+    TrackingCheckResultDTO,
     TrackingDetailResultDTO,
     TrackingItemListResultDTO,
     TrackingManagementResultDTO,
@@ -1205,6 +1206,45 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             "409": {
                 "tracking_revision_conflict": "追番记录版本已变化，请刷新后重试",
                 "tracking_state_conflict": "当前追番记录状态不允许恢复",
+            },
+            "500": {
+                "storage_error": "写入/读取追番记录失败",
+                "storage_json_error": "追番记录 JSON 损坏",
+                "tracking_storage_error": "追番记录存储失败",
+                "tracking_migration_error": "历史数据迁移失败",
+            },
+        },
+    },
+    "POST /api/v1/tracking/items/<path:tracking_id>/check": {
+        "operationId": "checkTrackingItem",
+        "summary": "有界只读确认待确认的持续追番提交",
+        "description": "issue #183：对结果待确认的持续追番提交执行一次有界只读确认，使用原提交 operation 绑定的已保存连接（客户端不提供连接，也不改绑）。检查只读，不创建、修改、删除或重发订阅；瞬时读取失败在端点总预算与最大次数内重查。已确认外部订阅返回 ACTIVE/DISABLED；仍无法确认时返回原待确认状态与已证实的原因分类。",
+        "requestBody": {
+            "type": "object",
+            "required": ["expected_revision"],
+            "properties": {
+                "expected_revision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "客户端最后观察到的追番记录 revision（revision-aware 检查）。",
+                },
+                "storage_dir": {
+                    "type": "string",
+                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
+                },
+            },
+        },
+        "success": TrackingCheckResultDTO,
+        "errors": {
+            "400": {
+                "data_validation_errors": "请求参数校验失败",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+                "invalid_tracking_id": "tracking_id 包含不合法字符或路径片段",
+            },
+            "404": {"tracking_not_found": "未找到该追番记录"},
+            "409": {
+                "tracking_revision_conflict": "追番记录版本已变化，请刷新后重试",
+                "tracking_state_conflict": "当前追番记录没有可核验的待确认提交",
             },
             "500": {
                 "storage_error": "写入/读取追番记录失败",

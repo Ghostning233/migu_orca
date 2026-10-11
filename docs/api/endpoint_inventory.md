@@ -86,6 +86,7 @@
 | POST | `/api/v1/tracking/items/<path:tracking_id>/retry` | `migu_orca_web_api.TrackingItemRetryView` | TrackingItemRetryView |
 | POST | `/api/v1/tracking/batch-submit` | `migu_orca_web_api.TrackingBatchSubmitView` | TrackingBatchSubmitView |
 | POST | `/api/v1/tracking/items/<path:tracking_id>/delete-plan` | `migu_orca_web_api.TrackingItemDeletePlanView` | TrackingItemDeletePlanView |
+| POST | `/api/v1/tracking/items/<path:tracking_id>/check` | `migu_orca_web_api.TrackingItemCheckView` | TrackingItemCheckView |
 | POST | `/api/v1/tracking/items/<path:tracking_id>/recover` | `migu_orca_web_api.TrackingItemRecoverView` | TrackingItemRecoverView |
 | POST | `/api/v1/tracking/items/<path:tracking_id>/modify` | `migu_orca_web_api.TrackingItemModifyView` | TrackingItemModifyView |
 | POST | `/api/v1/tracking/items/<path:tracking_id>/set-enabled` | `migu_orca_web_api.TrackingItemSetEnabledView` | TrackingItemSetEnabledView |
@@ -132,6 +133,7 @@
 | POST | `/api/v1/tracking/items/<path:tracking_id>/set-enabled` | PRIMARY | 外部方案启停 | TrackingRecord + operation |
 | POST | `/api/v1/tracking/items/<path:tracking_id>/delete-external` | PRIMARY | 外部删除并保留本地数据 | TrackingRecord + operation |
 | POST | `/api/v1/tracking/items/<path:tracking_id>/refresh` | PRIMARY | 关联 RSS 刷新 | TrackingRecord + operation |
+| POST | `/api/v1/tracking/items/<path:tracking_id>/check` | PRIMARY | 结果待确认提交的有界只读确认（已保存连接，只读） | TrackingRecord + operation |
 | POST | `/api/v1/tracking/items/<path:tracking_id>/recover` | RECOVERY | 未知结果保守恢复；不得盲目重放 | TrackingRecord + operation |
 | POST | `/api/v1/requests/<path:request_id>/accept` | RECOVERY | 保存后确认失败的 Request 恢复入口 | Request + TrackingRecord |
 | POST | `/api/v1/requests/<path:request_id>/cancel` | RECOVERY | 待确认 Request 的显式取消 | Request store |

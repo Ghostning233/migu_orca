@@ -54,6 +54,7 @@ from apps.migu_orca_web.serializers import (
     _sanitize_ab_submit_result,
     serialize_request_safe_info,
 )
+from apps.migu_orca_web.tracking_external_check import read_snapshot_bounded
 from apps.migu_orca_web.tracking_migration_service import run_tracking_migration
 from apps.migu_orca_web.tracking_serializers import (
     tracking_available_actions,
@@ -183,14 +184,31 @@ def compose_tracking_collect_one() -> Callable[..., Any]:
 def compose_tracking_readback_external(config: Any) -> Callable[[], Any]:
     """Return a read-only exact read-back of the Auto Bangumi snapshot (#97).
 
-    The returned callable performs one management snapshot read
-    ``(capabilities, subscriptions, rss)`` and never writes. The caller keeps the
-    config lease alive for its duration, exactly like the submit seam.
+    The returned callable performs one bounded management snapshot read
+    ``(capabilities, subscriptions, rss)`` and never writes. Transient read
+    failures are retried inside the fixed endpoint budget (issue #183) so a
+    short network hiccup does not immediately become 结果待确认; a proven
+    authentication/version failure returns at once. The caller keeps the config
+    lease alive for its duration, exactly like the submit seam.
     """
     client = create_legacy_31_management_client(
         config, transport=UrlopenAutoBangumiHttpTransport()
     )
-    return client.read_snapshot
+
+    def read_bounded() -> Any:
+        read = read_snapshot_bounded(client.read_snapshot)
+        if read.snapshot is None:
+            if read.error is not None:
+                raise read.error
+            raise Stage1Error(
+                "ab_management_failed",
+                "Auto Bangumi 管理请求失败",
+                "tracking_submit",
+                {"reason": "unreadable"},
+            )
+        return read.snapshot
+
+    return read_bounded
 
 
 def run_tracking_submit(
@@ -1097,6 +1115,9 @@ def _finalize_external_outcome(
         request=request,
         timestamp=timestamp,
         error_type=op_error_type,
+        verification_reason=(
+            confirm_reason if op_state == TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN else None
+        ),
     )
 
 
@@ -1427,6 +1448,7 @@ def _submit_result_payload(
     request: dict[str, Any] | None,
     timestamp: str,
     error_type: str | None = None,
+    verification_reason: str | None = None,
 ) -> dict[str, Any]:
     """Build the safe US-225 submit result (HTTP 200 business result).
 
@@ -1448,6 +1470,8 @@ def _submit_result_payload(
         "checked_at": timestamp,
         "operation_id": operation_id,
         "failure_category": submit_failure_category(outcome=outcome, error_type=error_type),
+        # Issue #183: the proven reason class of an unresolved outcome.
+        "verification_reason": verification_reason,
         # Issue #101: the bounded upstream reason, never the raw response.
         "diagnostics": _submit_diagnostics(ab_result),
         "issues": [
