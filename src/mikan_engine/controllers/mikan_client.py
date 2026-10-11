@@ -968,6 +968,8 @@ class _MikanBangumiPageParser(HTMLParser):
             image_url = _poster_url_from_attrs(attr_map, self._base_url)
             if image_url is not None:
                 self._poster_url = image_url
+        if tag_name == "div" and "bangumi-poster" in classes and self._poster_url is None:
+            self._poster_url = _poster_url_from_background(attr_map.get("style", ""), self._base_url)
         if tag_name == "a":
             self._active_anchor = _MikanPageAnchor(
                 attr_map,
@@ -1275,6 +1277,29 @@ def _episode_url_from_href(href: str, base_url: str) -> str | None:
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return None
     if "/home/episode/" not in parsed.path.casefold():
+        return None
+    return urlunparse(parsed)
+
+
+def _poster_url_from_background(style: str, base_url: str) -> str | None:
+    """Read MiKan's inline cover declaration, not arbitrary CSS images."""
+    match = re.search(
+        r"(?:^|;)\s*background-image\s*:\s*url\(\s*"
+        r"(?:'([^']*)'|\"([^\"]*)\"|([^\s'\"()]+))\s*\)\s*(?:;|$)",
+        style,
+        re.IGNORECASE,
+    )
+    if match is None:
+        return None
+    source = next(value for value in match.groups() if value is not None)
+    # urlparse/urljoin strip some control characters; reject before normalizing.
+    if not source or any(ord(char) < 32 or ord(char) == 127 for char in source):
+        return None
+    try:
+        parsed = urlparse(urljoin(base_url, source))
+    except ValueError:
+        return None
+    if not _is_safe_public_poster_url(parsed):
         return None
     return urlunparse(parsed)
 
