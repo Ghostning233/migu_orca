@@ -11,6 +11,7 @@ from shared.models import (
     BangumiCorrectionMetadata,
     TitleCorrection,
 )
+from shared.sensitive_values import contains_sensitive_value
 from storage_engine.controllers.correction_repository import (
     CORRECTIONS_FILENAME,
     MAX_CORRECTION_QUERY_LENGTH,
@@ -24,7 +25,6 @@ from storage_engine.controllers.correction_repository import (
     serialize_corrections,
     validate_correction,
 )
-from storage_engine.controllers.preference_repository import contains_sensitive_value
 from storage_engine.controllers.storage_config import load_storage_config
 
 

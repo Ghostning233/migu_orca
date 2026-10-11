@@ -6,7 +6,7 @@ from typing import Any
 
 from shared.errors import Stage1Error
 from shared.models import BangumiCorrectionMetadata, TitleCorrection
-from storage_engine.controllers.preference_repository import contains_sensitive_value
+from shared.sensitive_values import contains_sensitive_value
 from storage_engine.controllers.storage_config import (
     StorageConfig,
     ensure_storage_layout,
@@ -345,7 +345,6 @@ def _corrections_path(config: StorageConfig) -> Path:
             {"directory": config.corrections_dir.name},
         )
     return candidate
-
 
 
 def _validate_string(

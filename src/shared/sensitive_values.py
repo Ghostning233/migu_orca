@@ -24,12 +24,13 @@ ABSOLUTE_PATH_STRICT_RE = re.compile(r"(?:^|[\s'\"])(/[^\s<>'\"]+)")
 FILE_SCHEME_RE = re.compile(r"file://", re.IGNORECASE)
 WINDOWS_DRIVE_RE = re.compile(r"(?i)\b[a-z]:[\\/]")
 MARKUP_RE = re.compile(r"<\s*(?:html|rss|xml|svg|script|body|!doctype)\b", re.IGNORECASE)
+#: ``key=value`` / ``key: value`` 形态（带取值）。
 SENSITIVE_KEY_VALUE_RE = re.compile(
     r"(?i)\b(?:token|secret|cookie|authorization|password|passwd|bearer|"
     r"username|sid|session|endpoint|rss_url)\s*[=:]\s*[^\s,;]+"
 )
-#: 偏好值的词边界关键词表（比键值对形态更宽：包含 api_key/raw_html 等）。
-SENSITIVE_KEYWORDS_RE = re.compile(
+#: 裸关键词形态（无 ``=``/``:`` 取值，比键值对形态更宽：含 api_key/raw_html 等）。
+SENSITIVE_BARE_KEYWORD_RE = re.compile(
     r"(?i)\b(?:token|secret|cookie|authorization|password|passwd|bearer|"
     r"username|sid|session|endpoint|api_key|apikey|rss_url|raw_html|raw_rss|"
     r"response_body|request_body|magnet)\b"
@@ -59,7 +60,7 @@ def contains_sensitive_value(text: str, *, allow_relative_paths: bool = False) -
         return True
     if SENSITIVE_KEY_VALUE_RE.search(text):
         return True
-    return bool(SENSITIVE_KEYWORDS_RE.search(text))
+    return bool(SENSITIVE_BARE_KEYWORD_RE.search(text))
 
 
 def redact_sensitive_text(value: str) -> str:

@@ -17,7 +17,8 @@ for the Stage 29 B-B tracking flow and provides:
 
 Storage rules
 -------------
-- Writes use a temp file + ``os.replace`` so a crash can never leave a
+- Writes go through ``storage_primitives.write_text_atomic`` (temp file +
+  ``os.replace``) so a crash can never leave a
   half-written record (the same pattern as ``idempotency_repository``).
 - A per-``tracking_id`` process lock serializes ensure/CAS writers; readers rely
   on atomic replace.  Multiple OS processes sharing one storage directory are

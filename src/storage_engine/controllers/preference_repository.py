@@ -505,7 +505,6 @@ def _preferences_path(config: StorageConfig) -> Path:
     return candidate
 
 
-
 def _validate_string(
     value: Any,
     field: str,
@@ -603,7 +602,6 @@ __all__ = [
     "MAX_FILTER_RULE_LENGTH",
     "MAX_NAMING_TEMPLATE_LENGTH",
     "build_preferences_from_api",
-    "contains_sensitive_value",
     "default_user_preferences",
     "load_user_preferences",
     "save_user_preferences",

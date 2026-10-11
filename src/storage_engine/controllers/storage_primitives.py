@@ -20,12 +20,10 @@ def is_relative_to(path: Path, parent: Path) -> bool:
     """纯布尔：``path`` 是否位于 ``parent`` 之内。
 
     只回答「是否越界」；越界时抛哪种错误、带什么 `failed_step` 由调用方决定。
+    语义就是 stdlib 的 ``Path.is_relative_to``（词法判定，调用方先 ``resolve``）；
+    保留这一层是为了让「路径逃逸」这条安全策略只有一个改动点，而不是八处判断。
     """
-    try:
-        path.relative_to(parent)
-    except ValueError:
-        return False
-    return True
+    return path.is_relative_to(parent)
 
 
 def write_text_atomic(path: Path, payload: str) -> None:

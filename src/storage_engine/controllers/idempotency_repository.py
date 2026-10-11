@@ -30,7 +30,7 @@ Security rules
 - ``request_fingerprint`` is a one-way digest: the caller passes only the
   canonicalized *allowed* fields (draft-independent identity of the Request's
   public essence), never the raw payload.
-- File writes use the same atomic temp-file + ``os.replace`` pattern as
+- File writes use the shared atomic temp-file + ``os.replace`` primitive as
   ``save_user_preferences`` so a crash cannot leave a half-written record.
 - A damaged/missing record surfaces as a stable ``storage_json_error`` /
   ``idempotency_not_found`` (never the raw bytes), and a key that was never
@@ -239,7 +239,6 @@ def _idempotency_path(
             {"field": "idempotency_key"},
         )
     return candidate
-
 
 
 __all__ = [

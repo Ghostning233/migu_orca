@@ -22,7 +22,8 @@ Keyed replay / binding rules
 
 Storage rules
 -------------
-- Writes use a temp file + ``os.replace`` (same pattern as the tracking and
+- Writes go through ``storage_primitives.write_text_atomic`` (temp file +
+  ``os.replace``, same pattern as the tracking and
   idempotency repositories) so a crash can never leave a half-written file.
 - A per-``operation_id`` process lock serializes concurrent bind/CAS writers;
   readers rely on atomic replace.  Multiple OS processes sharing one storage

@@ -10,6 +10,7 @@ from storage_engine.controllers.storage_config import (
     StorageConfig,
     ensure_storage_layout,
 )
+from storage_engine.controllers.storage_primitives import is_relative_to
 
 
 def append_status_history(
@@ -117,13 +118,11 @@ def _history_path(
     candidate = (config.history_dir / f"{clean_request_id}.json").resolve(
         strict=False
     )
-    try:
-        candidate.relative_to(history_root)
-    except ValueError as exc:
+    if not is_relative_to(candidate, history_root):
         raise Stage1Error(
             "invalid_request_id",
             "request_id 不能包含路径片段",
             failed_step,
             {"field": "request_id"},
-        ) from exc
+        )
     return candidate
