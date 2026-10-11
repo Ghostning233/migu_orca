@@ -2523,6 +2523,24 @@ describe('BatchWorkbenchView lifecycle characterization (#161)', () => {
     expect(wrapper.find('.confirm-dialog').exists()).toBe(false)
   })
 
+  it('草案版本不可审核时只显示裁定后的单一文案（#167）', async () => {
+    // preview_request 存在但 draft_id 缺失：旧的「草案能力无效」+「草案版本无效」两条
+    // 文案在 #167 词表里收口为「订阅草案版本不可用」。
+    apiPost.mockResolvedValueOnce(parseResult({
+      items: [batchItem({ item_id: 'item-1', status: 'DRAFT', preview_request: previewRequest('req-1'), draft_id: null, draft_revision: null })],
+    }))
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王S4')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+
+    const pane = wrapper.find('#batch-detail-pane')
+    expect(pane.text()).toContain('订阅草案版本不可用')
+    expect(wrapper.text()).not.toContain('草案能力无效')
+    expect(wrapper.text()).not.toContain('草案版本无效')
+    wrapper.unmount()
+  })
+
   it('弱闸 ⊂ 强闸：强闸放行的勾选集合发出的保存请求不会被 begin_save 拒绝', async () => {
     apiPost.mockResolvedValueOnce(parseResult({
       items: [

@@ -25,6 +25,7 @@ import AnimeDraftEditor from '@/features/workbench/AnimeDraftEditor.vue'
 import AnimeModeSwitch, { type AnimeMode } from '@/features/workbench/AnimeModeSwitch.vue'
 import { useDraftEditScheduler } from '@/features/workbench/draftEditScheduler'
 import type { PreviewEditState, SelectedCollectionSummary } from '@/features/workbench/candidateSearch'
+import { SINGLE_REVIEW_DISPLAY_ORDER, evaluateReviewEligibility, reviewBlockerMessages } from '@/features/workbench/reviewEligibility'
 import { effectiveSeeds, type RequestSnapshot } from '@/features/requests/requestDetail'
 import { storageQuery } from '@/features/requests/requestStorage'
 import { isPublicRouteIdentifier, routeLocation } from '@/app/router/catalog'
@@ -120,25 +121,28 @@ journey.setDraft(props.draftId, props.draftRevision ?? 1)
 // list, so a blocked button can never claim it is available. Every entry is
 // evaluated on each read: an early reason must not short-circuit the reactive
 // dependencies of the later ones.
-const saveBlockers = computed(() => {
-  const reasons: string[] = []
-  if (confirmLoading.value) reasons.push('正在保存并确认')
-  if (session.invalid.value) reasons.push('订阅草案已失效')
-  if (journey.state.phase !== 'review') reasons.push('当前订阅方案已进入确认恢复流程')
-  if (session.applying.value) reasons.push('正在重新计算订阅方案')
-  // A pending local edit is never submitted by the confirm click itself: the
-  // scheduler owns every preview-modify, so the primary action stays blocked
-  // until it has something server-consistent to confirm.
-  if (scheduler.waiting.value) reasons.push('有尚未应用的编辑，正在等待过滤规则自动更新')
-  else if (scheduler.folderPending.value) reasons.push('有尚未应用的编辑，等待提交目录名')
-  else if (dirty.value) reasons.push('有尚未应用的编辑')
-  if (session.error.value) reasons.push('存在未恢复的字段修改失败')
-  if (!draftSnapshot.value.confirmable_config?.selected_subtitle_group) reasons.push('尚未选择字幕组')
-  if (!effectiveSeeds(draftSnapshot.value).length) reasons.push('没有有效资源')
-  if (!session.draftId.value || session.draftRevision.value === null) reasons.push('订阅草案版本不可用')
-  if (!journey.canConfirm()) reasons.push('当前订阅方案不可确认')
-  return reasons
-})
+// #167：判据、文案与展示序都来自共享的 reviewEligibility 模块；本页只装配自己的事实。
+// A pending local edit is never submitted by the confirm click itself: the scheduler
+// owns every preview-modify, so the primary action stays blocked until it has
+// something server-consistent to confirm.
+const saveBlockers = computed(() => reviewBlockerMessages(
+  evaluateReviewEligibility({
+    draftId: session.draftId.value,
+    draftRevision: session.draftRevision.value,
+    draftInvalid: session.invalid.value,
+    phaseInReview: journey.state.phase === 'review',
+    saving: confirmLoading.value,
+    recalculating: session.applying.value,
+    schedulerWaiting: scheduler.waiting.value,
+    schedulerFolderPending: scheduler.folderPending.value,
+    pendingEdit: dirty.value,
+    editFailed: Boolean(session.error.value),
+    weakConfirmable: journey.canConfirm(),
+    selectedSubtitleGroup: draftSnapshot.value.confirmable_config?.selected_subtitle_group ?? null,
+    effectiveSeedNames: effectiveSeeds(draftSnapshot.value),
+  }).blockers,
+  SINGLE_REVIEW_DISPLAY_ORDER,
+))
 
 const saveButtonDisabled = computed(() => saveBlockers.value.length > 0)
 
