@@ -875,25 +875,11 @@ def test_download_existing_fails_closed_without_a_verified_endpoint(
     assert response.status_code == 200
     assert response.get_json()["result"]["tracking"]["status"] == TRACKING_STATUS_SUBMIT_FAILED
 
-class _BareArrayAbResponse:
-    def __init__(self, body: bytes) -> None:
-        self._body = body
-
-    def read(self) -> bytes:
-        return self._body
-
-    def __enter__(self) -> _BareArrayAbResponse:
-        return self
-
-    def __exit__(self, *_args: Any) -> None:
-        return None
-
-
 class _BareArrayAbOpener:
     """The verified 3.1.18 HTTP surface, served as raw bytes keyed by path.
 
-    Only the outermost network is replaced: the real write adapter, the real
-    urllib JSON decoder, the real management adapter and the real local
+    Only the outermost network exchange is replaced: the real write adapter, the
+    real JSON decoder, the real management adapter and the real local
     persistence all run.  The list endpoints answer with the bare JSON arrays
     the real service returns (issue #182).
     """
@@ -902,9 +888,11 @@ class _BareArrayAbOpener:
         self.rss_url = rss_url
         self.calls: list[str] = []
 
-    def open(self, request: Any, timeout: float) -> _BareArrayAbResponse:
-        path = urlsplit(request.full_url).path
-        self.calls.append(f"{request.get_method()} {path}")
+    def exchange(
+        self, method: str, endpoint: str, headers: Any, body: Any, **kwargs: Any
+    ) -> tuple[int, dict[str, str], bytes]:
+        path = urlsplit(endpoint).path
+        self.calls.append(f"{method} {path}")
         if path == "/api/v1/auth/login":
             body = b'{"access_token": "ab-session"}'
         elif path == "/api/v1/status":
@@ -925,7 +913,7 @@ class _BareArrayAbOpener:
             body = b'{"status": true}'
         else:  # pragma: no cover - the fixture must stay exhaustive
             raise AssertionError(f"unexpected Auto Bangumi path: {path}")
-        return _BareArrayAbResponse(body)
+        return 200, {}, body
 
 
 def test_submit_confirms_through_the_real_http_decoder_and_persists_active(
@@ -944,9 +932,7 @@ def test_submit_confirms_through_the_real_http_decoder_and_persists_active(
     stored_request = load_request_snapshot(_config(tmp_path), request["request_id"])
     rss_url = stored_request["confirmable_config"]["selected_rss_url"]
     opener = _BareArrayAbOpener(rss_url)
-    monkeypatch.setattr(
-        "ab_engine.controllers.ab_http_client.build_opener", lambda *handlers: opener
-    )
+    monkeypatch.setattr("ab_engine.controllers.ab_http_client._exchange", opener.exchange)
 
     response = client.post(
         f"/api/v1/tracking/items/{record.tracking_id}/submit", json=_submit_body(record)

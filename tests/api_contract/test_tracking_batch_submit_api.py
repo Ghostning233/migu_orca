@@ -417,37 +417,25 @@ def test_batch_defaults_to_continue_tracking(
         "CONTINUE_TRACKING"
     )
 
-class _EmptyListAbResponse:
-    def __init__(self, body: bytes) -> None:
-        self._body = body
-
-    def read(self) -> bytes:
-        return self._body
-
-    def __enter__(self) -> _EmptyListAbResponse:
-        return self
-
-    def __exit__(self, *_args: Any) -> None:
-        return None
-
-
 class _EmptyListAbOpener:
     """A verified 3.1.18 session whose list endpoints answer ``[]`` in bytes."""
 
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    def open(self, request: Any, timeout: float) -> _EmptyListAbResponse:
-        path = urlsplit(request.full_url).path
-        self.calls.append(f"{request.get_method()} {path}")
+    def exchange(
+        self, method: str, endpoint: str, headers: Any, body: Any, **kwargs: Any
+    ) -> tuple[int, dict[str, str], bytes]:
+        path = urlsplit(endpoint).path
+        self.calls.append(f"{method} {path}")
         if path == "/api/v1/auth/login":
-            return _EmptyListAbResponse(b'{"access_token": "ab-session"}')
+            return 200, {}, b'{"access_token": "ab-session"}'
         if path == "/api/v1/status":
-            return _EmptyListAbResponse(b'{"version": "3.1.18"}')
+            return 200, {}, b'{"version": "3.1.18"}'
         if path == "/api/v1/rss/subscribe":
-            return _EmptyListAbResponse(b'{"status": true}')
+            return 200, {}, b'{"status": true}'
         if path in ("/api/v1/bangumi/get/all", "/api/v1/rss"):
-            return _EmptyListAbResponse(b"[]")
+            return 200, {}, b"[]"
         raise AssertionError(f"unexpected Auto Bangumi path: {path}")  # pragma: no cover
 
 
@@ -464,9 +452,7 @@ def test_batch_single_miss_on_a_real_bare_list_keeps_every_item_pending(
     """
     connection, records = _seed_records(tmp_path, 2)
     opener = _EmptyListAbOpener()
-    monkeypatch.setattr(
-        "ab_engine.controllers.ab_http_client.build_opener", lambda *handlers: opener
-    )
+    monkeypatch.setattr("ab_engine.controllers.ab_http_client._exchange", opener.exchange)
 
     response = _post(client, _batch_body(connection, records))
 
@@ -493,19 +479,19 @@ class _PerItemAbOpener:
         self.calls: list[str] = []
         self.registered: dict[str, int] = {}
 
-    def _body(self, request: Any) -> _EmptyListAbResponse:
-        path = urlsplit(request.full_url).path
-        self.calls.append(f"{request.get_method()} {path}")
+    def _handle(self, method: str, endpoint: str, body: Any) -> tuple[int, dict[str, str], bytes]:
+        path = urlsplit(endpoint).path
+        self.calls.append(f"{method} {path}")
         if path == "/api/v1/auth/login":
-            return _EmptyListAbResponse(b'{"access_token": "ab-session"}')
+            return 200, {}, b'{"access_token": "ab-session"}'
         if path == "/api/v1/status":
-            return _EmptyListAbResponse(b'{"version": "3.1.18"}')
+            return 200, {}, b'{"version": "3.1.18"}'
         if path == "/api/v1/rss/subscribe":
-            payload = json.loads((request.data or b"{}").decode("utf-8"))
+            payload = json.loads((body or b"{}").decode("utf-8"))
             url = payload.get("rss", {}).get("url")
             if isinstance(url, str) and url not in self.registered:
                 self.registered[url] = len(self.registered) + 1
-            return _EmptyListAbResponse(b'{"status": true}')
+            return 200, {}, b'{"status": true}'
         if path == "/api/v1/bangumi/get/all":
             rows = [
                 {
@@ -515,17 +501,17 @@ class _PerItemAbOpener:
                 }
                 for url, index in self.registered.items()
             ]
-            return _EmptyListAbResponse(json.dumps(rows).encode("utf-8"))
+            return 200, {}, json.dumps(rows).encode("utf-8")
         if path == "/api/v1/rss":
             rows = [
                 {"id": index, "name": "RSS", "url": url, "aggregate": False, "parser": "rss", "enabled": True}
                 for url, index in self.registered.items()
             ]
-            return _EmptyListAbResponse(json.dumps(rows).encode("utf-8"))
+            return 200, {}, json.dumps(rows).encode("utf-8")
         raise AssertionError(f"unexpected Auto Bangumi path: {path}")  # pragma: no cover
 
-    def open(self, request: Any, timeout: float) -> _EmptyListAbResponse:
-        return self._body(request)
+    def exchange(self, method: str, endpoint: str, headers: Any, body: Any, **kwargs: Any):
+        return self._handle(method, endpoint, body)
 
 
 def _distinct_rss_urls(tmp_path: Path, records: list[TrackingRecord]) -> list[str]:
@@ -556,9 +542,7 @@ def test_batch_confirms_every_item_through_the_real_bare_array_transport(
     connection, records = _seed_records(tmp_path, 2)
     urls = _distinct_rss_urls(tmp_path, records)
     opener = _PerItemAbOpener()
-    monkeypatch.setattr(
-        "ab_engine.controllers.ab_http_client.build_opener", lambda *handlers: opener
-    )
+    monkeypatch.setattr("ab_engine.controllers.ab_http_client._exchange", opener.exchange)
     response = _post(client, _batch_body(connection, records))
 
     assert response.status_code == 200

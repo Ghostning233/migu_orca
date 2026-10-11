@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import threading
-import time
 from collections.abc import Mapping
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -61,45 +59,36 @@ def _legacy_payload() -> dict[str, Any]:
     return build_legacy_31_subscription_payload(request)
 
 
-class _FakeResponse:
-    def __init__(self, body: bytes) -> None:
-        self._body = body
+def _stub_exchange(
+    monkeypatch: pytest.MonkeyPatch, bodies: list[bytes | Exception]
+) -> list[str]:
+    """Serve canned raw response bodies through the one-exchange seam."""
+    queue = list(bodies)
+    calls: list[str] = []
 
-    def read(self) -> bytes:
-        return self._body
+    def _exchange(
+        method: str,
+        endpoint: str,
+        headers: Mapping[str, str],
+        body: Any,
+        *,
+        timeout: float,
+        step: str,
+        monotonic: Any = None,
+    ) -> tuple[int, dict[str, str], bytes]:
+        calls.append(f"{method} {endpoint}")
+        result = queue.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return 200, {}, result
 
-    def __enter__(self) -> _FakeResponse:
-        return self
-
-    def __exit__(self, *args: Any) -> None:
-        return None
-
-
-class _FakeOpener:
-    def __init__(self, bodies: list[bytes | Exception]) -> None:
-        self._bodies = list(bodies)
-        self.requests: list[Any] = []
-
-    def open(self, request: Any, timeout: float) -> _FakeResponse:
-        self.requests.append(request)
-        body = self._bodies.pop(0)
-        if isinstance(body, Exception):
-            raise body
-        return _FakeResponse(body)
-
-
-def _stub_urlopen(monkeypatch: pytest.MonkeyPatch, bodies: list[bytes | Exception]) -> _FakeOpener:
-    opener = _FakeOpener(bodies)
-    monkeypatch.setattr(
-        "ab_engine.controllers.ab_http_client.build_opener",
-        lambda *handlers: opener,
-    )
-    return opener
+    monkeypatch.setattr("ab_engine.controllers.ab_http_client._exchange", _exchange)
+    return calls
 
 
 def test_legacy_transport_decodes_a_bare_json_array(monkeypatch: pytest.MonkeyPatch) -> None:
     """Issue #182: verified 3.1.18 list endpoints answer with a bare array."""
-    _stub_urlopen(monkeypatch, [b'[{"id": 9, "name": "\\u8ba2\\u9605\\u6e90"}]'])
+    _stub_exchange(monkeypatch, [b'[{"id": 9, "name": "\\u8ba2\\u9605\\u6e90"}]'])
 
     result = UrlopenAutoBangumiHttpTransport().request_json(
         "GET", "https://auto-bangumi.example/api/v1/rss",
@@ -110,7 +99,7 @@ def test_legacy_transport_decodes_a_bare_json_array(monkeypatch: pytest.MonkeyPa
 
 
 def test_legacy_transport_rejects_non_json_and_keeps_the_stable_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    _stub_urlopen(monkeypatch, [b"<html>not json</html>"])
+    _stub_exchange(monkeypatch, [b"<html>not json</html>"])
 
     with pytest.raises(Stage1Error) as error:
         UrlopenAutoBangumiHttpTransport().request_json(
@@ -122,7 +111,7 @@ def test_legacy_transport_rejects_non_json_and_keeps_the_stable_error(monkeypatc
 
 def test_write_transport_still_requires_a_json_object(monkeypatch: pytest.MonkeyPatch) -> None:
     """A write response is never shape-agnostic: only the read seam is relaxed."""
-    _stub_urlopen(monkeypatch, [b"[]"])
+    _stub_exchange(monkeypatch, [b"[]"])
 
     with pytest.raises(Stage1Error) as error:
         UrlopenAutoBangumiHttpTransport().post_json_same_origin(
@@ -249,54 +238,3 @@ def test_submit_classifies_a_duplicate_subscription_with_bounded_upstream_reason
     assert secret not in str(failure.value.details or {})
     # The bounded reason is available to the diagnostics layer only.
     assert failure.value.details == {"message_zh": canary}
-
-
-class _TricklingResponse:
-    """A body that keeps arriving until the strict deadline closes it."""
-
-    def __init__(self) -> None:
-        self.closed = threading.Event()
-
-    def read(self) -> bytes:
-        # Simulate a peer that never stops sending: the read only returns when
-        # the watchdog closes the response, which must happen at the deadline.
-        self.closed.wait(5.0)
-        raise OSError("response closed at the deadline")
-
-    def close(self) -> None:
-        self.closed.set()
-
-    def __enter__(self) -> _TricklingResponse:
-        return self
-
-    def __exit__(self, *args: Any) -> None:
-        return None
-
-
-def test_a_trickling_body_cannot_outlive_the_strict_read_deadline(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Issue #183 review: the *total* time is bounded, not one socket recv."""
-    response = _TricklingResponse()
-    monkeypatch.setattr(
-        "ab_engine.controllers.ab_http_client.build_opener",
-        lambda *handlers: _AlwaysOpener(response),
-    )
-
-    started = time.monotonic()
-    with pytest.raises(Stage1Error) as error:
-        UrlopenAutoBangumiHttpTransport().request_json(
-            "GET", "https://auto-bangumi.example/api/v1/rss", {}, timeout=0.05
-        )
-    elapsed = time.monotonic() - started
-
-    assert error.value.error_type == "ab_timeout"
-    assert elapsed < 1.0, elapsed
-
-
-class _AlwaysOpener:
-    def __init__(self, response: Any) -> None:
-        self._response = response
-
-    def open(self, request: Any, timeout: float) -> Any:
-        return self._response

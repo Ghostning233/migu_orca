@@ -37,32 +37,6 @@ class RecordingTransport:
         raise AssertionError("management adapter must never use the write transport")
 
 
-class _FakeResponse:
-    def __init__(self, body: bytes) -> None:
-        self._body = body
-
-    def read(self) -> bytes:
-        return self._body
-
-    def __enter__(self) -> _FakeResponse:
-        return self
-
-    def __exit__(self, *args: Any) -> None:
-        return None
-
-
-class _FakeOpener:
-    """Serves the raw bytes of one verified 3.1.18 session in request order."""
-
-    def __init__(self, bodies: list[bytes]) -> None:
-        self._bodies = list(bodies)
-        self.requests: list[Any] = []
-
-    def open(self, request: Any, timeout: float) -> _FakeResponse:
-        self.requests.append(request)
-        return _FakeResponse(self._bodies.pop(0))
-
-
 def _config(**overrides: str) -> AutoBangumiConfig:
     values: dict[str, Any] = {
         "base_url": "https://auto-bangumi.example",
@@ -126,10 +100,12 @@ def test_real_bare_array_lists_pass_the_decoder_and_management_adapter(monkeypat
         b'[{"id": 42, "official_title": "\\u793a\\u4f8b\\u756a\\u5267", "season": 2, "group_name": "\\u5b57\\u5e55\\u7ec4", "rss_ids": [7]}]',
         b'[{"id": 7, "name": "\\u8ba2\\u9605\\u6e90", "url": "https://rss.example/feed", "aggregate": false, "parser": "rss", "enabled": true}]',
     ]
-    opener = _FakeOpener(bodies)
-    monkeypatch.setattr(
-        "ab_engine.controllers.ab_http_client.build_opener", lambda *handlers: opener
-    )
+    queue = list(bodies)
+
+    def _exchange(method, endpoint, headers, body, *, timeout, step, monotonic=None):
+        return 200, {}, queue.pop(0)
+
+    monkeypatch.setattr("ab_engine.controllers.ab_http_client._exchange", _exchange)
     from ab_engine.controllers.ab_http_client import UrlopenAutoBangumiHttpTransport
 
     capabilities, subscriptions, rss_items = create_legacy_31_management_client(
