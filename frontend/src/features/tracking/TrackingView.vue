@@ -3,7 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import { api, toApiError, type ApiPath } from '@/api/client'
+import { api, toApiError } from '@/api/client'
 import type { operations } from '@/api/generated/api'
 import EmptyState from '@/components/feedback/EmptyState.vue'
 import ErrorState from '@/components/feedback/ErrorState.vue'
@@ -39,6 +39,7 @@ import {
 import {
   useTrackingWriteSession,
   type TrackingRecoveryActionCode,
+  type TrackingWriteRequest,
   type TrackingSubmissionMode,
   type TrackingWriteEffect,
   type TrackingWriteFeedback,
@@ -444,7 +445,7 @@ async function presentFeedback(feedback: TrackingWriteFeedback): Promise<void> {
  * paths can only differ in which session command settles them.
  */
 async function runSessionTransport<Result extends { tracking: TrackingItem }>(options: {
-  readonly request: { readonly endpoint: ApiPath; readonly path: Readonly<Record<string, string>>; readonly body: unknown }
+  readonly request: TrackingWriteRequest
   /** Runs after a success response and before the returned tracking converges. */
   readonly beforeConverge?: () => void
   readonly settle: (result: Result) => readonly TrackingWriteEffect[]

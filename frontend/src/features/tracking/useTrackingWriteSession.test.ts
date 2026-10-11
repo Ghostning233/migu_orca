@@ -1342,9 +1342,13 @@ describe('tracking management write session (US-313, US-314, US-315)', () => {
       expect(settled.keepsIntent).toBe(false)
     }
     // An unnamed 409 falls back to the generic next step, never to blank copy.
-    const unnamed = beginManagementWrite()
-    unnamed.writes.failManagement({ status: 409, httpError: true, type: 'brand_new_conflict' })
-    expect(unnamed.writes.sessions.value.management!.message).toBe(MANAGEMENT_CONFLICT_FALLBACK)
+    for (const unknown of ['brand_new_conflict', null, undefined, 42]) {
+      const unnamed = beginManagementWrite()
+      unnamed.writes.failManagement({ status: 409, httpError: true, type: unknown })
+      const settled = unnamed.writes.sessions.value.management!
+      expect(settled.message).toBe(MANAGEMENT_CONFLICT_FALLBACK)
+      expect(settled.message).not.toContain('brand_new_conflict')
+    }
   })
 
   it('names the request itself only where the generic wording would misdescribe it', () => {

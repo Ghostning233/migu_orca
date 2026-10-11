@@ -234,7 +234,7 @@ function makeOpaqueKey(): string {
 }
 
 /** One request the page must send; endpoint, path and body travel as one unit. */
-interface TrackingWriteRequest {
+export interface TrackingWriteRequest {
   readonly endpoint: ApiPath
   /** The path parameters the endpoint template requires. */
   readonly path: Readonly<Record<string, string>>
