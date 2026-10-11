@@ -12,12 +12,14 @@ import {
   executableTrackingActions,
   MANAGEMENT_NEEDS_MANUAL_NOTICE,
   formatSubmissionMode,
+  isPendingSubmission,
   managementSessionKeepsIntent,
   projectTrackingActionScopes,
   recoverySessionKeepsLock,
   writeSessionKeepsIntent,
   RECOVERY_NEEDS_MANUAL_NOTICE,
   type CapabilityResult,
+  type TrackingCheckSession,
   type TrackingAction,
   type TrackingItem,
   type TrackingManagementScope,
@@ -66,6 +68,15 @@ const props = defineProps<{
   writeSession?: TrackingWriteSession | null
   /** Page-level unknown-result recovery state for one item (US-312). */
   recoverySession?: TrackingRecoverySession | null
+  /** Page-level bounded read-only check state for one item (issue #183). */
+  checkSession?: TrackingCheckSession | null
+  /**
+   * Issue #183: true while the page still owes this item one automatic
+   * read-only check (reopening/refreshing a 结果待确认 submission). The page
+   * disarms it after the first automatic check so a check that changes the
+   * revision can never loop forever.
+   */
+  autoCheckArmed?: boolean
   /** Page-level external management state for one item (US-313). */
   managementSession?: TrackingManagementSession | null
   /** The single page intent is spent elsewhere (another item's write/recovery). */
@@ -84,6 +95,8 @@ const emit = defineEmits<{
   // The recovery action travels as its server-agreed code, not as a projected
   // action object: VERIFY_EXTERNAL is never part of the server's action list.
   (e: 'recovery-requested', payload: { action: TrackingRecoveryActionCode; item: TrackingItem }): void
+  // Issue #183: the only action a pending submission offers. It reads only.
+  (e: 'check-requested', payload: { item: TrackingItem; automatic: boolean }): void
   // A management request carries the scope the user chose and the strict patch
   // its own form built; the page re-validates both before anything is sent.
   /** Issue #92: delete this plan, optionally with its controlled external object. */
@@ -188,6 +201,32 @@ function requestWrite(action: TrackingAction | null): void {
   emit('write-requested', { action, item: detail.value })
 }
 
+// -- bounded read-only check of a pending submission (issue #183) -------------
+// A persistent submit whose outcome could not be proven shows 结果待确认. The
+// page never guesses: the server publishes the proven reason class and the check
+// endpoint, bound to the original operation's saved connection, reads only.
+const thisCheck = computed(() => (
+  props.checkSession && props.checkSession.trackingId === props.trackingId ? props.checkSession : null
+))
+const checkInFlight = computed(() => thisCheck.value?.state === 'IN_FLIGHT')
+const pendingSubmission = computed(() => isPendingSubmission(
+  detail.value?.status,
+  detail.value?.current_operation?.operation,
+  detail.value?.submission_mode,
+))
+
+function requestCheck(automatic = false): void {
+  if (!detail.value || checkInFlight.value || actionBusy.value) return
+  emit('check-requested', { item: detail.value, automatic })
+}
+
+// One automatic check per armed detail load; the page disarms the flag, so a
+// check that persists a new revision never re-triggers itself.
+watch([pendingSubmission, () => props.autoCheckArmed, () => detail.value?.revision], () => {
+  if (!pendingSubmission.value || props.autoCheckArmed !== true) return
+  requestCheck(true)
+})
+
 // -- unknown-result recovery (US-312) ----------------------------------------
 // The three local actions are rendered exactly as the server offers them for a
 // recovery status, so no capability or credential is involved; the read-only
@@ -265,7 +304,7 @@ const writeDiagnostics = computed(() => (
 const submissionModeLabel = computed(() => formatSubmissionMode(detail.value?.submission_mode))
 
 const itemActionInFlight = computed(() => (
-  writeInFlight.value || recoveryInFlight.value || managementInFlight.value
+  writeInFlight.value || recoveryInFlight.value || managementInFlight.value || checkInFlight.value
 ))
 /**
  * One page-level intent at a time: a recovery in flight, or an unresolved write
@@ -734,7 +773,30 @@ defineExpose({ reload: () => fetchDetail(true) })
 
       <section class="tracking-inspector-section tracking-submit" aria-labelledby="tracking-submit-heading">
         <h4 id="tracking-submit-heading">提交到 Auto Bangumi</h4>
-        <template v-if="submitAction">
+        <template v-if="pendingSubmission || thisCheck">
+          <p v-if="pendingSubmission" class="field-help">
+            持续追番提交结果尚未确认。重新检查只会使用原提交绑定的已保存连接只读核对
+            Auto Bangumi 的当前状态，不会创建、修改、删除或重新提交订阅。
+          </p>
+          <BaseButton
+            v-if="pendingSubmission"
+            id="tracking-check"
+            variant="secondary"
+            :loading="checkInFlight"
+            :disabled="actionBusy"
+            @click="requestCheck(false)"
+          >重新检查</BaseButton>
+          <div
+            v-if="thisCheck"
+            id="tracking-check-result"
+            class="tracking-submit-result"
+            :class="`is-${thisCheck.state.toLowerCase()}`"
+            role="status"
+          >
+            <p class="tracking-submit-verdict">{{ thisCheck.message }}</p>
+          </div>
+        </template>
+        <template v-else-if="submitAction">
           <p class="field-help">提交会使用已保存的 Auto Bangumi 连接，在 Auto Bangumi 创建外部订阅并可能触发下载；服务端会在同一次请求中校验连接、认证、版本与写能力，每次提交都需要单独确认。</p>
           <BaseButton
             id="tracking-submit"
@@ -776,7 +838,7 @@ defineExpose({ reload: () => fetchDetail(true) })
       </section>
 
       <section
-        v-if="recoveryActions.length || verifyExternalOffered || thisRecovery"
+        v-if="!pendingSubmission && (recoveryActions.length || verifyExternalOffered || thisRecovery)"
         class="tracking-inspector-section tracking-recovery"
         aria-labelledby="tracking-recovery-heading"
       >
