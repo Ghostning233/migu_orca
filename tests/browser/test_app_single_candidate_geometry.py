@@ -33,6 +33,12 @@ from tests.browser.visual_support import browser_surface
 
 pytestmark = pytest.mark.browser
 
+# #177：主按钮底边是亚像素值，固定 Noto CJK 字体下同一状态的前后差值会抖动到
+# 1.24px（实测 1.2406 / 1.2420，见 issue #177 的三次 CI 证据）。真正的「按钮跳位」
+# 至少是一行文字高（约 20px），所以这里给亚像素度量留 2.0px 余量：既不会把可见
+# 跳位放过去，也不会让同一棵代码树在 CI 上先绿后红。
+BUTTON_BOTTOM_TOLERANCE_PX = 2.0
+
 CANDIDATE_SPECS: tuple[tuple[str, str, int | None], ...] = (
     ("2353", "葬送的芙莉莲", 28),
     ("3072", "葬送的芙莉莲 第二季", 24),
@@ -207,7 +213,7 @@ def test_short_states_do_not_move_neighbour_cards_or_the_content_below(
     # 邻卡（2～4）位置与尺寸不变，下方诊断不位移，主按钮不跳位。
     for index in range(1, 4):
         assert _same_box(during[index], before[index]), (index, before[index], during[index])
-    assert abs(during[0]["buttonDocBottom"] - before[0]["buttonDocBottom"]) <= 1.0
+    assert abs(during[0]["buttonDocBottom"] - before[0]["buttonDocBottom"]) <= BUTTON_BOTTOM_TOLERANCE_PX
     assert note_during == note_before, (note_before, note_during)
 
     # 释放生成，进入真实草案屏。
@@ -255,7 +261,7 @@ def test_candidate_generation_failure_stays_inside_the_reserved_feedback_area(
     assert page.locator(".candidate-generate-error").first.inner_text().strip() != ""
     for index in range(1, 4):
         assert _same_box(after[index], before[index]), (index, before[index], after[index])
-    assert abs(after[0]["buttonDocBottom"] - before[0]["buttonDocBottom"]) <= 1.0
+    assert abs(after[0]["buttonDocBottom"] - before[0]["buttonDocBottom"]) <= BUTTON_BOTTOM_TOLERANCE_PX
 
 
 def test_candidate_cards_have_no_advanced_information_entry_but_page_diagnostics_remain(
