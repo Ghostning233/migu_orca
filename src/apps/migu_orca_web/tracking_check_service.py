@@ -22,7 +22,10 @@ from typing import Any
 
 from apps.migu_orca_web.schemas import TrackingCheckPayload
 from apps.migu_orca_web.services import _storage_dir
-from apps.migu_orca_web.tracking_external_check import CheckPolicy
+from apps.migu_orca_web.tracking_external_check import (
+    CheckPolicy,
+    single_flight_check,
+)
 from apps.migu_orca_web.tracking_recovery_service import run_tracking_recover
 from apps.migu_orca_web.tracking_serializers import tracking_summary_fields
 from shared.errors import Stage1Error
@@ -70,6 +73,9 @@ def run_saved_tracking_check(
     config = load_storage_config(_storage_dir(payload.storage_dir))
     timestamp = now or utc_now()
     record = load_tracking_record(config, payload.tracking_id)
+    # Issue #183 review: a stale revision is refused *before* any binding branch,
+    # so a stale check can never answer 200 on the connection-change path.
+    _guard_expected_revision(payload.expected_revision, record)
     operation = (
         load_tracking_operation(config, record.current_operation_id)
         if record.current_operation_id
@@ -99,39 +105,66 @@ def run_saved_tracking_check(
             reason=CONFIRM_REASON_CONNECTION_CHANGED,
         )
     repository = AutoBangumiConfigRepository(config_root)
-    try:
-        current = repository.load()
-    except Stage1Error:
-        current = None
+    # Issue #183 review: one effective check per record, and the configuration
+    # lease is held across the whole read so the bound instance cannot be
+    # replaced while Auto Bangumi is being read.
+    with single_flight_check(payload.tracking_id):
+        try:
+            lease = repository.acquire_lease(connection_ref=connection_ref)
+        except Stage1Error as exc:
+            if exc.error_type in {"connection_ref_conflict", "config_error"}:
+                # A replaced saved connection never rebinds the old operation; the
+                # check reports the proven binding change and reads nothing.
+                return _unresolved_check(
+                    config,
+                    record=record,
+                    expected_revision=payload.expected_revision,
+                    timestamp=timestamp,
+                    reason=CONFIRM_REASON_CONNECTION_CHANGED,
+                )
+            raise
+        with lease:
+            if (
+                lease.record.config is None
+                or lease.record.connection_ref is None
+                or str(lease.record.connection_ref) != connection_ref
+            ):
+                return _unresolved_check(
+                    config,
+                    record=record,
+                    expected_revision=payload.expected_revision,
+                    timestamp=timestamp,
+                    reason=CONFIRM_REASON_CONNECTION_CHANGED,
+                )
+            return run_tracking_recover(
+                config,
+                tracking_id=payload.tracking_id,
+                expected_revision=payload.expected_revision,
+                action=RECOVERY_ACTION_VERIFY_EXTERNAL,
+                confirm=False,
+                now=timestamp,
+                ab_config=lease.record.config.to_runtime_config(),
+                management_client=management_client,
+                connection_ref=connection_ref,
+                expected_operation_id=operation.operation_id,
+                expected_operation_kind=operation.operation,
+                read_policy=read_policy,
+            )
+
+
+def _guard_expected_revision(expected_revision: Any, record: Any) -> None:
+    """Refuse a check that acts on a revision the record no longer has."""
     if (
-        current is None
-        or current.connection_ref is None
-        or str(current.connection_ref) != connection_ref
-        or current.config is None
+        not isinstance(expected_revision, int)
+        or isinstance(expected_revision, bool)
+        or expected_revision != record.revision
     ):
-        # Issue #183: a replaced saved connection never rebinds the old
-        # operation; the check reports the proven binding change and reads nothing.
-        return _unresolved_check(
-            config,
-            record=record,
-            expected_revision=payload.expected_revision,
-            timestamp=timestamp,
-            reason=CONFIRM_REASON_CONNECTION_CHANGED,
+        raise Stage1Error(
+            "tracking_revision_conflict",
+            "追番记录版本已变化，请刷新后重试",
+            _CHECK_FAILED_STEP,
+            {"field": "expected_revision", "current_revision": record.revision},
         )
-    return run_tracking_recover(
-        config,
-        tracking_id=payload.tracking_id,
-        expected_revision=payload.expected_revision,
-        action=RECOVERY_ACTION_VERIFY_EXTERNAL,
-        confirm=False,
-        now=timestamp,
-        ab_config=current.config.to_runtime_config(),
-        management_client=management_client,
-        connection_ref=connection_ref,
-        expected_operation_id=operation.operation_id,
-        expected_operation_kind=operation.operation,
-        read_policy=read_policy,
-    )
 
 
 def _unresolved_check(

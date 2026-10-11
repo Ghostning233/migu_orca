@@ -14,8 +14,10 @@ no test has to sleep for real.
 
 from __future__ import annotations
 
+import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,6 +25,7 @@ from shared.errors import Stage1Error
 from tracking_engine.controllers.submit import (
     CONFIRM_REASON_AUTHENTICATION,
     CONFIRM_REASON_CAPABILITY,
+    CONFIRM_REASON_CONNECTION,
     CONFIRM_REASON_UNREADABLE,
     CONFIRM_REASON_VERSION,
     confirm_reason_for_error,
@@ -30,8 +33,13 @@ from tracking_engine.controllers.submit import (
 
 #: Upper bound of read attempts for one check (including the first one).
 CHECK_MAX_ATTEMPTS = 3
-#: Total wall-clock budget for one check, retries and backoff included.
-CHECK_TOTAL_BUDGET_SECONDS = 20.0
+#: Hard wall-clock budget for one check, retries, backoff and the reads
+#: themselves included. It must stay strictly below the browser's default
+#: request budget (``frontend/src/api/client.ts`` ``DEFAULT_TIMEOUT_MS`` =
+#: 15_000) so a legal, slow check is never cut by the page and reported as an
+#: unproven result; ``test_budget_stays_inside_the_browser_request_budget``
+#: guards that relation.
+CHECK_TOTAL_BUDGET_SECONDS = 12.0
 #: Pause between two read attempts; never sleeps past the remaining budget.
 CHECK_RETRY_BACKOFF_SECONDS = 0.5
 
@@ -57,6 +65,47 @@ class CheckPolicy:
 
 
 DEFAULT_CHECK_POLICY = CheckPolicy()
+
+
+#: Process-level single-flight registry: one effective check per tracking record.
+_CHECK_REGISTRY_GUARD = threading.Lock()
+_ACTIVE_CHECKS: set[str] = set()
+
+
+@contextmanager
+def single_flight_check(tracking_id: str) -> Iterator[None]:
+    """Allow at most one effective check per tracking record in this process.
+
+    Concurrent requests for the same record are refused instead of all reading
+    Auto Bangumi: the CAS at the end only prevents a duplicate *write*, while
+    this guard prevents duplicate *reads* and duplicate read-only work
+    (issue #183 review). The page is single-flight on its own; this covers a
+    refresh, a second tab or a replay that arrives while the first check runs.
+    """
+    with _CHECK_REGISTRY_GUARD:
+        if tracking_id in _ACTIVE_CHECKS:
+            raise Stage1Error(
+                "tracking_check_in_progress",
+                "该追番记录的只读检查正在进行",
+                "tracking_check",
+                {"field": "tracking_id"},
+            )
+        _ACTIVE_CHECKS.add(tracking_id)
+    try:
+        yield
+    finally:
+        with _CHECK_REGISTRY_GUARD:
+            _ACTIVE_CHECKS.discard(tracking_id)
+
+
+def attempt_timeout_seconds(policy: CheckPolicy = DEFAULT_CHECK_POLICY) -> float:
+    """The per-attempt read timeout derived from the endpoint budget.
+
+    One read may never outlive the whole check: capping each attempt at
+    ``budget / max_attempts`` keeps ``max_attempts`` attempts inside the
+    endpoint budget instead of letting a single slow read consume it.
+    """
+    return max(policy.budget_seconds / max(policy.max_attempts, 1), 0.1)
 
 
 @dataclass(frozen=True)
@@ -97,7 +146,7 @@ def read_snapshot_bounded(
     while attempts < policy.max_attempts:
         attempts += 1
         try:
-            return BoundedSnapshotRead(snapshot=read_snapshot(), attempts=attempts)
+            snapshot = read_snapshot()
         except Stage1Error as exc:
             last_error = exc
             last_reason = confirm_reason_for_error(exc.error_type)
@@ -108,6 +157,17 @@ def read_snapshot_bounded(
         except Exception:  # noqa: BLE001 - any unreadable transport stays unresolved
             last_error = None
             last_reason = CONFIRM_REASON_UNREADABLE
+        else:
+            # A read that only answered *after* the deadline is not evidence
+            # inside the budget: it is discarded, never accepted late.
+            if policy.monotonic() > deadline:
+                return BoundedSnapshotRead(
+                    error=last_error,
+                    reason=CONFIRM_REASON_CONNECTION,
+                    attempts=attempts,
+                    timed_out=True,
+                )
+            return BoundedSnapshotRead(snapshot=snapshot, attempts=attempts)
         if attempts >= policy.max_attempts:
             break
         if policy.monotonic() + policy.backoff_seconds >= deadline:
@@ -120,6 +180,8 @@ def read_snapshot_bounded(
 
 __all__ = [
     "CHECK_MAX_ATTEMPTS",
+    "attempt_timeout_seconds",
+    "single_flight_check",
     "CHECK_RETRY_BACKOFF_SECONDS",
     "CHECK_TOTAL_BUDGET_SECONDS",
     "NON_RETRIABLE_REASONS",

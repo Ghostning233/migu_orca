@@ -10,7 +10,7 @@ import pytest
 from ab_engine.models.management import ExternalRss, ExternalSubscription
 from apps.migu_orca_web.schemas import TrackingCheckPayload
 from apps.migu_orca_web.tracking_check_service import run_saved_tracking_check
-from apps.migu_orca_web.tracking_external_check import CheckPolicy
+from apps.migu_orca_web.tracking_external_check import CheckPolicy, single_flight_check
 from apps.migu_orca_web.tracking_saved_recovery_service_test import (
     ReadOnlyClient,
     _bound_submit_scenario,
@@ -28,7 +28,11 @@ from storage_engine.controllers.tracking_repository import (
     compare_and_swap_tracking_record,
     load_tracking_record,
 )
-from tracking_engine.controllers.submit import CONFIRM_REASON_CONNECTION_CHANGED, CONFIRM_REASON_NOT_FOUND
+from tracking_engine.controllers.submit import (
+    CONFIRM_REASON_AMBIGUOUS,
+    CONFIRM_REASON_CONNECTION_CHANGED,
+    CONFIRM_REASON_NOT_FOUND,
+)
 from tracking_engine.models.operation import (
     TRACKING_OPERATION_STATE_IN_PROGRESS,
     TRACKING_OPERATION_STATE_PREPARED,
@@ -202,3 +206,96 @@ def test_check_rejects_a_record_without_a_pending_submit(monkeypatch, tmp_path: 
         )
 
     assert error.value.error_type == "tracking_state_conflict"
+
+
+def test_check_reports_an_ambiguous_snapshot_instead_of_not_found(monkeypatch, tmp_path: Path) -> None:
+    """Issue #183 review: an ambiguous snapshot has its own proven reason."""
+    config, record, saved, op, verifying = _bound_submit_scenario(
+        monkeypatch, tmp_path, TRACKING_OPERATION_STATE_IN_PROGRESS
+    )
+    external = ExternalSubscription("external-1", "芙莉莲", 1, "Group", rss_urls=(RSS_URL,), rss_ids=("rss-1",))
+    duplicated = [
+        ExternalRss("rss-1", "芙莉莲", RSS_URL),
+        ExternalRss("rss-2", "芙莉莲副本", RSS_URL),
+    ]
+
+    result = run_saved_tracking_check(
+        _payload(verifying),
+        config_root=tmp_path / "private",
+        management_client=ReadOnlyClient([external], rss_items=duplicated),
+    )
+
+    assert result["outcome"] == TRACKING_STATUS_RECOVERY_REQUIRED
+    assert result["verification_reason"] == CONFIRM_REASON_AMBIGUOUS
+    assert load_tracking_record(config, record.tracking_id).last_error["reason_code"] == CONFIRM_REASON_AMBIGUOUS
+
+
+def test_check_holds_the_saved_connection_lease_while_reading(monkeypatch, tmp_path: Path) -> None:
+    """Issue #183 review: the bound instance cannot be replaced mid-read."""
+    config, record, saved, op, verifying = _bound_submit_scenario(
+        monkeypatch, tmp_path, TRACKING_OPERATION_STATE_IN_PROGRESS
+    )
+    external, rss = _matching_snapshot()
+    repository = AutoBangumiConfigRepository(tmp_path / "private")
+    blocked: list[str] = []
+
+    class _ReplacingClient(ReadOnlyClient):
+        def read_snapshot(self):
+            try:
+                repository.save(
+                    build_stored_autobangumi_config(
+                        {"auth_mode": "password", "base_url": "http://other.invalid", "username": "u", "password": "p"}
+                    ),
+                    expected_configuration_revision=saved.configuration_revision,
+                )
+            except Stage1Error as exc:
+                blocked.append(exc.error_type)
+            return self.capabilities, self.subscriptions, self.rss_items
+
+    result = run_saved_tracking_check(
+        _payload(verifying),
+        config_root=tmp_path / "private",
+        management_client=_ReplacingClient([external], rss_items=[rss]),
+    )
+
+    assert result["outcome"] == TRACKING_STATUS_ACTIVE
+    assert blocked == ["connection_in_use"], blocked
+
+
+def test_check_refuses_a_stale_revision_before_the_connection_branch(monkeypatch, tmp_path: Path) -> None:
+    """Issue #183 review: a stale check is a 409, never a 200 binding report."""
+    config, record, saved, op, verifying = _bound_submit_scenario(
+        monkeypatch, tmp_path, TRACKING_OPERATION_STATE_IN_PROGRESS
+    )
+    # A replaced connection AND a stale revision: the revision must win.
+    AutoBangumiConfigRepository(tmp_path / "private").save(
+        build_stored_autobangumi_config(
+            {"auth_mode": "password", "base_url": "http://other.invalid", "username": "u", "password": "p"}
+        ),
+        expected_configuration_revision=saved.configuration_revision,
+    )
+
+    with pytest.raises(Stage1Error) as error:
+        run_saved_tracking_check(
+            _payload(verifying, expected_revision=verifying.revision + 1),
+            config_root=tmp_path / "private",
+            management_client=ReadOnlyClient(),
+        )
+
+    assert error.value.error_type == "tracking_revision_conflict"
+
+
+def test_check_refuses_a_concurrent_check_for_the_same_record(monkeypatch, tmp_path: Path) -> None:
+    """Issue #183 review: one effective check per record (server-side防重)."""
+    config, record, saved, op, verifying = _bound_submit_scenario(
+        monkeypatch, tmp_path, TRACKING_OPERATION_STATE_IN_PROGRESS
+    )
+    client = ReadOnlyClient()
+
+    with single_flight_check(record.tracking_id), pytest.raises(Stage1Error) as error:
+        run_saved_tracking_check(
+            _payload(verifying), config_root=tmp_path / "private", management_client=client
+        )
+
+    assert error.value.error_type == "tracking_check_in_progress"
+    assert client.reads == 0, "a refused concurrent check must not read Auto Bangumi"

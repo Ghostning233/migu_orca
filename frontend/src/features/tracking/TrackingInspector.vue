@@ -216,16 +216,9 @@ const pendingSubmission = computed(() => isPendingSubmission(
 ))
 
 function requestCheck(automatic = false): void {
-  if (!detail.value || checkInFlight.value || actionBusy.value) return
+  if (!detail.value || checkBusy.value) return
   emit('check-requested', { item: detail.value, automatic })
 }
-
-// One automatic check per armed detail load; the page disarms the flag, so a
-// check that persists a new revision never re-triggers itself.
-watch([pendingSubmission, () => props.autoCheckArmed, () => detail.value?.revision], () => {
-  if (!pendingSubmission.value || props.autoCheckArmed !== true) return
-  requestCheck(true)
-})
 
 // -- unknown-result recovery (US-312) ----------------------------------------
 // The three local actions are rendered exactly as the server offers them for a
@@ -330,6 +323,25 @@ const itemIntentUnresolved = computed(() => {
 const actionBusy = computed(() => (
   props.writeBusy === true || itemActionInFlight.value || itemIntentUnresolved.value
 ))
+
+/**
+ * The check's own single-flight gate (issue #183). It deliberately excludes
+ * *this* record's unresolved submission intent: a read-only check is exactly how
+ * that intent gets settled, so the pending state must not disable it. Another
+ * record's intent, an in-flight write on this one and a running check still do.
+ */
+const checkBusy = computed(() => (
+  props.writeBusy === true || checkInFlight.value
+  || writeInFlight.value || recoveryInFlight.value || managementInFlight.value
+))
+// One automatic check per armed detail load. The armed attempt is retried when
+// it stops being blocked (a submit that is still settling, another record's
+// intent) until the page actually starts it; the page only disarms on a started
+// check, so a check that persists a new revision never re-triggers itself.
+watch([pendingSubmission, () => props.autoCheckArmed, () => detail.value?.revision, checkBusy], () => {
+  if (!pendingSubmission.value || props.autoCheckArmed !== true || checkBusy.value) return
+  requestCheck(true)
+})
 
 /**
  * Issue 116：外部写（提交、重试提交、外部管理）只有在存在已保存的 Auto
@@ -783,7 +795,7 @@ defineExpose({ reload: () => fetchDetail(true) })
             id="tracking-check"
             variant="secondary"
             :loading="checkInFlight"
-            :disabled="actionBusy"
+            :disabled="checkBusy"
             @click="requestCheck(false)"
           >重新检查</BaseButton>
           <div

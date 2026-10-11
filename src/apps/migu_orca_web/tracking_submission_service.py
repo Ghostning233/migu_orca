@@ -54,7 +54,10 @@ from apps.migu_orca_web.serializers import (
     _sanitize_ab_submit_result,
     serialize_request_safe_info,
 )
-from apps.migu_orca_web.tracking_external_check import read_snapshot_bounded
+from apps.migu_orca_web.tracking_external_check import (
+    attempt_timeout_seconds,
+    read_snapshot_bounded,
+)
 from apps.migu_orca_web.tracking_migration_service import run_tracking_migration
 from apps.migu_orca_web.tracking_serializers import (
     tracking_available_actions,
@@ -191,8 +194,11 @@ def compose_tracking_readback_external(config: Any) -> Callable[[], Any]:
     authentication/version failure returns at once. The caller keeps the config
     lease alive for its duration, exactly like the submit seam.
     """
+    # One read may never outlive the bounded check it belongs to (issue #183).
     client = create_legacy_31_management_client(
-        config, transport=UrlopenAutoBangumiHttpTransport()
+        config,
+        transport=UrlopenAutoBangumiHttpTransport(),
+        timeout=attempt_timeout_seconds(),
     )
 
     def read_bounded() -> Any:

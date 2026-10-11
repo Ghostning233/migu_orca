@@ -231,8 +231,19 @@ class Legacy31ManagementClient:
             raise Stage1Error("ab_management_failed", "Auto Bangumi 管理请求失败", "ab_management", {"reason": exc.__class__.__name__}) from exc
 
 
-def create_legacy_31_management_client(config: AutoBangumiConfig, *, transport: AutoBangumiLegacyTransport) -> Legacy31ManagementClient:
-    return Legacy31ManagementClient(config, transport=transport)
+def create_legacy_31_management_client(
+    config: AutoBangumiConfig,
+    *,
+    transport: AutoBangumiLegacyTransport,
+    timeout: float = 30,
+) -> Legacy31ManagementClient:
+    """Build one request-scoped management client.
+
+    ``timeout`` bounds a *single* HTTP call; callers that run inside an
+    endpoint-level budget pass a derived per-attempt timeout through here
+    (issue #183) instead of widening any global default.
+    """
+    return Legacy31ManagementClient(config, transport=transport, timeout=timeout)
 
 
 def _unknown_capabilities(adapter: Literal["legacy_3_1", "api_token"], version: str | None) -> AutoBangumiCapabilities:

@@ -667,16 +667,17 @@ async function runTrackingCheck(payload: { item: TrackingItem; automatic: boolea
   const trackingId = payload.item.tracking_id
   const revision = payload.item.revision
   if (typeof revision !== 'number') return
-  if (payload.automatic) {
-    // The owed automatic check is consumed by the first attempt, whatever it
-    // returns, so persisting a new revision never re-triggers itself.
-    if (!autoCheckArmed.value) return
-    autoCheckArmed.value = false
-  }
+  if (payload.automatic && !autoCheckArmed.value) return
   if (checkLoading.value) return
   if (otherItemIntentOwner(trackingId)) {
     if (!payload.automatic) blockIntent(trackingId)
     return
+  }
+  if (payload.automatic) {
+    // The owed automatic check is consumed only when one is actually started,
+    // so a refused/blocked attempt is retried rather than silently dropped, and
+    // a check that persists a new revision never re-triggers itself.
+    autoCheckArmed.value = false
   }
   blockedIntentNotice.value = null
   const sequence = ++checkSequence
@@ -696,7 +697,12 @@ async function runTrackingCheck(payload: { item: TrackingItem; automatic: boolea
     })
     if (sequence !== checkSequence) return
     applyReturnedTracking(result.tracking)
-    checkSession.value = projectCheckResult(trackingId, result, revision)
+    const session = projectCheckResult(trackingId, result, revision)
+    checkSession.value = session
+    // Issue #183 review: once the exact object is proven, the pending submit is
+    // no longer ambiguous, so its page-level intent lock is released here —
+    // otherwise the stale intent would keep blocking every other record.
+    if (session.state === 'CONFIRMED') releaseSettledSubmissionIntent(trackingId)
     await recheckAfterAction(trackingId, true)
   } catch (error) {
     if (sequence !== checkSequence) return
@@ -712,6 +718,21 @@ async function runTrackingCheck(payload: { item: TrackingItem; automatic: boolea
       if (checkController === controller) checkController = null
     }
   }
+}
+
+/**
+ * Release a pending *submission* intent that a read-only check has just proven
+ * settled (issue #183 review). Only the submit-family session is released: a
+ * recovery or management lock that is still unresolved stays locked, and the
+ * operation/audit history on the server is untouched.
+ */
+function releaseSettledSubmissionIntent(trackingId: string): void {
+  if (writeSession.value?.trackingId !== trackingId) return
+  if (writeSession.value.state !== 'VERIFYING_EXTERNAL'
+    && writeSession.value.state !== 'RECOVERY_REQUIRED'
+    && writeSession.value.state !== 'UNKNOWN') return
+  writeIntent = null
+  writeSession.value = null
 }
 
 function resetCheck(): void {

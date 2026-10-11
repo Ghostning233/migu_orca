@@ -6,8 +6,10 @@ import pytest
 
 from apps.migu_orca_web.tracking_external_check import (
     CHECK_MAX_ATTEMPTS,
+    CHECK_TOTAL_BUDGET_SECONDS,
     BoundedSnapshotRead,
     CheckPolicy,
+    attempt_timeout_seconds,
     read_snapshot_bounded,
 )
 from shared.errors import Stage1Error
@@ -133,3 +135,27 @@ def test_an_unexpected_error_stays_unreadable_and_is_retried_but_bounded() -> No
 def test_default_policy_keeps_a_small_fixed_bound() -> None:
     assert CHECK_MAX_ATTEMPTS == 3
     assert CheckPolicy().max_attempts == CHECK_MAX_ATTEMPTS
+
+
+def test_a_read_that_only_answers_after_the_deadline_is_never_accepted() -> None:
+    """Issue #183 review: the budget bounds the reads, not just the retries."""
+    clock = _Clock()
+
+    def read() -> tuple[str]:
+        # A slow upstream answers successfully, but only after the deadline.
+        clock.now += 5.0
+        return ("late",)
+
+    result = read_snapshot_bounded(read, policy=_policy(clock, budget_seconds=2.0))
+
+    assert result.snapshot is None
+    assert result.timed_out is True
+    assert result.attempts == 1
+    assert result.reason == CONFIRM_REASON_CONNECTION
+
+
+def test_per_attempt_timeout_is_derived_from_the_endpoint_budget() -> None:
+    policy = CheckPolicy(max_attempts=3, budget_seconds=12.0)
+    assert attempt_timeout_seconds(policy) == 4.0
+    # The whole check must stay inside the browser's default request budget.
+    assert CHECK_TOTAL_BUDGET_SECONDS < 15.0
