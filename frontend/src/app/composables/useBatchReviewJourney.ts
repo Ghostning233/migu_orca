@@ -219,6 +219,16 @@ function updateItem(state: BatchReviewState, itemId: string, update: Partial<Bat
   return item ? { ...state, items: { ...state.items, [itemId]: { ...item, ...update } } } : state
 }
 
+/**
+ * 弱闸：只回答「这一条现在能不能进入保存确认」的最小子集——相位为 `draft`、
+ * 有草案身份、没有未应用编辑。
+ *
+ * 视图的强闸（`itemConfirmability`）在这之上继续加判据（可展开草案、会话有效、
+ * 无重算/编辑在途、无修改失败、保存不在途、字幕组与有效资源）。因此**强闸为真
+ * 必然蕴含弱闸为真**：弱闸的判据是强闸判据的子集。这条关系钉在
+ * `BatchWorkbenchView.test.ts` 的「弱闸 ⊂ 强闸」用例上——强闸放行的勾选集合
+ * 发出的保存请求不会被 `begin_save` 拒绝。
+ */
 export function batchItemCanConfirm(item: BatchReviewItem | undefined): boolean {
   return Boolean(item && item.phase === 'draft' && item.draftId && item.draftRevision !== null && !item.dirty)
 }

@@ -2523,6 +2523,34 @@ describe('BatchWorkbenchView lifecycle characterization (#161)', () => {
     expect(wrapper.find('.confirm-dialog').exists()).toBe(false)
   })
 
+  it('弱闸 ⊂ 强闸：强闸放行的勾选集合发出的保存请求不会被 begin_save 拒绝', async () => {
+    apiPost.mockResolvedValueOnce(parseResult({
+      items: [
+        draftRow(),
+        draftRow({ item_id: 'item-2', draft_id: 'draft-2', preview_request: previewRequest('req-2') }),
+      ],
+    }))
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('甲\n乙')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+
+    // item-2 有未应用编辑：强闸阻断它，但它不是「被 begin_save 拒绝」。
+    await wrapper.find('.batch-draft-card[data-item-id="item-2"]').trigger('click')
+    await nextTick()
+    await wrapper.find('#batch-preview-must-contain').setValue('未应用修改')
+    await nextTick()
+
+    await saveAllVisible(wrapper)
+
+    const saveCall = apiPost.mock.calls.find(([path]) => path === '/api/v1/batches/{batch_id}/save-confirm')
+    expect((saveCall?.[1]?.body as { item_ids: string[] }).item_ids).toEqual(['item-1'])
+    const { useNotificationStore } = await import('@/app/stores/notification')
+    const notification = useNotificationStore()
+    expect(notification.current?.message ?? '').not.toContain('当前条目状态已变化')
+    wrapper.unmount()
+  })
+
   it('右栏详情编辑接线打通：flush 发一次 preview-modify 并恢复可确认', async () => {
     apiPost.mockResolvedValueOnce(parseResult({ items: [draftRow()] }))
     const { wrapper } = await mountBatch()
