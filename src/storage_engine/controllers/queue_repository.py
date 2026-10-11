@@ -13,6 +13,7 @@ from shared.errors import Stage1Error
 from storage_engine.controllers.storage_config import (
     StorageConfig,
 )
+from storage_engine.controllers.storage_primitives import is_relative_to
 
 
 @dataclass(frozen=True)
@@ -139,7 +140,7 @@ def _queue_path(
 
     queue_root = config.queue_dir.resolve(strict=False)
     candidate = (config.queue_dir / f"{clean_batch_id}.json").resolve(strict=False)
-    if not _is_relative_to(candidate, queue_root):
+    if not is_relative_to(candidate, queue_root):
         raise Stage1Error(
             "invalid_batch_id",
             "batch_id 不能包含路径片段",
@@ -147,14 +148,6 @@ def _queue_path(
             {"field": "batch_id"},
         )
     return candidate
-
-
-def _is_relative_to(path: Path, parent: Path) -> bool:
-    try:
-        path.relative_to(parent)
-        return True
-    except ValueError:
-        return False
 
 
 __all__ = [

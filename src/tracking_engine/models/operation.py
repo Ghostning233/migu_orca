@@ -45,9 +45,10 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
+
+from shared.timestamps import utc_now
 
 TRACKING_OPERATION_CONNECTION_SCHEMA_VERSION = 3
 #: Issue #98: operations record which submission mode the user chose.
@@ -250,11 +251,6 @@ class TrackingOperation:
     #: Issue #98: the operation-level submission mode.  A v1-v3 operation reads
     #: back as the continue-tracking default.
     submission_mode: str = TRACKING_SUBMISSION_MODE_CONTINUE
-
-
-def utc_now() -> str:
-    """Current UTC RFC3339 timestamp used for operation timestamps."""
-    return datetime.now(UTC).isoformat()
 
 
 def create_tracking_operation(

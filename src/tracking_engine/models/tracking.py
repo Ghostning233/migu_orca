@@ -37,9 +37,11 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
+
+from shared.sensitive_values import redact_sensitive_text
+from shared.timestamps import utc_now
 
 TRACKING_SCHEMA_VERSION = 1
 EXTERNAL_MAPPING_SCHEMA_VERSION = 2
@@ -310,18 +312,6 @@ _SENSITIVE_KEYS = frozenset(
         "headers",
     }
 )
-_URL_RE = re.compile(r"https?://[^\s<>'\"]+")
-_MAGNET_RE = re.compile(r"magnet:\?[^\s<>'\"]*", re.IGNORECASE)
-_ABSOLUTE_PATH_RE = re.compile(r"(?<!\w)(?:/[^\s<>'\"]+)+")
-_FILE_SCHEME_RE = re.compile(r"file://", re.IGNORECASE)
-_WINDOWS_DRIVE_RE = re.compile(r"(?i)\b[a-z]:[\\/]")
-_MARKUP_RE = re.compile(r"<\s*(?:html|rss|xml|svg|script|body|!doctype)\b", re.IGNORECASE)
-_SENSITIVE_KEY_VALUE_RE = re.compile(
-    r"(?i)\b(?:token|secret|cookie|authorization|password|passwd|bearer|"
-    r"username|sid|session|endpoint|rss_url)\s*[=:]\s*[^\s,;]+"
-)
-
-
 def tracking_id_for_request(request_id: str) -> str:
     """Return the deterministic opaque ``tracking_id`` for one ``request_id``.
 
@@ -386,11 +376,6 @@ class TrackingRecord:
     created_at: str | None = None
     updated_at: str | None = None
     last_synced_at: str | None = None
-
-
-def utc_now() -> str:
-    """Current UTC RFC3339 timestamp used for ``created_at``/``updated_at``."""
-    return datetime.now(UTC).isoformat()
 
 
 def build_audit_event(
@@ -754,7 +739,7 @@ def _clean_external_plan_summary(
         if value is not None:
             if not isinstance(value, str):
                 raise ValueError(f"{key} must be a string or null")
-            safe = _redact_string(value).strip()[:256]
+            safe = redact_sensitive_text(value).strip()[:256]
             if safe:
                 values[key] = safe
     if season is not None:
@@ -945,20 +930,8 @@ def _clean_opaque_value(value: Any) -> Any:
         items = [item for item in items if item is not None]
         return items or None
     if isinstance(value, str):
-        return _redact_string(value) or None
+        return redact_sensitive_text(value) or None
     return value
-
-
-def _redact_string(value: str) -> str:
-    text = _MAGNET_RE.sub("[redacted]", value)
-    text = _URL_RE.sub("[redacted-url]", text)
-    text = _SENSITIVE_KEY_VALUE_RE.sub("[redacted]", text)
-    text = _ABSOLUTE_PATH_RE.sub("[redacted-path]", text)
-    text = _FILE_SCHEME_RE.sub("[redacted-url]", text)
-    text = _WINDOWS_DRIVE_RE.sub("[redacted-path]", text)
-    if _MARKUP_RE.search(text):
-        return "[redacted-content]"
-    return text
 
 
 def _require_request_id(request_id: str) -> str:

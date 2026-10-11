@@ -13,9 +13,7 @@ never leave a half-written manifest.
 
 from __future__ import annotations
 
-import contextlib
 import json
-import os
 from pathlib import Path
 from threading import RLock
 
@@ -24,6 +22,7 @@ from storage_engine.controllers.storage_config import (
     StorageConfig,
     ensure_storage_layout,
 )
+from storage_engine.controllers.storage_primitives import write_text_atomic
 from tracking_engine.models.migration import (
     MigrationManifest,
     manifest_from_storage_dict,
@@ -98,10 +97,8 @@ def save_migration_manifest(
             )
             + "\n"
         )
-        temp_path = manifest_path.with_name(manifest_path.name + ".tmp")
         try:
-            temp_path.write_text(payload, encoding="utf-8")
-            os.replace(temp_path, manifest_path)
+            write_text_atomic(manifest_path, payload)
         except OSError as exc:
             raise Stage1Error(
                 "storage_error",
@@ -109,10 +106,6 @@ def save_migration_manifest(
                 "save_migration_manifest",
                 {"directory": config.tracking_migrations_dir.name},
             ) from exc
-        finally:
-            if temp_path.exists():
-                with contextlib.suppress(OSError):
-                    temp_path.unlink()
     try:
         return manifest_from_storage_dict(manifest_to_storage_dict(manifest))
     except ValueError as exc:  # pragma: no cover - model guards construction

@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import contextlib
 import json
-import os
-import re
 from pathlib import Path
 from typing import Any
 
@@ -17,9 +14,14 @@ from shared.models import (
     SubtitleGroupPreference,
     VersionedUserPreference,
 )
+from shared.sensitive_values import contains_sensitive_value
 from storage_engine.controllers.storage_config import (
     StorageConfig,
     ensure_storage_layout,
+)
+from storage_engine.controllers.storage_primitives import (
+    is_relative_to,
+    write_text_atomic,
 )
 
 #: Single-user default preference file inside ``<storage>/preferences``.
@@ -50,30 +52,6 @@ _SEARCH_FIELDS = frozenset({"reuse_explicit_corrections"})
 # body, or local absolute path. Word-boundary keywords follow the queue
 # sanitizer's token-word list so legitimate values like "1080p" or "喵萌"
 # are never rejected.
-_SENSITIVE_KEYWORDS = re.compile(
-    r"(?i)\b(?:token|secret|cookie|authorization|password|passwd|bearer|"
-    r"username|sid|session|endpoint|api_key|apikey|rss_url|raw_html|raw_rss|"
-    r"response_body|request_body|magnet)\b"
-)
-_URL_RE = re.compile(r"https?://[^\s<>'\"]+")
-_MAGNET_RE = re.compile(r"magnet:\?[^\s<>'\"]*", re.IGNORECASE)
-_ABSOLUTE_PATH_RE = re.compile(r"(?<!\w)(?:/[^\s<>'\"]+)+")
-# Absolute (root) path form only: a slash segment at the start of the text or
-# right after whitespace/a quote. Used when a field legitimately allows
-# relative path separators (e.g. naming templates like "TV/{title}/Season N"),
-# while still rejecting true absolute paths like "/home/user/...".
-_ABSOLUTE_PATH_STRICT_RE = re.compile(r"(?:^|[\s'\"])(/[^\s<>'\"]+)")
-_FILE_SCHEME_RE = re.compile(r"file://", re.IGNORECASE)
-_WINDOWS_DRIVE_RE = re.compile(r"(?i)\b[a-z]:[\\/]")
-_MARKUP_RE = re.compile(
-    r"<\s*(?:html|rss|xml|svg|script|body|!doctype)\b", re.IGNORECASE
-)
-_SENSITIVE_KEY_VALUE_RE = re.compile(
-    r"(?i)\b(?:token|secret|cookie|authorization|password|passwd|bearer|"
-    r"username|sid|session|endpoint|rss_url)\s*[=:]\s*[^\s,;]+"
-)
-
-
 def default_user_preferences() -> VersionedUserPreference:
     """Return the safe non-sensitive default preferences.
 
@@ -81,34 +59,6 @@ def default_user_preferences() -> VersionedUserPreference:
     usable (empty) preference set instead of an error.
     """
     return VersionedUserPreference()
-
-
-def contains_sensitive_value(text: str, *, allow_relative_paths: bool = False) -> bool:
-    """Return True when ``text`` looks like a sensitive external value.
-
-    ``allow_relative_paths`` is for fields that legitimately contain relative
-    path separators (e.g. naming templates like ``TV/{title}/Season N``): only
-    true absolute paths (root paths, Windows drives, file:// URLs) are then
-    rejected, while relative slash segments are allowed.
-    """
-    if _URL_RE.search(text):
-        return True
-    if _MAGNET_RE.search(text):
-        return True
-    if allow_relative_paths:
-        if _ABSOLUTE_PATH_STRICT_RE.search(text):
-            return True
-    elif _ABSOLUTE_PATH_RE.search(text):
-        return True
-    if _FILE_SCHEME_RE.search(text):
-        return True
-    if _WINDOWS_DRIVE_RE.search(text):
-        return True
-    if _MARKUP_RE.search(text):
-        return True
-    if _SENSITIVE_KEY_VALUE_RE.search(text):
-        return True
-    return bool(_SENSITIVE_KEYWORDS.search(text))
 
 
 def validate_preferences(
@@ -262,10 +212,8 @@ def save_user_preferences(
         )
         + "\n"
     )
-    temp_path = preferences_path.with_name(PREFERENCES_FILENAME + ".tmp")
     try:
-        temp_path.write_text(payload, encoding="utf-8")
-        os.replace(temp_path, preferences_path)
+        write_text_atomic(preferences_path, payload)
     except OSError as exc:
         raise Stage1Error(
             "storage_error",
@@ -273,10 +221,6 @@ def save_user_preferences(
             "save_user_preferences",
             {"directory": config.preferences_dir.name},
         ) from exc
-    finally:
-        if temp_path.exists():
-            with contextlib.suppress(OSError):
-                temp_path.unlink()
 
     return {
         "storage": "local_json",
@@ -551,7 +495,7 @@ def _bool_from_dict(value: Any, field: str) -> bool:
 def _preferences_path(config: StorageConfig) -> Path:
     preferences_root = config.preferences_dir.resolve(strict=False)
     candidate = (config.preferences_dir / PREFERENCES_FILENAME).resolve(strict=False)
-    if not _is_relative_to(candidate, preferences_root):
+    if not is_relative_to(candidate, preferences_root):
         raise Stage1Error(
             "storage_error",
             "偏好存储路径无效",
@@ -560,13 +504,6 @@ def _preferences_path(config: StorageConfig) -> Path:
         )
     return candidate
 
-
-def _is_relative_to(path: Path, parent: Path) -> bool:
-    try:
-        path.relative_to(parent)
-        return True
-    except ValueError:
-        return False
 
 
 def _validate_string(
