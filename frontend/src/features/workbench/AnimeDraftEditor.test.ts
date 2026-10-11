@@ -145,7 +145,7 @@ describe('AnimeDraftEditor', () => {
     const summary = wrapper.find('.draft-review-summary')
     expect(summary.text()).toContain('已选合集')
     expect(summary.text()).toContain('未提供')
-    expect(summary.text()).toContain('未知')
+    expect(summary.text()).toContain('未开发')
   })
 
   it('does not infer the selected collection from request titles when the projection is absent', () => {

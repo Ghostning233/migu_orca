@@ -147,7 +147,7 @@ Stage 23 UI 调整要求（已完成）：
 3. 浮层维护 `aria-expanded`/`aria-controls`、焦点进入和返回；桌面/窄屏保持 viewport 内，不在 `#search-results-panel` 制造额外内部滚动条。
 4. DRAFT/READY 的“查看草案”把 preview/request 送入现有“订阅方案详情”，不在结果卡内渲染完整 `.batch-card-review`；详情保留修改、保存、接受、筛选和种子动作。
 5. 各结果卡片布局相互独立，不因同一 grid row 另一张卡片的草案内容被拉长。
-6. 卡片单行显示 `播出进度：待开发 / N 集` 或 `播出进度：待开发 / 未知`；不以有效种子数推断播出进度。
+6. 卡片单行显示 `总集数：N 集`，缺可信数值时显示「未开发」；不以有效种子数推断集数。
 7. disabled/`aria-disabled=true` 控件使用静态视觉和普通/default 鼠标，hover 不显示 spinner/无限动画；只有真实 `aria-busy=true` 才显示 loading。
 8. 新浮层、详情和封面端点继续遵守敏感值过滤与真实 Chromium 回归要求。
 

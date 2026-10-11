@@ -353,13 +353,13 @@ describe('batch card default layer (US-355)', () => {
     expect(byLabel['输入']).toBe('萌王S4')
     expect(byLabel['有效种子数']).toBe('1')
     expect(byLabel['偏好']).toBe('未配置偏好，使用默认流程')
-    expect(byLabel['总集数']).toBe('未知')
+    expect(byLabel['总集数']).toBe('未开发')
     expect(batchCardAuxiliaryFacts(batchItem())).toEqual([
       { label: '检索关键词', value: '转生史莱姆 第四季' },
       { label: '季数提示', value: 'S4' },
       { label: '输入', value: '萌王S4' },
       { label: '偏好', value: '未配置偏好，使用默认流程' },
-      { label: '总集数', value: '未知' },
+      { label: '总集数', value: '未开发' },
     ])
   })
 

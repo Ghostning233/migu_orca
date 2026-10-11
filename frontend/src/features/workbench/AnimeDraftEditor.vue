@@ -25,6 +25,7 @@ import CheckboxRow from '@/components/forms/CheckboxRow.vue'
 import FormField from '@/components/layout/FormField.vue'
 import PanelSection from '@/components/layout/PanelSection.vue'
 
+import { EPISODE_PLACEHOLDER, episodeCountText } from '@/features/workbench/episodeCount'
 import ResourceSummary from '@/features/workbench/ResourceSummary.vue'
 import ResourceDetailDialog from '@/features/workbench/ResourceDetailDialog.vue'
 import SubtitleGroupSelect from '@/features/workbench/SubtitleGroupSelect.vue'
@@ -428,17 +429,18 @@ defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
               <span class="batch-metric-value">{{ excluded.length }}</span>
               <span class="batch-metric-unit">个</span>
             </li>
-            <!-- #145：批量草案本轮不接入可信集数数据源，两个集数字段固定显示「未开发」，
-                 既不从资源数推断，也不改变其他页面缺可信值时显示「未知」的规则。 -->
+            <!-- #145/#165：不接入可信集数数据源，两个集数字段固定显示占位；文案与
+                 单番候选卡、追番详情同源（features/workbench/episodeCount.ts），
+                 既不从资源数推断，也不再使用「未知」作为集数占位。 -->
             <li class="batch-resource-metric" data-metric="updated-episodes">
               <span class="batch-metric-mark is-clock" aria-hidden="true"></span>
               <span class="batch-metric-label">已更新集数</span>
-              <span class="batch-metric-value">未开发</span>
+              <span class="batch-metric-value">{{ EPISODE_PLACEHOLDER }}</span>
             </li>
             <li class="batch-resource-metric" data-metric="total-episodes">
               <span class="batch-metric-mark is-bars" aria-hidden="true"></span>
               <span class="batch-metric-label">预期总集数</span>
-              <span class="batch-metric-value">未开发</span>
+              <span class="batch-metric-value">{{ EPISODE_PLACEHOLDER }}</span>
             </li>
           </ul>
           <ul v-if="resourceSamples.length" class="batch-resource-samples">
@@ -503,7 +505,7 @@ defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
             </div>
             <div class="detail-row">
               <dt>总集数</dt>
-              <dd>{{ candidateSummary?.totalEpisodes ? `${candidateSummary.totalEpisodes} 集` : '未知' }}</dd>
+              <dd>{{ episodeCountText(candidateSummary?.totalEpisodes) }}</dd>
             </div>
             <div class="detail-row">
               <dt>封面</dt>

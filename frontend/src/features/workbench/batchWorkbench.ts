@@ -19,6 +19,7 @@ import type { ApiStreamEvent } from '@/api/client'
 import type { operations } from '@/api/generated/api'
 import { isPublicRouteIdentifier } from '@/app/router/catalog'
 import { displayValue, type RequestSnapshot } from '@/features/requests/requestDetail'
+import { EPISODE_PLACEHOLDER } from '@/features/workbench/episodeCount'
 import {
   publicPosterPath,
   type SelectedCollectionSummary,
@@ -352,7 +353,8 @@ export function batchCardAuxiliaryFacts(item: BatchItem): BatchCardFact[] {
   facts.push({ label: '输入', value: displayValue(item.raw_title) })
   if (batchCardRequest(item)) facts.push({ label: '有效种子数', value: batchCardSeedSummary(item) })
   facts.push({ label: '偏好', value: batchCardPreferenceSummary(item) })
-  facts.push({ label: '总集数', value: batchEpisodeProgressText(undefined).replace('总集数：', '') })
+  // #165：批量卡这条事实没有可信总集数来源，固定用同一份占位。
+  facts.push({ label: '总集数', value: EPISODE_PLACEHOLDER })
   return facts
 }
 
@@ -447,12 +449,6 @@ export function batchCandidateSelectionIsBlocked(candidate: BatchCandidate, conf
 /** True when the candidate needs the explicit season-confirmation checkbox. */
 export function batchCandidateNeedsConfirmation(candidate: BatchCandidate): boolean {
   return candidate.season_evidence?.status === 'NEEDS_CONFIRMATION'
-}
-
-/** Episode-progress display text for a batch card (same as single-search). */
-export function batchEpisodeProgressText(totalEpisodes: number | null | undefined): string {
-  const total = Number(totalEpisodes)
-  return Number.isInteger(total) && total > 0 ? `总集数：${total} 集` : '总集数：未知'
 }
 
 /** Build the create-request payload for a selected batch candidate. */

@@ -33,6 +33,7 @@ import {
   type SendableManagementActionCode,
 } from './trackingManagement'
 import AnimeDraftEditor from '@/features/workbench/AnimeDraftEditor.vue'
+import { EPISODE_PLACEHOLDER, hasTrustedEpisodeCount } from '@/features/workbench/episodeCount'
 import {
   useSavedPlanEditor,
   type SavedPlanFetch,
@@ -576,8 +577,8 @@ defineExpose({ reload: () => fetchDetail(true) })
           <div><dt>本地状态</dt><dd>{{ detail.status_label }}</dd></div>
           <div v-if="submissionModeLabel"><dt>提交方式</dt><dd>{{ submissionModeLabel }}</dd></div>
           <div><dt>有效资源</dt><dd>{{ detail.valid_resource_count }}</dd></div>
-          <div><dt>总集数</dt><dd>{{ detail.total_episodes ?? '未知' }}</dd></div>
-          <div><dt>已更新集数</dt><dd>未知</dd></div>
+          <div><dt>总集数</dt><dd>{{ hasTrustedEpisodeCount(detail.total_episodes) ? detail.total_episodes : EPISODE_PLACEHOLDER }}</dd></div>
+          <div><dt>已更新集数</dt><dd>{{ EPISODE_PLACEHOLDER }}</dd></div>
         </dl>
       </section>
 

@@ -32,11 +32,11 @@ import BaseButton from '@/components/forms/BaseButton.vue'
 
 import {
   candidateSelectionIsBlocked,
-  episodeProgressText,
   needsSeasonConfirmation,
   seasonEvidenceText,
   type MikanCandidate,
 } from '@/features/workbench/candidateSearch'
+import { episodeProgressText } from '@/features/workbench/episodeCount'
 
 const props = withDefaults(defineProps<{
   candidate: MikanCandidate
