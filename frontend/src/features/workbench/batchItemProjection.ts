@@ -40,6 +40,29 @@ export interface BatchOutcomeProjection {
  * 分支顺序与原实现逐条一致：成功 → 草案已被保存（重放）→ 允许恢复确认 →
  * 草案失效 → 其余可重试失败。
  */
+/** 草案已被保存、等待定位的冻结行（两个入口共用）。 */
+function locatePendingRow(row: BatchItem): BatchItem {
+  return {
+    ...row,
+    status: 'SAVED_PENDING_LOCATE',
+    preview_request: null,
+    draft_id: null,
+    draft_revision: null,
+    request_id: null,
+  }
+}
+
+/** 草案已失效：回到真实合集选择（有候选 FOUND，否则 EMPTY）。 */
+function draftInvalidatedRow(row: BatchItem): BatchItem {
+  return {
+    ...row,
+    status: (row.candidates?.length ?? 0) > 0 ? 'FOUND' : 'EMPTY',
+    preview_request: null,
+    draft_id: null,
+    draft_revision: null,
+  }
+}
+
 export function projectSaveConfirmOutcome(
   row: BatchItem,
   resultItem: BatchSaveResultItem,
@@ -63,14 +86,7 @@ export function projectSaveConfirmOutcome(
     // Issue 130：草案已经被保存；冻结该条目等待核验，不提供重新生成或新键重试。
     return {
       kind: 'locate_pending',
-      row: {
-        ...row,
-        status: 'SAVED_PENDING_LOCATE',
-        preview_request: null,
-        draft_id: null,
-        draft_revision: null,
-        request_id: null,
-      },
+      row: locatePendingRow(row),
       invalidatesResources: true,
       clearsSelection: true,
     }
@@ -92,13 +108,7 @@ export function projectSaveConfirmOutcome(
   if (batchSaveErrorInvalidatesDraft(resultItem.error_type)) {
     return {
       kind: 'draft_invalidated',
-      row: {
-        ...row,
-        status: (row.candidates?.length ?? 0) > 0 ? 'FOUND' : 'EMPTY',
-        preview_request: null,
-        draft_id: null,
-        draft_revision: null,
-      },
+      row: draftInvalidatedRow(row),
       invalidatesResources: true,
       clearsSelection: true,
     }
@@ -115,24 +125,9 @@ export function projectSaveConfirmOutcome(
 export function projectDeterministicSaveFailure(row: BatchItem, safeType: string): BatchItem {
   if (batchSaveErrorIsReplayed(safeType)) {
     // Issue 130：单条重试撞上已保存草案：同样冻结为待定位，不引导重复保存。
-    return {
-      ...row,
-      status: 'SAVED_PENDING_LOCATE',
-      preview_request: null,
-      draft_id: null,
-      draft_revision: null,
-      request_id: null,
-    }
+    return locatePendingRow(row)
   }
-  if (batchSaveErrorInvalidatesDraft(safeType)) {
-    return {
-      ...row,
-      status: (row.candidates?.length ?? 0) > 0 ? 'FOUND' : 'EMPTY',
-      preview_request: null,
-      draft_id: null,
-      draft_revision: null,
-    }
-  }
+  if (batchSaveErrorInvalidatesDraft(safeType)) return draftInvalidatedRow(row)
   return { ...row, status: 'DRAFT' }
 }
 

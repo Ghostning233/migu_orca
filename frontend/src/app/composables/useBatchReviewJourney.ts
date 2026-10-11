@@ -340,7 +340,14 @@ export type BatchReviewEffect =
   | { readonly kind: 'navigate'; readonly batchId: string }
   | { readonly kind: 'notify'; readonly event: BatchReviewNotifyEvent }
   | { readonly kind: 'focus'; readonly target: BatchReviewFocusTarget }
+  /** 无障碍播报：只更新 aria-live 文本，不移动焦点、不弹通知。 */
+  | { readonly kind: 'announce'; readonly event: BatchReviewAnnounceEvent }
   | { readonly kind: 'needsConfirmation'; readonly request: BatchReviewConfirmationRequest }
+
+/** 定位播报的事件；标题文案由视图补。 */
+export type BatchReviewAnnounceEvent =
+  | { readonly type: 'focus_first_failed'; readonly itemId: string }
+  | { readonly type: 'focus_first_pending'; readonly itemId: string }
 
 /** Where the caller must move focus once a command settled. */
 export type BatchReviewFocusTarget =
@@ -369,12 +376,12 @@ export type BatchReviewNotifyEvent =
   | { readonly type: 'parse_succeeded'; readonly itemCount: number }
   | { readonly type: 'parse_empty' }
   | { readonly type: 'parse_failed'; readonly message: string }
-  /** 保存确认后已定位到首个失败／未处理条目；标题文案由视图补。 */
-  | { readonly type: 'focus_first_failed'; readonly itemId: string }
-  | { readonly type: 'focus_first_pending'; readonly itemId: string }
 
 export interface BatchReviewCommandResult {
-  /** false = the current state rejected this transition; the caller keeps its scene. */
+  /**
+   * true = 模块真的应用了一次状态转换；false = 什么都没变（转换被当前状态拒绝，
+   * 或这条命令只声明效应、真正的动作由调用方执行）。调用方据 false 保持现场。
+   */
   readonly accepted: boolean
   readonly effects: readonly BatchReviewEffect[]
 }
@@ -451,9 +458,19 @@ export interface BatchReviewSaveOperation {
   readonly inFlight: boolean
 }
 
-/** Read-only view of the client lifecycle plus the item state it decides. */
+/**
+ * Read-only view of the client lifecycle plus the item state it decides.
+ *
+ * 快照只回吐表面需要的事实，reducer 的原始 state 不外泄：条目、当前条目、
+ * 勾选集合与两个相位都以窄接口给出。
+ */
 export interface BatchReviewSnapshot {
-  readonly state: BatchReviewState
+  /** 客户端相位（input / parsing / review）。 */
+  readonly phase: BatchReviewState['phase']
+  readonly busy: BatchBusyPhase
+  readonly items: Readonly<Record<string, BatchReviewItem>>
+  readonly currentItemId: string | null
+  readonly selectedItemIds: ReadonlySet<string>
   readonly parseError: string
   readonly batchId: string
   readonly draftCreateItemIds: ReadonlySet<string>
@@ -498,7 +515,6 @@ export interface BatchReviewJourney<
   mergeAcceptFeedback: (feedback: Readonly<Record<string, string>>) => BatchReviewCommandResult
   clearAcceptFeedback: (itemId: string) => BatchReviewCommandResult
   resetAcceptFeedback: () => BatchReviewCommandResult
-  setSaveFailureType: (itemId: string, errorType: string) => BatchReviewCommandResult
   setSaveFailureTypesFor: (itemIds: readonly string[], errorType: string) => BatchReviewCommandResult
   clearSaveFailure: (itemId: string) => BatchReviewCommandResult
   setRecoveryLoading: (itemId: string, loading: boolean) => BatchReviewCommandResult
@@ -576,7 +592,15 @@ export function useBatchReviewJourney<
   }
 
   const snapshot = computed<BatchReviewSnapshot>(() => ({
-    state: stateRef.value,
+    phase: stateRef.value.phase,
+    busy: stateRef.value.busy,
+    items: stateRef.value.items,
+    currentItemId: stateRef.value.currentItemId,
+    selectedItemIds: new Set(
+      Object.values(stateRef.value.items)
+        .filter((item) => item.selected)
+        .map((item) => item.itemId),
+    ),
     parseError: parseErrorRef.value,
     batchId: batchIdRef.value,
     draftCreateItemIds: draftCreateItemIdsRef.value,
@@ -620,6 +644,12 @@ export function useBatchReviewJourney<
     return scheduler
   }
 
+  /** 停掉所有定时器并遗忘调度器句柄（会话是否作废由调用方决定）。 */
+  function disposeSchedulers(): void {
+    for (const { scheduler } of editSchedulers.values()) scheduler.dispose()
+    editSchedulers.clear()
+  }
+
   function dropItemResources(itemId: string): void {
     const handle = editSchedulers.get(itemId)
     if (handle) {
@@ -648,11 +678,6 @@ export function useBatchReviewJourney<
 
   function resetAcceptFeedback(): BatchReviewCommandResult {
     acceptFeedbackRef.value = {}
-    return { accepted: true, effects: [] }
-  }
-
-  function setSaveFailureType(itemId: string, errorType: string): BatchReviewCommandResult {
-    saveFailureTypesRef.value = { ...saveFailureTypesRef.value, [itemId]: errorType }
     return { accepted: true, effects: [] }
   }
 
@@ -743,9 +768,9 @@ export function useBatchReviewJourney<
     return apply({ type: 'parse_started' })
   }
 
-  /** The user refused to discard the scene: the caller restores its input surface. */
+  /** The user refused to discard the scene: nothing changed, the caller restores its input. */
   function abandonParseStart(): BatchReviewCommandResult {
-    return { accepted: true, effects: [{ kind: 'focus', target: { target: 'search_input' } }] }
+    return { accepted: false, effects: [{ kind: 'focus', target: { target: 'search_input' } }] }
   }
 
   /** Asking whether the route-local scene may be dropped; no state changes yet. */
@@ -849,7 +874,6 @@ export function useBatchReviewJourney<
     mergeAcceptFeedback,
     clearAcceptFeedback,
     resetAcceptFeedback,
-    setSaveFailureType,
     setSaveFailureTypesFor,
     clearSaveFailure,
     setRecoveryLoading,
@@ -859,15 +883,11 @@ export function useBatchReviewJourney<
     clearSaveOperation,
     invalidateItemResources: dropItemResources,
     invalidateAllItemResources() {
-      for (const { scheduler } of editSchedulers.values()) scheduler.dispose()
-      editSchedulers.clear()
+      disposeSchedulers()
       for (const session of draftSessions.values()) session.invalidate()
       draftSessions.clear()
     },
-    disposeAllSchedulers() {
-      for (const { scheduler } of editSchedulers.values()) scheduler.dispose()
-      editSchedulers.clear()
-    },
+    disposeAllSchedulers: disposeSchedulers,
     selectItem: (itemId) => apply({ type: 'set_current', itemId }),
     setSelected: (itemId, selected) => apply({ type: 'set_selected', itemId, selected }),
     setDraft: (itemId, draftId, revision) => apply({ type: 'set_draft', itemId, draftId, revision }),
@@ -903,7 +923,7 @@ export function useBatchReviewJourney<
         accepted: true,
         effects: [
           {
-            kind: 'notify',
+            kind: 'announce',
             event: options.failed
               ? { type: 'focus_first_failed', itemId }
               : { type: 'focus_first_pending', itemId },

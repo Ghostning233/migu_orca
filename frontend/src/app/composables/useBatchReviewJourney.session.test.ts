@@ -54,7 +54,7 @@ describe('useBatchReviewJourney session commands (#161)', () => {
     expect(session.snapshot.value.batchId).toBe('')
 
     expect(session.beginParse().accepted).toBe(true)
-    expect(session.snapshot.value.state.busy).toBe('parsing')
+    expect(session.snapshot.value.busy).toBe('parsing')
 
     const rejected = session.rejectParseInput('至少需要 1 部番剧')
     expect(rejected.accepted).toBe(true)
@@ -71,7 +71,7 @@ describe('useBatchReviewJourney session commands (#161)', () => {
     ])
     expect(session.snapshot.value.parseError).toBe('')
     expect(session.snapshot.value.batchId).toBe('batch-1')
-    expect(session.snapshot.value.state.phase).toBe('review')
+    expect(session.snapshot.value.phase).toBe('review')
 
     const empty = useBatchReviewJourney()
     empty.beginParse()
@@ -90,27 +90,27 @@ describe('useBatchReviewJourney session commands (#161)', () => {
     expect(session.snapshot.value.parseError).toBe('批量候选解析暂时不可用')
     expect(session.snapshot.value.batchId).toBe('')
     // reducer 的 parse_failed 仍只负责相位，不携带错误载荷。
-    expect(session.snapshot.value.state.phase).toBe('input')
-    expect(session.snapshot.value.state.busy).toBeNull()
+    expect(session.snapshot.value.phase).toBe('input')
+    expect(session.snapshot.value.busy).toBeNull()
   })
 
   it('restores a batch id from the route without inventing a navigation', () => {
     const session = useBatchReviewJourney()
     session.restoreBatchId('batch-from-url')
     expect(session.snapshot.value.batchId).toBe('batch-from-url')
-    expect(session.snapshot.value.state.phase).toBe('input')
+    expect(session.snapshot.value.phase).toBe('input')
   })
 
   it('reports a rejected transition without mutating the snapshot', () => {
     const session = useBatchReviewJourney()
     session.finishParse(parsed([draftItem('a')]))
-    const before = session.snapshot.value.state
+    const before = session.snapshot.value
 
     expect(session.selectItem('missing').accepted).toBe(false)
     expect(session.setSelected('missing', true).accepted).toBe(false)
     expect(session.beginApply('missing').accepted).toBe(false)
     expect(session.markTrackingNotFound('a').accepted).toBe(false)
-    expect(session.snapshot.value.state).toBe(before)
+    expect(session.snapshot.value).toBe(before)
   })
 
   it('tracks per-item draft generation candidate and sanitized failure', () => {
@@ -150,14 +150,13 @@ describe('useBatchReviewJourney session commands (#161)', () => {
 
     const cleared = session.resetRoute()
     expect(cleared.accepted).toBe(true)
-    expect(session.snapshot.value.state).toMatchObject({
+    expect(session.snapshot.value).toMatchObject({
       phase: 'input',
-      inputOrder: [],
-      reviewOrder: [],
+      busy: null,
       currentItemId: null,
       items: {},
-      busy: null,
     })
+    expect([...session.snapshot.value.selectedItemIds]).toEqual([])
     expect(session.snapshot.value.draftCreateItemIds.size).toBe(0)
     expect(session.snapshot.value.draftCreateCandidateIds).toEqual({})
     expect(session.snapshot.value.draftCreateErrors).toEqual({})
@@ -165,8 +164,8 @@ describe('useBatchReviewJourney session commands (#161)', () => {
     expect(session.snapshot.value.batchId).toBe('batch-1')
     // 重复清理总是落回一份新的空会话（clear_route 的既有语义）。
     expect(session.resetRoute().accepted).toBe(true)
-    expect(session.snapshot.value.state.items).toEqual({})
-    expect(session.snapshot.value.state.phase).toBe('input')
+    expect(session.snapshot.value.items).toEqual({})
+    expect(session.snapshot.value.phase).toBe('input')
   })
 })
 
@@ -379,7 +378,7 @@ describe('useBatchReviewJourney save operation (#163)', () => {
 
     session.markSaveResponseUnknown(['a'])
     expect(session.snapshot.value.saveOperation).toMatchObject({ outcomeUnknown: true, inFlight: false })
-    expect(session.snapshot.value.state.items.a?.phase).toBe('response_unknown')
+    expect(session.snapshot.value.items.a?.phase).toBe('response_unknown')
     expect(session.snapshot.value.saveInFlight).toBe(false)
     expect(session.snapshot.value.savingItemIds.size).toBe(0)
 
@@ -400,11 +399,11 @@ describe('useBatchReviewJourney save operation (#163)', () => {
     const asked = session.beginSave(['a'])
     expect(asked.accepted).toBe(false)
     expect(asked.effects).toEqual([{ kind: 'needsConfirmation', request: { reason: 'confirm_selected_batch' } }])
-    expect(session.snapshot.value.state.busy).toBeNull()
-    expect(session.snapshot.value.state.items.a?.phase).toBe('draft')
+    expect(session.snapshot.value.busy).toBeNull()
+    expect(session.snapshot.value.items.a?.phase).toBe('draft')
 
     expect(session.beginSave(['a'], { confirmed: true }).accepted).toBe(true)
-    expect(session.snapshot.value.state.busy).toBe('saving')
+    expect(session.snapshot.value.busy).toBe('saving')
   })
 
   it('asks before discarding an unsafe parse scene and applies it only on the second call', () => {
@@ -414,9 +413,9 @@ describe('useBatchReviewJourney save operation (#163)', () => {
       accepted: false,
       effects: [{ kind: 'needsConfirmation', request: { reason: 'discard_batch_scene' } }],
     })
-    expect(session.snapshot.value.state.busy).toBeNull()
+    expect(session.snapshot.value.busy).toBeNull()
     expect(session.beginParse({ sceneHasUnsafeWork: true, discardScene: true }).accepted).toBe(true)
-    expect(session.snapshot.value.state.busy).toBe('parsing')
+    expect(session.snapshot.value.busy).toBe('parsing')
   })
 
   it('hands focus and the leave confirmation back as data', () => {
@@ -425,10 +424,12 @@ describe('useBatchReviewJourney save operation (#163)', () => {
       { kind: 'focus', target: { target: 'selected_recheck_notice' } },
     ])
     expect(session.focusItemAfterSave('a', { failed: true }).effects).toEqual([
-      { kind: 'notify', event: { type: 'focus_first_failed', itemId: 'a' } },
+      { kind: 'announce', event: { type: 'focus_first_failed', itemId: 'a' } },
       { kind: 'focus', target: { target: 'card', itemId: 'a', reveal: true } },
     ])
-    expect(session.abandonParseStart().effects).toEqual([{ kind: 'focus', target: { target: 'search_input' } }])
+    const abandoned = session.abandonParseStart()
+    expect(abandoned.accepted).toBe(false)
+    expect(abandoned.effects).toEqual([{ kind: 'focus', target: { target: 'search_input' } }])
     expect(session.requestRouteReset()).toEqual({
       accepted: false,
       effects: [{ kind: 'needsConfirmation', request: { reason: 'leave_batch_review' } }],
@@ -442,7 +443,7 @@ describe('useBatchReviewJourney save operation (#163)', () => {
     expect(removal.effects).toEqual([
       { kind: 'focus', target: { target: 'card_or_list', candidateItemIds: ['b', 'c'] } },
     ])
-    expect(session.snapshot.value.state.items.a).toBeUndefined()
+    expect(session.snapshot.value.items.a).toBeUndefined()
 
     const rejected = session.removeItem('missing')
     expect(rejected.accepted).toBe(false)
@@ -463,7 +464,7 @@ describe('useBatchReviewJourney save operation (#163)', () => {
     session.setRecoveryLoading('a', false)
     expect([...session.snapshot.value.recoveryLoadingItemIds]).toEqual([])
 
-    session.setSaveFailureType('a', 'idempotency_conflict')
+    session.setSaveFailureTypesFor(['a'], 'idempotency_conflict')
     session.setSaveFailureTypesFor(['b', 'c'], 'network_error')
     expect(session.snapshot.value.saveFailureTypes).toEqual({
       a: 'idempotency_conflict', b: 'network_error', c: 'network_error',

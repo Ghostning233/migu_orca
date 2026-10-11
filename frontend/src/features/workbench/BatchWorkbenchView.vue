@@ -35,6 +35,7 @@ import { useDraftSession, type DraftSession } from '@/app/composables/useDraftSe
 import {
   toSafeBatchError,
   useBatchReviewJourney,
+  type BatchReviewAnnounceEvent,
   type BatchReviewConfirmationRequest,
   type BatchReviewDraftFacts,
   type BatchReviewDraftPorts,
@@ -204,17 +205,16 @@ function notifyBatchReviewEvent(event: BatchReviewNotifyEvent): void {
     case 'parse_failed':
       notification.error('批量草案获取失败', event.message)
       return
-    case 'focus_first_failed':
-    case 'focus_first_pending': {
-      // 定位播报的标题文案由视图补：模块只说“定位到了哪个条目、是哪一类”。
-      const item = items.value.find((candidate) => candidate.item_id === event.itemId)
-      if (!item) return
-      focusAnnouncement.value = event.type === 'focus_first_failed'
-        ? `已定位到首个失败条目：${batchCardTitle(item)}`
-        : `已定位到首个未处理条目：${batchCardTitle(item)}`
-      return
-    }
   }
+}
+
+/** 定位播报：标题文案由视图补——模块只说「定位到了哪个条目、是哪一类」。 */
+function announceBatchReviewEvent(event: BatchReviewAnnounceEvent): void {
+  const item = items.value.find((candidate) => candidate.item_id === event.itemId)
+  if (!item) return
+  focusAnnouncement.value = event.type === 'focus_first_failed'
+    ? `已定位到首个失败条目：${batchCardTitle(item)}`
+    : `已定位到首个未处理条目：${batchCardTitle(item)}`
 }
 
 /** 焦点效应：模块决定“该把焦点放到哪”，这里执行真实的 DOM 焦点与滚动。 */
@@ -258,6 +258,9 @@ function runBatchReviewEffects(effects: readonly BatchReviewEffect[]): void {
         break
       case 'focus':
         focusBatchTarget(effect.target)
+        break
+      case 'announce':
+        announceBatchReviewEvent(effect.event)
         break
       case 'needsConfirmation':
         // 两步式转换：由调用方取到用户答复后重调命令，效应本身不改状态。
@@ -314,23 +317,23 @@ watch(rawInput, (value) => emit('update:rawInput', value))
 // 派生：解析在途 = journey 的 parsing 相位。parseBatch 每次先 resetRoute 再
 // beginParse，因此重新解析也会重新进入 parsing；请求结束后 finishParse/failParse
 // 都会把 busy 归零，不再需要视图自己维护这个标志。
-const parseLoading = computed(() => batchReview.value.state.busy === 'parsing')
+const parseLoading = computed(() => batchReview.value.busy === 'parsing')
 const parseBlocked = computed(() => parseLoading.value || Boolean(batchReview.value.saveOperation) || batchReview.value.saveInFlight || batchReview.value.savingItemIds.size > 0 || batchReview.value.draftCreateItemIds.size > 0)
 const items = ref<BatchItem[]>([])
 const loadingMessage = ref('')
 const parseCount = ref(0)
 const currentItemId = computed<string | null>({
-  get: () => batchReview.value.state.currentItemId,
+  get: () => batchReview.value.currentItemId,
   set: (value) => {
-    if (value && batchReview.value.state.items[value]) selectItem(value)
+    if (value && batchReview.value.items[value]) selectItem(value)
   },
 })
 
 // Selection / accept state.
 const selectedItemIds = computed<Set<string>>({
-  get: () => new Set(Object.values(batchReview.value.state.items).filter((item) => item.selected).map((item) => item.itemId)),
+  get: () => new Set(batchReview.value.selectedItemIds),
   set: (next) => {
-    for (const item of Object.values(batchReview.value.state.items)) {
+    for (const item of Object.values(batchReview.value.items)) {
       const selected = next.has(item.itemId)
       if (selected !== item.selected) setSelected(item.itemId, selected)
     }
@@ -401,22 +404,24 @@ function createBatchReviewDraftPorts(): BatchReviewDraftPorts<DraftSession, Draf
 }
 
 /** The module's creation input for one item's draft handles. */
-function draftFactsFor(item: BatchItem): BatchReviewDraftFacts | null {
+function draftHandleInputFor(item: BatchItem): BatchReviewDraftFacts | null {
   const itemId = item.item_id
   const request = batchCardRequest(item)
   if (!itemId || !request || !item.draft_id) return null
   return { itemId, draftId: item.draft_id, draftRevision: item.draft_revision ?? 1, source: request }
 }
 
-/** The item's draft session (created on demand, keyed by item + draft identity). */
-function ensureDraftSession(item: BatchItem): DraftSession | null {
-  const facts = draftFactsFor(item)
+/**
+ * The item's draft session (created on demand by the module, keyed by item +
+ * draft identity) and its paired edit scheduler, recreated with the session.
+ */
+function draftSessionFor(item: BatchItem): DraftSession | null {
+  const facts = draftHandleInputFor(item)
   return facts ? ensureItemDraftSession(facts) : null
 }
 
-/** The item's edit scheduler, recreated whenever its session is replaced. */
-function ensureScheduler(item: BatchItem): DraftEditScheduler | null {
-  const facts = draftFactsFor(item)
+function draftSchedulerFor(item: BatchItem): DraftEditScheduler | null {
+  const facts = draftHandleInputFor(item)
   return facts ? ensureItemScheduler(facts) : null
 }
 
@@ -424,8 +429,8 @@ function ensureScheduler(item: BatchItem): DraftEditScheduler | null {
  * The read-only client facts the save gate consumes. Ensuring both handles
  * first keeps lazy creation identical to the previous view-local maps.
  */
-function draftViewFactsFor(item: BatchItem): BatchReviewDraftViewFacts | null {
-  const facts = draftFactsFor(item)
+function draftClientFactsFor(item: BatchItem): BatchReviewDraftViewFacts | null {
+  const facts = draftHandleInputFor(item)
   if (!facts) return null
   ensureItemDraftSession(facts)
   ensureItemScheduler(facts)
@@ -433,7 +438,7 @@ function draftViewFactsFor(item: BatchItem): BatchReviewDraftViewFacts | null {
 }
 
 /** Read-only fact lookup: never creates a session or a scheduler. */
-function draftFactsById(itemId: string): BatchReviewDraftViewFacts | null {
+function draftClientFactsById(itemId: string): BatchReviewDraftViewFacts | null {
   return batchReview.value.drafts[itemId] ?? null
 }
 
@@ -447,12 +452,12 @@ interface BatchItemConfirmability {
 /** The single qualification gate shared by cards, detail and save actions. */
 function itemConfirmability(itemId: string): BatchItemConfirmability {
   const item = items.value.find((candidate) => candidate.item_id === itemId)
-  const journeyItem = batchReview.value.state.items[itemId]
+  const journeyItem = batchReview.value.items[itemId]
   const blockers: string[] = []
   if (!item || !canExpandBatchCard(item) || !batchCardRequest(item)) blockers.push('需先生成可审核草案')
   // #162：判据只读模块快照回吐的客户端事实；句柄的创建/替换/销毁由模块决定。
-  const facts = item ? draftViewFactsFor(item) : null
-  const session = item ? ensureDraftSession(item) : null
+  const facts = item ? draftClientFactsFor(item) : null
+  const session = item ? draftSessionFor(item) : null
   const draftId = facts?.draftId ?? item?.draft_id
   const revision = facts?.draftRevision ?? item?.draft_revision
   if (!draftId || !draftId.trim()) blockers.push('草案能力无效')
@@ -483,7 +488,7 @@ function hasUnsafeBatchWork(): boolean {
     selectedItemIds.value.size > 0 ||
     items.value.some((item) => {
       if (['CONFIRMED', 'SAVED_PENDING_CONFIRM'].includes(String(item.status ?? ''))) return false
-      const facts = draftFactsById(item.item_id ?? '')
+      const facts = draftClientFactsById(item.item_id ?? '')
       return Boolean(canChooseBatchCandidate(item) || facts?.draftId || facts?.dirty || facts?.applying)
     }),
   )
@@ -519,7 +524,7 @@ const reviewFilterKey = computed(() => `${reviewQuery.value}\u0000${reviewStatus
 const searchFilterActive = computed(() => reviewQuery.value.trim().length > 0)
 
 const selectable = computed(() => visibleItems.value.filter((item) => itemConfirmability(item.item_id ?? '').confirmable))
-const processingCount = computed(() => items.value.filter((item) => draftFactsById(item.item_id ?? '')?.applying).length)
+const processingCount = computed(() => items.value.filter((item) => draftClientFactsById(item.item_id ?? '')?.applying).length)
 const allSelected = computed(
   () => selectable.value.length > 0 && selectable.value.every((item) => selectedItemIds.value.has(item.item_id ?? '')),
 )
@@ -685,7 +690,7 @@ function cardNeedsNextStep(item: BatchItem): boolean {
   if (CARD_STUCK_STATUSES.includes(String(item.status ?? ''))) return true
   if (generatingCandidateIdFor(item.item_id ?? '')) return true
   if (recoveryActionFor(item) !== 'NONE') return true
-  return Boolean(draftFactsById(item.item_id ?? '')?.applying)
+  return Boolean(draftClientFactsById(item.item_id ?? '')?.applying)
 }
 
 /**
@@ -871,7 +876,7 @@ async function parseBatch(onProgress?: (progress: BatchParseProgress) => void): 
     const parsed = finishParse(result)
     const parsedItems = result.items ?? []
     items.value = orderBatchItemsForReview(parsedItems)
-    for (const item of items.value) ensureDraftSession(item)
+    for (const item of items.value) draftSessionFor(item)
     selectedItemIds.value = new Set()
     currentItemId.value = items.value[0]?.item_id ?? null
     resetAcceptFeedback()
@@ -959,7 +964,7 @@ async function generateDraftFromCandidate(candidate: BatchCandidate): Promise<vo
         ? projectDraftGenerated(current, { preview_request: request, draft_id: draftId, draft_revision: draftRevision })
         : current,
     )
-    ensureDraftSession({ ...item, preview_request: request, draft_id: draftId, draft_revision: draftRevision })
+    draftSessionFor({ ...item, preview_request: request, draft_id: draftId, draft_revision: draftRevision })
     // The item left the candidate step atomically; its candidate feedback goes
     // with it.
     clearDraftCreateErrors(itemId)
@@ -1239,7 +1244,7 @@ async function submitBatchSaveConfirm(
     } else {
       const descriptors: BatchSaveConfirmDescriptor[] = rows.map((row) => {
         const itemId = row.item_id ?? ''
-        const key = batchReview.value.state.items[itemId]?.idempotencyKey
+        const key = batchReview.value.items[itemId]?.idempotencyKey
         return { item_id: itemId, draft_id: row.draft_id ?? '', base_revision: row.draft_revision ?? 1, idempotency_key: key ?? '' }
       })
       if (!descriptors.length || descriptors.some((item) => !item.draft_id)) {
@@ -1455,7 +1460,7 @@ function onDetailDirty(dirty: boolean): void {
   const item = detailItem.value
   if (!item) return
   setDraftDirty(item.item_id ?? '', dirty)
-  ensureDraftSession(item)?.setDirty(dirty)
+  draftSessionFor(item)?.setDirty(dirty)
 }
 
 function onDraftExpired(itemId: string): void {
@@ -1483,7 +1488,7 @@ function onDraftExpired(itemId: string): void {
 async function flushDetailModify(): Promise<void> {
   const item = detailItem.value
   if (!item) return
-  const scheduler = ensureScheduler(item)
+  const scheduler = draftSchedulerFor(item)
   if (!scheduler) return
   draftApplyErrors.value = { ...draftApplyErrors.value, [item.item_id ?? '']: '' }
   await scheduler.flush()
@@ -1492,7 +1497,7 @@ async function flushDetailModify(): Promise<void> {
 /** #150：字幕组只在右栏编辑；这里仍用同一个调度器保证 CAS 与修订同步。 */
 function onSubtitleGroupChange(value: string): void {
   const item = detailItem.value
-  const scheduler = item ? ensureScheduler(item) : null
+  const scheduler = item ? draftSchedulerFor(item) : null
   if (!scheduler || !value) return
   draftApplyErrors.value = { ...draftApplyErrors.value, [item?.item_id ?? '']: '' }
   scheduler.setSubtitleGroup(value)
@@ -1500,28 +1505,28 @@ function onSubtitleGroupChange(value: string): void {
 
 function onFilterChange(state: PreviewEditState): void {
   const item = detailItem.value
-  const scheduler = item ? ensureScheduler(item) : null
+  const scheduler = item ? draftSchedulerFor(item) : null
   if (!scheduler) return
   scheduler.setFilter(state)
 }
 
 function onFolderNameChange(value: string): void {
   const item = detailItem.value
-  const scheduler = item ? ensureScheduler(item) : null
+  const scheduler = item ? draftSchedulerFor(item) : null
   if (!scheduler) return
   scheduler.setFolderName(value)
 }
 
 async function retryDetailModify(): Promise<void> {
   const item = detailItem.value
-  const scheduler = item ? ensureScheduler(item) : null
+  const scheduler = item ? draftSchedulerFor(item) : null
   if (!scheduler) return
   await scheduler.retry()
 }
 
 function resetDetailModify(): void {
   const item = detailItem.value
-  const scheduler = item ? ensureScheduler(item) : null
+  const scheduler = item ? draftSchedulerFor(item) : null
   if (!scheduler) return
   detailEditor.value?.reset()
   scheduler.restore()
@@ -1956,16 +1961,16 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                   ref="detailEditor"
                   :key="`detail-${detailItem.item_id ?? detailItem.raw_title ?? ''}`"
                   layout="batch"
-                  :request="(ensureDraftSession(detailItem)?.request.value ?? batchCardRequest(detailItem)) as RequestSnapshot"
+                  :request="(draftSessionFor(detailItem)?.request.value ?? batchCardRequest(detailItem)) as RequestSnapshot"
                   :candidate-summary="detailCollectionSummary"
                   id-prefix="batch-preview"
                   form-id="detail-preview-edit-form"
                   container-id="request-detail-container"
                   apply-variant="secondary"
-                  :applying="ensureDraftSession(detailItem)?.applying.value ?? false"
+                  :applying="draftSessionFor(detailItem)?.applying.value ?? false"
                   :error="draftApplyErrors[detailItem.item_id ?? '']"
-                  :can-retry="ensureDraftSession(detailItem)?.canRetry.value ?? false"
-                  :disabled="(ensureDraftSession(detailItem)?.applying.value ?? false) || operationLocks(detailItem.item_id ?? '')"
+                  :can-retry="draftSessionFor(detailItem)?.canRetry.value ?? false"
+                  :disabled="(draftSessionFor(detailItem)?.applying.value ?? false) || operationLocks(detailItem.item_id ?? '')"
                   @apply="flushDetailModify"
                   @subtitle-group-change="onSubtitleGroupChange"
                   @filter-change="onFilterChange"
