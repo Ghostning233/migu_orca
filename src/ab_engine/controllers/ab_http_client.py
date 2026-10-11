@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import contextlib
-import http.client
 import json
 import re
+import socket
 import ssl
 import time
 from collections.abc import Callable, Mapping
@@ -508,6 +508,10 @@ def _exchange(
         request_bytes = _request_bytes(method, target, parsed, headers, body)
         _send_bounded(connection, request_bytes, deadline, step)
         status, response_headers, buffered = _read_headers(connection, deadline, step)
+        # The status is decided by the header block: a non-2xx is classified
+        # before the body, so a stalled rejection body can never turn a proven
+        # authentication/HTTP failure into an unproven timeout (issue review).
+        _raise_for_status(status, step=step)
         payload = _read_body(
             connection, deadline, response_headers, status=status, method=method,
             buffered=buffered, step=step,
@@ -519,21 +523,84 @@ def _exchange(
 
 
 def _open_connection(scheme: str, host: str, port: int, deadline: _Deadline, step: str) -> Any:
-    """Connect (and, for https, handshake) inside the deadline."""
+    """Connect (and, for https, handshake) inside the deadline.
+
+    The socket is created here and owned by the caller, so a failed connect or
+    a failed TLS handshake is always cleaned up by this function (issue review):
+    nothing is left half-open when a later phase never starts.
+    """
+    if deadline.expired():
+        raise _timeout_error(step)
+    sock: Any = None
     try:
-        connection: Any = http.client.HTTPConnection(
-            host, port, timeout=max(deadline.remaining(), 0.001)
+        sock = _connect_bounded(
+            _resolved_addresses(host, port), timeout=max(deadline.remaining(), 0.001)
         )
-        connection.connect()
+        if deadline.expired():
+            raise _timeout_error(step)
         if scheme == "https":
+            # TCP and TLS share one budget: the handshake gets what is left, not
+            # the original timeout (issue review).
+            sock.settimeout(max(deadline.remaining(), 0.001))
             context = ssl.create_default_context()
-            connection.sock = context.wrap_socket(connection.sock, server_hostname=host)
-        connection.sock.settimeout(max(deadline.remaining(), 0.001))
+            sock = context.wrap_socket(sock, server_hostname=host)
+            if deadline.expired():
+                raise _timeout_error(step)
+        sock.settimeout(max(deadline.remaining(), 0.001))
     except TimeoutError as exc:
+        _close_quietly(sock)
         raise _timeout_error(step) from exc
     except (ssl.SSLError, OSError) as exc:
+        _close_quietly(sock)
         raise _network_error_to_stage1_error(exc, step=step) from exc
-    return connection
+    except BaseException:
+        _close_quietly(sock)
+        raise
+    return sock
+
+
+def _connect_bounded(addresses: list[Any], *, timeout: float) -> Any:
+    """Connect to one of the already-resolved addresses (never re-resolving)."""
+    last_error: OSError | None = None
+    for family, socktype, proto, _canonical, sockaddr in addresses:
+        candidate: Any = None
+        try:
+            candidate = socket.socket(family, socktype, proto)
+            candidate.settimeout(timeout)
+            candidate.connect(sockaddr)
+            return candidate
+        except OSError as exc:
+            last_error = exc
+            _close_quietly(candidate)
+    raise last_error or OSError("Auto Bangumi 地址不可达")
+
+
+def _close_quietly(sock: Any) -> None:
+    if sock is None:
+        return
+    with contextlib.suppress(OSError):
+        sock.close()
+
+
+def _resolved_addresses(host: str, port: int) -> list[Any]:
+    """Addresses for one connect, skipping DNS whenever the host is literal.
+
+    ``socket.getaddrinfo`` has no timeout parameter in the standard library, so
+    a *hostname* resolves only as fast as the operating system resolver allows.
+    Literal IPv4/IPv6 addresses and ``localhost`` never reach it, which is the
+    common Auto Bangumi deployment (a LAN address or the local machine).
+    """
+    for family in (socket.AF_INET, socket.AF_INET6):
+        try:
+            socket.inet_pton(family, host)
+        except OSError:
+            continue
+        if family == socket.AF_INET:
+            return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", (host, port))]
+        return [(socket.AF_INET6, socket.SOCK_STREAM, 0, "", (host, port, 0, 0))]
+    if host.rstrip(".").lower() == "localhost":
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", port))]
+    return socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
 
 
 def _request_bytes(
@@ -565,9 +632,9 @@ def _send_bounded(connection: Any, data: bytes, deadline: _Deadline, step: str) 
     while sent < len(view):
         if deadline.expired():
             raise _timeout_error(step)
-        connection.sock.settimeout(max(deadline.remaining(), 0.001))
+        connection.settimeout(max(deadline.remaining(), 0.001))
         try:
-            sent += connection.sock.send(view[sent : sent + _READ_CHUNK_BYTES])
+            sent += connection.send(view[sent : sent + _READ_CHUNK_BYTES])
         except TimeoutError as exc:
             raise _timeout_error(step) from exc
         except OSError as exc:
@@ -579,9 +646,9 @@ def _recv_bounded(connection: Any, deadline: _Deadline, step: str) -> bytes:
     while True:
         if deadline.expired():
             raise _timeout_error(step)
-        connection.sock.settimeout(max(deadline.slice(), 0.001))
+        connection.settimeout(max(deadline.slice(), 0.001))
         try:
-            return connection.sock.recv(_READ_CHUNK_BYTES)
+            return connection.recv(_READ_CHUNK_BYTES)
         except TimeoutError:
             # A quiet moment is not a failure: only the absolute deadline ends it.
             continue

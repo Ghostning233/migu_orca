@@ -11,6 +11,7 @@ the blocked read.
 """
 
 import contextlib
+import os
 import socket
 import threading
 import time
@@ -62,6 +63,9 @@ class _LocalAbServer:
         self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._socket.bind(("127.0.0.1", 0))
         self._socket.listen(8)
+        # A short accept timeout lets close() stop the listener even while the
+        # accept loop is blocked (a plain close does not interrupt accept()).
+        self._socket.settimeout(0.2)
         self.port = self._socket.getsockname()[1]
         self._stop = threading.Event()
         self._lock = threading.Lock()
@@ -77,6 +81,8 @@ class _LocalAbServer:
         while not self._stop.is_set():
             try:
                 connection, _ = self._socket.accept()
+            except TimeoutError:
+                continue
             except OSError:
                 return
             threading.Thread(target=self._handle, args=(connection,), daemon=True).start()
@@ -178,6 +184,28 @@ def _trickle_body(connection: socket.socket, stop: threading.Event, path: str) -
     _send(
         connection,
         b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 4000\r\n\r\n",
+    )
+    for _ in range(4000):
+        if stop.is_set():
+            return
+        time.sleep(0.05)
+        if not _send(connection, b"x"):
+            return
+
+
+def _stalled_handshake(connection: socket.socket, stop: threading.Event, path: str) -> None:
+    """Accept TCP and then say nothing, so the TLS handshake cannot finish."""
+    del path
+    stop.wait(30)
+    del connection
+
+
+def _unauthorized_then_stall(connection: socket.socket, stop: threading.Event, path: str) -> None:
+    """A 401 whose body never arrives: the status is already proven."""
+    del path
+    _send(
+        connection,
+        b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 4000\r\n\r\n",
     )
     for _ in range(4000):
         if stop.is_set():
@@ -452,3 +480,72 @@ class TestSubmitReadbackDeadline:
         assert confirmed.classification == TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN
         assert confirmed.external_id is None
         assert confirmed.reason == "UNREADABLE"
+
+
+class TestConnectionPhaseDeadline:
+    def test_a_stalled_tls_handshake_uses_only_the_remaining_budget(self) -> None:
+        """TCP is established, but TLS must not get a fresh full timeout."""
+        server = _LocalAbServer(_stalled_handshake)
+        try:
+            outcome, elapsed = _exchange_elapsed(f"https://{server.base_url.split('//')[1]}", 0.2)
+        finally:
+            server.close()
+        assert outcome == "ab_timeout"
+        assert elapsed < 0.2 + _TOLERANCE_SECONDS, elapsed
+
+    def test_a_proven_unauthorized_status_is_never_reported_as_a_timeout(self) -> None:
+        """A 401 is decided by the header block, before its stalled body."""
+        server = _LocalAbServer(_unauthorized_then_stall)
+        try:
+            outcome, elapsed = _exchange_elapsed(server.base_url, 2.0)
+        finally:
+            server.close()
+        assert outcome == "ab_auth_failed", outcome
+        assert elapsed < 0.5, elapsed
+
+    def test_a_failed_connect_is_reclaimed_and_classified(self) -> None:
+        """Nothing is left half-open when the connection never establishes."""
+        probe = socket.socket()
+        probe.bind(("127.0.0.1", 0))
+        dead_port = probe.getsockname()[1]
+        probe.close()
+        dead_url = f"http://127.0.0.1:{dead_port}"
+        before = _open_file_descriptors()
+        for _ in range(5):
+            outcome, _elapsed = _exchange_elapsed(dead_url, 0.5)
+            assert outcome in {"ab_connection_failed", "ab_timeout"}, outcome
+        assert _open_file_descriptors() <= before + 1
+        assert [
+            thread.name for thread in threading.enumerate()
+            if thread is not main_thread() and not thread.daemon
+        ] == []
+
+    def test_a_literal_or_localhost_host_never_uses_the_resolver(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """DNS has no stdlib timeout, so the common hosts must not need it."""
+        import ab_engine.controllers.ab_http_client as module
+
+        def _forbidden(*args: Any, **kwargs: Any) -> Any:
+            raise AssertionError("getaddrinfo must not be called for a literal host")
+
+        server = _LocalAbServer(_respond_json(b"[]"))
+        try:
+            monkeypatch.setattr(module.socket, "getaddrinfo", _forbidden)
+            assert _exchange_elapsed(server.base_url, 2.0)[0] == "ok"
+            assert _exchange_elapsed(f"http://localhost:{server.port}", 2.0)[0] == "ok"
+            assert module._resolved_addresses("127.0.0.1", 80)[0][4] == ("127.0.0.1", 80)
+            assert module._resolved_addresses("localhost", 80)[0][4] == ("127.0.0.1", 80)
+        finally:
+            server.close()
+
+
+def main_thread() -> threading.Thread:
+    return threading.main_thread()
+
+
+def _open_file_descriptors() -> int:
+    try:
+        return len(os.listdir("/proc/self/fd"))
+    except OSError:  # pragma: no cover - non-Linux hosts
+        return 0
