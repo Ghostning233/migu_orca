@@ -11,13 +11,16 @@ import { describe, expect, it } from 'vitest'
 
 import {
   isSendableManagementAction,
-  isTrackingManagementScope,
   projectTrackingActionScopes,
   useTrackingWriteSession,
   type TrackingSubmissionMode,
   type TrackingWriteSession,
 } from './useTrackingWriteSession'
-import type { CapabilityResult, TrackingItem } from './trackingProjection'
+import {
+  isTrackingManagementScope,
+  type CapabilityResult,
+  type TrackingItem,
+} from './trackingProjection'
 
 type ItemAction = NonNullable<TrackingItem['available_actions']>[number]
 type Body = Record<string, unknown>
@@ -131,9 +134,8 @@ const WRITE_CONFLICT_MESSAGES: Record<string, string> = {
   tracking_operation_in_progress:
     '存在尚未完成的提交操作，本次未提交到 Auto Bangumi；正在刷新最新详情，请先完成恢复后再提交。',
 }
-const WRITE_CONFLICT_FALLBACK = WRITE_CONFLICT_MESSAGES.tracking_revision_conflict === SUBMIT_MESSAGES.CONFLICT
-  ? SUBMIT_MESSAGES.CONFLICT
-  : SUBMIT_MESSAGES.CONFLICT
+// The generic 409 next step is the submit family's own CONFLICT sentence.
+const WRITE_CONFLICT_FALLBACK = SUBMIT_MESSAGES.CONFLICT!
 
 const MANAGEMENT_MESSAGES: Record<string, Record<string, string>> = {
   MODIFY: {
@@ -176,6 +178,19 @@ const MANAGEMENT_UNBUILDABLE_MESSAGE =
 
 const RECOVERY_MANUAL_NOTICE =
   '需要人工核验：请先在 Auto Bangumi 中独立核对该追番的实际状态，再选择“标记为成功”或“标记为失败”；本页不会代替你判断，也不会自动提交。'
+const MANAGEMENT_CONFLICT_MESSAGES: Record<string, string> = {
+  tracking_revision_conflict: '追番记录已变化，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
+  tracking_idempotency_conflict: '本次管理请求标识已失效，未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
+  tracking_management_state_conflict: '存在尚未完成的管理操作，本次未提交到 Auto Bangumi；正在刷新最新详情，请先完成恢复。',
+  tracking_management_patch_invalid: '本次修改内容未通过服务端校验，未提交到 Auto Bangumi；正在刷新最新详情，请重新确认后再修改。',
+  tracking_target_missing: '该记录当前没有对应的外部对象，本次未提交到 Auto Bangumi；正在刷新最新详情。',
+  tracking_target_drift: '外部对象已变化，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
+  tracking_target_ambiguous: '匹配到多个外部对象，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
+  tracking_mapping_missing: '该记录缺少外部关联信息，本次未提交到 Auto Bangumi；正在刷新最新详情。',
+}
+const MANAGEMENT_CONFLICT_FALLBACK =
+  '追番记录已变化或当前状态不允许本次管理操作，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。'
+
 const MANAGEMENT_MANUAL_NOTICE =
   '需要人工核验：请先在 Auto Bangumi 中独立核对该追番的实际状态，再决定是否重新发起修改；本页不会代替你判断，也不会自动重试。'
 
@@ -245,6 +260,8 @@ describe('tracking submit-family write session (US-310, US-311)', () => {
   it('binds each submit-family action to its own generated endpoint and copy', () => {
     const submit = beginSubmitWrite()
     expect(submit.started.request?.endpoint).toBe('/api/v1/tracking/items/{tracking_id}/submit')
+    // The request carries the path parameters its own template needs.
+    expect(submit.started.request?.path).toEqual({ tracking_id: 'tracking-1' })
     const retry = beginSubmitWrite({ action: { code: 'RETRY', label: '重试提交', style: 'SECONDARY' } })
     expect(retry.started.request?.endpoint).toBe('/api/v1/tracking/items/{tracking_id}/retry')
 
@@ -1313,6 +1330,41 @@ describe('tracking management write session (US-313, US-314, US-315)', () => {
     }
   })
 
+  it('gives every documented management conflict its own fixed next step', () => {
+    for (const [type, message] of Object.entries(MANAGEMENT_CONFLICT_MESSAGES)) {
+      const { writes } = beginManagementWrite()
+      writes.failManagement({ status: 409, httpError: true, type })
+      const settled = writes.sessions.value.management!
+      expect(settled.state).toBe('CONFLICT')
+      expect(settled.message).toBe(message)
+      expect(message).toContain('未提交到 Auto Bangumi')
+      expect(message).not.toContain(type)
+      expect(settled.keepsIntent).toBe(false)
+    }
+    // An unnamed 409 falls back to the generic next step, never to blank copy.
+    const unnamed = beginManagementWrite()
+    unnamed.writes.failManagement({ status: 409, httpError: true, type: 'brand_new_conflict' })
+    expect(unnamed.writes.sessions.value.management!.message).toBe(MANAGEMENT_CONFLICT_FALLBACK)
+  })
+
+  it('names the request itself only where the generic wording would misdescribe it', () => {
+    const cases: ReadonlyArray<[ItemAction, TrackingItem, 'SUBSCRIPTION' | 'ASSOCIATED_RSS', unknown, string]> = [
+      [ENABLE_ACTION, managementItem({ status: 'DISABLED', available_actions: [ENABLE_ACTION] }), 'SUBSCRIPTION', null,
+        '本次启停请求未通过服务端校验，未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。'],
+      [REFRESH_ACTION, managementItem({ available_actions: [REFRESH_ACTION] }), 'ASSOCIATED_RSS', null,
+        '本次刷新请求未通过服务端校验，未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。'],
+      [DELETE_ACTION, managementItem({ available_actions: [DELETE_ACTION] }), 'SUBSCRIPTION', null,
+        '该记录当前没有对应的外部对象，本次未删除任何外部对象；正在刷新最新详情。'],
+    ]
+    for (const [action0, record, scope, patch, message] of cases) {
+      const type = action0.code === 'DELETE_EXTERNAL' ? 'tracking_target_missing' : 'tracking_management_patch_invalid'
+      const { writes } = beginManagementWrite({ action: action0, item: record, targetScope: scope, patch })
+      writes.failManagement({ status: 409, httpError: true, type })
+      expect(writes.sessions.value.management!.message).toBe(message)
+      expect(writes.sessions.value.management!.message).not.toContain(type)
+    }
+  })
+
   it('keeps the raw conflict type and the action wording out of the copy', () => {
     for (const [action0, record, scope, patch, expected] of [
       [modifyAction, managementItem(), 'SUBSCRIPTION', { title: 'x' }, '外部对象已变化'],
@@ -1450,6 +1502,7 @@ describe('tracking plan delete session (issue #92)', () => {
     const localStart = local.beginPlanDelete({ item: item(), deleteExternal: false }, { connection: null })
     expect(localStart.accepted).toBe(true)
     expect(localStart.request?.endpoint).toBe('/api/v1/tracking/items/{tracking_id}/delete-plan')
+    expect(localStart.request?.path).toEqual({ tracking_id: 'tracking-1' })
     expect(bodyOf(localStart)).toMatchObject({ confirm: true, delete_external: false })
     expect(Object.keys(bodyOf(localStart))).not.toContain('connection_ref')
     expect(local.planDelete.value!.state).toBe('IN_FLIGHT')
@@ -1645,6 +1698,8 @@ describe('batch selection rules (issue #87)', () => {
       { trackingId: 'gone', title: '未命名番剧', reason: '不在当前列表中，请刷新后重试' },
     ])
     expect(started.skippedTitle).toBe('部分方案未提交')
+    // A batch endpoint has no path parameters at all.
+    expect(started.request?.path).toEqual({})
     const body = bodyOf(started)
     expect(body).toMatchObject({
       confirm: true, storage_dir: STORAGE, submission_mode: 'CONTINUE_TRACKING',

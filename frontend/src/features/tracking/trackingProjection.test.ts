@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  canVerifyExternally,
   capabilityStateLabel,
   capabilityVersionLabel,
   DELETE_EXTERNAL_HELP,
@@ -180,6 +181,13 @@ describe('capability display projection (US-307 review fix)', () => {
     expect(capabilityVersionLabel(capabilities({ version: '   ' }))).toBe('未确认')
     expect(capabilityVersionLabel(capabilities({ version: 'https://private.invalid' }))).toBe('未确认')
     expect(capabilityVersionLabel(capabilities({ version: '3.1.18 (legacy)' }))).toBe('未确认')
+  })
+
+  it('offers the read-only external check only while a verified probe proves it', () => {
+    expect(canVerifyExternally(capabilities())).toBe(true)
+    expect(canVerifyExternally(null)).toBe(false)
+    expect(canVerifyExternally(capabilities({ probe_status: 'FAILED' }))).toBe(false)
+    expect(canVerifyExternally(capabilities({ external_verify: 'UNKNOWN' }))).toBe(false)
   })
 
   it('keeps only the documented §11.5 issue codes and fails closed otherwise', () => {

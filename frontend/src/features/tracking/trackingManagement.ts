@@ -10,7 +10,7 @@
  */
 import type { operations } from '@/api/generated/api'
 
-import type { TrackingManagementScope } from './useTrackingWriteSession'
+import type { TrackingManagementScope } from './trackingProjection'
 
 export type TrackingModifyBody = NonNullable<
   operations['modifyTrackingItem']['requestBody']['content']['application/json']

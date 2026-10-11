@@ -3,7 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import { api, toApiError } from '@/api/client'
+import { api, toApiError, type ApiPath } from '@/api/client'
 import type { operations } from '@/api/generated/api'
 import EmptyState from '@/components/feedback/EmptyState.vue'
 import ErrorState from '@/components/feedback/ErrorState.vue'
@@ -32,12 +32,12 @@ import {
   type TrackingAction,
   type TrackingItem,
   type TrackingListSummary,
+  type TrackingManagementScope,
   type TrackingOverviewGroup,
   type TrackingStatusGroup,
 } from './trackingProjection'
 import {
   useTrackingWriteSession,
-  type TrackingManagementScope,
   type TrackingRecoveryActionCode,
   type TrackingSubmissionMode,
   type TrackingWriteEffect,
@@ -123,7 +123,6 @@ let writeController: AbortController | null = null
 const planDeleteSession = writes.planDelete
 const batchOutcome = writes.batchOutcome
 const batchLoading = writes.batchLoading
-const batchPending = writes.batchPending
 const batchNotice = writes.batchNotice
 const batchSkippedNotice = writes.batchSkippedNotice
 const isBatchSelected = writes.isBatchSelected
@@ -437,6 +436,45 @@ async function presentFeedback(feedback: TrackingWriteFeedback): Promise<void> {
 }
 
 /**
+ * Run one single-write session transport.
+ *
+ * The page owns the transport: the abort controller, the sequence guard, the
+ * returned-tracking convergence, the converging effects and the end of the
+ * attempt all live here exactly once, so the submit, recovery and management
+ * paths can only differ in which session command settles them.
+ */
+async function runSessionTransport<Result extends { tracking: TrackingItem }>(options: {
+  readonly request: { readonly endpoint: ApiPath; readonly path: Readonly<Record<string, string>>; readonly body: unknown }
+  /** Runs after a success response and before the returned tracking converges. */
+  readonly beforeConverge?: () => void
+  readonly settle: (result: Result) => readonly TrackingWriteEffect[]
+  readonly fail: (error: ReturnType<typeof toApiError>) => readonly TrackingWriteEffect[]
+}): Promise<void> {
+  const sequence = ++writeSequence
+  const controller = new AbortController()
+  writeController?.abort()
+  writeController = controller
+  try {
+    const result = await api.post<Result>(options.request.endpoint, {
+      path: options.request.path, body: options.request.body, signal: controller.signal,
+    })
+    if (sequence !== writeSequence) return
+    // The returned tracking converges the list row without a second list read.
+    options.beforeConverge?.()
+    applyReturnedTracking(result.tracking)
+    await runWriteEffects(options.settle(result))
+  } catch (error) {
+    if (sequence !== writeSequence) return
+    await runWriteEffects(options.fail(toApiError(error)))
+  } finally {
+    if (sequence === writeSequence) {
+      writes.finishAttempt()
+      if (writeController === controller) writeController = null
+    }
+  }
+}
+
+/**
  * Run the converging effects one session command returned.
  *
  * The module decides *what* must happen (re-read the server, state a fixed
@@ -500,7 +538,7 @@ async function showSkippedPlans(title: string, skipped: readonly { title: string
 
 /** Issue #100 AC 1: the entry opens one mode choice for the whole batch. */
 function runBatchSubmit(): void {
-  if (batchPending.value || batchLoading.value) return
+  if (batchLoading.value) return
   if (!savedRef.value?.connection_ref) return
   if (!batchSummary.value.selected) return
   batchModeOpen.value = true
@@ -519,7 +557,7 @@ function cancelBatchSubmissionMode(): void {
 }
 
 async function performBatchSubmit(): Promise<void> {
-  if (batchPending.value || batchLoading.value) return
+  if (batchLoading.value) return
   const config = savedRef.value
   if (!config?.connection_ref) return
   if (!batchSummary.value.selected) return
@@ -541,7 +579,9 @@ async function performBatchSubmit(): Promise<void> {
 
   const sequence = ++batchSequence
   try {
-    const result = await api.post<BatchResult>(started.request.endpoint, { body: started.request.body })
+    const result = await api.post<BatchResult>(started.request.endpoint, {
+      path: started.request.path, body: started.request.body,
+    })
     if (sequence !== batchSequence) return
     await runWriteEffects(writes.finishBatchSubmit(result))
   } catch (error) {
@@ -626,30 +666,12 @@ async function runTrackingWrite(payload: TrackingWriteTarget): Promise<void> {
     await runWriteEffects(started.effects)
     return
   }
-  const request = started.request
-  const trackingId = payload.item.tracking_id
-  const sequence = ++writeSequence
-  const controller = new AbortController()
-  writeController?.abort()
-  writeController = controller
-  try {
-    const result = await api.post<TrackingWriteResult>(request.endpoint, {
-      path: { tracking_id: trackingId }, body: request.body, signal: controller.signal,
-    })
-    if (sequence !== writeSequence) return
-    // The returned tracking converges the list row without a second list read.
-    closeSubmissionModeChoice()
-    applyReturnedTracking(result.tracking)
-    await runWriteEffects(writes.finishSubmit(result))
-  } catch (error) {
-    if (sequence !== writeSequence) return
-    await runWriteEffects(writes.failSubmit(toApiError(error)))
-  } finally {
-    if (sequence === writeSequence) {
-      writes.finishAttempt()
-      if (writeController === controller) writeController = null
-    }
-  }
+  await runSessionTransport<TrackingWriteResult>({
+    request: started.request,
+    beforeConverge: closeSubmissionModeChoice,
+    settle: (result) => writes.finishSubmit(result),
+    fail: (error) => writes.failSubmit(error),
+  })
 }
 
 /**
@@ -696,30 +718,11 @@ async function runTrackingRecovery(
     await runWriteEffects(started.effects)
     return
   }
-  const request = started.request
-  const trackingId = payload.item.tracking_id
-  const sequence = ++writeSequence
-  const controller = new AbortController()
-  writeController?.abort()
-  writeController = controller
-  try {
-    const result = await api.post<TrackingRecoverResult>(request.endpoint, {
-      path: { tracking_id: trackingId }, body: request.body, signal: controller.signal,
-    })
-    if (sequence !== writeSequence) return
-    // The returned tracking converges the list row; the detail is re-read so the
-    // inspector shows the recovered status and its next legitimate action.
-    applyReturnedTracking(result.tracking)
-    await runWriteEffects(writes.finishRecovery(result))
-  } catch (error) {
-    if (sequence !== writeSequence) return
-    await runWriteEffects(writes.failRecovery(toApiError(error)))
-  } finally {
-    if (sequence === writeSequence) {
-      writes.finishAttempt()
-      if (writeController === controller) writeController = null
-    }
-  }
+  await runSessionTransport<TrackingRecoverResult>({
+    request: started.request,
+    settle: (result) => writes.finishRecovery(result),
+    fail: (error) => writes.failRecovery(error),
+  })
 }
 
 /**
@@ -762,29 +765,11 @@ async function runTrackingManagement(payload: {
     await runWriteEffects(started.effects)
     return
   }
-  const request = started.request
-  const trackingId = payload.item.tracking_id
-  const sequence = ++writeSequence
-  const controller = new AbortController()
-  writeController?.abort()
-  writeController = controller
-  try {
-    const result = await api.post<TrackingManagementResult>(request.endpoint, {
-      path: { tracking_id: trackingId }, body: request.body, signal: controller.signal,
-    })
-    if (sequence !== writeSequence) return
-    // The returned tracking converges the list row without a second list read.
-    applyReturnedTracking(result.tracking)
-    await runWriteEffects(writes.finishManagement(result))
-  } catch (error) {
-    if (sequence !== writeSequence) return
-    await runWriteEffects(writes.failManagement(toApiError(error)))
-  } finally {
-    if (sequence === writeSequence) {
-      writes.finishAttempt()
-      if (writeController === controller) writeController = null
-    }
-  }
+  await runSessionTransport<TrackingManagementResult>({
+    request: started.request,
+    settle: (result) => writes.finishManagement(result),
+    fail: (error) => writes.failManagement(error),
+  })
 }
 
 // -- unified plan delete (issue #92) -----------------------------------------
@@ -813,7 +798,7 @@ async function runPlanDelete(payload: {
   const sequence = ++planDeleteSequence
   try {
     const result = await api.post<PlanDeleteResult>(request.endpoint, {
-      path: { tracking_id: trackingId }, body: request.body,
+      path: request.path, body: request.body,
     })
     if (sequence !== planDeleteSequence) return
     const effects = writes.finishPlanDelete(result)
@@ -906,7 +891,7 @@ onBeforeUnmount(() => {
           </span>
           <BaseButton id="tracking-batch-select-all" variant="secondary" @click="selectAllCurrent">全选当前结果</BaseButton>
           <BaseButton id="tracking-batch-clear" variant="secondary" :disabled="!batchSummary.selected" @click="clearSelection">清除选择</BaseButton>
-          <BaseButton id="tracking-batch-submit" :loading="batchLoading" :disabled="batchLoading || batchPending || !batchSummary.selected || !savedRef" @click="runBatchSubmit">
+          <BaseButton id="tracking-batch-submit" :loading="batchLoading" :disabled="batchLoading || !batchSummary.selected || !savedRef" @click="runBatchSubmit">
             提交选中方案
           </BaseButton>
           <!-- Issue 116：缺少已保存连接时批量提交可见但禁用，并就地说明下一步。 -->
@@ -1010,7 +995,7 @@ onBeforeUnmount(() => {
     <TrackingSubmissionModeDialog
       :open="batchModeOpen"
       :batch-count="batchSummary.selected"
-      :busy="batchLoading || batchPending"
+      :busy="batchLoading"
       @choose="chooseBatchSubmissionMode"
       @cancel="cancelBatchSubmissionMode"
     />

@@ -16,12 +16,12 @@ import {
   type CapabilityResult,
   type TrackingAction,
   type TrackingItem,
+  type TrackingManagementScope,
 } from './trackingProjection'
 import {
   isSendableManagementAction,
   projectTrackingActionScopes,
   type TrackingManagementActionCode,
-  type TrackingManagementScope,
   type TrackingPlanDeleteSession,
   type TrackingRecoveryActionCode,
   type TrackingWriteSession,

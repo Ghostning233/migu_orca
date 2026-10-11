@@ -20,12 +20,14 @@
 import { computed, ref, watch } from 'vue'
 
 import BaseButton from '@/components/forms/BaseButton.vue'
-import { MANAGEMENT_SCOPE_LABELS, type TrackingAction, type TrackingItem } from './trackingProjection'
 import {
   isTrackingManagementScope,
+  MANAGEMENT_SCOPE_LABELS,
+  type TrackingAction,
+  type TrackingItem,
   type TrackingManagementScope,
-  type TrackingWriteSession,
-} from './useTrackingWriteSession'
+} from './trackingProjection'
+import type { TrackingWriteSession } from './useTrackingWriteSession'
 
 const props = defineProps<{
   item: TrackingItem

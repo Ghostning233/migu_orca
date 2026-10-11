@@ -15,12 +15,13 @@
 import { computed } from 'vue'
 
 import BaseButton from '@/components/forms/BaseButton.vue'
-import type { TrackingAction, TrackingItem } from './trackingProjection'
 import {
   isTrackingManagementScope,
+  type TrackingAction,
+  type TrackingItem,
   type TrackingManagementScope,
-  type TrackingWriteSession,
-} from './useTrackingWriteSession'
+} from './trackingProjection'
+import type { TrackingWriteSession } from './useTrackingWriteSession'
 
 const props = defineProps<{
   item: TrackingItem

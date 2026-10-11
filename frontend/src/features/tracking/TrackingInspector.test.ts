@@ -5,10 +5,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '@/api/client'
 import { clearReuseHandoff, consumeReuseHandoff } from '@/features/requests/reuseHandoff'
 import TrackingInspector from './TrackingInspector.vue'
-import type { CapabilityResult } from './trackingProjection'
+import type { CapabilityResult, TrackingManagementScope } from './trackingProjection'
 import type {
   TrackingManagementActionCode,
-  TrackingManagementScope,
   TrackingWriteSession,
   TrackingWriteSessionSet,
 } from './useTrackingWriteSession'

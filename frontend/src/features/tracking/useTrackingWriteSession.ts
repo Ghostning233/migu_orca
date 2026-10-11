@@ -18,10 +18,13 @@
  *
  * The module is API-free.  It never performs transport, shows a dialog, routes
  * or touches the DOM: the page answers the confirmation with `begin*` again and
- * sends the returned request.  Callers use two surfaces only:
+ * sends the returned request.  Callers use three surfaces only:
  *
- *   - the three family snapshots (`sessions`) and the lock queries;
- *   - named commands, each returning what the page must do next.
+ *   - the three family snapshots (`sessions`) and the lock/notice queries;
+ *   - named commands, each returning what the page must do next;
+ *   - the read-only scope/sendable projections the inspector and the forms
+ *     filter their own offers with (`projectTrackingActionScopes`,
+ *     `isSendableManagementAction`).
  *
  * The vocabulary of the previous ``trackingProjection``/``trackingManagement``
  * session halves (state enums, message tables, constructors, conflict
@@ -36,11 +39,13 @@ import type { operations, paths } from '@/api/generated/api'
 import {
   canVerifyExternally,
   executableTrackingActions,
+  isTrackingManagementScope,
   projectRevalidateIssues,
   type CapabilityResult,
   type TrackingAction,
   type TrackingActionCode,
   type TrackingItem,
+  type TrackingManagementScope,
   type TrackingRevalidateIssueView,
   type TrackingScope,
 } from './trackingProjection'
@@ -228,9 +233,11 @@ function makeOpaqueKey(): string {
     : `intent-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`
 }
 
-/** One request the page must send; the body shape is the module's decision. */
+/** One request the page must send; endpoint, path and body travel as one unit. */
 interface TrackingWriteRequest {
   readonly endpoint: ApiPath
+  /** The path parameters the endpoint template requires. */
+  readonly path: Readonly<Record<string, string>>
   readonly body: unknown
 }
 
@@ -693,22 +700,6 @@ const RECOVERY_NEEDS_MANUAL_NOTICE =
 // Management family (US-313, US-314, US-315).
 // ---------------------------------------------------------------------------
 
-/**
- * The scope of a management action *as it is being requested* (US-313).
- *
- * ``TrackingScope`` is the generated public scope enum, but the requested scope
- * is only real if this page has a builder for it: a scope without a request body
- * shape can never be sent, so it fails closed here rather than at the boundary.
- */
-const TRACKING_MANAGEMENT_SCOPES = ['SUBSCRIPTION', 'ASSOCIATED_RSS'] as const
-
-export type TrackingManagementScope = (typeof TRACKING_MANAGEMENT_SCOPES)[number]
-
-export function isTrackingManagementScope(value: unknown): value is TrackingManagementScope {
-  return typeof value === 'string'
-    && (TRACKING_MANAGEMENT_SCOPES as readonly string[]).includes(value)
-}
-
 /** The enable/disable direction implied by the record's own server status. */
 function managementEnableDirection(status: unknown): boolean | null {
   if (status === 'DISABLED') return true
@@ -1087,7 +1078,7 @@ const MANAGEMENT_CONFLICT_MESSAGES: Record<(typeof MANAGEMENT_CONFLICT_TYPES)[nu
   tracking_target_ambiguous:
     '匹配到多个外部对象，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
   tracking_mapping_missing:
-    '该记录缺少外部关联信息，未提交到 Auto Bangumi；正在刷新最新详情。',
+    '该记录缺少外部关联信息，本次未提交到 Auto Bangumi；正在刷新最新详情。',
 }
 
 /**
@@ -1771,7 +1762,6 @@ export interface TrackingWriteSessionApi {
   readonly batchSelection: Ref<TrackingBatchSelection>
   readonly batchOutcome: Ref<TrackingBatchOutcome | null>
   readonly batchLoading: Ref<boolean>
-  readonly batchPending: Ref<boolean>
   readonly batchNotice: Ref<string>
   readonly batchSkippedNotice: ComputedRef<string>
 
@@ -1797,8 +1787,6 @@ export interface TrackingWriteSessionApi {
    * a decided one is simply forgotten.
    */
   preserveAfterClear: () => void
-  /** A confirmed local recovery released this record's unresolved write intents. */
-  releaseFor: (trackingId: string) => void
   /** The page owns the impact dialog; it reports the dialog's open state here. */
   setPending: (pending: boolean) => void
 
@@ -1866,7 +1854,6 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
   const batchSelection = ref<TrackingBatchSelection>(EMPTY_BATCH_SELECTION)
   const batchOutcome = ref<TrackingBatchOutcome | null>(null)
   const batchLoading = ref(false)
-  const batchPending = ref(false)
   const batchNotice = ref('')
 
   // The locked intents and the connection generation each one was confirmed
@@ -2142,7 +2129,11 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
       refusal: null,
       ask: null,
       confirmation: null,
-      request: { endpoint: WRITE_ACTION_ENDPOINTS[requested], body },
+      request: {
+        endpoint: WRITE_ACTION_ENDPOINTS[requested],
+        path: { tracking_id: trackingId },
+        body,
+      },
       effects: [],
     }
   }
@@ -2230,7 +2221,11 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
       refusal: null,
       ask: null,
       confirmation: null,
-      request: { endpoint: TRACKING_RECOVER_ENDPOINT, body },
+      request: {
+        endpoint: TRACKING_RECOVER_ENDPOINT,
+        path: { tracking_id: trackingId },
+        body,
+      },
       effects: [],
     }
   }
@@ -2353,7 +2348,11 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
       refusal: null,
       ask: null,
       confirmation: null,
-      request: { endpoint: MANAGEMENT_ACTION_ENDPOINTS[intent.action], body },
+      request: {
+        endpoint: MANAGEMENT_ACTION_ENDPOINTS[intent.action],
+        path: { tracking_id: trackingId },
+        body,
+      },
       effects: [],
     }
   }
@@ -2435,7 +2434,11 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
       refusal: null,
       ask: null,
       confirmation: null,
-      request: { endpoint: PLAN_DELETE_ENDPOINT, body },
+      request: {
+        endpoint: PLAN_DELETE_ENDPOINT,
+        path: { tracking_id: trackingId },
+        body,
+      },
       effects: [],
     }
   }
@@ -2512,7 +2515,7 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
       refusal: null,
       ask: null,
       confirmation: null,
-      request: { endpoint: TRACKING_BATCH_SUBMIT_ENDPOINT, body },
+      request: { endpoint: TRACKING_BATCH_SUBMIT_ENDPOINT, path: {}, body },
       effects: [],
       skipped,
       skippedTitle: skipped.length ? '部分方案未提交' : '',
@@ -2557,7 +2560,6 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
     batchSelection,
     batchOutcome,
     batchLoading,
-    batchPending,
     batchNotice,
     batchSkippedNotice,
     hasUnresolvedLock,
@@ -2566,7 +2568,6 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
     noticeFor,
     reset,
     preserveAfterClear,
-    releaseFor,
     setPending(value: boolean) { pending.value = value },
     beginSubmit,
     finishSubmit,

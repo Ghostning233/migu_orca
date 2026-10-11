@@ -30,8 +30,12 @@ import {
   type TrackingSubscriptionForm,
   type TrackingSubscriptionTextField,
 } from './trackingManagement'
-import { MODIFY_FORM_HELP, type TrackingAction, type TrackingItem } from './trackingProjection'
-import type { TrackingManagementScope } from './useTrackingWriteSession'
+import {
+  MODIFY_FORM_HELP,
+  type TrackingAction,
+  type TrackingItem,
+  type TrackingManagementScope,
+} from './trackingProjection'
 
 const props = defineProps<{
   item: TrackingItem
