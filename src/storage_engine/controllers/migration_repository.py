@@ -7,15 +7,14 @@ Persists exactly one file under ``<storage>/tracking_migrations``::
 The manifest stores only version/state/timestamps/safe counts (Stage 29 PRD
 §10.1) and never request ids, file names, paths or raw JSON.  Reads are
 fail-closed (an unknown schema version or field maps to a stable
-``storage_json_error``); writes use a temp file + ``os.replace`` so a crash can
+``storage_json_error``); writes use ``storage_primitives.write_text_atomic``
+(temp file + ``os.replace``) so a crash can
 never leave a half-written manifest.
 """
 
 from __future__ import annotations
 
-import contextlib
 import json
-import os
 from pathlib import Path
 from threading import RLock
 
@@ -23,6 +22,10 @@ from shared.errors import Stage1Error
 from storage_engine.controllers.storage_config import (
     StorageConfig,
     ensure_storage_layout,
+)
+from storage_engine.controllers.storage_primitives import (
+    is_relative_to,
+    write_text_atomic,
 )
 from tracking_engine.models.migration import (
     MigrationManifest,
@@ -98,10 +101,8 @@ def save_migration_manifest(
             )
             + "\n"
         )
-        temp_path = manifest_path.with_name(manifest_path.name + ".tmp")
         try:
-            temp_path.write_text(payload, encoding="utf-8")
-            os.replace(temp_path, manifest_path)
+            write_text_atomic(manifest_path, payload)
         except OSError as exc:
             raise Stage1Error(
                 "storage_error",
@@ -109,10 +110,6 @@ def save_migration_manifest(
                 "save_migration_manifest",
                 {"directory": config.tracking_migrations_dir.name},
             ) from exc
-        finally:
-            if temp_path.exists():
-                with contextlib.suppress(OSError):
-                    temp_path.unlink()
     try:
         return manifest_from_storage_dict(manifest_to_storage_dict(manifest))
     except ValueError as exc:  # pragma: no cover - model guards construction
@@ -129,15 +126,13 @@ def _manifest_path(config: StorageConfig, failed_step: str) -> Path:
     candidate = (config.tracking_migrations_dir / MIGRATION_MANIFEST_FILENAME).resolve(
         strict=False
     )
-    try:
-        candidate.relative_to(root)
-    except ValueError:
+    if not is_relative_to(candidate, root):
         raise Stage1Error(
             "storage_error",
             "迁移清单路径不合法",
             failed_step,
             {"directory": config.tracking_migrations_dir.name},
-        ) from None
+        )
     return candidate
 
 

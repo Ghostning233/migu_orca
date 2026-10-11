@@ -17,7 +17,8 @@ for the Stage 29 B-B tracking flow and provides:
 
 Storage rules
 -------------
-- Writes use a temp file + ``os.replace`` so a crash can never leave a
+- Writes go through ``storage_primitives.write_text_atomic`` (temp file +
+  ``os.replace``) so a crash can never leave a
   half-written record (the same pattern as ``idempotency_repository``).
 - A per-``tracking_id`` process lock serializes ensure/CAS writers; readers rely
   on atomic replace.  Multiple OS processes sharing one storage directory are
@@ -31,19 +32,21 @@ Storage rules
 
 from __future__ import annotations
 
-import contextlib
 import json
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from threading import RLock
 from typing import Any
 
 from shared.errors import Stage1Error
 from storage_engine.controllers.storage_config import (
     StorageConfig,
     ensure_storage_layout,
+)
+from storage_engine.controllers.storage_primitives import (
+    KeyedLocks,
+    is_relative_to,
+    write_text_atomic,
 )
 from tracking_engine.models.tracking import (
     TRACKING_ORIGIN_EXTERNAL_SYNC,
@@ -108,7 +111,7 @@ def ensure_tracking_record(
                 {"field": "revision", "revision": record.revision},
             )
         ensure_storage_layout(config)
-        with _key_lock(clean_id):
+        with _LOCKS.for_key(clean_id):
             if _tracking_path(config, clean_id, "ensure_tracking_record").exists():
                 return _load_tracking_record(config, clean_id, "ensure_tracking_record"), False
             normalized = _normalize(record, "ensure_tracking_record")
@@ -138,7 +141,7 @@ def ensure_tracking_record(
         )
     ensure_storage_layout(config)
 
-    with _key_lock(expected_id):
+    with _LOCKS.for_key(expected_id):
         if _tracking_path(config, expected_id, "ensure_tracking_record").exists():
             existing = _load_tracking_record(
                 config, expected_id, "ensure_tracking_record"
@@ -207,7 +210,7 @@ def compare_and_swap_tracking_record(
     clean_id = _validated_tracking_id(tracking_id, "compare_and_swap_tracking_record")
     ensure_storage_layout(config)
 
-    with _key_lock(clean_id):
+    with _LOCKS.for_key(clean_id):
         current = _load_tracking_record(
             config, clean_id, "compare_and_swap_tracking_record"
         )
@@ -347,10 +350,8 @@ def _atomic_write(
         )
         + "\n"
     )
-    temp_path = record_path.with_name(record_path.name + ".tmp")
     try:
-        temp_path.write_text(payload, encoding="utf-8")
-        os.replace(temp_path, record_path)
+        write_text_atomic(record_path, payload)
     except OSError as exc:
         raise Stage1Error(
             "storage_error",
@@ -358,10 +359,6 @@ def _atomic_write(
             failed_step,
             {"tracking_id": tracking_id, "directory": config.tracking_dir.name},
         ) from exc
-    finally:
-        if temp_path.exists():
-            with contextlib.suppress(OSError):
-                temp_path.unlink()
 
 
 def _normalize(record: TrackingRecord, failed_step: str) -> TrackingRecord:
@@ -407,20 +404,8 @@ def _validated_tracking_id(tracking_id: str, failed_step: str) -> str:
     return clean_id
 
 
-#: Process-level per-key locks so concurrent ensure/CAS writers on the same
-#: tracking_id are serialized.  Locks live for the process lifetime; the id
-#: space is small (one lock per record).
-_LOCK_GUARD: RLock = RLock()
-_KEY_LOCKS: dict[str, RLock] = {}
-
-
-def _key_lock(tracking_id: str) -> RLock:
-    with _LOCK_GUARD:
-        lock = _KEY_LOCKS.get(tracking_id)
-        if lock is None:
-            lock = RLock()
-            _KEY_LOCKS[tracking_id] = lock
-        return lock
+#: 进程内 per-key 锁池：同一条目的 ensure/CAS 写串行，不同条目互不阻塞。
+_LOCKS = KeyedLocks()
 
 
 def _tracking_path(
@@ -431,7 +416,7 @@ def _tracking_path(
     clean_id = _validated_tracking_id(tracking_id, failed_step)
     tracking_root = config.tracking_dir.resolve(strict=False)
     candidate = (config.tracking_dir / f"{clean_id}.json").resolve(strict=False)
-    if not _is_relative_to(candidate, tracking_root):
+    if not is_relative_to(candidate, tracking_root):
         raise Stage1Error(
             "invalid_tracking_id",
             "tracking_id 不能包含路径片段",
@@ -439,14 +424,6 @@ def _tracking_path(
             {"field": "tracking_id"},
         )
     return candidate
-
-
-def _is_relative_to(path: Path, parent: Path) -> bool:
-    try:
-        path.relative_to(parent)
-        return True
-    except ValueError:
-        return False
 
 
 __all__ = [

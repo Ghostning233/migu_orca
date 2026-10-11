@@ -30,16 +30,14 @@ Security rules
 - ``request_fingerprint`` is a one-way digest: the caller passes only the
   canonicalized *allowed* fields (draft-independent identity of the Request's
   public essence), never the raw payload.
-- File writes use the same atomic temp-file + ``os.replace`` pattern as
+- File writes use the shared atomic temp-file + ``os.replace`` primitive as
   ``save_user_preferences`` so a crash cannot leave a half-written record.
 - A damaged/missing record surfaces as a stable ``storage_json_error`` /
   ``idempotency_not_found`` (never the raw bytes), and a key that was never
   bound returns ``None`` so the caller can start a fresh attempt.
 """
 
-import contextlib
 import json
-import os
 from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
@@ -49,6 +47,10 @@ from shared.errors import Stage1Error
 from storage_engine.controllers.storage_config import (
     StorageConfig,
     ensure_storage_layout,
+)
+from storage_engine.controllers.storage_primitives import (
+    is_relative_to,
+    write_text_atomic,
 )
 
 #: Public idempotency states (D28-06 / Stage 28 PRD §7).
@@ -157,10 +159,8 @@ def save_idempotency_record(
         )
         + "\n"
     )
-    temp_path = record_path.with_name(record_path.name + ".tmp")
     try:
-        temp_path.write_text(payload, encoding="utf-8")
-        os.replace(temp_path, record_path)
+        write_text_atomic(record_path, payload)
     except OSError as exc:
         raise Stage1Error(
             "storage_error",
@@ -171,10 +171,6 @@ def save_idempotency_record(
                 "directory": config.idempotency_dir.name,
             },
         ) from exc
-    finally:
-        if temp_path.exists():
-            with contextlib.suppress(OSError):
-                temp_path.unlink()
 
     return {
         "idempotency_key": idempotency_key,
@@ -235,7 +231,7 @@ def _idempotency_path(
     candidate = (config.idempotency_dir / f"{clean_key}.json").resolve(
         strict=False
     )
-    if not _is_relative_to(candidate, idempotency_root):
+    if not is_relative_to(candidate, idempotency_root):
         raise Stage1Error(
             "invalid_idempotency_key",
             "idempotency_key 不能包含路径片段",
@@ -243,14 +239,6 @@ def _idempotency_path(
             {"field": "idempotency_key"},
         )
     return candidate
-
-
-def _is_relative_to(path: Path, parent: Path) -> bool:
-    try:
-        path.relative_to(parent)
-        return True
-    except ValueError:
-        return False
 
 
 __all__ = [

@@ -1,17 +1,19 @@
 from __future__ import annotations
 
-import contextlib
 import json
-import os
 from pathlib import Path
 from typing import Any
 
 from shared.errors import Stage1Error
 from shared.models import BangumiCorrectionMetadata, TitleCorrection
-from storage_engine.controllers.preference_repository import contains_sensitive_value
+from shared.sensitive_values import contains_sensitive_value
 from storage_engine.controllers.storage_config import (
     StorageConfig,
     ensure_storage_layout,
+)
+from storage_engine.controllers.storage_primitives import (
+    is_relative_to,
+    write_text_atomic,
 )
 
 #: Single-user correction file inside ``<storage>/corrections``.
@@ -103,10 +105,8 @@ def save_correction(
         )
         + "\n"
     )
-    temp_path = corrections_path.with_name(CORRECTIONS_FILENAME + ".tmp")
     try:
-        temp_path.write_text(payload, encoding="utf-8")
-        os.replace(temp_path, corrections_path)
+        write_text_atomic(corrections_path, payload)
     except OSError as exc:
         raise Stage1Error(
             "storage_error",
@@ -114,10 +114,6 @@ def save_correction(
             "save_correction",
             {"directory": config.corrections_dir.name},
         ) from exc
-    finally:
-        if temp_path.exists():
-            with contextlib.suppress(OSError):
-                temp_path.unlink()
 
     return {
         "storage": "local_json",
@@ -341,7 +337,7 @@ def _merge_latest_by_raw_title(
 def _corrections_path(config: StorageConfig) -> Path:
     corrections_root = config.corrections_dir.resolve(strict=False)
     candidate = (config.corrections_dir / CORRECTIONS_FILENAME).resolve(strict=False)
-    if not _is_relative_to(candidate, corrections_root):
+    if not is_relative_to(candidate, corrections_root):
         raise Stage1Error(
             "storage_error",
             "搜索修正存储路径无效",
@@ -349,14 +345,6 @@ def _corrections_path(config: StorageConfig) -> Path:
             {"directory": config.corrections_dir.name},
         )
     return candidate
-
-
-def _is_relative_to(path: Path, parent: Path) -> bool:
-    try:
-        path.relative_to(parent)
-        return True
-    except ValueError:
-        return False
 
 
 def _validate_string(

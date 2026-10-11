@@ -12,6 +12,7 @@ from storage_engine.controllers.storage_config import (
     StorageConfig,
     ensure_storage_layout,
 )
+from storage_engine.controllers.storage_primitives import is_relative_to
 
 
 @dataclass(frozen=True)
@@ -186,7 +187,7 @@ def _ab_result_path(
     candidate = (config.ab_results_dir / f"{clean_request_id}.json").resolve(
         strict=False
     )
-    if not _is_relative_to(candidate, results_root):
+    if not is_relative_to(candidate, results_root):
         raise Stage1Error(
             "invalid_request_id",
             "request_id 不能包含路径片段",
@@ -196,9 +197,3 @@ def _ab_result_path(
     return candidate
 
 
-def _is_relative_to(path: Path, parent: Path) -> bool:
-    try:
-        path.relative_to(parent)
-        return True
-    except ValueError:
-        return False

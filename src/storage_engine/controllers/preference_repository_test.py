@@ -14,13 +14,13 @@ from shared.models import (
     SubtitleGroupPreference,
     VersionedUserPreference,
 )
+from shared.sensitive_values import contains_sensitive_value
 from storage_engine.controllers.preference_repository import (
     MAX_FILTER_RULE_LENGTH,
     MAX_NAMING_TEMPLATE_LENGTH,
     MAX_SUBTITLE_GROUP_NAME_LENGTH,
     PREFERENCES_FILENAME,
     build_preferences_from_api,
-    contains_sensitive_value,
     default_user_preferences,
     load_user_preferences,
     save_user_preferences,

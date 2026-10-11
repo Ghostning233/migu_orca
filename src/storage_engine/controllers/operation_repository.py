@@ -22,7 +22,8 @@ Keyed replay / binding rules
 
 Storage rules
 -------------
-- Writes use a temp file + ``os.replace`` (same pattern as the tracking and
+- Writes go through ``storage_primitives.write_text_atomic`` (temp file +
+  ``os.replace``, same pattern as the tracking and
   idempotency repositories) so a crash can never leave a half-written file.
 - A per-``operation_id`` process lock serializes concurrent bind/CAS writers;
   readers rely on atomic replace.  Multiple OS processes sharing one storage
@@ -38,13 +39,10 @@ Storage rules
 
 from __future__ import annotations
 
-import contextlib
 import json
-import os
 import re
 from dataclasses import replace
 from pathlib import Path
-from threading import RLock
 from typing import Any
 from uuid import UUID
 
@@ -52,6 +50,11 @@ from shared.errors import Stage1Error
 from storage_engine.controllers.storage_config import (
     StorageConfig,
     ensure_storage_layout,
+)
+from storage_engine.controllers.storage_primitives import (
+    KeyedLocks,
+    is_relative_to,
+    write_text_atomic,
 )
 from tracking_engine.models.operation import (
     TRACKING_OPERATION_SCHEMA_VERSION,
@@ -130,7 +133,7 @@ def bind_tracking_operation(
     operation_id = tracking_operation_id_for_idempotency_key(clean_key)
     ensure_storage_layout(config)
 
-    with _key_lock(operation_id):
+    with _LOCKS.for_key(operation_id):
         if _operation_path(config, operation_id, "bind_tracking_operation").exists():
             existing = _load_tracking_operation(
                 config, operation_id, "bind_tracking_operation"
@@ -206,7 +209,7 @@ def compare_and_swap_tracking_operation(
     )
     ensure_storage_layout(config)
 
-    with _key_lock(clean_id):
+    with _LOCKS.for_key(clean_id):
         current = _load_tracking_operation(
             config, clean_id, "compare_and_swap_tracking_operation"
         )
@@ -285,7 +288,7 @@ def recover_tracking_operation(
         raise ValueError("completed operation can only be compensated to recovery required")
     clean_id = _validated_operation_id(operation_id, "recover_tracking_operation")
     ensure_storage_layout(config)
-    with _key_lock(clean_id):
+    with _LOCKS.for_key(clean_id):
         current = _load_tracking_operation(config, clean_id, "recover_tracking_operation")
         if current.schema_version != TRACKING_OPERATION_SCHEMA_VERSION:
             raise Stage1Error(
@@ -420,10 +423,8 @@ def _atomic_write(
         )
         + "\n"
     )
-    temp_path = record_path.with_name(record_path.name + ".tmp")
     try:
-        temp_path.write_text(payload, encoding="utf-8")
-        os.replace(temp_path, record_path)
+        write_text_atomic(record_path, payload)
     except OSError as exc:
         raise Stage1Error(
             "storage_error",
@@ -434,10 +435,6 @@ def _atomic_write(
                 "directory": config.tracking_operations_dir.name,
             },
         ) from exc
-    finally:
-        if temp_path.exists():
-            with contextlib.suppress(OSError):
-                temp_path.unlink()
 
 
 def _normalize(operation: TrackingOperation, failed_step: str) -> TrackingOperation:
@@ -529,20 +526,8 @@ def _validated_operation_id(operation_id: Any, failed_step: str) -> str:
     return clean_id
 
 
-#: Process-level per-key locks so concurrent bind/CAS writers on the same
-#: operation_id are serialized.  Locks live for the process lifetime; the id
-#: space is small (one lock per operation).
-_LOCK_GUARD: RLock = RLock()
-_KEY_LOCKS: dict[str, RLock] = {}
-
-
-def _key_lock(operation_id: str) -> RLock:
-    with _LOCK_GUARD:
-        lock = _KEY_LOCKS.get(operation_id)
-        if lock is None:
-            lock = RLock()
-            _KEY_LOCKS[operation_id] = lock
-        return lock
+#: 进程内 per-key 锁池：同一条目的 bind/CAS 写串行，不同条目互不阻塞。
+_LOCKS = KeyedLocks()
 
 
 def _operation_path(
@@ -555,7 +540,7 @@ def _operation_path(
     candidate = (config.tracking_operations_dir / f"{clean_id}.json").resolve(
         strict=False
     )
-    if not _is_relative_to(candidate, operations_root):
+    if not is_relative_to(candidate, operations_root):
         raise Stage1Error(
             "invalid_operation_id",
             "operation_id 不能包含路径片段",
@@ -563,14 +548,6 @@ def _operation_path(
             {"field": "operation_id"},
         )
     return candidate
-
-
-def _is_relative_to(path: Path, parent: Path) -> bool:
-    try:
-        path.relative_to(parent)
-        return True
-    except ValueError:
-        return False
 
 
 __all__ = [
