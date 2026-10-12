@@ -70,6 +70,33 @@ def run_saved_tracking_check(
     read_policy: CheckPolicy | None = None,
 ) -> dict[str, Any]:
     """Run one bounded read-only check bound to the original submit operation."""
+    # Issue #183 review: one effective check per record, serialized in-process
+    # for the whole read so a replay/second tab cannot read twice.
+    with single_flight_check(payload.tracking_id):
+        return run_saved_tracking_check_locked(
+            payload,
+            config_root=config_root,
+            management_client=management_client,
+            now=now,
+            read_policy=read_policy,
+        )
+
+
+def run_saved_tracking_check_locked(
+    payload: TrackingCheckPayload,
+    *,
+    config_root: Path | str | None = None,
+    management_client: object | None = None,
+    now: str | None = None,
+    read_policy: CheckPolicy | None = None,
+) -> dict[str, Any]:
+    """Run the bounded read-only check without taking the single-flight guard.
+
+    Issue #184 reuses this exact read-only rule as the first phase of a
+    risk-confirmed resubmission. That caller already holds
+    :func:`single_flight_check` for the whole two-phase interaction, so the check
+    itself must not try to re-enter its own guard.
+    """
     config = load_storage_config(_storage_dir(payload.storage_dir))
     timestamp = now or utc_now()
     record = load_tracking_record(config, payload.tracking_id)
@@ -105,51 +132,49 @@ def run_saved_tracking_check(
             reason=CONFIRM_REASON_CONNECTION_CHANGED,
         )
     repository = AutoBangumiConfigRepository(config_root)
-    # Issue #183 review: one effective check per record, and the configuration
-    # lease is held across the whole read so the bound instance cannot be
-    # replaced while Auto Bangumi is being read.
-    with single_flight_check(payload.tracking_id):
-        try:
-            lease = repository.acquire_lease(connection_ref=connection_ref)
-        except Stage1Error as exc:
-            if exc.error_type in {"connection_ref_conflict", "config_error"}:
-                # A replaced saved connection never rebinds the old operation; the
-                # check reports the proven binding change and reads nothing.
-                return _unresolved_check(
-                    config,
-                    record=record,
-                    expected_revision=payload.expected_revision,
-                    timestamp=timestamp,
-                    reason=CONFIRM_REASON_CONNECTION_CHANGED,
-                )
-            raise
-        with lease:
-            if (
-                lease.record.config is None
-                or lease.record.connection_ref is None
-                or str(lease.record.connection_ref) != connection_ref
-            ):
-                return _unresolved_check(
-                    config,
-                    record=record,
-                    expected_revision=payload.expected_revision,
-                    timestamp=timestamp,
-                    reason=CONFIRM_REASON_CONNECTION_CHANGED,
-                )
-            return run_tracking_recover(
+    # Issue #183 review: the configuration lease is held across the whole read so
+    # the bound instance cannot be replaced while Auto Bangumi is being read.
+    try:
+        lease = repository.acquire_lease(connection_ref=connection_ref)
+    except Stage1Error as exc:
+        if exc.error_type in {"connection_ref_conflict", "config_error"}:
+            # A replaced saved connection never rebinds the old operation; the
+            # check reports the proven binding change and reads nothing.
+            return _unresolved_check(
                 config,
-                tracking_id=payload.tracking_id,
+                record=record,
                 expected_revision=payload.expected_revision,
-                action=RECOVERY_ACTION_VERIFY_EXTERNAL,
-                confirm=False,
-                now=timestamp,
-                ab_config=lease.record.config.to_runtime_config(),
-                management_client=management_client,
-                connection_ref=connection_ref,
-                expected_operation_id=operation.operation_id,
-                expected_operation_kind=operation.operation,
-                read_policy=read_policy,
+                timestamp=timestamp,
+                reason=CONFIRM_REASON_CONNECTION_CHANGED,
             )
+        raise
+    with lease:
+        if (
+            lease.record.config is None
+            or lease.record.connection_ref is None
+            or str(lease.record.connection_ref) != connection_ref
+        ):
+            return _unresolved_check(
+                config,
+                record=record,
+                expected_revision=payload.expected_revision,
+                timestamp=timestamp,
+                reason=CONFIRM_REASON_CONNECTION_CHANGED,
+            )
+        return run_tracking_recover(
+            config,
+            tracking_id=payload.tracking_id,
+            expected_revision=payload.expected_revision,
+            action=RECOVERY_ACTION_VERIFY_EXTERNAL,
+            confirm=False,
+            now=timestamp,
+            ab_config=lease.record.config.to_runtime_config(),
+            management_client=management_client,
+            connection_ref=connection_ref,
+            expected_operation_id=operation.operation_id,
+            expected_operation_kind=operation.operation,
+            read_policy=read_policy,
+        )
 
 
 def _guard_expected_revision(expected_revision: Any, record: Any) -> None:
@@ -195,4 +220,4 @@ def _unresolved_check(
     }
 
 
-__all__ = ["run_saved_tracking_check"]
+__all__ = ["run_saved_tracking_check", "run_saved_tracking_check_locked"]

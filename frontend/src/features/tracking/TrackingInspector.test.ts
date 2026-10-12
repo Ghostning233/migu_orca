@@ -5,7 +5,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '@/api/client'
 import { clearReuseHandoff, consumeReuseHandoff } from '@/features/requests/reuseHandoff'
 import TrackingInspector from './TrackingInspector.vue'
-import { createCheckSession, createManagementSession, RECOVERY_NEEDS_MANUAL_NOTICE } from './trackingProjection'
+import {
+  createCheckSession, createManagementSession, createResubmitSession, RECOVERY_NEEDS_MANUAL_NOTICE,
+} from './trackingProjection'
 import type {
   CapabilityResult, TrackingCheckSession, TrackingRecoverySession, TrackingWriteSession,
 } from './trackingProjection'
@@ -987,13 +989,15 @@ describe('pending submission check (issue #183)', () => {
     ],
   })
 
-  it('offers only a read-only 重新检查 in the submit area and hides the recovery panel', async () => {
+  it('offers the read-only 重新检查 and the risk-confirmed 重新提交, hiding the recovery panel', async () => {
     apiGet.mockResolvedValue(pendingDetail() as never)
     const wrapper = await mountInspector('tracking-1', {
       checkSession: createCheckSession('tracking-1', 'PENDING', 'NOT_FOUND', 2),
     })
 
     expect(wrapper.find('#tracking-check').exists()).toBe(true)
+    // Issue #184: the second, explicitly confirmed step is offered beside it.
+    expect(wrapper.find('#tracking-resubmit').exists()).toBe(true)
     expect(wrapper.find('#tracking-check-result').text()).toContain('暂时没有在 Auto Bangumi 中找到该订阅')
     // Issue #181: the standalone recovery panel is gone for a submit result.
     expect(wrapper.find('#tracking-recovery-heading').exists()).toBe(false)
@@ -1047,5 +1051,69 @@ describe('pending submission check (issue #183)', () => {
 
     expect(wrapper.find('#tracking-check-result').text()).toContain('正在只读核验')
     expect(wrapper.find('#tracking-check').attributes('disabled')).toBeDefined()
+  })
+})
+
+describe('risk-confirmed resubmission (issue #184)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  const pendingDetail = (operationState = 'OUTCOME_UNKNOWN') => detail({
+    status: 'VERIFYING_EXTERNAL', status_label: '核验外部结果中', status_group: 'PROCESSING',
+    submission_mode: 'CONTINUE_TRACKING',
+    current_operation: {
+      operation_id: 'operation-1', operation: 'SUBMIT', state: operationState, attempt: 1,
+      external_result_id: null, error_type: null, created_at: null, updated_at: null, completed_at: null,
+    },
+    available_actions: [
+      { code: 'RECOVER_AUTO', label: '自动恢复', style: 'SECONDARY', requires_confirmation: false, target_scopes: [] },
+    ],
+  })
+
+  it('emits exactly one resubmit request and renders the page-level result', async () => {
+    apiGet.mockResolvedValue(pendingDetail() as never)
+    const wrapper = await mountInspector('tracking-1', {
+      resubmitSession: createResubmitSession('tracking-1', 'CONFIRMED', null, 3),
+    })
+
+    expect(wrapper.find('#tracking-resubmit-result').text()).toContain('已确认订阅存在')
+    await wrapper.find('#tracking-resubmit').trigger('click')
+    expect(wrapper.emitted('resubmit-requested')).toHaveLength(1)
+    expect(wrapper.emitted('resubmit-requested')![0]![0]).toMatchObject({
+      item: { tracking_id: 'tracking-1' },
+    })
+  })
+
+  it('states the proven reason when the server refuses the resubmit', async () => {
+    apiGet.mockResolvedValue(pendingDetail() as never)
+    const wrapper = await mountInspector('tracking-1', {
+      resubmitSession: createResubmitSession(
+        'tracking-1', 'BLOCKED', null, 3, undefined, 'EXTERNAL_WRITE_IN_PROGRESS',
+      ),
+    })
+
+    expect(wrapper.find('#tracking-resubmit-result').text()).toContain('上一次提交可能仍在执行')
+    expect(wrapper.find('#tracking-resubmit-result').text()).not.toContain('EXTERNAL_WRITE_IN_PROGRESS')
+  })
+
+  it('never offers the resubmit while the external write may still be running', async () => {
+    apiGet.mockResolvedValue(pendingDetail('IN_PROGRESS') as never)
+    const wrapper = await mountInspector()
+
+    expect(wrapper.find('#tracking-resubmit').exists()).toBe(false)
+    expect(wrapper.find('#tracking-resubmit-hint').text()).toContain('可能仍在执行')
+  })
+
+  it('disables the resubmit while the page owns the risk dialog', async () => {
+    apiGet.mockResolvedValue(pendingDetail() as never)
+    const wrapper = await mountInspector('tracking-1', { resubmitPending: true })
+
+    expect(wrapper.find('#tracking-resubmit').attributes('disabled')).toBeDefined()
+  })
+
+  it('offers nothing for a one-time download submission', async () => {
+    apiGet.mockResolvedValue({ ...pendingDetail(), submission_mode: 'DOWNLOAD_EXISTING' } as never)
+    const wrapper = await mountInspector()
+
+    expect(wrapper.find('#tracking-resubmit').exists()).toBe(false)
   })
 })

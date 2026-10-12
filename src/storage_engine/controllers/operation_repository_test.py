@@ -648,3 +648,41 @@ def test_recovery_required_is_a_readable_terminal_state(tmp_path: Path) -> None:
     loaded = load_tracking_operation(config, OPERATION_ID)
     assert loaded.state == TRACKING_OPERATION_STATE_RECOVERY_REQUIRED
     assert loaded.error_type == "RESULT_PERSIST_FAILED"
+
+
+def test_bind_keeps_the_previous_operation_link_and_it_is_immutable(tmp_path: Path) -> None:
+    """Issue #184 AC 5: a resubmit operation is durably traceable and the link
+    can never be re-pointed by a later CAS."""
+    config = _config(tmp_path)
+    previous, _ = _bind(config)
+    resubmit, created = bind_tracking_operation(
+        config,
+        tracking_id=TRACKING_ID,
+        operation=TRACKING_OPERATION_KIND_SUBMIT,
+        idempotency_key=SECOND_KEY,
+        expected_revision=6,
+        request_fingerprint=FINGERPRINT,
+        connection_ref=None,
+        previous_operation_id=previous.operation_id,
+        now="2026-09-08T00:01:00+00:00",
+    )
+
+    assert created is True
+    assert resubmit.previous_operation_id == previous.operation_id
+    assert load_tracking_operation(config, resubmit.operation_id).previous_operation_id == (
+        previous.operation_id
+    )
+
+    in_progress = transition_tracking_operation(
+        resubmit,
+        state=TRACKING_OPERATION_STATE_IN_PROGRESS,
+        now="2026-09-08T00:02:00+00:00",
+    )
+    repointed = replace(in_progress, previous_operation_id=None)
+    with pytest.raises(Stage1Error) as error:
+        compare_and_swap_tracking_operation(
+            config, resubmit.operation_id, resubmit.state, repointed
+        )
+
+    assert error.value.error_type == "invalid_tracking_operation"
+    assert error.value.details["field"] == "previous_operation_id"

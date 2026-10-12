@@ -31,6 +31,10 @@
   写后回查并落安全结果；结果待确认进入恢复，不能误记成直接可重试失败。
 - 旧 submit/batch queue Web 写端点已退役；统一 tracking submission/recovery 是唯一运行时写路径。
   历史 queue 文件仅由迁移所需只读解析器读取，不为清理无用路径而删除历史数据。
+- 结果待确认的主动重发（#184）分两阶段：`confirm=false` 只跑 #183 的只读检查（命中即零写收敛），
+  仍待确认才返回已证实原因 + 绑定；`confirm=true` 先校验 revision/原 operation/连接 generation
+  （变化即 409，不改绑），复检后以服务端推导的新幂等键创建至多一个新 operation（`previous_operation_id`
+  追溯原 operation）；原 operation/审计保留，外部写仍在执行或方案不满足前提时禁止重发。
 - revalidate/AUTO 恢复纯本地；VERIFY_EXTERNAL 才携带临时 AB 配置做能力校验的只读恢复。
   管理写仅在精确 3.1.18 password 能力开放，read-before-write/confirm/key/revision 必须保留。
 - 删除媒体参数在 adapter 固定 file=false，不能通过客户端输入覆盖；

@@ -1198,6 +1198,92 @@ class TrackingCheckResultDTO(_StrictBase):
     tracking: TrackingItemDTO
 
 
+class TrackingResubmitBindingDTO(_StrictBase):
+    """The exact binding a risk confirmation is valid for (issue #184).
+
+    It is republished to the client by the read-only phase and echoed back by the
+    confirmed phase.  Nothing here is a credential: ``connection_ref`` is the
+    opaque saved-connection generation the original operation was bound to, never
+    an address, account or token.
+    """
+
+    expected_revision: int
+    previous_operation_id: str
+    connection_ref: UUID
+
+
+class TrackingResubmitResultDTO(_StrictBase):
+    """Result of ``POST /api/v1/tracking/items/{tracking_id}/resubmit`` (#184).
+
+    One endpoint, two phases.  ``confirm=false`` performs the bounded read-only
+    check only: ``check_status=CONFIRMED`` and ``outcome`` in
+    ``ACTIVE``/``DISABLED`` mean the subscription was proven and nothing was
+    written externally; ``check_status=UNRESOLVED`` with
+    ``requires_risk_confirmation=true`` publishes the proven
+    ``verification_reason`` and the ``binding`` the user must confirm, and the
+    page renders its own fixed duplicate/resource risk copy from that code —
+    never from an upstream response; ``check_status=BLOCKED`` publishes the
+    proven ``blocked_reason`` that forbids a resubmit (a write that may still be
+    running, an unusable bound connection, a plan that fails its submit
+    preconditions, or an unresolved result whose cause could not be proven).
+
+    ``confirm=true`` validates that binding, re-checks once and only then creates
+    the single new operation: ``operation_id`` is that new operation and
+    ``previous_operation_id`` the pending operation it replaces (its file and
+    audit are preserved).  ``outcome``/``failure_category``/``verification_reason``/
+    ``diagnostics``/``issues`` reuse the published submit result so the client
+    reads one contract.  A stale binding is a 409, never a silent rebind.
+    """
+
+    tracking_id: str
+    confirm: bool
+    check_status: Literal["CONFIRMED", "UNRESOLVED", "BLOCKED"]
+    #: The status this phase answered with: the pending status (or the confirmed
+    #: ``ACTIVE``/``DISABLED``) for the read-only phase, the ordinary submit
+    #: outcome for the confirmed one. Nothing else is reachable — a record in any
+    #: other status is refused before the response.
+    outcome: Literal[
+        "ACTIVE", "DISABLED", "VERIFYING_EXTERNAL", "RECOVERY_REQUIRED",
+        "UNKNOWN", "SUBMIT_FAILED", "NEEDS_RECONFIRM", "ADDED_TO_DOWNLOAD",
+    ]
+    #: True only in the read-only phase when an explicit risk confirmation is the
+    #: user's next step; never set by a check failure.
+    requires_risk_confirmation: bool = False
+    #: Proven reason a resubmit is refused: the resubmit's own codes
+    #: (``EXTERNAL_WRITE_IN_PROGRESS`` / ``PLAN_NOT_SUBMITTABLE`` /
+    #: ``CONFIG_ERROR`` / ``RESULT_UNPROVEN``) or the check's proven reason class
+    #: (``CONNECTION_CHANGED``/``AUTHENTICATION``/``VERSION``/``CAPABILITY``/
+    #: ``CONNECTION``). ``None`` when the phase proceeded.
+    blocked_reason: str | None = None
+    #: The proven reason class of an unresolved check (issue #183).
+    verification_reason: str | None = None
+    #: Echoed binding for ``confirm=true``; ``None`` once confirmed.
+    binding: TrackingResubmitBindingDTO | None = None
+    checked_revision: int
+    next_revision: int
+    checked_at: str
+    #: The new operation created by a confirmed resubmit (or the pending one the
+    #: read-only phase is about).
+    operation_id: str | None = None
+    #: The pending operation a confirmed resubmit replaced; its record and audit
+    #: are preserved.
+    previous_operation_id: str | None = None
+    failure_category: Literal[
+        "CONNECTION",
+        "AUTHENTICATION",
+        "VERSION",
+        "DUPLICATE_SUBSCRIPTION",
+        "VALIDATION",
+        "REJECTED",
+        "OUTCOME_UNKNOWN",
+    ] | None = None
+    diagnostics: TrackingSubmitDiagnosticsDTO = Field(
+        default_factory=TrackingSubmitDiagnosticsDTO
+    )
+    issues: list[TrackingRevalidationIssueDTO] = Field(default_factory=list)
+    tracking: TrackingItemDTO
+
+
 class TrackingManagementResultDTO(_StrictBase):
     """Safe result shared by the four Stage 31 management write routes."""
 

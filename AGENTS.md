@@ -71,7 +71,10 @@ HTTP/认证细节留在 adapter，持久化留在 repository，纯规则不混�
 - 追番状态以服务端 TrackingRecord/TrackingOperation 为准；动作取服务端允许值与 capability，
   未知值 fail closed。外部管理写只允许 password + 精确 Auto Bangumi 3.1.18 已验证能力。
 - 外部写保留 confirm、幂等键、expected revision、写前读取、写后回查与结果待确认恢复。
-  结果待确认不等于确定失败；未决意图不得换键、换绑定或盲目重发。纯本地复核不要求 AB 凭据。
+  结果待确认不等于确定失败；未决意图不得换键、换绑定或盲目重发。唯一例外是用户显式接受
+  重复/资源风险的**单条主动重发**（[ADR-0002](docs/adr/0002-risk-confirmed-manual-resubmission.md)）：
+  先只读检查、确认绑定（条目 + revision + 原 operation + 连接）、再以新 operation 重发并保留
+  原记录与审计；它不是安全重试，也不提供批量强制重发。纯本地复核不要求 AB 凭据。
   部署配置更换不能改绑旧 operation 或复用另一 AB 实例的外部映射；新绑定必须经后端验证。
 - 外部删除固定 `file=false`，保留本地方案、追番记录、审计、任务和已下载媒体。
   提交方式是一次操作的语义（下载现有资源 / 持续追番），不是追番方案字段；「下载现有资源」按

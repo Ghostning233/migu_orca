@@ -7,6 +7,8 @@
 > 与 safe-info 端点/错误并入同一基线并保持无漂移。Stage 29（US-222～US-226）把
 > `/api/v1/tracking/items` 六条端点与 tracking handoff 扩展并入同一基线（§3.6 与 §4
 > US 里程碑），全部为严格 DTO + 可读 operationId，保持无漂移。
+> issue #183/#184 在 `/api/v1/tracking/items` 上追加有界只读确认与风险确认后的单条主动
+> 重新提交；两者都只使用原提交 operation 绑定的已保存连接，客户端不提供连接。
 > Stage 30（B-C1）新增的 capability 与 tracking sync 端点也在本清单、OpenAPI registry、
 > `docs/api/openapi.json`、生成 TypeScript client 和 operation fixture 中保持同步；B-C1 不注册任何
 > Auto Bangumi 管理写端点。它不是 OpenAPI 契约（US-190 已基于 Pydantic DTO 生成 `docs/api/openapi.json`，
@@ -87,6 +89,7 @@
 | POST | `/api/v1/tracking/batch-submit` | `migu_orca_web_api.TrackingBatchSubmitView` | TrackingBatchSubmitView |
 | POST | `/api/v1/tracking/items/<path:tracking_id>/delete-plan` | `migu_orca_web_api.TrackingItemDeletePlanView` | TrackingItemDeletePlanView |
 | POST | `/api/v1/tracking/items/<path:tracking_id>/check` | `migu_orca_web_api.TrackingItemCheckView` | TrackingItemCheckView |
+| POST | `/api/v1/tracking/items/<path:tracking_id>/resubmit` | `migu_orca_web_api.TrackingItemResubmitView` | TrackingItemResubmitView |
 | POST | `/api/v1/tracking/items/<path:tracking_id>/recover` | `migu_orca_web_api.TrackingItemRecoverView` | TrackingItemRecoverView |
 | POST | `/api/v1/tracking/items/<path:tracking_id>/modify` | `migu_orca_web_api.TrackingItemModifyView` | TrackingItemModifyView |
 | POST | `/api/v1/tracking/items/<path:tracking_id>/set-enabled` | `migu_orca_web_api.TrackingItemSetEnabledView` | TrackingItemSetEnabledView |
@@ -134,6 +137,7 @@
 | POST | `/api/v1/tracking/items/<path:tracking_id>/delete-external` | PRIMARY | 外部删除并保留本地数据 | TrackingRecord + operation |
 | POST | `/api/v1/tracking/items/<path:tracking_id>/refresh` | PRIMARY | 关联 RSS 刷新 | TrackingRecord + operation |
 | POST | `/api/v1/tracking/items/<path:tracking_id>/check` | PRIMARY | 结果待确认提交的有界只读确认（已保存连接，只读） | TrackingRecord + operation |
+| POST | `/api/v1/tracking/items/<path:tracking_id>/resubmit` | RECOVERY | 结果待确认提交的风险确认单条主动重新提交（先只读检查，确认后才新建 operation） | TrackingRecord + operation |
 | POST | `/api/v1/tracking/items/<path:tracking_id>/recover` | RECOVERY | 未知结果保守恢复；不得盲目重放 | TrackingRecord + operation |
 | POST | `/api/v1/requests/<path:request_id>/accept` | RECOVERY | 保存后确认失败的 Request 恢复入口 | Request + TrackingRecord |
 | POST | `/api/v1/requests/<path:request_id>/cancel` | RECOVERY | 待确认 Request 的显式取消 | Request store |

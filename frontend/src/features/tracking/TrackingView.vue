@@ -23,6 +23,8 @@ import {
   createManagementSession,
   createCheckSession,
   createRecoveryConflictSession,
+  createResubmitConfirmationBody,
+  createResubmitSession,
   createRecoverySession,
   createTrackingActionIntent,
   createTrackingRecoverBody,
@@ -50,8 +52,13 @@ import {
   TRACKING_OVERVIEW_GROUPS,
   type TrackingOverviewGroup,
   projectCheckResult,
+  projectResubmitOffer,
+  resubmitBindingFrom,
+  resubmitConflictMessage,
+  resubmitRiskMessage,
   TRACKING_CHECK_ENDPOINT,
   TRACKING_RECOVER_ENDPOINT,
+  TRACKING_RESUBMIT_ENDPOINT,
   TRACKING_STATUS_GROUPS,
   WRITE_ACTION_CONFIRMATIONS,
   WRITE_FAILURE_PRESENTATIONS,
@@ -66,9 +73,13 @@ import {
   type TrackingPlanDeleteSession,
   type TrackingCheckBody,
   type TrackingCheckResult,
+  type TrackingCheckReason,
   type TrackingCheckSession,
   type TrackingRecoverResult,
   type TrackingRecoveryActionCode,
+  type TrackingResubmitBody,
+  type TrackingResubmitResult,
+  type TrackingResubmitSession,
   type TrackingRecoverySession,
   type TrackingStatusGroup,
   type TrackingWriteActionCode,
@@ -189,6 +200,17 @@ const checkSession = ref<TrackingCheckSession | null>(null)
 const checkLoading = ref(false)
 let checkSequence = 0
 let checkController: AbortController | null = null
+// Issue #184: the risk-confirmed resubmission. The page runs the read-only
+// phase, then asks for the explicit risk confirmation, and only then sends the
+// single write. `resubmitIntent` holds the exact confirmation body while its
+// result is unresolved, so a retry replays the identical binding (the server
+// derives the same operation key and can never create a second operation).
+const resubmitSession = ref<TrackingResubmitSession | null>(null)
+const resubmitLoading = ref(false)
+const resubmitPending = ref(false)
+let resubmitSequence = 0
+let resubmitController: AbortController | null = null
+let resubmitIntent: { trackingId: string; body: TrackingResubmitBody } | null = null
 // One automatic check per opened/armed record: the inspector emits it, the page
 // consumes the flag, so a check that persists a new revision cannot loop.
 const autoCheckArmed = ref(false)
@@ -302,6 +324,7 @@ const blockedIntentNotice = ref<{ trackingId: string; message: string } | null>(
 
 /** The record whose still-unresolved intent refuses this request, or ''. */
 function otherItemIntentOwner(trackingId: string): string {
+  if (resubmitIntent && resubmitIntent.trackingId !== trackingId) return resubmitIntent.trackingId
   const write = writeSession.value
   if (write && write.trackingId !== trackingId && writeSessionKeepsIntent(write.state)) return write.trackingId
   const recovery = recoverySession.value
@@ -317,6 +340,7 @@ function otherItemIntentOwner(trackingId: string): string {
 
 /** True while any record still owns the page's single unresolved intent. */
 function hasPendingIntentLock(): boolean {
+  if (resubmitIntent) return true
   const write = writeSession.value
   if (write && writeSessionKeepsIntent(write.state)) return true
   const recovery = recoverySession.value
@@ -350,7 +374,9 @@ const selectedIntentNotice = computed(() => {
  * recovery too), but never blocks the item's own next step.
  */
 const inspectorIntentBusy = computed(() => {
-  if (writeLoading.value || recoveryLoading.value || managementLoading.value) return true
+  if (writeLoading.value || recoveryLoading.value || managementLoading.value
+    || resubmitLoading.value || resubmitPending.value) return true
+  if (resubmitIntent && resubmitIntent.trackingId !== selectedTrackingId.value) return true
   const write = writeSession.value
   if (write && writeSessionKeepsIntent(write.state) && write.trackingId !== selectedTrackingId.value) {
     return true
@@ -467,7 +493,9 @@ function preserveWriteLockAfterClear(): void {
   const unresolved = Boolean(
     writeLoading.value || (session && (session.state === 'IN_FLIGHT' || writeSessionKeepsIntent(session.state))),
   )
-  if (!unresolved || !writeIntent || !session) {
+  // Issue #184: the resubmit confirmation is the same kind of locked intent, so
+  // a cleared connection keeps it unresolved instead of silently releasing it.
+  if (!unresolved || !(writeIntent ?? resubmitIntent) || !session) {
     resetWrite()
     return
   }
@@ -615,6 +643,8 @@ function resetWrite(): void {
   writeSession.value = null
   writeReplayBlocked.value = false
   writeConfigSnapshot = null
+  // Issue #184: a spent write intent also spends the resubmit confirmation.
+  resetResubmit(true)
   blockedIntentNotice.value = null
 }
 
@@ -721,6 +751,202 @@ async function runTrackingCheck(payload: { item: TrackingItem; automatic: boolea
 }
 
 /**
+ * Run one risk-confirmed single manual resubmission (issue #184).
+ *
+ * Two steps, exactly as the server defines them:
+ *
+ * 1. ``confirm=false`` — the same bounded read-only check as 重新检查, through the
+ *    Auto Bangumi instance the pending operation was bound to. A proven
+ *    subscription converges the record with zero external writes; a proven
+ *    refusal (write may still be running, unusable connection/version, plan not
+ *    submittable) is displayed with its own reason and never opens a dialog.
+ * 2. only a still-unresolved outcome that the server explicitly offered may open
+ *    the fixed risk confirmation. Cancelling sends nothing at all; confirming
+ *    sends the exact published binding once (the server derives the operation
+ *    key from it) and reports through the ordinary submit result panel.
+ */
+async function runTrackingResubmit(payload: { item: TrackingItem }): Promise<void> {
+  const trackingId = payload.item.tracking_id
+  if (resubmitLoading.value || resubmitPending.value || writeLoading.value) return
+  if (checkLoading.value) return
+  if (otherItemIntentOwner(trackingId)) {
+    blockIntent(trackingId)
+    return
+  }
+  // A confirmation that was already sent and is still unresolved is replayed
+  // with the identical body: re-checking or re-minting could create a second
+  // subscription (the confirmation binding is the idempotency identity).
+  const locked = resubmitIntent && resubmitIntent.trackingId === trackingId ? resubmitIntent : null
+  if (locked) {
+    if (writeReplayBlocked.value) {
+      blockReplay(trackingId)
+      return
+    }
+    await sendResubmitConfirmation(trackingId, locked.body, null, null)
+    return
+  }
+  const revision = payload.item.revision
+  if (typeof revision !== 'number') return
+  blockedIntentNotice.value = null
+  const sequence = ++resubmitSequence
+  const controller = new AbortController()
+  resubmitController?.abort()
+  resubmitController = controller
+  resubmitLoading.value = true
+  resubmitSession.value = createResubmitSession(trackingId, 'IN_FLIGHT', null, revision)
+  try {
+    const storageDir = storageQuery().storage_dir
+    const body: TrackingResubmitBody = {
+      expected_revision: revision,
+      confirm: false,
+      ...(storageDir ? { storage_dir: storageDir } : {}),
+    }
+    const result = await api.post<TrackingResubmitResult>(TRACKING_RESUBMIT_ENDPOINT, {
+      path: { tracking_id: trackingId }, body, signal: controller.signal,
+    })
+    if (sequence !== resubmitSequence) return
+    applyReturnedTracking(result.tracking)
+    const session = projectResubmitOffer(trackingId, result, revision)
+    resubmitSession.value = session
+    if (session.state === 'CONFIRMED') {
+      // The read-only phase proved the object: the pending submission is settled
+      // and releaseSettledSubmissionIntent also drops the resubmit confirmation.
+      releaseSettledSubmissionIntent(trackingId)
+      await recheckAfterAction(trackingId, true)
+      return
+    }
+    if (session.state === 'BLOCKED') {
+      await recheckAfterAction(trackingId, true)
+      return
+    }
+    const binding = resubmitBindingFrom(result)
+    if (!binding) {
+      // An unresolved check without a published binding is never an
+      // authorization: no dialog, no write, just the honest result.
+      await recheckAfterAction(trackingId, true)
+      return
+    }
+    // The risk confirmation is the *only* gate before the one new submission.
+    resubmitLoading.value = false
+    resubmitPending.value = true
+    let confirmed = false
+    try {
+      confirmed = (await confirmDialog.value?.confirm({
+        title: '重新提交到 Auto Bangumi？',
+        message: resubmitRiskMessage(session.reason),
+        itemsLabel: '风险说明',
+        items: [
+          '原提交结果尚未确认：Auto Bangumi 可能已经创建了该订阅并开始处理资源。',
+          '重新提交会以新操作再次创建订阅；MiGuOrca 无法去重，也不会改写或删除原提交记录。',
+        ],
+        confirmLabel: '确认重新提交',
+        cancelLabel: '取消',
+      })) ?? false
+    } finally {
+      resubmitPending.value = false
+    }
+    if (!confirmed) {
+      // Cancelling sends zero requests: no new operation, no external write.
+      resubmitSession.value = createResubmitSession(trackingId, 'CANCELLED', session.reason, revision)
+      return
+    }
+    await sendResubmitConfirmation(
+      trackingId,
+      createResubmitConfirmationBody(binding, storageDir),
+      session.reason,
+      revision,
+    )
+  } catch (error) {
+    if (sequence !== resubmitSequence) return
+    const apiError = toApiError(error)
+    if (apiError.cancelled && !apiError.httpError) return
+    // Every documented 409 is raised before the external boundary, so nothing
+    // was resubmitted; the proven reason is stated and the page re-reads the
+    // server truth instead of guessing a generic cause.
+    resubmitSession.value = apiError.status === 409
+      ? createResubmitSession(
+          trackingId, 'CONFLICT', null, revision, resubmitConflictMessage(apiError.type),
+        )
+      : createResubmitSession(trackingId, 'UNKNOWN', null, revision)
+    await recheckAfterAction(trackingId, true)
+  } finally {
+    if (sequence === resubmitSequence) {
+      resubmitLoading.value = false
+      if (resubmitController === controller) resubmitController = null
+    }
+  }
+}
+
+/**
+ * Send the one confirmation of a risk-confirmed resubmission (issue #184).
+ *
+ * ``body`` is the exact binding the server published (or the identical body of an
+ * unresolved earlier attempt). The outcome is projected through the shared submit
+ * session so the page shows one submit contract, arms the ordinary automatic
+ * read-only check, and keeps the confirmation body only while the external result
+ * is still unproven.
+ */
+async function sendResubmitConfirmation(
+  trackingId: string,
+  body: TrackingResubmitBody,
+  reason: TrackingCheckReason | null,
+  sourceRevision: number | null,
+): Promise<void> {
+  if (writeLoading.value || writePending.value) return
+  resubmitIntent = { trackingId, body }
+  resubmitLoading.value = true
+  // The write panel owns the outcome; the pre-write panel is spent.
+  resubmitSession.value = null
+  const sequence = ++writeSequence
+  const controller = new AbortController()
+  writeController?.abort()
+  writeController = controller
+  writeLoading.value = true
+  writeSession.value = createWriteSession(trackingId, 'SUBMIT', 'IN_FLIGHT')
+  try {
+    const result = await api.post<TrackingResubmitResult>(TRACKING_RESUBMIT_ENDPOINT, {
+      path: { tracking_id: trackingId }, body, signal: controller.signal,
+    })
+    if (sequence !== writeSequence) return
+    applyReturnedTracking(result.tracking)
+    const session = projectWriteOutcome(trackingId, 'SUBMIT', result, null)
+    writeSession.value = session
+    if (!writeSessionKeepsIntent(session.state)) resubmitIntent = null
+    else autoCheckArmed.value = true
+    await recheckAfterAction(trackingId)
+    await presentWriteFeedback(session)
+  } catch (error) {
+    if (sequence !== writeSequence) return
+    const apiError = toApiError(error)
+    if (apiError.cancelled && !apiError.httpError) return
+    if (apiError.status === 409) {
+      resubmitIntent = null
+      writeIntent = null
+      writeSession.value = createWriteConflictSession(trackingId, 'SUBMIT', apiError.type)
+      resubmitSession.value = createResubmitSession(trackingId, 'CONFLICT', reason, sourceRevision)
+      await recheckAfterAction(trackingId, true)
+      return
+    }
+    if (isDefiniteWriteRejection(apiError)) {
+      resubmitIntent = null
+      writeSession.value = createWriteSession(trackingId, 'SUBMIT', 'REJECTED')
+      await recheckAfterAction(trackingId, true)
+      return
+    }
+    // Network/timeout/unreadable: the external result is unknown, so the exact
+    // confirmation keeps its body and is only ever replayed identically.
+    writeSession.value = createWriteSession(trackingId, 'SUBMIT', 'UNKNOWN')
+    await recheckAfterAction(trackingId, true)
+  } finally {
+    if (sequence === writeSequence) {
+      writeLoading.value = false
+      if (writeController === controller) writeController = null
+    }
+    resubmitLoading.value = false
+  }
+}
+
+/**
  * Release a pending *submission* intent that a read-only check has just proven
  * settled (issue #183 review). Only the submit-family session is released: a
  * recovery or management lock that is still unresolved stays locked, and the
@@ -733,6 +959,7 @@ function releaseSettledSubmissionIntent(trackingId: string): void {
     && writeSession.value.state !== 'UNKNOWN') return
   writeIntent = null
   writeSession.value = null
+  resubmitIntent = null
 }
 
 function resetCheck(): void {
@@ -742,6 +969,23 @@ function resetCheck(): void {
   checkLoading.value = false
   checkSession.value = null
   autoCheckArmed.value = false
+}
+
+/**
+ * Drop one resubmission interaction's *display* (issue #184).
+ *
+ * ``clearIntent`` additionally forgets the exact confirmation body. It is only
+ * ever passed for a spent intent: an unresolved confirmation keeps its body so a
+ * retry replays the identical binding instead of minting a second operation.
+ */
+function resetResubmit(clearIntent = false): void {
+  resubmitSequence += 1
+  resubmitController?.abort()
+  resubmitController = null
+  resubmitLoading.value = false
+  resubmitPending.value = false
+  resubmitSession.value = null
+  if (clearIntent) resubmitIntent = null
 }
 
 // -- explicit batch submit (issue #87) --------------------------------------
@@ -1053,7 +1297,8 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
   // running: one page-level intent at a time, and no second dialog can displace
   // the first (D38-09.4: an active recovery blocks submit/retry).
   if (writePending.value || writeLoading.value || recoveryPending.value || recoveryLoading.value
-    || managementPending.value || managementLoading.value) return
+    || managementPending.value || managementLoading.value
+    || resubmitPending.value || resubmitLoading.value) return
   if (writeReplayBlocked.value) {
     blockReplay(trackingId)
     return
@@ -1501,6 +1746,7 @@ onBeforeUnmount(() => {
   resetWrite()
   resetRecovery()
   resetCheck()
+  resetResubmit(true)
   resetManagement()
   savedState.value = null
 })
@@ -1614,6 +1860,8 @@ onBeforeUnmount(() => {
           :write-session="writeSession"
           :recovery-session="recoverySession"
           :check-session="checkSession"
+          :resubmit-session="resubmitSession"
+          :resubmit-pending="resubmitPending"
           :auto-check-armed="autoCheckArmed"
           :management-session="managementSession"
           :write-busy="inspectorIntentBusy"
@@ -1625,6 +1873,7 @@ onBeforeUnmount(() => {
           @write-requested="runTrackingWrite"
           @recovery-requested="runTrackingRecovery"
           @check-requested="runTrackingCheck"
+          @resubmit-requested="runTrackingResubmit"
           @management-requested="runTrackingManagement"
         />
         <template v-else>

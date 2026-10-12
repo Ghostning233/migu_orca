@@ -542,6 +542,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tracking/items/{tracking_id}/resubmit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 风险确认后的单条主动重新提交
+         * @description issue #184：对结果待确认的持续追番提交提供单条主动重新提交。confirm=false 先执行与原提交绑定连接的有界只读检查：已确认外部订阅存在时收敛为追番中且外部写入为零；仍待确认时返回已证实原因、具体重复/资源风险与精确绑定（revision + 原 operation + 连接 generation）。confirm=true 必须携带该绑定，过期或改绑返回 409；服务端复检一次，命中仍零写收敛，否则以新幂等键创建可追溯原 operation 的单个新 operation 并执行一次既有可靠提交序列。外部写可能仍在执行、连接/版本无效或方案不满足提交前提时禁止重发并返回已证实原因；不提供批量强制重发，原未决记录与审计保留。
+         */
+        post: operations["resubmitTrackingItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tracking/items/{tracking_id}/retry": {
         parameters: {
             query?: never;
@@ -12247,6 +12267,497 @@ export interface operations {
                      *       "ok": false,
                      *       "error_type": "tracking_management_capability_unknown",
                      *       "error_message": "当前 Auto Bangumi 管理能力未验证",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
+    resubmitTrackingItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 风险确认后的单条主动重新提交 */
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "expected_revision": 1,
+                 *       "confirm": false,
+                 *       "previous_operation_id": null,
+                 *       "connection_ref": null
+                 *     }
+                 */
+                "application/json": {
+                    /** @description 客户端最后观察到的追番记录 revision；confirm=true 时必须等于确认发布时的 revision。 */
+                    expected_revision: number;
+                    /**
+                     * @description false=只做只读检查；true=用户已确认重复/资源风险，携带精确绑定后创建一次新提交。
+                     * @default false
+                     */
+                    confirm?: boolean;
+                    /** @description 只读检查发布的原待确认 operation id；confirm=true 必填，不能改绑其他 operation。 */
+                    previous_operation_id?: string | null;
+                    /**
+                     * Format: uuid
+                     * @description 原 operation 绑定的已保存连接 generation；confirm=true 必填，客户端不能提供其他连接。
+                     */
+                    connection_ref?: string | null;
+                    /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
+                    storage_dir?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "tracking_id": "示例",
+                     *         "confirm": true,
+                     *         "check_status": "示例",
+                     *         "outcome": "示例",
+                     *         "requires_risk_confirmation": false,
+                     *         "blocked_reason": null,
+                     *         "verification_reason": null,
+                     *         "binding": null,
+                     *         "checked_revision": 1,
+                     *         "next_revision": 1,
+                     *         "checked_at": "示例",
+                     *         "operation_id": null,
+                     *         "previous_operation_id": null,
+                     *         "failure_category": null,
+                     *         "diagnostics": {
+                     *           "http_status": null,
+                     *           "message_zh": null,
+                     *           "message_en": null
+                     *         },
+                     *         "issues": [
+                     *           {
+                     *             "code": "示例",
+                     *             "field": null,
+                     *             "message": "示例",
+                     *             "recovery_action": "示例"
+                     *           }
+                     *         ],
+                     *         "tracking": {
+                     *           "tracking_id": "示例",
+                     *           "request_id": null,
+                     *           "title": null,
+                     *           "season": null,
+                     *           "subtitle_group": null,
+                     *           "poster_path": null,
+                     *           "status": "示例",
+                     *           "status_label": "示例",
+                     *           "status_group": "示例",
+                     *           "submission_mode": null,
+                     *           "available_actions": [
+                     *             {
+                     *               "code": "示例",
+                     *               "label": "示例",
+                     *               "style": "示例",
+                     *               "requires_confirmation": true,
+                     *               "target_scopes": []
+                     *             }
+                     *           ],
+                     *           "valid_resource_count": 0,
+                     *           "updated_episode": null,
+                     *           "updated_episode_status": "NOT_IMPLEMENTED",
+                     *           "total_episodes": null,
+                     *           "revision": 1,
+                     *           "updated_at": null
+                     *         }
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /**
+                         * TrackingResubmitResultDTO
+                         * @description Result of ``POST /api/v1/tracking/items/{tracking_id}/resubmit`` (#184).
+                         *
+                         *     One endpoint, two phases.  ``confirm=false`` performs the bounded read-only
+                         *     check only: ``check_status=CONFIRMED`` and ``outcome`` in
+                         *     ``ACTIVE``/``DISABLED`` mean the subscription was proven and nothing was
+                         *     written externally; ``check_status=UNRESOLVED`` with
+                         *     ``requires_risk_confirmation=true`` publishes the proven
+                         *     ``verification_reason`` and the ``binding`` the user must confirm, and the
+                         *     page renders its own fixed duplicate/resource risk copy from that code —
+                         *     never from an upstream response; ``check_status=BLOCKED`` publishes the
+                         *     proven ``blocked_reason`` that forbids a resubmit (a write that may still be
+                         *     running, an unusable bound connection, a plan that fails its submit
+                         *     preconditions, or an unresolved result whose cause could not be proven).
+                         *
+                         *     ``confirm=true`` validates that binding, re-checks once and only then creates
+                         *     the single new operation: ``operation_id`` is that new operation and
+                         *     ``previous_operation_id`` the pending operation it replaces (its file and
+                         *     audit are preserved).  ``outcome``/``failure_category``/``verification_reason``/
+                         *     ``diagnostics``/``issues`` reuse the published submit result so the client
+                         *     reads one contract.  A stale binding is a 409, never a silent rebind.
+                         */
+                        result: {
+                            /** Tracking Id */
+                            tracking_id: string;
+                            /** Confirm */
+                            confirm: boolean;
+                            /**
+                             * Check Status
+                             * @enum {string}
+                             */
+                            check_status: "CONFIRMED" | "UNRESOLVED" | "BLOCKED";
+                            /**
+                             * Outcome
+                             * @enum {string}
+                             */
+                            outcome: "ACTIVE" | "DISABLED" | "VERIFYING_EXTERNAL" | "RECOVERY_REQUIRED" | "UNKNOWN" | "SUBMIT_FAILED" | "NEEDS_RECONFIRM" | "ADDED_TO_DOWNLOAD";
+                            /**
+                             * Requires Risk Confirmation
+                             * @default false
+                             */
+                            requires_risk_confirmation: boolean;
+                            /**
+                             * Blocked Reason
+                             * @default null
+                             */
+                            blocked_reason: string | null;
+                            /**
+                             * Verification Reason
+                             * @default null
+                             */
+                            verification_reason: string | null;
+                            /** @default null */
+                            binding: {
+                                /** Expected Revision */
+                                expected_revision: number;
+                                /** Previous Operation Id */
+                                previous_operation_id: string;
+                                /**
+                                 * Connection Ref
+                                 * Format: uuid
+                                 */
+                                connection_ref: string;
+                            } | null;
+                            /** Checked Revision */
+                            checked_revision: number;
+                            /** Next Revision */
+                            next_revision: number;
+                            /** Checked At */
+                            checked_at: string;
+                            /**
+                             * Operation Id
+                             * @default null
+                             */
+                            operation_id: string | null;
+                            /**
+                             * Previous Operation Id
+                             * @default null
+                             */
+                            previous_operation_id: string | null;
+                            /**
+                             * Failure Category
+                             * @default null
+                             */
+                            failure_category: ("CONNECTION" | "AUTHENTICATION" | "VERSION" | "DUPLICATE_SUBSCRIPTION" | "VALIDATION" | "REJECTED" | "OUTCOME_UNKNOWN") | null;
+                            /**
+                             * TrackingSubmitDiagnosticsDTO
+                             * @description Bounded, sanitized Auto Bangumi failure diagnostics (issue #101).
+                             *
+                             *     Every field is optional on purpose: when Auto Bangumi gives no usable
+                             *     reason the object is empty and the client states 未提供具体原因 rather than
+                             *     inventing one. Nothing raw, no full RSS URL, magnet, credential or path.
+                             */
+                            diagnostics?: {
+                                /**
+                                 * Http Status
+                                 * @default null
+                                 */
+                                http_status: number | null;
+                                /**
+                                 * Message Zh
+                                 * @default null
+                                 */
+                                message_zh: string | null;
+                                /**
+                                 * Message En
+                                 * @default null
+                                 */
+                                message_en: string | null;
+                            };
+                            /** Issues */
+                            issues?: {
+                                /**
+                                 * Code
+                                 * @enum {string}
+                                 */
+                                code: "REQUEST_MISSING" | "REQUEST_NOT_ACCEPTED" | "REQUEST_CHANGED" | "TITLE_MISSING" | "SEASON_REVIEW_REQUIRED" | "MIKAN_SELECTION_MISSING" | "SUBTITLE_GROUP_MISSING" | "NO_VALID_RESOURCES" | "EXTERNAL_ALREADY_LINKED" | "OPERATION_IN_PROGRESS" | "TRACKING_STATE_INVALID";
+                                /**
+                                 * Field
+                                 * @default null
+                                 */
+                                field: string | null;
+                                /** Message */
+                                message: string;
+                                /**
+                                 * Recovery Action
+                                 * @enum {string}
+                                 */
+                                recovery_action: "" | "SUBMIT";
+                            }[];
+                            /**
+                             * TrackingItemDTO
+                             * @description One unified tracking list item (Stage 29 PRD §11.2).
+                             *
+                             *     ``updated_episode`` is always null and ``updated_episode_status`` is always
+                             *     NOT_IMPLEMENTED (BL-020 out of scope — never guessed from seeds/RSS).
+                             *     ``poster_path`` may only be a same-origin opaque poster proxy route.
+                             */
+                            tracking: {
+                                /** Tracking Id */
+                                tracking_id: string;
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Title
+                                 * @default null
+                                 */
+                                title: string | null;
+                                /**
+                                 * Season
+                                 * @default null
+                                 */
+                                season: number | null;
+                                /**
+                                 * Subtitle Group
+                                 * @default null
+                                 */
+                                subtitle_group: string | null;
+                                /**
+                                 * Poster Path
+                                 * @default null
+                                 */
+                                poster_path: string | null;
+                                /**
+                                 * Status
+                                 * @enum {string}
+                                 */
+                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY" | "ADDED_TO_DOWNLOAD";
+                                /** Status Label */
+                                status_label: string;
+                                /**
+                                 * Status Group
+                                 * @enum {string}
+                                 */
+                                status_group: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
+                                /**
+                                 * Submission Mode
+                                 * @default null
+                                 */
+                                submission_mode: ("CONTINUE_TRACKING" | "DOWNLOAD_EXISTING") | null;
+                                /** Available Actions */
+                                available_actions?: {
+                                    /**
+                                     * Code
+                                     * @enum {string}
+                                     */
+                                    code: "REVALIDATE" | "SUBMIT" | "RETRY" | "RECOVER_AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS" | "DELETE_EXTERNAL";
+                                    /** Label */
+                                    label: string;
+                                    /**
+                                     * Style
+                                     * @enum {string}
+                                     */
+                                    style: "PRIMARY" | "SECONDARY" | "DANGER";
+                                    /** Requires Confirmation */
+                                    requires_confirmation: boolean;
+                                    /** Target Scopes */
+                                    target_scopes?: ("SUBSCRIPTION" | "ASSOCIATED_RSS")[];
+                                }[];
+                                /**
+                                 * Valid Resource Count
+                                 * @default 0
+                                 */
+                                valid_resource_count: number;
+                                /**
+                                 * Updated Episode
+                                 * @default null
+                                 */
+                                updated_episode: null;
+                                /**
+                                 * Updated Episode Status
+                                 * @default NOT_IMPLEMENTED
+                                 * @constant
+                                 */
+                                updated_episode_status: "NOT_IMPLEMENTED";
+                                /**
+                                 * Total Episodes
+                                 * @default null
+                                 */
+                                total_episodes: number | null;
+                                /** Revision */
+                                revision: number;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                            };
+                        };
+                    };
+                };
+            };
+            /** @description data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / invalid_tracking_id: tracking_id 包含不合法字符或路径片段 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "data_validation_errors",
+                     *       "error_message": "请求参数校验失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description tracking_not_found: 未找到该追番记录 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "tracking_not_found",
+                     *       "error_message": "未找到该追番记录",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重新检查 / tracking_state_conflict: 当前追番记录没有可核验的待确认提交 / tracking_check_in_progress: 该追番记录的只读检查正在进行 / tracking_resubmit_binding_conflict: 本次重新提交绑定的操作或连接已变化，请重新检查后再确认 / tracking_operation_in_progress: 存在尚未完成的提交操作，请先恢复后再提交 / tracking_idempotency_conflict: 同一幂等键已绑定不同的提交内容，不能复用 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "tracking_revision_conflict",
+                     *       "error_message": "追番记录版本已变化，请刷新后重新检查",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description storage_error: 写入/读取追番记录失败 / storage_json_error: 追番记录 JSON 损坏 / tracking_storage_error: 追番记录存储失败 / tracking_migration_error: 历史数据迁移失败 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "storage_error",
+                     *       "error_message": "写入/读取追番记录失败",
                      *       "error_data": {
                      *         "failed_step": "示例步骤"
                      *       }

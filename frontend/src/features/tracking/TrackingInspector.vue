@@ -16,10 +16,12 @@ import {
   managementSessionKeepsIntent,
   projectTrackingActionScopes,
   recoverySessionKeepsLock,
+  resubmitOfferState,
   writeSessionKeepsIntent,
   RECOVERY_NEEDS_MANUAL_NOTICE,
   type CapabilityResult,
   type TrackingCheckSession,
+  type TrackingResubmitSession,
   type TrackingAction,
   type TrackingItem,
   type TrackingManagementScope,
@@ -72,6 +74,14 @@ const props = defineProps<{
   /** Page-level bounded read-only check state for one item (issue #183). */
   checkSession?: TrackingCheckSession | null
   /**
+   * Issue #184: page-level risk-confirmed resubmission state for one item. The
+   * component only offers the step and renders the page-level result; the page
+   * owns the read-only phase, the risk confirmation and the single write.
+   */
+  resubmitSession?: TrackingResubmitSession | null
+  /** True while the page's risk confirmation dialog is open for this item. */
+  resubmitPending?: boolean
+  /**
    * Issue #183: true while the page still owes this item one automatic
    * read-only check (reopening/refreshing a 结果待确认 submission). The page
    * disarms it after the first automatic check so a check that changes the
@@ -98,6 +108,9 @@ const emit = defineEmits<{
   (e: 'recovery-requested', payload: { action: TrackingRecoveryActionCode; item: TrackingItem }): void
   // Issue #183: the only action a pending submission offers. It reads only.
   (e: 'check-requested', payload: { item: TrackingItem; automatic: boolean }): void
+  // Issue #184: one single manual resubmission of a pending submission. The page
+  // runs the read-only phase first and only writes after an explicit confirmation.
+  (e: 'resubmit-requested', payload: { item: TrackingItem }): void
   // A management request carries the scope the user chose and the strict patch
   // its own form built; the page re-validates both before anything is sent.
   /** Issue #92: delete this plan, optionally with its controlled external object. */
@@ -219,6 +232,35 @@ const pendingSubmission = computed(() => isPendingSubmission(
 function requestCheck(automatic = false): void {
   if (!detail.value || checkBusy.value) return
   emit('check-requested', { item: detail.value, automatic })
+}
+
+// -- risk-confirmed single resubmission (issue #184) --------------------------
+// 结果待确认 is never a safe retry (ADR-0001/ADR-0002). The page runs the same
+// bounded read-only check first; only a still-unresolved, server-offered binding
+// can lead to a second, explicit risk confirmation. This component offers the
+// entry and states the proven reason when the server has already refused it.
+const thisResubmit = computed(() => (
+  props.resubmitSession && props.resubmitSession.trackingId === props.trackingId
+    ? props.resubmitSession
+    : null
+))
+const resubmitInFlight = computed(() => thisResubmit.value?.state === 'IN_FLIGHT')
+const resubmitOffer = computed(() => resubmitOfferState(
+  detail.value?.status,
+  detail.value?.current_operation?.operation,
+  detail.value?.current_operation?.state,
+  detail.value?.submission_mode,
+))
+const resubmitOffered = computed(() => resubmitOffer.value.available)
+const resubmitHint = computed(() => resubmitOffer.value.hint)
+/** The resubmit needs no client credential: the server resolves the bound one. */
+const resubmitBusy = computed(() => (
+  checkBusy.value || props.resubmitPending === true || resubmitInFlight.value
+))
+
+function requestResubmit(): void {
+  if (!detail.value || resubmitBusy.value) return
+  emit('resubmit-requested', { item: detail.value })
 }
 
 // -- unknown-result recovery (US-312) ----------------------------------------
@@ -786,19 +828,41 @@ defineExpose({ reload: () => fetchDetail(true) })
 
       <section class="tracking-inspector-section tracking-submit" aria-labelledby="tracking-submit-heading">
         <h4 id="tracking-submit-heading">提交到 Auto Bangumi</h4>
-        <template v-if="pendingSubmission || thisCheck">
+        <template v-if="pendingSubmission || thisCheck || thisResubmit">
           <p v-if="pendingSubmission" class="field-help">
             持续追番提交结果尚未确认。重新检查只会使用原提交绑定的已保存连接只读核对
             Auto Bangumi 的当前状态，不会创建、修改、删除或重新提交订阅。
           </p>
-          <BaseButton
-            v-if="pendingSubmission"
-            id="tracking-check"
-            variant="secondary"
-            :loading="checkInFlight"
-            :disabled="checkBusy"
-            @click="requestCheck(false)"
-          >重新检查</BaseButton>
+          <div class="tracking-submit-actions">
+            <BaseButton
+              v-if="pendingSubmission"
+              id="tracking-check"
+              variant="secondary"
+              :loading="checkInFlight"
+              :disabled="checkBusy"
+              @click="requestCheck(false)"
+            >重新检查</BaseButton>
+            <BaseButton
+              v-if="resubmitOffered"
+              id="tracking-resubmit"
+              variant="secondary"
+              :loading="resubmitInFlight"
+              :disabled="resubmitBusy"
+              @click="requestResubmit"
+            >重新提交</BaseButton>
+          </div>
+          <p v-if="resubmitHint" id="tracking-resubmit-hint" class="field-help" role="status">
+            {{ resubmitHint }}
+          </p>
+          <div
+            v-if="thisResubmit"
+            id="tracking-resubmit-result"
+            class="tracking-submit-result"
+            :class="`is-${thisResubmit.state.toLowerCase()}`"
+            role="status"
+          >
+            <p class="tracking-submit-verdict">{{ thisResubmit.message }}</p>
+          </div>
           <div
             v-if="thisCheck"
             id="tracking-check-result"
@@ -1072,10 +1136,12 @@ defineExpose({ reload: () => fetchDetail(true) })
 .tracking-inspector-loading { min-height: 8rem; }
 .tracking-intent-notice { padding: var(--space-3); border: 1px solid var(--color-border-subtle); border-left: 0.3rem solid var(--color-accent-emphasis); border-radius: var(--radius-sm); background: var(--color-surface-raised); font-weight: 600; }
 .tracking-submit { gap: .65rem; }
+.tracking-submit-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .tracking-submit-result { display: grid; gap: .4rem; padding: var(--space-3); border: 1px solid var(--color-border-subtle); border-left: 0.3rem solid var(--color-text-muted); border-radius: var(--radius-sm); background: var(--color-surface-raised); }
 .tracking-submit-result.is-active { border-left-color: var(--color-feedback-success-border); }
 .tracking-submit-result.is-submit_failed, .tracking-submit-result.is-conflict, .tracking-submit-result.is-rejected, .tracking-submit-result.is-unknown { border-left-color: var(--color-feedback-error-border); }
-.tracking-submit-result.is-needs_reconfirm, .tracking-submit-result.is-verifying_external, .tracking-submit-result.is-recovery_required { border-left-color: var(--color-accent-emphasis); }
+.tracking-submit-result.is-needs_reconfirm, .tracking-submit-result.is-verifying_external, .tracking-submit-result.is-recovery_required, .tracking-submit-result.is-blocked, .tracking-submit-result.is-cancelled { border-left-color: var(--color-accent-emphasis); }
+.tracking-submit-result.is-confirmed { border-left-color: var(--color-feedback-success-border); }
 .tracking-submit-verdict { font-weight: 600; }
 .tracking-submit-issues { padding-left: 1.2rem; }
 .tracking-recovery { gap: .65rem; }

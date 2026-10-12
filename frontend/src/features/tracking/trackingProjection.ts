@@ -51,6 +51,12 @@ export type TrackingWriteResult = TrackingSubmitResult | TrackingRetryResult
 export type TrackingRecoverBody = NonNullable<
   operations['recoverTrackingItem']['requestBody']['content']['application/json']
 >
+export type TrackingResubmitBody = NonNullable<
+  operations['resubmitTrackingItem']['requestBody']['content']['application/json']
+>
+export type TrackingResubmitResult = NonNullable<
+  operations['resubmitTrackingItem']['responses']['200']['content']['application/json']['result']
+>
 export type TrackingRecoverResult = NonNullable<
   operations['recoverTrackingItem']['responses']['200']['content']['application/json']['result']
 >
@@ -818,14 +824,16 @@ export function isDefiniteWriteRejection(error: {
 }
 
 /**
- * Project one HTTP 200 submit-family result. An outcome we do not recognize is
- * treated exactly like an unreadable transport result: read back, never
+ * Project one HTTP 200 submit-family result. Issue #184's resubmit answers with
+ * the same generated write fields plus its own two-phase metadata, so both
+ * contracts project through one function; an outcome we do not recognize is
+ * treated exactly like an unreadable transport result — read back, never
  * resubmit blind.
  */
 export function projectWriteOutcome(
   trackingId: string,
   action: TrackingActionCode,
-  result: TrackingWriteResult,
+  result: TrackingWriteResult | TrackingResubmitResult,
   submissionMode: 'CONTINUE_TRACKING' | 'DOWNLOAD_EXISTING' | null = null,
 ): TrackingWriteSession {
   const outcome: TrackingWriteState = isSubmitOutcome(result.outcome) ? result.outcome : 'UNKNOWN'
@@ -1445,4 +1453,262 @@ export function checkSessionIsCurrent(
   revision: number | null,
 ): boolean {
   return Boolean(session) && session!.trackingId === trackingId && session!.revision === revision
+}
+
+/**
+ * Risk-confirmed single manual resubmission of a pending submission (issue #184).
+ *
+ * 结果待确认 is not a safe retry (ADR-0001/ADR-0002). The page therefore has two
+ * steps: the read-only check the server already owns, and only then an explicit
+ * risk confirmation whose fixed copy comes from the server's *proven* reason. A
+ * cancelled confirmation sends no write request, and a confirmed one reuses the
+ * ordinary submit result panel — the page never invents a second submit contract.
+ */
+export const TRACKING_RESUBMIT_ENDPOINT =
+  '/api/v1/tracking/items/{tracking_id}/resubmit' as const satisfies ApiPath
+
+/** Operation states a pending submission may be resubmitted from. */
+export const RESUBMIT_OPERATION_STATES = ['OUTCOME_UNKNOWN', 'RECOVERY_REQUIRED'] as const
+
+/**
+ * Fixed risk copy for the three proven reasons the server can still offer a
+ * resubmit for (``NOT_FOUND``/``AMBIGUOUS``/``UNREADABLE``). Every other reason
+ * is a refusal, so it is presented by ``trackingResubmitBlockedMessage`` and is
+ * never reachable as a risk dialog; anything unproven yields the honest generic
+ * sentence instead of an invented duplication event or a safety promise.
+ */
+const RESUBMIT_RISK_MESSAGES: Readonly<Partial<Record<TrackingCheckReason, string>>> = {
+  NOT_FOUND:
+    '重新提交会在 Auto Bangumi 中再次创建该订阅：如果原提交其实已经成功、只是暂时没有出现在列表里，就会产生重复订阅并重复处理资源。',
+  AMBIGUOUS:
+    'Auto Bangumi 中存在多条相同身份的订阅，重新提交会再创建一条并重复处理资源。',
+  UNREADABLE:
+    '无法读取 Auto Bangumi 的当前状态：原提交可能已经创建订阅并开始处理资源，重新提交可能造成重复订阅或重复下载。',
+}
+
+export const RESUBMIT_PENDING_UNKNOWN_RISK_MESSAGE =
+  '原提交的结果仍未确认；重新提交可能创建重复订阅或重复处理资源。'
+
+export function resubmitRiskMessage(reason: TrackingCheckReason | null): string {
+  return (reason ? RESUBMIT_RISK_MESSAGES[reason] : undefined)
+    ?? RESUBMIT_PENDING_UNKNOWN_RISK_MESSAGE
+}
+
+/**
+ * Every published reason the server may use to refuse a resubmit outright
+ * (AC 6), plus its own plan/connection refusals. Anything unrecognized fails
+ * closed to the honest generic sentence.
+ */
+export const RESUBMIT_BLOCKED_REASONS = [
+  'EXTERNAL_WRITE_IN_PROGRESS', 'PLAN_NOT_SUBMITTABLE', 'CONFIG_ERROR',
+  'RESULT_UNPROVEN', 'CONNECTION_CHANGED', 'AUTHENTICATION', 'VERSION',
+  'CAPABILITY', 'CONNECTION',
+] as const
+
+export type TrackingResubmitBlockedReason = (typeof RESUBMIT_BLOCKED_REASONS)[number]
+
+const RESUBMIT_BLOCKED_MESSAGES: Readonly<Record<TrackingResubmitBlockedReason, string>> = {
+  EXTERNAL_WRITE_IN_PROGRESS:
+    '上一次提交可能仍在执行，本次不会重新提交；请先完成恢复核验。',
+  PLAN_NOT_SUBMITTABLE:
+    '本地方案未通过提交前检查，本次不会重新提交；请按提示修改追番方案后再试。',
+  CONFIG_ERROR:
+    '保存的 Auto Bangumi 连接当前不可用，本次不会重新提交；请前往设置检查连接。',
+  RESULT_UNPROVEN:
+    '无法用已证实的原因判定当前待确认结果，本次不会重新提交；请稍后重新检查。',
+  CONNECTION_CHANGED:
+    '保存的连接已被更换，原提交绑定的实例不再可用；不会用新连接重新提交旧结果。',
+  AUTHENTICATION:
+    'Auto Bangumi 拒绝了保存的连接凭据，本次不会重新提交；请前往设置更新账号或密码。',
+  VERSION:
+    '当前 Auto Bangumi 版本不在已验证范围内，本次不会重新提交；请前往设置确认版本。',
+  CAPABILITY:
+    '保存的连接不支持所需的只读核验能力，本次不会重新提交；请前往设置检查连接类型。',
+  CONNECTION:
+    '保存的 Auto Bangumi 连接当前无法访问，本次不会重新提交；请检查网络或设置后重新检查。',
+}
+
+export const RESUBMIT_BLOCKED_FALLBACK_MESSAGE =
+  '暂时无法重新提交；未确认绑定与方案之前不会向 Auto Bangumi 发起新的提交。'
+
+export function trackingResubmitBlockedMessage(value: unknown): string {
+  return typeof value === 'string' && (RESUBMIT_BLOCKED_REASONS as readonly string[]).includes(value)
+    ? RESUBMIT_BLOCKED_MESSAGES[value as TrackingResubmitBlockedReason]
+    : RESUBMIT_BLOCKED_FALLBACK_MESSAGE
+}
+
+/**
+ * Fixed next step for every 409 the resubmit endpoint documents. A 409 is always
+ * raised before the external boundary, so the copy states plainly that nothing
+ * was resubmitted and which proven condition refused it; an unrecognized type
+ * fails closed to the generic sentence.
+ */
+const RESUBMIT_CONFLICT_MESSAGES: Readonly<Record<string, string>> = {
+  tracking_revision_conflict:
+    '追番记录已变化，本次未重新提交；正在读取最新详情，请重新检查后再确认。',
+  tracking_state_conflict:
+    '当前追番状态没有可核验的待确认提交（例如上一次提交仍可能在进行），本次未重新提交；请先完成恢复核验。',
+  tracking_check_in_progress:
+    '该追番记录的只读检查正在进行，本次未重新提交；请稍候再试。',
+  tracking_operation_in_progress:
+    '存在尚未完成的提交操作，本次未重新提交；请先完成恢复核验。',
+  tracking_resubmit_binding_conflict:
+    '本次重新提交绑定的操作或连接已变化，未重新提交；请重新检查后再确认。',
+  tracking_idempotency_conflict:
+    '本次重新提交标识已失效，未重新提交；请重新检查后再确认。',
+}
+
+export const RESUBMIT_CONFLICT_FALLBACK_MESSAGE =
+  '追番记录或绑定已变化，本次未重新提交；正在读取最新详情，请重新检查后再确认。'
+
+export function resubmitConflictMessage(errorType: unknown): string {
+  return typeof errorType === 'string' && errorType in RESUBMIT_CONFLICT_MESSAGES
+    ? RESUBMIT_CONFLICT_MESSAGES[errorType]!
+    : RESUBMIT_CONFLICT_FALLBACK_MESSAGE
+}
+
+export type TrackingResubmitState =
+  | 'IN_FLIGHT' | 'CONFIRMED' | 'BLOCKED' | 'CANCELLED' | 'CONFLICT' | 'UNKNOWN'
+
+export interface TrackingResubmitSession {
+  readonly trackingId: string
+  /** The revision this interaction acted on; a stale one never overwrites a newer result. */
+  readonly revision: number | null
+  readonly state: TrackingResubmitState
+  readonly message: string
+  readonly reason: TrackingCheckReason | null
+  readonly blockedReason: TrackingResubmitBlockedReason | null
+}
+
+export const RESUBMIT_CANCELLED_MESSAGE =
+  '已取消重新提交；本次没有向 Auto Bangumi 发起新的提交。'
+
+export function createResubmitSession(
+  trackingId: string,
+  state: TrackingResubmitState,
+  reason: TrackingCheckReason | null = null,
+  revision: number | null = null,
+  message?: string,
+  blockedReason: TrackingResubmitBlockedReason | null = null,
+): TrackingResubmitSession {
+  return {
+    trackingId,
+    revision,
+    state,
+    reason,
+    blockedReason,
+    message: message ?? resubmitStateMessage(state, reason, blockedReason),
+  }
+}
+
+function resubmitStateMessage(
+  state: TrackingResubmitState,
+  reason: TrackingCheckReason | null,
+  blockedReason: TrackingResubmitBlockedReason | null,
+): string {
+  switch (state) {
+    case 'IN_FLIGHT': return '正在只读核验 Auto Bangumi 的当前状态…'
+    case 'CONFIRMED': return '已确认订阅存在，追番状态已更新；本次没有重新提交。'
+    case 'BLOCKED': return trackingResubmitBlockedMessage(blockedReason)
+    case 'CANCELLED': return RESUBMIT_CANCELLED_MESSAGE
+    case 'CONFLICT':
+      return RESUBMIT_CONFLICT_FALLBACK_MESSAGE
+    default: return trackingCheckReasonMessage(reason)
+  }
+}
+
+/**
+ * Project the read-only phase. ``CONFIRMED``/``BLOCKED`` are decided outcomes;
+ * an unresolved check is only ever presented as the *risk* the user must accept,
+ * never as an automatic resubmission.
+ */
+export function projectResubmitOffer(
+  trackingId: string,
+  result: TrackingResubmitResult,
+  checkedRevision: number,
+): TrackingResubmitSession {
+  const reason = trackingCheckReason(result.verification_reason)
+  if (result.check_status === 'CONFIRMED') {
+    return createResubmitSession(trackingId, 'CONFIRMED', null, checkedRevision)
+  }
+  if (result.check_status === 'BLOCKED') {
+    const blocked = typeof result.blocked_reason === 'string'
+      && (RESUBMIT_BLOCKED_REASONS as readonly string[]).includes(result.blocked_reason)
+      ? (result.blocked_reason as TrackingResubmitBlockedReason)
+      : null
+    return createResubmitSession(trackingId, 'BLOCKED', reason, checkedRevision, undefined, blocked)
+  }
+  return createResubmitSession(trackingId, 'UNKNOWN', reason, checkedRevision)
+}
+
+/**
+ * True only when the server offered the resubmit and published the exact binding
+ * the confirmation must echo; a check failure can never authorize the write.
+ */
+export function resubmitBindingFrom(
+  result: TrackingResubmitResult,
+): TrackingResubmitResult['binding'] | null {
+  if (result.check_status !== 'UNRESOLVED' || result.requires_risk_confirmation !== true) return null
+  const binding = result.binding
+  if (!binding) return null
+  if (typeof binding.expected_revision !== 'number') return null
+  if (typeof binding.previous_operation_id !== 'string' || !binding.previous_operation_id) return null
+  if (typeof binding.connection_ref !== 'string' || !binding.connection_ref) return null
+  return binding
+}
+
+/** The confirmation body: the exact binding the server published, nothing else. */
+export function createResubmitConfirmationBody(
+  binding: NonNullable<TrackingResubmitResult['binding']>,
+  storageDir: string | undefined,
+): TrackingResubmitBody {
+  return {
+    expected_revision: binding.expected_revision,
+    confirm: true,
+    previous_operation_id: binding.previous_operation_id,
+    connection_ref: binding.connection_ref,
+    ...(storageDir ? { storage_dir: storageDir } : {}),
+  }
+}
+
+/** The page's decision for the 重新提交 entry of one pending submission. */
+export interface TrackingResubmitOfferState {
+  readonly available: boolean
+  /** The proven next step when the entry cannot be offered ('' while available). */
+  readonly hint: string
+}
+
+/**
+ * Whether the page offers 重新提交 for a pending submission, in one place.
+ *
+ * It never decides the outcome: the server re-validates every precondition, and
+ * this only avoids offering a step the server has already proven impossible (a
+ * write that may still be running, or an operation that is not a checkable
+ * pending submit).
+ */
+export function resubmitOfferState(
+  status: unknown,
+  operationKind: unknown,
+  operationState: unknown,
+  submissionMode: unknown,
+): TrackingResubmitOfferState {
+  if (!isPendingSubmission(status, operationKind, submissionMode)) {
+    return { available: false, hint: '' }
+  }
+  if (
+    typeof operationState === 'string'
+    && (RESUBMIT_OPERATION_STATES as readonly string[]).includes(operationState)
+  ) {
+    return { available: true, hint: '' }
+  }
+  if (operationState === 'IN_PROGRESS') {
+    return {
+      available: false,
+      hint: '上一次提交可能仍在执行，请先完成恢复核验后再重新提交。',
+    }
+  }
+  return {
+    available: false,
+    hint: '当前待确认提交的绑定状态不支持重新提交，请先完成恢复核验。',
+  }
 }
