@@ -21,21 +21,20 @@ import { computed, ref, watch } from 'vue'
 
 import BaseButton from '@/components/forms/BaseButton.vue'
 import {
-  MANAGEMENT_NEEDS_MANUAL_NOTICE,
-  MANAGEMENT_SCOPE_LABELS,
   isTrackingManagementScope,
+  MANAGEMENT_SCOPE_LABELS,
   type TrackingAction,
   type TrackingItem,
   type TrackingManagementScope,
-  type TrackingManagementSession,
 } from './trackingProjection'
+import type { TrackingWriteSession } from './useTrackingWriteSession'
 
 const props = defineProps<{
   item: TrackingItem
   /** The server-computed DELETE_EXTERNAL action, with this page's scopes only. */
   action?: TrackingAction | null
   /** Page-level management result for this item; the page owns the request. */
-  result?: TrackingManagementSession | null
+  result?: TrackingWriteSession | null
   /** Fixed read-only degradation copy when this page cannot delete. */
   hint: string
   /** Page-level single-flight/blocked state; the page owns the request. */
@@ -62,6 +61,11 @@ const scopes = computed<TrackingManagementScope[]>(() => (
 // the user's explicit choice, and a new server revision invalidates the old one.
 const selectedScope = ref<TrackingManagementScope | ''>('')
 watch(() => [props.item.tracking_id, props.item.revision], () => { selectedScope.value = '' })
+
+/** The scope label of the page-level delete result; empty when it has none. */
+const resultTargetLabel = computed(() => (
+  props.result?.targetScope ? MANAGEMENT_SCOPE_LABELS[props.result.targetScope] : ''
+))
 
 function submitDelete(): void {
   if (props.busy || !props.action || !selectedScope.value) return
@@ -118,10 +122,10 @@ function submitDelete(): void {
       role="status"
     >
       <p class="tracking-external-delete-verdict">
-        本次目标：{{ MANAGEMENT_SCOPE_LABELS[result.targetScope] }}。{{ result.message }}
+        本次目标：{{ resultTargetLabel }}。{{ result.message }}
       </p>
-      <p v-if="result.needsManual" id="tracking-delete-external-manual-notice" class="tracking-external-delete-manual">
-        {{ MANAGEMENT_NEEDS_MANUAL_NOTICE }}
+      <p v-if="result.manualNotice" id="tracking-delete-external-manual-notice" class="tracking-external-delete-manual">
+        {{ result.manualNotice }}
       </p>
     </div>
   </div>

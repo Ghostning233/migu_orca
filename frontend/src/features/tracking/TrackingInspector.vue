@@ -10,30 +10,25 @@ import { storageQuery } from '@/features/requests/requestStorage'
 import {
   canVerifyExternally,
   executableTrackingActions,
-  MANAGEMENT_NEEDS_MANUAL_NOTICE,
   formatSubmissionMode,
+  DELETE_EXTERNAL_HELP,
   isPendingSubmission,
-  managementSessionKeepsIntent,
-  projectTrackingActionScopes,
-  recoverySessionKeepsLock,
-  writeSessionKeepsIntent,
-  RECOVERY_NEEDS_MANUAL_NOTICE,
+  MANAGEMENT_ACTIONS_HELP,
   type CapabilityResult,
   type TrackingCheckSession,
   type TrackingAction,
   type TrackingItem,
   type TrackingManagementScope,
-  type TrackingManagementSession,
-  type TrackingRecoveryActionCode,
-  type TrackingRecoverySession,
-  type TrackingWriteSession,
 } from './trackingProjection'
 import {
-  DELETE_EXTERNAL_HELP,
-  isSendableManagementActionCode,
-  MANAGEMENT_ACTIONS_HELP,
-  type SendableManagementActionCode,
-} from './trackingManagement'
+  isSendableManagementAction,
+  projectTrackingActionScopes,
+  type TrackingManagementActionCode,
+  type TrackingPlanDeleteSession,
+  type TrackingRecoveryActionCode,
+  type TrackingWriteSession,
+  type TrackingWriteSessionSet,
+} from './useTrackingWriteSession'
 import AnimeDraftEditor from '@/features/workbench/AnimeDraftEditor.vue'
 import { EPISODE_PLACEHOLDER, hasTrustedEpisodeCount } from '@/features/workbench/episodeCount'
 import {
@@ -42,7 +37,6 @@ import {
 } from '@/features/requests/useSavedPlanEditor'
 import type { RequestDetailResult } from '@/features/requests/requestDetail'
 import type { PreviewPatch } from '@/features/workbench/candidateSearch'
-import type { TrackingPlanDeleteSession } from './trackingProjection'
 import CheckboxRow from '@/components/forms/CheckboxRow.vue'
 import { buildReuseHandoff, publishReuseHandoff } from '@/features/requests/reuseHandoff'
 import TrackingExternalDelete from './TrackingExternalDelete.vue'
@@ -65,11 +59,16 @@ const props = defineProps<{
    * the connection, credentials, exact version and capability server-side.
    */
   connectionReady?: boolean
-  /** Page-level external write state for one item; the page owns the request. */
-  writeSession?: TrackingWriteSession | null
-  /** Page-level unknown-result recovery state for one item (US-312). */
-  recoverySession?: TrackingRecoverySession | null
-  /** Page-level bounded read-only check state for one item (issue #183). */
+  /**
+   * The page's single write-session entry (issue #168): the latest session of
+   * each write family.  The page owns the request; this component only renders
+   * the result of the family whose panel it is.
+   */
+  sessions?: TrackingWriteSessionSet | null
+  /**
+   * Page-level bounded read-only check state for one item (issue #183).  It is
+   * its own slot: a read-only check never holds the page-level write intent.
+   */
   checkSession?: TrackingCheckSession | null
   /**
    * Issue #183: true while the page still owes this item one automatic
@@ -78,8 +77,6 @@ const props = defineProps<{
    * revision can never loop forever.
    */
   autoCheckArmed?: boolean
-  /** Page-level external management state for one item (US-313). */
-  managementSession?: TrackingManagementSession | null
   /** The single page intent is spent elsewhere (another item's write/recovery). */
   writeBusy?: boolean
   /** Page-owned plan-delete result for this item (issue #92). */
@@ -126,11 +123,13 @@ let controller: AbortController | null = null
 // renders the fixed page-level write result.  No key, credential or request
 // state ever lives here.  SUBMIT and RETRY are mutually exclusive on the server
 // (different source statuses), so at most one of them is ever projected.
+/** The one session of each family, filtered to the record this panel shows. */
+function sessionFor(session: TrackingWriteSession | null | undefined): TrackingWriteSession | null {
+  return session && session.trackingId === props.trackingId ? session : null
+}
+const thisWrite = computed(() => sessionFor(props.sessions?.submit))
 const writeInFlight = computed(() => (
-  props.writeSession?.trackingId === props.trackingId && props.writeSession.state === 'IN_FLIGHT'
-))
-const thisWrite = computed(() => (
-  props.writeSession && props.writeSession.trackingId === props.trackingId ? props.writeSession : null
+  thisWrite.value?.state === 'IN_FLIGHT'
 ))
 /** The server-computed write actions, intersected only with known values. */
 const writeActions = computed(() => (
@@ -256,29 +255,22 @@ const verifyExternalOffered = computed(() => (
   recoveryActions.value.length > 0 && props.connectionReady === true && canVerifyExternally(props.capabilities)
 ))
 const recoveryInFlight = computed(() => (
-  props.recoverySession?.trackingId === props.trackingId && props.recoverySession.state === 'IN_FLIGHT'
+  thisRecovery.value?.state === 'IN_FLIGHT'
 ))
-const thisRecovery = computed(() => (
-  props.recoverySession && props.recoverySession.trackingId === props.trackingId ? props.recoverySession : null
-))
+const thisRecovery = computed(() => sessionFor(props.sessions?.recovery))
 const managementInFlight = computed(() => (
-  props.managementSession?.trackingId === props.trackingId
-  && props.managementSession.state === 'IN_FLIGHT'
+  thisManagement.value?.state === 'IN_FLIGHT'
 ))
-const thisManagement = computed(() => (
-  props.managementSession && props.managementSession.trackingId === props.trackingId
-    ? props.managementSession
-    : null
-))
+const thisManagement = computed(() => sessionFor(props.sessions?.management))
 /** The modify result is rendered next to the modify form; the rest next to the actions. */
-const thisModify = computed(() => (thisManagement.value?.action === 'MODIFY' ? thisManagement.value : null))
+const thisModify = computed(() => (thisManagement.value?.operation === 'MODIFY' ? thisManagement.value : null))
 /** The delete result belongs to the delete section only (US-315). */
 const thisDelete = computed(() => (
-  thisManagement.value?.action === 'DELETE_EXTERNAL' ? thisManagement.value : null
+  thisManagement.value?.operation === 'DELETE_EXTERNAL' ? thisManagement.value : null
 ))
 const thisManagementAction = computed(() => (
-  thisManagement.value && thisManagement.value.action !== 'MODIFY'
-    && thisManagement.value.action !== 'DELETE_EXTERNAL'
+  thisManagement.value && thisManagement.value.operation !== 'MODIFY'
+    && thisManagement.value.operation !== 'DELETE_EXTERNAL'
     ? thisManagement.value
     : null
 ))
@@ -306,16 +298,11 @@ const itemActionInFlight = computed(() => (
  * Management actions are server-computed, so a record in a recovery status
  * never offers any — this lock covers the actions the page can actually send.
  */
-const itemIntentUnresolved = computed(() => {
-  const trackingId = props.trackingId
-  const write = props.writeSession?.trackingId === trackingId
-    && writeSessionKeepsIntent(props.writeSession.state)
-  const recovery = props.recoverySession?.trackingId === trackingId
-    && recoverySessionKeepsLock(props.recoverySession.state)
-  const management = props.managementSession?.trackingId === trackingId
-    && managementSessionKeepsIntent(props.managementSession)
-  return Boolean(write || recovery || management)
-})
+const itemIntentUnresolved = computed(() => Boolean(
+  (thisWrite.value?.keepsIntent ?? false)
+  || (thisRecovery.value?.keepsIntent ?? false)
+  || (thisManagement.value?.keepsIntent ?? false),
+))
 /**
  * In-flight *or* unresolved: an external result whose outcome is not yet
  * confirmed keeps every conflicting action blocked until an explicit recovery
@@ -369,7 +356,7 @@ function requestRecovery(action: TrackingRecoveryActionCode): void {
 
 /** One management action together with the scopes this page may request for it. */
 interface ManagementOfferView {
-  code: SendableManagementActionCode
+  code: TrackingManagementActionCode
   action: TrackingAction
   scopes: TrackingManagementScope[]
 }
@@ -382,7 +369,7 @@ const managementOffers = computed<ManagementOfferView[]>(() => {
   if (!detail.value) return []
   const offers: ManagementOfferView[] = []
   for (const action of executableTrackingActions(detail.value)) {
-    if (!isSendableManagementActionCode(action.code)) continue
+    if (!isSendableManagementAction(action.code)) continue
     const code = action.code
     const scopes = (action.target_scopes ?? [])
       .filter((scope): scope is TrackingManagementScope =>
@@ -393,7 +380,7 @@ const managementOffers = computed<ManagementOfferView[]>(() => {
   return offers
 })
 
-function offerFor(code: SendableManagementActionCode): ManagementOfferView | null {
+function offerFor(code: TrackingManagementActionCode): ManagementOfferView | null {
   return managementOffers.value.find((offer) => offer.code === code) ?? null
 }
 
@@ -885,8 +872,8 @@ defineExpose({ reload: () => fetchDetail(true) })
           role="status"
         >
           <p class="tracking-recovery-verdict">{{ thisRecovery.message }}</p>
-          <p v-if="thisRecovery.needsManual" id="tracking-recovery-manual-notice" class="tracking-recovery-manual">
-            {{ RECOVERY_NEEDS_MANUAL_NOTICE }}
+          <p v-if="thisRecovery.manualNotice" id="tracking-recovery-manual-notice" class="tracking-recovery-manual">
+            {{ thisRecovery.manualNotice }}
           </p>
         </div>
       </section>
@@ -922,8 +909,8 @@ defineExpose({ reload: () => fetchDetail(true) })
           role="status"
         >
           <p class="tracking-modify-verdict">{{ thisModify.message }}</p>
-          <p v-if="thisModify.needsManual" id="tracking-modify-manual-notice" class="tracking-modify-manual">
-            {{ MANAGEMENT_NEEDS_MANUAL_NOTICE }}
+          <p v-if="thisModify.manualNotice" id="tracking-modify-manual-notice" class="tracking-modify-manual">
+            {{ thisModify.manualNotice }}
           </p>
         </div>
       </section>

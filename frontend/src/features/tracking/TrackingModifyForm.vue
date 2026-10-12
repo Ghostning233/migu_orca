@@ -22,7 +22,6 @@ import {
   buildSubscriptionPatch,
   emptyRssForm,
   emptySubscriptionForm,
-  MODIFY_FORM_HELP,
   rssTextValue,
   setRssTextValue,
   setSubscriptionTextValue,
@@ -31,7 +30,12 @@ import {
   type TrackingSubscriptionForm,
   type TrackingSubscriptionTextField,
 } from './trackingManagement'
-import type { TrackingAction, TrackingItem, TrackingManagementScope } from './trackingProjection'
+import {
+  MODIFY_FORM_HELP,
+  type TrackingAction,
+  type TrackingItem,
+  type TrackingManagementScope,
+} from './trackingProjection'
 
 const props = defineProps<{
   item: TrackingItem

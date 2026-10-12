@@ -20,96 +20,35 @@ import { storageQuery } from '@/features/requests/requestStorage'
 import {
   capabilityStateLabel,
   capabilityVersionLabel,
-  createManagementSession,
-  createCheckSession,
-  createRecoveryConflictSession,
-  createRecoverySession,
-  createTrackingActionIntent,
-  createTrackingRecoverBody,
-  createTrackingRecoveryIntent,
-  createWriteConflictSession,
-  createWriteSession,
   filterTrackingItems,
   formatSubmissionMode,
   formatTrackingUpdatedAt,
-  isDefiniteWriteRejection,
-  isRecoveryActionCode,
-  isTrackingManagementScope,
-  isWriteActionCode,
-  createPlanDeleteSession,
-  makeOpaqueKey,
-  managementSessionKeepsIntent,
   probeStatusLabel,
   projectCapabilitySummary,
-  projectRecoveryOutcome,
   projectTrackingOverview,
-  projectWriteOutcome,
-  recoveryConfirmation,
-  recoverySessionKeepsLock,
   sortTrackingItems,
   TRACKING_OVERVIEW_GROUPS,
-  type TrackingOverviewGroup,
-  projectCheckResult,
-  TRACKING_CHECK_ENDPOINT,
-  TRACKING_RECOVER_ENDPOINT,
   TRACKING_STATUS_GROUPS,
-  WRITE_ACTION_CONFIRMATIONS,
-  WRITE_FAILURE_PRESENTATIONS,
-  WRITE_ACTION_ENDPOINTS,
-  writeSessionKeepsIntent,
   type TrackingAction,
-  type TrackingActionIntent,
+  type TrackingCheckResult,
   type TrackingItem,
   type TrackingListSummary,
   type TrackingManagementScope,
-  type TrackingManagementSession,
-  type TrackingPlanDeleteSession,
-  type TrackingCheckBody,
-  type TrackingCheckResult,
-  type TrackingCheckSession,
-  type TrackingRecoverResult,
-  type TrackingRecoveryActionCode,
-  type TrackingRecoverySession,
+  type TrackingOverviewGroup,
   type TrackingStatusGroup,
-  type TrackingWriteActionCode,
-  type TrackingWriteBody,
-  type TrackingWriteResult,
-  type TrackingWriteSession,
 } from './trackingProjection'
 import {
-  createManagementConflictSession,
-  createManagementInFlightSession,
-  createManagementRejectedSession,
-  createManagementUnbuildableSession,
-  createTrackingManagementActionIntent,
-  createTrackingManagementBody,
-  isSendableManagementActionCode,
-  MANAGEMENT_ACTION_ENDPOINTS,
-  managementConfirmation,
-  projectManagementOutcome,
-  sameManagementRequest,
-  type TrackingManagementIntent,
-  type TrackingManagementResult,
-} from './trackingManagement'
+  useTrackingWriteSession,
+  type TrackingRecoveryActionCode,
+  type TrackingWriteRequest,
+  type TrackingSubmissionMode,
+  type TrackingWriteEffect,
+  type TrackingWriteFeedback,
+  type TrackingWriteTarget,
+} from './useTrackingWriteSession'
 import TrackingInspector from './TrackingInspector.vue'
 import TrackingSubmissionModeDialog, { type SubmissionMode } from './TrackingSubmissionModeDialog.vue'
 import TrackingPoster from './TrackingPoster.vue'
-import {
-  EMPTY_BATCH_SELECTION,
-  batchSelectionSummary,
-  batchSkipReason,
-  buildBatchSubmitBody,
-  skippedBatchEntries,
-  type SkippedBatchEntry,
-  clearBatchSelection,
-  isBatchSelected,
-  projectBatchOutcome,
-  selectAllBatch,
-  selectionAfterBatch,
-  toggleBatchSelection,
-  type TrackingBatchOutcome,
-  type TrackingBatchSelection,
-} from './batchSelection'
 
 type ListResult = NonNullable<
   operations['listTrackingItems']['responses']['200']['content']['application/json']['result']
@@ -123,6 +62,15 @@ type PlanDeleteResult = NonNullable<
 >
 type BatchResult = NonNullable<
   operations['submitTrackingBatch']['responses']['200']['content']['application/json']['result']
+>
+type TrackingWriteResult = NonNullable<
+  operations['submitTrackingItem']['responses']['200']['content']['application/json']['result']
+>
+type TrackingRecoverResult = NonNullable<
+  operations['recoverTrackingItem']['responses']['200']['content']['application/json']['result']
+>
+type TrackingManagementResult = NonNullable<
+  operations['modifyTrackingItem']['responses']['200']['content']['application/json']['result']
 >
 type SyncBody = NonNullable<
   operations['syncTrackingItems']['requestBody']['content']['application/json']
@@ -160,52 +108,38 @@ const syncSummary = ref<SyncResult['summary'] | null>(null)
 const confirmDialog = ref<InstanceType<typeof ConfirmDialog> | null>(null)
 const detailRevision = ref(0)
 const inspector = ref<InstanceType<typeof TrackingInspector> | null>(null)
-// Explicit external submission (US-310).  The credential itself never leaves
-// this component: it is read here and placed only into the single POST body.
-const writeSession = ref<TrackingWriteSession | null>(null)
-const writeLoading = ref(false)
-const writePending = ref(false)
-let writeIntent: TrackingActionIntent | null = null
+/**
+ * Every external write — submit/retry, recovery, the four management actions,
+ * the unified plan delete and the confirmed batch — is one local session owned
+ * by this module (issue #168).  The page keeps the transport lifecycle: the
+ * abort controller and its sequence guard, the dialogs, the notifications, the
+ * routing and the focus.
+ */
+const writes = useTrackingWriteSession()
+/** The inspector consumes the page's single write-session entry. */
+const writeSessions = writes.sessions
+const writeLoading = writes.loading
+const writePending = writes.pending
 let writeSequence = 0
 let writeController: AbortController | null = null
-// Explicitly clearing credentials destroys the config.  An unresolved intent
-// remains a tombstone, but can never be replayed with a newly connected account.
-const writeReplayBlocked = ref(false)
-let writeConfigSnapshot: Pick<SavedConnection, 'connection_ref' | 'configuration_revision'> | null = null
-// Unknown-result recovery (US-312).  Like the write family, the page owns the
-// request (only VERIFY_EXTERNAL needs the page credential) and the single
-// page-level intent; no recovery key or credential is ever stored here beyond
-// the live session config.
-const recoverySession = ref<TrackingRecoverySession | null>(null)
-const recoveryLoading = ref(false)
-const recoveryPending = ref(false)
-let recoverySequence = 0
-let recoveryController: AbortController | null = null
-// Issue #183: bounded read-only confirmation of a 结果待确认 persistent submit.
-// The page owns one check at a time and holds no connection for it — the server
-// resolves the original submit operation's saved instance — and a check never
-// holds the external-write intent because it writes nothing.
-const checkSession = ref<TrackingCheckSession | null>(null)
-const checkLoading = ref(false)
+/**
+ * Issue #183: the bounded read-only check of a pending submission.  It is its
+ * own session slot rather than a write family — it holds no page-level intent,
+ * so the page only owns its transport sequence and abort controller.
+ */
+const checkSession = writes.check
+const autoCheckArmed = writes.autoCheckArmed
 let checkSequence = 0
 let checkController: AbortController | null = null
-// One automatic check per opened/armed record: the inspector emits it, the page
-// consumes the flag, so a check that persists a new revision cannot loop.
-const autoCheckArmed = ref(false)
-// External management writes (US-313, US-314).  MODIFY, SET_ENABLED and
-// REFRESH_RSS share the page credential, the impact confirmation, the latest
-// revision and the single page-level intent with the submit family; only the
-// endpoint, the request body and the server verdict differ (management_status
-// instead of outcome).  The patch, the enable direction and the refresh scope
-// live only in the locked in-memory intent and the single POST body.
-const managementSession = ref<TrackingManagementSession | null>(null)
-const managementLoading = ref(false)
-const managementPending = ref(false)
-let managementIntent: TrackingManagementIntent | null = null
-let managementSequence = 0
-let managementController: AbortController | null = null
-const managementReplayBlocked = ref(false)
-let managementConfigSnapshot: Pick<SavedConnection, 'connection_ref' | 'configuration_revision'> | null = null
+const planDeleteSession = writes.planDelete
+const batchOutcome = writes.batchOutcome
+const batchLoading = writes.batchLoading
+const batchNotice = writes.batchNotice
+const batchSkippedNotice = writes.batchSkippedNotice
+const isBatchSelected = writes.isBatchSelected
+const batchSkipReason = writes.batchSkipReason
+const resetBatch = writes.resetBatch
+const clearBatchSelection = writes.clearBatchSelection
 // List reads and server-confirmed tracking writes have independent lifecycles:
 // `listSequence` only invalidates stale list responses, while `writeGeneration`
 // marks the revision a sync (or a local revalidate) already applied.  A list
@@ -215,8 +149,6 @@ let listSequence = 0
 let writeGeneration = 0
 let syncSequence = 0
 let syncController: AbortController | null = null
-// Retired queue deep links (US-316): the one-time compat read is tracked by its
-// own sequence so a route change can never let a stale location win.
 
 async function loadSavedConnection(): Promise<void> {
   try {
@@ -281,65 +213,13 @@ const selectedItem = computed(() => items.value.find(
 const selectedHidden = computed(() => Boolean(
   selectedItem.value && !filteredItems.value.some((item) => item.tracking_id === selectedTrackingId.value),
 ))
+
 /**
- * Feedback for a locked (unresolved) external intent (Stage 38 review fix).
- *
- * One page-level intent at a time is a safety invariant: while an external
- * result is still unconfirmed, minting a new key for a *different* request
- * could duplicate or double-apply the external change, so the page refuses it
- * and sends zero requests.  A refusal the user cannot see is a dead end, so the
- * fixed next step below is stated instead of returning silently.  It is
- * deliberately separate from the write/recovery/management result panels (it
- * never replaces their copy or state) and scoped to the record the user acted
- * on, so it can never leak onto another item.
+ * The fixed page-level reason a locked intent refused a different request, or ''
+ * while nothing is blocked.  The session owns the rule; the page only asks for
+ * the selected record.
  */
-const INTENT_BLOCKED_MESSAGE =
-  '上一次外部操作的结果仍未确认，在确认或恢复之前不能发起不同的外部操作；请先使用只读回查或恢复得出结论。'
-const REPLAY_BLOCKED_MESSAGE =
-  '该外部操作绑定的连接已被清除或更换，结果确认前不能使用新连接重试写入；请继续使用只读回查或恢复。'
-
-const blockedIntentNotice = ref<{ trackingId: string; message: string } | null>(null)
-
-/** The record whose still-unresolved intent refuses this request, or ''. */
-function otherItemIntentOwner(trackingId: string): string {
-  const write = writeSession.value
-  if (write && write.trackingId !== trackingId && writeSessionKeepsIntent(write.state)) return write.trackingId
-  const recovery = recoverySession.value
-  if (recovery && recovery.trackingId !== trackingId && recoverySessionKeepsLock(recovery.state)) {
-    return recovery.trackingId
-  }
-  const management = managementSession.value
-  if (management && management.trackingId !== trackingId && managementSessionKeepsIntent(management)) {
-    return management.trackingId
-  }
-  return ''
-}
-
-/** True while any record still owns the page's single unresolved intent. */
-function hasPendingIntentLock(): boolean {
-  const write = writeSession.value
-  if (write && writeSessionKeepsIntent(write.state)) return true
-  const recovery = recoverySession.value
-  if (recovery && recoverySessionKeepsLock(recovery.state)) return true
-  const management = managementSession.value
-  return Boolean(management && managementSessionKeepsIntent(management))
-}
-
-/** State the fixed reason a locked intent refused a different request. */
-function blockIntent(trackingId: string): void {
-  blockedIntentNotice.value = { trackingId, message: INTENT_BLOCKED_MESSAGE }
-}
-
-function blockReplay(trackingId: string): void {
-  blockedIntentNotice.value = { trackingId, message: REPLAY_BLOCKED_MESSAGE }
-}
-
-/** The notice shown on the selected record; empty while nothing is blocked. */
-const selectedIntentNotice = computed(() => {
-  const notice = blockedIntentNotice.value
-  if (notice && notice.trackingId === selectedTrackingId.value) return notice.message
-  return otherItemIntentOwner(selectedTrackingId.value) ? INTENT_BLOCKED_MESSAGE : ''
-})
+const selectedIntentNotice = computed(() => writes.noticeFor(selectedTrackingId.value))
 
 /**
  * External writes and recoveries are single-flight (Stage 38 invariant).  The
@@ -349,21 +229,7 @@ const selectedIntentNotice = computed(() => {
  * holds the one page-level intent (D38-09.4 keeps that lock for an unresolved
  * recovery too), but never blocks the item's own next step.
  */
-const inspectorIntentBusy = computed(() => {
-  if (writeLoading.value || recoveryLoading.value || managementLoading.value) return true
-  const write = writeSession.value
-  if (write && writeSessionKeepsIntent(write.state) && write.trackingId !== selectedTrackingId.value) {
-    return true
-  }
-  const recovery = recoverySession.value
-  if (recovery && recoverySessionKeepsLock(recovery.state) && recovery.trackingId !== selectedTrackingId.value) {
-    return true
-  }
-  const management = managementSession.value
-  return Boolean(
-    management && managementSessionKeepsIntent(management) && management.trackingId !== selectedTrackingId.value,
-  )
-})
+const inspectorIntentBusy = computed(() => writes.busyFor(selectedTrackingId.value))
 
 function queryTrackingId(): string | null {
   const value = route.query.tracking_id
@@ -455,74 +321,20 @@ function clearFilters(): void {
 function clearConnection(): void {
   savedState.value = null
   cancelSync()
-  preserveWriteLockAfterClear()
-  preserveRecoveryLockAfterClear()
-  preserveManagementLockAfterClear()
+  writeSequence += 1
+  writeController?.abort()
+  writeController = null
+  writes.preserveAfterClear()
   syncMessage.value = ''
   syncSummary.value = null
 }
 
-function preserveWriteLockAfterClear(): void {
-  const session = writeSession.value
-  const unresolved = Boolean(
-    writeLoading.value || (session && (session.state === 'IN_FLIGHT' || writeSessionKeepsIntent(session.state))),
-  )
-  if (!unresolved || !writeIntent || !session) {
-    resetWrite()
-    return
-  }
+/** Drop every session and invalidate whatever transport is still outstanding. */
+function resetSession(): void {
   writeSequence += 1
   writeController?.abort()
   writeController = null
-  writePending.value = false
-  writeLoading.value = false
-  writeReplayBlocked.value = true
-  writeConfigSnapshot = null
-  writeSession.value = createWriteSession(session.trackingId, session.action, 'UNKNOWN')
-}
-
-function preserveRecoveryLockAfterClear(): void {
-  const session = recoverySession.value
-  if (!session || (!recoveryLoading.value && !recoverySessionKeepsLock(session.state))) {
-    resetRecovery()
-    return
-  }
-  recoverySequence += 1
-  recoveryController?.abort()
-  recoveryController = null
-  recoveryPending.value = false
-  recoveryLoading.value = false
-  recoverySession.value = createRecoverySession(session.trackingId, session.action, 'UNKNOWN')
-  resetCheck()
-}
-
-function preserveManagementLockAfterClear(): void {
-  const session = managementSession.value
-  const unresolved = Boolean(
-    managementLoading.value || (session && (session.state === 'IN_FLIGHT' || managementSessionKeepsIntent(session))),
-  )
-  if (!unresolved || !managementIntent || !session) {
-    resetManagement()
-    return
-  }
-  managementSequence += 1
-  managementController?.abort()
-  managementController = null
-  managementPending.value = false
-  managementLoading.value = false
-  managementReplayBlocked.value = true
-  managementConfigSnapshot = null
-  managementSession.value = createManagementSession(
-    session.trackingId, session.action, session.targetScope, 'UNKNOWN', true,
-  )
-}
-
-/** A clear/reconnect never releases an old write; only a confirmed recovery does. */
-function releaseSourceIntentLocks(trackingId: string): void {
-  const write = writeSession.value
-  if (write?.trackingId === trackingId && writeSessionKeepsIntent(write.state)) resetWrite()
-  const management = managementSession.value
-  if (management?.trackingId === trackingId && managementSessionKeepsIntent(management)) resetManagement()
+  writes.reset()
 }
 
 function cancelSync(): void {
@@ -605,42 +417,6 @@ async function syncTracking(): Promise<void> {
   }
 }
 
-function resetWrite(): void {
-  writeSequence += 1
-  writeController?.abort()
-  writeController = null
-  writeIntent = null
-  writePending.value = false
-  writeLoading.value = false
-  writeSession.value = null
-  writeReplayBlocked.value = false
-  writeConfigSnapshot = null
-  blockedIntentNotice.value = null
-}
-
-function resetRecovery(): void {
-  recoverySequence += 1
-  recoveryController?.abort()
-  recoveryController = null
-  recoveryPending.value = false
-  recoveryLoading.value = false
-  recoverySession.value = null
-  blockedIntentNotice.value = null
-}
-
-function resetManagement(): void {
-  managementSequence += 1
-  managementController?.abort()
-  managementController = null
-  managementIntent = null
-  managementPending.value = false
-  managementLoading.value = false
-  managementSession.value = null
-  managementReplayBlocked.value = false
-  managementConfigSnapshot = null
-  blockedIntentNotice.value = null
-}
-
 /**
  * Read-back after an external write or a recovery (US-310, US-312).
  *
@@ -649,117 +425,188 @@ function resetManagement(): void {
  * told us nothing authoritative (409 conflict, unreadable result) the list is
  * re-read too, because the returned summary cannot be trusted in those paths.
  */
-async function recheckAfterAction(trackingId: string, refreshList = false): Promise<void> {
+async function recheckAfterAction(trackingId: string | null, refreshList: boolean): Promise<void> {
   if (refreshList) await loadList(true)
-  if (selectedTrackingId.value !== trackingId) return
+  if (!trackingId || selectedTrackingId.value !== trackingId) return
   await inspector.value?.reload()
 }
 
-/**
- * Run one bounded read-only confirmation of a pending submission (issue #183).
- *
- * The request carries only the revision the user is looking at; the server
- * resolves the original operation's saved connection, so nothing here can
- * rebind it.  A stale revision is a 409 before any read, and every read-only
- * business outcome converges the list and re-reads the detail.
- */
-async function runTrackingCheck(payload: { item: TrackingItem; automatic: boolean }): Promise<void> {
-  const trackingId = payload.item.tracking_id
-  const revision = payload.item.revision
-  if (typeof revision !== 'number') return
-  if (payload.automatic && !autoCheckArmed.value) return
-  if (checkLoading.value) return
-  if (otherItemIntentOwner(trackingId)) {
-    if (!payload.automatic) blockIntent(trackingId)
+/** A fixed verdict the session produced, mapped to its one page-level channel. */
+async function presentFeedback(feedback: TrackingWriteFeedback): Promise<void> {
+  if (feedback.channel === 'success') {
+    notification.show('success', feedback.title, feedback.message)
     return
   }
-  if (payload.automatic) {
-    // The owed automatic check is consumed only when one is actually started,
-    // so a refused/blocked attempt is retried rather than silently dropped, and
-    // a check that persists a new revision never re-triggers itself.
-    autoCheckArmed.value = false
-  }
-  blockedIntentNotice.value = null
-  const sequence = ++checkSequence
+  const openSettings = (await confirmDialog.value?.confirm({
+    title: feedback.title,
+    message: feedback.message,
+    confirmLabel: '前往设置',
+    cancelLabel: '关闭',
+  })) ?? false
+  if (openSettings) await router.push(routeLocation('settings'))
+}
+
+/**
+ * Run one single-write session transport.
+ *
+ * The page owns the transport: the abort controller, the sequence guard, the
+ * returned-tracking convergence, the converging effects and the end of the
+ * attempt all live here exactly once, so the submit, recovery and management
+ * paths can only differ in which session command settles them.
+ */
+async function runSessionTransport<Result extends { tracking: TrackingItem }>(options: {
+  readonly request: TrackingWriteRequest
+  /** Runs after a success response and before the returned tracking converges. */
+  readonly beforeConverge?: () => void
+  readonly settle: (result: Result) => readonly TrackingWriteEffect[]
+  readonly fail: (error: ReturnType<typeof toApiError>) => readonly TrackingWriteEffect[]
+}): Promise<void> {
+  const sequence = ++writeSequence
   const controller = new AbortController()
-  checkController?.abort()
-  checkController = controller
-  checkLoading.value = true
-  checkSession.value = createCheckSession(trackingId, 'IN_FLIGHT', null, revision)
+  writeController?.abort()
+  writeController = controller
   try {
-    const storageDir = storageQuery().storage_dir
-    const body: TrackingCheckBody = {
-      expected_revision: revision,
-      ...(storageDir ? { storage_dir: storageDir } : {}),
-    }
-    const result = await api.post<TrackingCheckResult>(TRACKING_CHECK_ENDPOINT, {
-      path: { tracking_id: trackingId }, body, signal: controller.signal,
+    const result = await api.post<Result>(options.request.endpoint, {
+      path: options.request.path, body: options.request.body, signal: controller.signal,
     })
-    if (sequence !== checkSequence) return
+    if (sequence !== writeSequence) return
+    // The returned tracking converges the list row without a second list read.
+    options.beforeConverge?.()
     applyReturnedTracking(result.tracking)
-    const session = projectCheckResult(trackingId, result, revision)
-    checkSession.value = session
-    // Issue #183 review: once the exact object is proven, the pending submit is
-    // no longer ambiguous, so its page-level intent lock is released here —
-    // otherwise the stale intent would keep blocking every other record.
-    if (session.state === 'CONFIRMED') releaseSettledSubmissionIntent(trackingId)
-    await recheckAfterAction(trackingId, true)
+    await runWriteEffects(options.settle(result))
   } catch (error) {
-    if (sequence !== checkSequence) return
-    const apiError = toApiError(error)
-    if (apiError.cancelled && !apiError.httpError) return
-    checkSession.value = apiError.status === 409
-      ? createCheckSession(trackingId, 'CONFLICT', null, revision)
-      : createCheckSession(trackingId, 'UNKNOWN', null, revision)
-    await recheckAfterAction(trackingId, true)
+    if (sequence !== writeSequence) return
+    await runWriteEffects(options.fail(toApiError(error)))
   } finally {
-    if (sequence === checkSequence) {
-      checkLoading.value = false
-      if (checkController === controller) checkController = null
+    if (sequence === writeSequence) {
+      writes.finishAttempt()
+      if (writeController === controller) writeController = null
     }
   }
 }
 
 /**
- * Release a pending *submission* intent that a read-only check has just proven
- * settled (issue #183 review). Only the submit-family session is released: a
- * recovery or management lock that is still unresolved stays locked, and the
- * operation/audit history on the server is untouched.
+ * Run the converging effects one session command returned.
+ *
+ * The module decides *what* must happen (re-read the server, state a fixed
+ * verdict); the page owns the IO, the dialog and the routing.
  */
-function releaseSettledSubmissionIntent(trackingId: string): void {
-  if (writeSession.value?.trackingId !== trackingId) return
-  if (writeSession.value.state !== 'VERIFYING_EXTERNAL'
-    && writeSession.value.state !== 'RECOVERY_REQUIRED'
-    && writeSession.value.state !== 'UNKNOWN') return
-  writeIntent = null
-  writeSession.value = null
-}
-
-function resetCheck(): void {
-  checkSequence += 1
-  checkController?.abort()
-  checkController = null
-  checkLoading.value = false
-  checkSession.value = null
-  autoCheckArmed.value = false
+async function runWriteEffects(effects: readonly TrackingWriteEffect[]): Promise<void> {
+  for (const effect of effects) {
+    if (effect.kind === 'recheck') {
+      await recheckAfterAction(effect.trackingId, effect.refreshList)
+      continue
+    }
+    await presentFeedback(effect.feedback)
+  }
 }
 
 // -- explicit batch submit (issue #87) --------------------------------------
-// A batch is a user-visible selection of *independent* reliable submissions:
-// the page owns the single confirmation and the request, every entry keeps its
-// own revision and opaque key, and filtering never clears the selection.
-const TRACKING_BATCH_SUBMIT_ENDPOINT = '/api/v1/tracking/batch-submit'
-// Unified plan delete (issue #92): the page owns the single request and result.
-// Issue #98: the entry button opens a mode choice; only the choice writes.
-const submitModeOpen = ref(false)
-const submitModePending = ref<{ action: TrackingAction; item: TrackingItem } | null>(null)
-const submissionMode = ref<SubmissionMode | null>(null)
+const batchMode = ref(false)
+const batchSubmissionMode = ref<SubmissionMode | null>(null)
+const batchModeOpen = ref(false)
+/** Issue #100: the mode dialog is answered before the whole batch is sent. */
+let batchSequence = 0
 
-const SUBMISSION_CHOICE_ACTIONS = new Set(['SUBMIT', 'RETRY'])
+const batchSummary = computed(() => writes.batchSummary(filteredItems.value))
 
-function isSubmissionChoiceAction(code: string): boolean {
-  return SUBMISSION_CHOICE_ACTIONS.has(code)
+function toggleBatchMode(): void {
+  batchMode.value = !batchMode.value
+  resetBatch()
 }
+
+function toggleRow(trackingId: string): void {
+  writes.toggleBatchRow(trackingId)
+}
+
+function selectAllCurrent(): void {
+  writes.selectAllBatch(filteredItems.value)
+}
+
+function clearSelection(): void {
+  clearBatchSelection()
+}
+
+function titleFor(trackingId: string): string {
+  return items.value.find((item) => item.tracking_id === trackingId)?.title || '未命名番剧'
+}
+
+/**
+ * AC 9: the local pre-check result lives in its own dialog; external success,
+ * failure and unknown results stay in the batch result area.
+ */
+async function showSkippedPlans(title: string, skipped: readonly { title: string; reason: string }[]): Promise<void> {
+  if (!skipped.length) return
+  await confirmDialog.value?.confirm({
+    title,
+    message: '以下所选方案未通过本地预检，本次不会提交到 Auto Bangumi：',
+    items: skipped.map((entry) => `${entry.title}：${entry.reason}`),
+    itemsLabel: '未提交的方案',
+    confirmLabel: '知道了',
+    cancelLabel: '关闭',
+  })
+}
+
+/** Issue #100 AC 1: the entry opens one mode choice for the whole batch. */
+function runBatchSubmit(): void {
+  if (batchLoading.value) return
+  if (!savedRef.value?.connection_ref) return
+  if (!batchSummary.value.selected) return
+  batchModeOpen.value = true
+}
+
+function chooseBatchSubmissionMode(mode: SubmissionMode): void {
+  const config = savedRef.value
+  if (!config?.connection_ref || batchSubmissionMode.value) return
+  batchSubmissionMode.value = mode
+  batchModeOpen.value = false
+  void performBatchSubmit()
+}
+
+function cancelBatchSubmissionMode(): void {
+  batchModeOpen.value = false
+}
+
+async function performBatchSubmit(): Promise<void> {
+  if (batchLoading.value) return
+  const config = savedRef.value
+  if (!config?.connection_ref) return
+  if (!batchSummary.value.selected) return
+
+  // One choice, one batch: the mode is spent here so a later batch cannot
+  // silently reuse it.
+  const submissionMode = batchSubmissionMode.value ?? null
+  batchSubmissionMode.value = null
+  const started = writes.beginBatchSubmit(
+    { items: items.value, mode: submissionMode },
+    { connection: config, storageDir: storageQuery().storage_dir },
+  )
+  if (started.skipped.length) {
+    // AC 4: the information dialog never gates the run — the submittable plans
+    // start immediately, with no second confirmation.
+    void showSkippedPlans(started.skippedTitle, started.skipped)
+  }
+  if (!started.accepted || !started.request) return
+
+  const sequence = ++batchSequence
+  try {
+    const result = await api.post<BatchResult>(started.request.endpoint, {
+      path: started.request.path, body: started.request.body,
+    })
+    if (sequence !== batchSequence) return
+    await runWriteEffects(writes.finishBatchSubmit(result))
+  } catch (error) {
+    if (sequence !== batchSequence) return
+    writes.failBatchSubmit(toApiError(error))
+  }
+}
+
+// -- explicit submit-family external writes (US-310, US-311) ----------------
+// The dialog stays open (all actions disabled, the chosen one loading) until the
+// page-level write settles, then closes on every path.
+const submitModeOpen = ref(false)
+const submitModePending = ref<TrackingWriteTarget | null>(null)
+const submissionMode = ref<TrackingSubmissionMode | null>(null)
 
 function chooseSubmissionMode(mode: SubmissionMode): void {
   const pending = submitModePending.value
@@ -782,14 +629,195 @@ function cancelSubmissionMode(): void {
   closeSubmissionModeChoice()
 }
 
-// The dialog stays open (all actions disabled, the chosen one loading) until the
-// page-level write settles, then closes on every path.
 watch(writeLoading, (loading) => {
   if (loading) return
   closeSubmissionModeChoice()
 })
 
-const planDeleteSession = ref<TrackingPlanDeleteSession | null>(null)
+/**
+ * Run one explicit submit-family external write (US-310, US-311).
+ *
+ * ``SUBMIT`` and ``RETRY`` share this single path: the endpoint, the impact
+ * confirmation and the result projection are all bound to the server-computed
+ * action code, so a retry can never be sent with submit copy (or the reverse).
+ */
+async function runTrackingWrite(payload: TrackingWriteTarget): Promise<void> {
+  const options = {
+    mode: submissionMode.value,
+    confirmed: submissionMode.value !== null,
+    connection: savedRef.value,
+    storageDir: storageQuery().storage_dir,
+  }
+  let started = writes.beginSubmit(payload, options)
+  if (started.ask === 'SUBMISSION_MODE') {
+    // Issue #98 AC 2: the entry only opens the mode choice, which is also the
+    // submit family's impact confirmation; opening it sends nothing.
+    submitModePending.value = payload
+    submitModeOpen.value = true
+    return
+  }
+  if (started.ask === 'IMPACT' && started.confirmation) {
+    writes.setPending(true)
+    let confirmed = false
+    try {
+      confirmed = (await confirmDialog.value?.confirm({
+        ...started.confirmation, cancelLabel: '取消',
+      })) ?? false
+    } finally {
+      writes.setPending(false)
+    }
+    // Cancelling the impact confirmation sends zero requests, and the live
+    // saved generation is read again after the dialog.
+    if (!confirmed) return
+    started = writes.beginSubmit(payload, {
+      ...options, confirmed: true, connection: savedRef.value, storageDir: storageQuery().storage_dir,
+    })
+  }
+  if (!started.accepted || !started.request) {
+    await runWriteEffects(started.effects)
+    return
+  }
+  await runSessionTransport<TrackingWriteResult>({
+    request: started.request,
+    beforeConverge: closeSubmissionModeChoice,
+    settle: (result) => writes.finishSubmit(result),
+    fail: (error) => writes.failSubmit(error),
+  })
+}
+
+/**
+ * Run one explicit unknown-result recovery (US-312).
+ *
+ * ``RECOVER_AUTO`` is pure local: no credential, no confirmation, no external
+ * call.  ``MARK_SUCCEEDED``/``MARK_FAILED`` are the user's manual conclusion and
+ * are always confirmed a second time (the dialog defaults to cancel and states
+ * that the user must have checked Auto Bangumi first).  ``VERIFY_EXTERNAL`` is
+ * the read-only external check: it uses the saved connection generation for one
+ * verification of the record's own operation and can never create an external
+ * write.  Every path converges on the returned tracking and never resends.
+ */
+async function runTrackingRecovery(
+  payload: { action: TrackingRecoveryActionCode; item: TrackingItem },
+): Promise<void> {
+  const recoveryOptions = {
+    capabilities: savedState.value?.capabilities ?? null,
+    connection: savedState.value,
+    storageDir: storageQuery().storage_dir,
+  }
+  let started = writes.beginRecovery(payload, recoveryOptions)
+  if (started.ask === 'IMPACT' && started.confirmation) {
+    writes.setPending(true)
+    let confirmed = false
+    try {
+      confirmed = (await confirmDialog.value?.confirm({
+        ...started.confirmation, cancelLabel: '取消',
+      })) ?? false
+    } finally {
+      writes.setPending(false)
+    }
+    // Cancelling the recovery confirmation sends zero requests, and the live
+    // page session is read again after the dialog.
+    if (!confirmed) return
+    started = writes.beginRecovery(payload, {
+      ...recoveryOptions,
+      capabilities: savedState.value?.capabilities ?? null,
+      connection: savedState.value,
+      confirmed: true,
+    })
+  }
+  if (!started.accepted || !started.request) {
+    await runWriteEffects(started.effects)
+    return
+  }
+  await runSessionTransport<TrackingRecoverResult>({
+    request: started.request,
+    settle: (result) => writes.finishRecovery(result),
+    fail: (error) => writes.failRecovery(error),
+  })
+}
+
+/**
+ * Run one bounded read-only confirmation of a pending submission (issue #183).
+ *
+ * The session decides whether anything may be sent at all and builds the one
+ * request (revision only); the server resolves the original operation's saved
+ * connection, so nothing here can rebind it.  A stale revision is a 409 before
+ * any read, and every read-only business outcome converges the list and
+ * re-reads the detail.
+ */
+async function runTrackingCheck(payload: { item: TrackingItem; automatic: boolean }): Promise<void> {
+  const started = writes.beginCheck(payload, { storageDir: storageQuery().storage_dir })
+  if (!started.accepted || !started.request) return
+  const request = started.request
+  const sequence = ++checkSequence
+  const controller = new AbortController()
+  checkController?.abort()
+  checkController = controller
+  try {
+    const result = await api.post<TrackingCheckResult>(request.endpoint, {
+      path: request.path, body: request.body, signal: controller.signal,
+    })
+    if (sequence !== checkSequence) return
+    // The returned tracking converges the list row; the detail is re-read so the
+    // check's own verdict is what the submit area shows.
+    applyReturnedTracking(result.tracking)
+    await runWriteEffects(writes.finishCheck(result))
+  } catch (error) {
+    if (sequence !== checkSequence) return
+    await runWriteEffects(writes.failCheck(toApiError(error)))
+  } finally {
+    if (sequence === checkSequence) checkController = null
+  }
+}
+
+/**
+ * Run one explicit external management write (US-313, US-314).
+ *
+ * ``MODIFY``, ``SET_ENABLED``, ``REFRESH_RSS`` and ``DELETE_EXTERNAL`` share
+ * this single path.  The session re-validates the emitted request against the
+ * current server projection, binds the endpoint/body/confirmation to the
+ * validated intent and projects the management verdict; the page owns the
+ * confirmation dialog and the transport.
+ */
+async function runTrackingManagement(payload: {
+  action: TrackingAction
+  item: TrackingItem
+  targetScope: TrackingManagementScope
+  patch: unknown
+  /** Issue #91: local plan values raised with a confirmed subscription modify. */
+  localPlan?: unknown
+}): Promise<void> {
+  const options = { connection: savedRef.value, storageDir: storageQuery().storage_dir }
+  let started = writes.beginManagement(payload, options)
+  if (started.ask === 'IMPACT' && started.confirmation) {
+    writes.setPending(true)
+    let confirmed = false
+    try {
+      confirmed = (await confirmDialog.value?.confirm({
+        ...started.confirmation, cancelLabel: '取消',
+      })) ?? false
+    } finally {
+      writes.setPending(false)
+    }
+    // Cancelling the impact confirmation sends zero requests, and the live
+    // saved generation is read again after the dialog.
+    if (!confirmed) return
+    started = writes.beginManagement(payload, {
+      ...options, confirmed: true, connection: savedRef.value, storageDir: storageQuery().storage_dir,
+    })
+  }
+  if (!started.accepted || !started.request) {
+    await runWriteEffects(started.effects)
+    return
+  }
+  await runSessionTransport<TrackingManagementResult>({
+    request: started.request,
+    settle: (result) => writes.finishManagement(result),
+    fail: (error) => writes.failManagement(error),
+  })
+}
+
+// -- unified plan delete (issue #92) -----------------------------------------
 let planDeleteSequence = 0
 
 async function openReuseJourney(): Promise<void> {
@@ -802,672 +830,32 @@ async function runPlanDelete(payload: {
   item: TrackingItem
   deleteExternal: boolean
 }): Promise<void> {
-  const config = savedRef.value
   // Issue #96: a purely local delete needs no Auto Bangumi connection at all;
-  // only the optional external delete requires the saved connection.
-  if (payload.deleteExternal && !config?.connection_ref) return
+  // only the optional external delete requires the saved connection (the
+  // session enforces exactly that).
+  const started = writes.beginPlanDelete(payload, {
+    connection: savedRef.value,
+    storageDir: storageQuery().storage_dir,
+  })
+  if (!started.accepted || !started.request) return
+  const request = started.request
   const trackingId = payload.item.tracking_id
   const sequence = ++planDeleteSequence
-  planDeleteSession.value = createPlanDeleteSession(trackingId, 'IN_FLIGHT')
   try {
-    const storageDir = storageQuery().storage_dir
-    const result = await api.post<PlanDeleteResult>(
-      '/api/v1/tracking/items/{tracking_id}/delete-plan',
-      {
-        path: { tracking_id: trackingId },
-        body: {
-          confirm: true,
-          delete_external: payload.deleteExternal,
-          idempotency_key: makeOpaqueKey(),
-          ...(payload.deleteExternal && config
-            ? {
-                connection_ref: config.connection_ref,
-                configuration_revision: config.configuration_revision,
-              }
-            : {}),
-          ...(storageDir ? { storage_dir: storageDir } : {}),
-        },
-      },
-    )
+    const result = await api.post<PlanDeleteResult>(request.endpoint, {
+      path: request.path, body: request.body,
+    })
     if (sequence !== planDeleteSequence) return
-    const state = result?.outcome === 'DELETED'
-      ? 'DELETED'
-      : result?.outcome === 'EXTERNAL_FAILED' ? 'EXTERNAL_FAILED' : 'EXTERNAL_UNKNOWN'
-    planDeleteSession.value = createPlanDeleteSession(trackingId, state)
-    if (state === 'DELETED') {
-      notification.show(
-        'success',
-        '追番方案已删除',
-        payload.deleteExternal
-          ? '已同时删除受控外部订阅；已下载媒体保留。'
-          : 'Auto Bangumi 中的订阅继续运行，MiGuOrca 不再管理它。',
-      )
-      if (selectedTrackingId.value === trackingId) selectedTrackingId.value = ''
-      await loadList(true)
-      return
+    const effects = writes.finishPlanDelete(result)
+    if (planDeleteSession.value?.state === 'DELETED' && selectedTrackingId.value === trackingId) {
+      selectedTrackingId.value = ''
     }
-    await recheckAfterAction(trackingId, true)
+    await runWriteEffects(effects)
   } catch (error) {
     if (sequence !== planDeleteSequence) return
     const apiError = toApiError(error)
     if (apiError.cancelled && !apiError.httpError) return
-    planDeleteSession.value = createPlanDeleteSession(
-      trackingId,
-      apiError.status === 409 ? 'EXTERNAL_FAILED' : 'EXTERNAL_UNKNOWN',
-    )
-    await recheckAfterAction(trackingId, true)
-  }
-}
-
-const batchMode = ref(false)
-const batchSubmissionMode = ref<SubmissionMode | null>(null)
-const batchSelection = ref<TrackingBatchSelection>(EMPTY_BATCH_SELECTION)
-const batchPending = ref(false)
-const batchLoading = ref(false)
-const batchOutcome = ref<TrackingBatchOutcome | null>(null)
-const batchNotice = ref('')
-let batchSequence = 0
-
-const batchSummary = computed(() => (
-  batchSelectionSummary(batchSelection.value, filteredItems.value)
-))
-const batchSkippedNotice = computed(() => {
-  const reasons = Object.values(batchSelection.value.skipped)
-  if (!reasons.length) return ''
-  const counts = new Map<string, number>()
-  for (const reason of reasons) counts.set(reason, (counts.get(reason) ?? 0) + 1)
-  const detail = [...counts].map(([reason, count]) => `${reason}（${count} 条）`).join('；')
-  return `已跳过 ${reasons.length} 条不可提交记录：${detail}。`
-})
-
-function toggleBatchMode(): void {
-  batchMode.value = !batchMode.value
-  batchSelection.value = clearBatchSelection()
-  batchOutcome.value = null
-  batchNotice.value = ''
-}
-
-function toggleRow(trackingId: string): void {
-  batchSelection.value = toggleBatchSelection(batchSelection.value, trackingId)
-}
-
-function selectAllCurrent(): void {
-  batchSelection.value = selectAllBatch(filteredItems.value)
-}
-
-function clearSelection(): void {
-  batchSelection.value = clearBatchSelection()
-}
-
-function titleFor(trackingId: string): string {
-  return items.value.find((item) => item.tracking_id === trackingId)?.title || '未命名番剧'
-}
-
-/**
- * Run one explicitly confirmed batch.
- *
- * Each entry is sent once with its own revision and opaque key. A transport
- * failure keeps the selection untouched and resends nothing; a persisted
- * per-entry result converges the success list and leaves every failed or
- * unresolved row selected for the user's next explicit action.
- */
-const batchModeOpen = ref(false)
-
-/**
- * AC 9: the local pre-check result lives in its own dialog; external success,
- * failure and unknown results stay in the batch result area.
- */
-async function showSkippedPlans(title: string, skipped: readonly SkippedBatchEntry[]): Promise<void> {
-  if (!skipped.length) return
-  await confirmDialog.value?.confirm({
-    title,
-    message: '以下所选方案未通过本地预检，本次不会提交到 Auto Bangumi：',
-    items: skipped.map((entry) => `${entry.title}：${entry.reason}`),
-    itemsLabel: '未提交的方案',
-    confirmLabel: '知道了',
-    cancelLabel: '关闭',
-  })
-}
-
-
-/** Issue #100 AC 1: the entry opens one mode choice for the whole batch. */
-function runBatchSubmit(): void {
-  if (batchPending.value || batchLoading.value) return
-  if (!savedRef.value?.connection_ref) return
-  if (!batchSummary.value.selected) return
-  batchModeOpen.value = true
-}
-
-function chooseBatchSubmissionMode(mode: SubmissionMode): void {
-  const config = savedRef.value
-  if (!config?.connection_ref || batchSubmissionMode.value) return
-  batchSubmissionMode.value = mode
-  batchModeOpen.value = false
-  void performBatchSubmit()
-}
-
-function cancelBatchSubmissionMode(): void {
-  batchModeOpen.value = false
-}
-
-async function performBatchSubmit(): Promise<void> {
-  if (batchPending.value || batchLoading.value) return
-  const config = savedRef.value
-  if (!config?.connection_ref) return
-  if (!batchSummary.value.selected) return
-
-  // One choice, one batch: the mode is spent here so a later batch cannot
-  // silently reuse it.
-  const submissionMode = batchSubmissionMode.value ?? undefined
-  batchSubmissionMode.value = null
-  // AC 5/6/9: the local pre-check result is stated before (and separately from)
-  // any external result, and a fully skipped batch sends nothing at all.
-  const skipped = skippedBatchEntries(batchSelection.value, items.value)
-  const body = buildBatchSubmitBody(
-    batchSelection.value,
-    items.value,
-    {
-      connection_ref: config.connection_ref,
-      configuration_revision: config.configuration_revision,
-    },
-    storageQuery().storage_dir,
-    submissionMode,
-  )
-  if (!body) {
-    // AC 6: a fully skipped batch proves zero Auto Bangumi requests.
-    batchOutcome.value = null
-    batchNotice.value = '没有可提交的方案'
-    void showSkippedPlans('没有可提交的方案', skipped)
-    return
-  }
-  if (skipped.length) {
-    // AC 4: the information dialog never gates the run — the submittable plans
-    // start immediately, with no second confirmation.
-    batchNotice.value = '部分方案未提交'
-    void showSkippedPlans('部分方案未提交', skipped)
-  }
-
-  const sequence = ++batchSequence
-  batchLoading.value = true
-  batchNotice.value = ''
-  batchOutcome.value = null
-  try {
-    const result = await api.post<BatchResult>(TRACKING_BATCH_SUBMIT_ENDPOINT, { body })
-    if (sequence !== batchSequence) return
-    const outcome = projectBatchOutcome(result)
-    batchOutcome.value = outcome
-    batchSelection.value = selectionAfterBatch(batchSelection.value, outcome)
-    const unknown = outcome.unresolved.length
-    batchNotice.value = `本次批量提交：成功 ${outcome.succeeded} 条，失败 ${outcome.failed} 条${unknown ? `，其中 ${unknown} 条结果未知需先恢复` : ''}。`
-    if (outcome.succeeded) {
-      notification.show('success', '批量提交完成', `已在 Auto Bangumi 创建 ${outcome.succeeded} 条外部订阅。`)
-    }
-    await loadList(true)
-  } catch (error) {
-    if (sequence !== batchSequence) return
-    const apiError = toApiError(error)
-    if (apiError.cancelled && !apiError.httpError) return
-    // Nothing was resolved: keep the selection and never resend on our own.
-    batchNotice.value = '批量提交请求未能确认送达，已保留当前选择；请核对连接后重新确认。'
-  } finally {
-    if (sequence === batchSequence) batchLoading.value = false
-  }
-}
-
-/**
- * Route one submit result to its fixed channel (issue #86).
- *
- * A blocking connection/credential/version problem takes over the page as an
- * actionable dialog with a settings deep link; success is a lightweight global
- * notice; every other failure keeps its copy on the affected record, where the
- * recovery controls already live. The server sends only a category code — all
- * user-facing sentences are fixed here.
- */
-async function presentWriteFeedback(session: TrackingWriteSession): Promise<void> {
-  if (session.state === 'ACTIVE') {
-    notification.show('success', '提交成功', '已在 Auto Bangumi 创建外部订阅。')
-    return
-  }
-  const category = session.failureCategory
-  if (!category || WRITE_FAILURE_PRESENTATIONS[category].channel !== 'dialog') return
-  const presentation = WRITE_FAILURE_PRESENTATIONS[category]
-  const openSettings = (await confirmDialog.value?.confirm({
-    title: presentation.title,
-    message: presentation.message,
-    confirmLabel: '前往设置',
-    cancelLabel: '关闭',
-  })) ?? false
-  if (openSettings) await router.push(routeLocation('settings'))
-}
-
-/**
- * Run one explicit submit-family external write (US-310, US-311).
- *
- * ``SUBMIT`` and ``RETRY`` share this single path: the endpoint, the impact
- * confirmation and the result projection are all bound to the server-computed
- * action code, so a retry can never be sent with submit copy (or the reverse).
- */
-async function runTrackingWrite(payload: { action: TrackingAction; item: TrackingItem }): Promise<void> {
-  const trackingId = payload.item.tracking_id
-  // A confirmation is already open, or an external write/recovery is already
-  // running: one page-level intent at a time, and no second dialog can displace
-  // the first (D38-09.4: an active recovery blocks submit/retry).
-  if (writePending.value || writeLoading.value || recoveryPending.value || recoveryLoading.value
-    || managementPending.value || managementLoading.value) return
-  if (writeReplayBlocked.value) {
-    blockReplay(trackingId)
-    return
-  }
-  // Issue #86: a saved Auto Bangumi connection is all an external write needs.
-  // The server re-validates the connection, credentials, exact version and write
-  // capability inside the same request and fails closed, so a settings-page
-  // probe is never a precondition for submitting.
-  if (!savedRef.value) return
-  const sameItemRecovery = recoverySession.value?.trackingId === trackingId
-    && recoverySessionKeepsLock(recoverySession.value.state)
-  const sameItemManagement = managementSession.value?.trackingId === trackingId
-    && managementSessionKeepsIntent(managementSession.value)
-  if (sameItemRecovery || sameItemManagement) {
-    blockIntent(trackingId)
-    return
-  }
-  // Any *other* record still holding the page's single unresolved intent refuses
-  // this request — with a stated next step instead of a silent no-op.
-  if (otherItemIntentOwner(trackingId)) {
-    blockIntent(trackingId)
-    return
-  }
-  const requested = payload.action.code
-  // Only the submit-family actions this page can actually send are accepted;
-  // every other server action waits for its own story.
-  if (!isWriteActionCode(requested)) return
-  // A locked intent still owns the single opaque key for this item. Replaying it
-  // under a different action would send something the user did not ask for, and
-  // minting a new key while the external result is unresolved could create a
-  // second subscription — so a mismatching action does nothing but explain why.
-  const locked = writeIntent && writeSession.value?.trackingId === trackingId ? writeIntent : null
-  if (locked && locked.action !== requested) {
-    blockIntent(trackingId)
-    return
-  }
-  // Issue #98 AC 2: the entry only opens the mode choice.
-  if (isSubmissionChoiceAction(requested) && submissionMode.value === null) {
-    submitModePending.value = payload
-    submitModeOpen.value = true
-    return
-  }
-  const action: TrackingWriteActionCode = requested
-
-  // The user is now replaying the one locked request (or starting a fresh one
-  // once nothing is pending): the refusal notice has served its purpose.
-  blockedIntentNotice.value = null
-  writePending.value = true
-  // Choosing the submission mode is the impact confirmation for SUBMIT/RETRY;
-  // every other write action keeps the shared confirm dialog.
-  let confirmed = submissionMode.value !== null
-  try {
-    if (!confirmed) {
-      confirmed = (await confirmDialog.value?.confirm({
-        ...WRITE_ACTION_CONFIRMATIONS[action], cancelLabel: '取消',
-      })) ?? false
-    }
-  } finally {
-    writePending.value = false
-  }
-  // Cancelling the impact confirmation sends zero requests.
-  if (!confirmed || !savedRef.value) return
-
-  // One opaque key per confirmation.  Only an indeterminate earlier result keeps
-  // its locked intent, so a transport retry reuses the very same key (and the
-  // very same revision binding) instead of risking a second external
-  // subscription; a definite failure always mints a fresh one.  Issue #86: the
-  // saved connection is enough to submit — the server performs the authoritative
-  // connection/authentication/version/capability check in the same request.
-  const intent = locked ?? createTrackingActionIntent(payload.item, payload.action)
-  if (!intent) return
-  const requestConfig = locked ? writeConfigSnapshot : savedRef.value
-  if (!requestConfig) {
-    blockReplay(trackingId)
-    return
-  }
-  writeIntent = intent
-  // Captured before the request: the settle watch clears the ref, and the
-  // result copy still needs to know which mode this attempt used (issue #101).
-  const requestedMode = submissionMode.value
-  if (!locked) writeConfigSnapshot = { ...requestConfig }
-  const sequence = ++writeSequence
-  const controller = new AbortController()
-  writeController?.abort()
-  writeController = controller
-  writeLoading.value = true
-  writeSession.value = createWriteSession(trackingId, action, 'IN_FLIGHT')
-  try {
-    const storageDir = storageQuery().storage_dir
-    const body: TrackingWriteBody = {
-      expected_revision: intent.expectedRevision,
-      idempotency_key: intent.idempotencyKey,
-      confirm: true,
-      ...(submissionMode.value ? { submission_mode: submissionMode.value } : {}),
-      connection_ref: requestConfig.connection_ref!,
-      configuration_revision: requestConfig.configuration_revision,
-      ...(storageDir ? { storage_dir: storageDir } : {}),
-    }
-    const result = await api.post<TrackingWriteResult>(WRITE_ACTION_ENDPOINTS[action], {
-      path: { tracking_id: trackingId }, body, signal: controller.signal,
-    })
-    if (sequence !== writeSequence) return
-    // The returned tracking converges the list row without a second list read.
-    closeSubmissionModeChoice()
-    applyReturnedTracking(result.tracking)
-    const session = projectWriteOutcome(trackingId, action, result, requestedMode)
-    writeSession.value = session
-    if (!writeSessionKeepsIntent(session.state)) writeIntent = null
-    // Issue #183: a submit whose result is still unproven owes one automatic
-    // bounded read-only check, which is exactly what the submit area then shows.
-    else autoCheckArmed.value = true
-    await recheckAfterAction(trackingId)
-    await presentWriteFeedback(session)
-  } catch (error) {
-    if (sequence !== writeSequence) return
-    const apiError = toApiError(error)
-    if (apiError.cancelled && !apiError.httpError) return
-    if (apiError.status === 409) {
-      // Every documented 409 (revision / idempotency / state / in-flight) is
-      // raised before the external boundary, so nothing was submitted. The
-      // locked intent is spent, the error body carries no authoritative
-      // tracking, so re-read both and require a new explicit confirmation —
-      // nothing is ever resent on the user's behalf.
-      writeIntent = null
-      writeSession.value = createWriteConflictSession(trackingId, action, apiError.type)
-      await recheckAfterAction(trackingId, true)
-      return
-    }
-    if (isDefiniteWriteRejection(apiError)) {
-      // D38-08.5: a documented JSON 400/404 is a definite refusal raised before
-      // the external boundary — Auto Bangumi was never written. This is *not*
-      // "结果未知": the intent is released (so the page-level write lock no
-      // longer blocks other items, and the next confirmation mints a fresh key)
-      // and the page only reads the latest state back. Nothing is ever resent.
-      writeIntent = null
-      writeSession.value = createWriteSession(trackingId, action, 'REJECTED')
-      await recheckAfterAction(trackingId, true)
-      return
-    }
-    // Network, timeout, non-JSON, 5xx — anything we cannot read as a definite
-    // outcome: the external result is unknown. Keeping the locked intent can
-    // never duplicate a subscription, so this path fails closed and only reads
-    // back; it never mints a new key and never resends by itself.
-    writeSession.value = createWriteSession(trackingId, action, 'UNKNOWN')
-    await recheckAfterAction(trackingId, true)
-  } finally {
-    if (sequence === writeSequence) {
-      writeLoading.value = false
-      if (writeController === controller) writeController = null
-    }
-  }
-}
-
-/**
- * Run one explicit unknown-result recovery (US-312).
- *
- * ``RECOVER_AUTO`` is pure local: no credential, no confirmation, no external
- * call.  ``MARK_SUCCEEDED``/``MARK_FAILED`` are the user's manual conclusion and
- * are always confirmed a second time (the dialog defaults to cancel and states
- * that the user must have checked Auto Bangumi first).  ``VERIFY_EXTERNAL`` is
- * the read-only external check: it uses the saved connection generation
- * for one verification of the record's own operation and can never create an
- * external write.  Every path converges on the returned tracking and never
- * resends by itself.
- */
-async function runTrackingRecovery(
-  payload: { action: TrackingRecoveryActionCode; item: TrackingItem },
-): Promise<void> {
-  // One page-level intent at a time: a confirmation is open, or a write or
-  // recovery is already running, or another item still owns the locked intent.
-  if (recoveryPending.value || recoveryLoading.value || writePending.value || writeLoading.value
-    || managementPending.value || managementLoading.value) return
-  const requested = payload.action
-  if (!isRecoveryActionCode(requested)) return
-  const trackingId = payload.item.tracking_id
-  // Another record's unresolved write or recovery keeps the page's single
-  // intent, so this recovery is refused before it can race it (D38-09.4) — and
-  // the reason is stated rather than swallowed.
-  if (otherItemIntentOwner(trackingId)) {
-    blockIntent(trackingId)
-    return
-  }
-  // This record's own next step is legitimate: drop the earlier refusal notice.
-  blockedIntentNotice.value = null
-  const confirmation = recoveryConfirmation(requested)
-  if (confirmation) {
-    recoveryPending.value = true
-    let confirmed = false
-    try {
-      confirmed = (await confirmDialog.value?.confirm({ ...confirmation, cancelLabel: '取消' })) ?? false
-    } finally {
-      recoveryPending.value = false
-    }
-    // Cancelling the recovery confirmation sends zero requests.
-    if (!confirmed) return
-  }
-  // Read the live session *after* the confirmation: a session cleared while the
-  // dialog was open must not be used (and the local actions never need one).
-  const intent = createTrackingRecoveryIntent(payload.item, requested, savedState.value?.capabilities ?? null)
-  if (!intent) return
-  const body = createTrackingRecoverBody(
-    intent.action, intent.expectedRevision, savedState.value, storageQuery().storage_dir,
-  )
-  // A body the page cannot build safely (external verification without the live
-  // session) is not sent at all.
-  if (!body) return
-
-  const sequence = ++recoverySequence
-  const controller = new AbortController()
-  recoveryController?.abort()
-  recoveryController = controller
-  recoveryLoading.value = true
-  recoverySession.value = createRecoverySession(trackingId, intent.action, 'IN_FLIGHT')
-  try {
-    const result = await api.post<TrackingRecoverResult>(TRACKING_RECOVER_ENDPOINT, {
-      path: { tracking_id: trackingId }, body, signal: controller.signal,
-    })
-    if (sequence !== recoverySequence) return
-    // The returned tracking converges the list row; the detail is re-read so the
-    // inspector shows the recovered status and its next legitimate action.
-    applyReturnedTracking(result.tracking)
-    recoverySession.value = projectRecoveryOutcome(trackingId, intent.action, result)
-    if (recoverySession.value.state === 'ACTIVE' || recoverySession.value.state === 'SUBMIT_FAILED') {
-      releaseSourceIntentLocks(trackingId)
-    }
-    await recheckAfterAction(trackingId)
-  } catch (error) {
-    if (sequence !== recoverySequence) return
-    const apiError = toApiError(error)
-    if (apiError.cancelled && !apiError.httpError) return
-    if (apiError.status === 409) {
-      // Revision/state conflict: the recovery was refused before anything was
-      // persisted, so re-read the server state and let the user confirm again.
-      recoverySession.value = createRecoveryConflictSession(trackingId, intent.action)
-      await recheckAfterAction(trackingId, true)
-      return
-    }
-    if (isDefiniteWriteRejection(apiError)) {
-      // A documented JSON 400/404 is decided before any state change.
-      recoverySession.value = createRecoverySession(trackingId, intent.action, 'REJECTED')
-      await recheckAfterAction(trackingId, true)
-      return
-    }
-    // Anything unreadable stays indeterminate: read back, keep the recovery
-    // state and never resend on the user's behalf.
-    recoverySession.value = createRecoverySession(trackingId, intent.action, 'UNKNOWN')
-    await recheckAfterAction(trackingId, true)
-  } finally {
-    if (sequence === recoverySequence) {
-      recoveryLoading.value = false
-      if (recoveryController === controller) recoveryController = null
-    }
-  }
-}
-
-/**
- * Run one explicit external management write (US-313, US-314).
- *
- * ``MODIFY``, ``SET_ENABLED`` and ``REFRESH_RSS`` share this single path.  It
- * reuses everything the submit family already guarantees: the live page
- * credential, the latest revision, an impact confirmation, one opaque key per
- * confirmation, the single page-level intent, the returned-tracking convergence
- * and a read-only read-back — never an automatic resend.  The endpoint, the
- * request body and the confirmation copy are all bound to the validated intent,
- * so an action can never send another action's request or copy.
- */
-async function runTrackingManagement(payload: {
-  action: TrackingAction
-  item: TrackingItem
-  targetScope: TrackingManagementScope
-  patch: unknown
-  /** Issue #91: local plan values raised with a confirmed subscription modify. */
-  localPlan?: unknown
-}): Promise<void> {
-  const trackingId = payload.item.tracking_id
-  if (managementPending.value || managementLoading.value || writePending.value || writeLoading.value
-    || recoveryPending.value || recoveryLoading.value) return
-  if (managementReplayBlocked.value) {
-    blockReplay(trackingId)
-    return
-  }
-  // Issue #89: a saved Auto Bangumi connection is all an external management
-  // write needs. The server re-validates connection, credentials, exact version
-  // and write capability in the same request and fails closed.
-  if (!savedRef.value) return
-  const requested = payload.action.code
-  // Only the management actions this page can actually send are accepted;
-  // DELETE_EXTERNAL waits for its own story and still sends zero requests.
-  if (!isSendableManagementActionCode(requested)) return
-  const action = requested
-  const targetScope = payload.targetScope
-  if (!isTrackingManagementScope(targetScope)) return
-  const sameItemWrite = writeSession.value?.trackingId === trackingId
-    && writeSessionKeepsIntent(writeSession.value.state)
-  const sameItemRecovery = recoverySession.value?.trackingId === trackingId
-    && recoverySessionKeepsLock(recoverySession.value.state)
-  if (sameItemWrite || sameItemRecovery) {
-    blockIntent(trackingId)
-    return
-  }
-  // Any other record still holding the page's single unresolved intent refuses
-  // this management request — with a stated reason, not a silent no-op.
-  if (otherItemIntentOwner(trackingId)) {
-    blockIntent(trackingId)
-    return
-  }
-
-  // The page re-validates the emitted request against the current server
-  // projection: the action and scope must still be offered for this revision,
-  // the patch must belong to the chosen scope and the enable direction must
-  // still be the one the record's own status implies. The server validates the
-  // connection, credentials, version and write capability itself (issue #89).
-  const projectedIntent = createTrackingManagementActionIntent(
-    payload.item, action, targetScope, payload.patch, payload.localPlan,
-  )
-  if (!projectedIntent) return
-  // A locked intent still owns the single opaque key *and* the request it was
-  // confirmed with. Replaying it for a different scope, patch or direction
-  // would send something the user did not ask for, and minting a new key while
-  // the external result is unresolved could apply the change twice — so a
-  // mismatching request is not sent, and the fixed next step is shown.
-  const locked = managementIntent && managementSession.value?.trackingId === trackingId ? managementIntent : null
-  if (locked && !sameManagementRequest(locked, projectedIntent)) {
-    blockIntent(trackingId)
-    return
-  }
-  const intent = locked ?? projectedIntent
-
-  // The user is replaying the one locked request (or starting a fresh one):
-  // the refusal notice has served its purpose.
-  blockedIntentNotice.value = null
-  managementPending.value = true
-  let confirmed = false
-  try {
-    confirmed = (await confirmDialog.value?.confirm({
-      ...managementConfirmation(intent), cancelLabel: '取消',
-    })) ?? false
-  } finally {
-    managementPending.value = false
-  }
-  // Cancelling the impact confirmation sends zero requests.
-  if (!confirmed || !savedRef.value) return
-
-  const requestConfig = locked ? managementConfigSnapshot : savedRef.value
-  if (!requestConfig) {
-    blockReplay(trackingId)
-    return
-  }
-  managementIntent = intent
-  if (!locked) managementConfigSnapshot = { ...requestConfig }
-  // A body the page cannot build safely (no server address, missing scope
-  // patch, no known enable direction) is refused here, before any in-flight
-  // session exists: it sends zero requests and converges on a definite failure
-  // instead of leaving the panel stuck on "正在提交外部修改，请稍候…".
-  const body = createTrackingManagementBody(intent, requestConfig, storageQuery().storage_dir)
-  if (!body) {
-    managementIntent = null
-    managementSession.value = createManagementUnbuildableSession(trackingId, action, targetScope)
-    await recheckAfterAction(trackingId, true)
-    return
-  }
-  const sequence = ++managementSequence
-  const controller = new AbortController()
-  managementController?.abort()
-  managementController = controller
-  managementLoading.value = true
-  managementSession.value = createManagementInFlightSession(trackingId, action, targetScope)
-  try {
-    const result = await api.post<TrackingManagementResult>(MANAGEMENT_ACTION_ENDPOINTS[intent.action], {
-      path: { tracking_id: trackingId }, body, signal: controller.signal,
-    })
-    if (sequence !== managementSequence) return
-    // The returned tracking converges the list row without a second list read.
-    applyReturnedTracking(result.tracking)
-    const session = projectManagementOutcome(trackingId, intent.action, targetScope, result)
-    managementSession.value = session
-    if (!managementSessionKeepsIntent(session)) managementIntent = null
-    await recheckAfterAction(trackingId)
-  } catch (error) {
-    if (sequence !== managementSequence) return
-    const apiError = toApiError(error)
-    if (apiError.cancelled && !apiError.httpError) return
-    if (apiError.status === 409) {
-      // Every documented management 409 is raised while the operation is being
-      // prepared, i.e. before the external boundary: nothing was submitted. The
-      // locked intent is spent, the error body carries no authoritative
-      // tracking, so re-read both and require a new explicit confirmation —
-      // nothing is ever resent on the user's behalf.
-      managementIntent = null
-      managementSession.value = createManagementConflictSession(trackingId, action, targetScope, apiError.type)
-      await recheckAfterAction(trackingId, true)
-      return
-    }
-    if (isDefiniteWriteRejection(apiError)) {
-      // A structured non-409 4xx is a definite refusal raised before the
-      // external boundary, so Auto Bangumi was never touched. The intent is
-      // released (other items are no longer blocked and the next confirmation
-      // mints a fresh key) and the page only reads the latest state back.
-      managementIntent = null
-      managementSession.value = createManagementRejectedSession(trackingId, action, targetScope)
-      await recheckAfterAction(trackingId, true)
-      return
-    }
-    // Network, timeout, non-JSON, 5xx — anything we cannot read as a definite
-    // verdict: the external result is unknown. Keeping the locked intent can
-    // never apply the change twice, so this path fails closed and only reads
-    // back; it never mints a new key and never resends by itself.
-    managementSession.value = createManagementSession(trackingId, action, targetScope, 'UNKNOWN', true)
-    await recheckAfterAction(trackingId, true)
-  } finally {
-    if (sequence === managementSequence) {
-      managementLoading.value = false
-      if (managementController === controller) managementController = null
-    }
+    await runWriteEffects(writes.failPlanDelete(apiError))
   }
 }
 
@@ -1487,21 +875,12 @@ watch(selectedTrackingId, (trackingId) => {
   // Reopening/refreshing an item owes it one automatic bounded check; the
   // inspector decides from the server's status + operation kind whether it is a
   // 结果待确认 submission, and the page consumes the flag here.
-  autoCheckArmed.value = Boolean(trackingId)
+  writes.setAutoCheck(Boolean(trackingId))
   if (trackingId) void focusSelection()
 }, { flush: 'post' })
-// A refusal notice only explains a still-pending intent: once every write,
-// recovery and management lock is released (a definite result, a 409, a 4xx
-// refusal, a manual recovery verdict or a cleared connection) it must disappear.
-watch([writeSession, recoverySession, managementSession], () => {
-  if (blockedIntentNotice.value && !hasPendingIntentLock()) blockedIntentNotice.value = null
-})
 onBeforeUnmount(() => {
   cancelSync()
-  resetWrite()
-  resetRecovery()
-  resetCheck()
-  resetManagement()
+  resetSession()
   savedState.value = null
 })
 </script>
@@ -1561,7 +940,7 @@ onBeforeUnmount(() => {
           </span>
           <BaseButton id="tracking-batch-select-all" variant="secondary" @click="selectAllCurrent">全选当前结果</BaseButton>
           <BaseButton id="tracking-batch-clear" variant="secondary" :disabled="!batchSummary.selected" @click="clearSelection">清除选择</BaseButton>
-          <BaseButton id="tracking-batch-submit" :loading="batchLoading" :disabled="batchLoading || batchPending || !batchSummary.selected || !savedRef" @click="runBatchSubmit">
+          <BaseButton id="tracking-batch-submit" :loading="batchLoading" :disabled="batchLoading || !batchSummary.selected || !savedRef" @click="runBatchSubmit">
             提交选中方案
           </BaseButton>
           <!-- Issue 116：缺少已保存连接时批量提交可见但禁用，并就地说明下一步。 -->
@@ -1578,7 +957,7 @@ onBeforeUnmount(() => {
               v-if="batchMode"
               type="checkbox"
               class="base-checkbox tracking-list-checkbox"
-              :checked="isBatchSelected(batchSelection, item.tracking_id)"
+              :checked="isBatchSelected(item.tracking_id)"
               :disabled="Boolean(batchSkipReason(item))"
               :aria-label="`选择提交 ${item.title || '未命名番剧'}`"
               @click.stop
@@ -1611,11 +990,9 @@ onBeforeUnmount(() => {
           :tracking-id="selectedItem.tracking_id"
           :capabilities="savedState?.capabilities ?? null"
           :connection-ready="Boolean(savedRef)"
-          :write-session="writeSession"
-          :recovery-session="recoverySession"
+          :sessions="writeSessions"
           :check-session="checkSession"
           :auto-check-armed="autoCheckArmed"
-          :management-session="managementSession"
           :write-busy="inspectorIntentBusy"
           :intent-notice="selectedIntentNotice"
           :plan-delete-session="planDeleteSession"
@@ -1670,14 +1047,14 @@ onBeforeUnmount(() => {
     <TrackingSubmissionModeDialog
       :open="batchModeOpen"
       :batch-count="batchSummary.selected"
-      :busy="batchLoading || batchPending"
+      :busy="batchLoading"
       @choose="chooseBatchSubmissionMode"
       @cancel="cancelBatchSubmissionMode"
     />
     <TrackingSubmissionModeDialog
       :open="submitModeOpen"
       :pending-mode="submissionMode"
-      :busy="writeLoading || writePending || recoveryLoading || managementLoading"
+      :busy="writeLoading || writePending"
       @choose="chooseSubmissionMode"
       @cancel="cancelSubmissionMode"
     />
