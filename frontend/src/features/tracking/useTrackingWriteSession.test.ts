@@ -314,6 +314,29 @@ describe('tracking submit-family write session (US-310, US-311)', () => {
     }
   })
 
+  it('maps every generated retry outcome exactly like a submit outcome', () => {
+    // #168 复审：基点 trackingProjection.test.ts 的同名用例在改写时丢失，这里按
+    // SUBMIT 的同一张文案表补回「每个 RETRY outcome → state/文案/操作种类」的断言。
+    const retryAction = { code: 'RETRY' as const, label: '重试提交', style: 'SECONDARY' as const }
+    for (const outcome of SUBMIT_OUTCOMES) {
+      const { writes, started } = inFlightSubmit({ action: retryAction })
+      expect(writes.sessions.value.submit!.message).toBe(SUBMIT_MESSAGES.IN_FLIGHT)
+      const effects = writes.finishSubmit(submitResult({ outcome }))
+      const settled = writes.sessions.value.submit!
+      expect(settled.state).toBe(outcome)
+      expect(settled.message).toBe(SUBMIT_MESSAGES[outcome])
+      expect(settled.operation).toBe('RETRY')
+      expect(settled.message).not.toContain(outcome)
+      expect(bodyOf(started).expected_revision).toBe(3)
+      expect(effects).toContainEqual({ kind: 'recheck', trackingId: 'tracking-1', refreshList: false })
+    }
+    const unknown = inFlightSubmit({ action: retryAction })
+    unknown.writes.finishSubmit(submitResult({ outcome: 'SOMETHING_NEW' }))
+    expect(unknown.writes.sessions.value.submit!.state).toBe('UNKNOWN')
+    expect(unknown.writes.sessions.value.submit!.message).toBe(SUBMIT_MESSAGES.UNKNOWN)
+    expect(unknown.writes.sessions.value.submit!.message).not.toContain('SOMETHING_NEW')
+  })
+
   it('fails closed to an unknown result when the outcome is not documented', () => {
     const { writes } = inFlightSubmit()
     writes.finishSubmit(submitResult({ outcome: 'SOMETHING_NEW' }))
@@ -1196,6 +1219,11 @@ describe('tracking management write session (US-313, US-314, US-315)', () => {
     expect(ok.message).toContain('已应用本次修改')
     expect(ok.message).not.toContain('SUCCEEDED')
     expect(ok.message).not.toContain('管理操作已完成')
+
+    // #168 复审：服务端的 needs_manual 标志不能把一个已决判定翻成「待人工」。
+    const flagged = beginManagementWrite()
+    flagged.writes.finishManagement(modifyResult({ management_status: 'SUCCEEDED', needs_manual: true }))
+    expect(flagged.writes.sessions.value.management!).toMatchObject({ state: 'SUCCEEDED', needsManual: false })
 
     const failed = beginManagementWrite({ targetScope: 'ASSOCIATED_RSS', patch: { name: 'x' } })
     failed.writes.finishManagement(modifyResult({
