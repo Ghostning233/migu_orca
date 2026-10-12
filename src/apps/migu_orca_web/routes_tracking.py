@@ -31,6 +31,7 @@ from apps.migu_orca_web.schemas import (
     TrackingModifyPayload,
     TrackingRecoverPayload,
     TrackingRefreshRssPayload,
+    TrackingResubmitPayload,
     TrackingRevalidatePayload,
     TrackingSetEnabledPayload,
     TrackingSyncPayload,
@@ -43,6 +44,7 @@ from apps.migu_orca_web.tracking_read_service import (
     build_tracking_detail,
     list_tracking_items,
 )
+from apps.migu_orca_web.tracking_resubmit_service import run_saved_tracking_resubmit
 from apps.migu_orca_web.tracking_revalidate_service import run_tracking_revalidate
 from apps.migu_orca_web.tracking_saved_management_service import run_saved_tracking_management
 from apps.migu_orca_web.tracking_saved_recovery_service import run_saved_tracking_recovery
@@ -292,6 +294,38 @@ class TrackingItemCheckView(PostView):
 
 @class_route(
     api_blueprint,
+    "/api/v1/tracking/items/<path:tracking_id>/resubmit",
+    methods=["POST"],
+)
+class TrackingItemResubmitView(PostView):
+    """Offer (read-only) or perform one risk-confirmed manual resubmit (#184).
+
+    ``confirm=false`` runs the same bounded read-only confirmation as ``check``
+    through the Auto Bangumi instance the pending operation was bound to. A
+    proven subscription converges the record with **zero external writes**; an
+    unresolved one publishes its proven reason, the duplicate/resource risk and
+    the exact binding (revision + pending operation + connection generation).
+
+    ``confirm=true`` is the user's explicit acceptance of that risk. A stale or
+    rebound confirmation is refused with 409 before anything is read or written;
+    the server re-checks once, converges if the subscription became provable, and
+    otherwise creates exactly one new operation traceable to the pending one and
+    runs the existing reliable submit sequence once. Every pre-boundary refusal
+    and persisted business outcome is HTTP 200.
+    """
+
+    request_validator_model = None
+
+    def save(self) -> dict[str, object]:
+        body = request.get_json(silent=True) or {}
+        payload = TrackingResubmitPayload.model_validate(
+            {**body, "tracking_id": request.view_args["tracking_id"]}
+        )
+        return run_saved_tracking_resubmit(payload)
+
+
+@class_route(
+    api_blueprint,
     "/api/v1/tracking/items/<path:tracking_id>/recover",
     methods=["POST"],
 )
@@ -402,6 +436,7 @@ __all__ = [
     "TrackingItemModifyView",
     "TrackingItemRefreshView",
     "TrackingItemRecoverView",
+    "TrackingItemResubmitView",
     "TrackingItemRetryView",
     "TrackingItemRevalidateView",
     "TrackingItemSubmitView",

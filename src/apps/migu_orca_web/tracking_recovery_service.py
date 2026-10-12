@@ -39,7 +39,6 @@ from ab_engine.controllers.ab_management_client import Legacy31ManagementClient
 from ab_engine.controllers.reconcile import ReconcileDecision, normalize_match_text
 from ab_engine.models.management import ExternalSubscription
 from apps.migu_orca_web.save_confirm_service import compute_request_fingerprint
-from apps.migu_orca_web.serializers import serialize_request_safe_info
 from apps.migu_orca_web.tracking_external_check import (
     DEFAULT_CHECK_POLICY,
     CheckPolicy,
@@ -49,6 +48,7 @@ from apps.migu_orca_web.tracking_external_check import (
 from apps.migu_orca_web.tracking_management_service import recover_tracking_management
 from apps.migu_orca_web.tracking_migration_service import run_tracking_migration
 from apps.migu_orca_web.tracking_serializers import (
+    safe_valid_resource_count,
     tracking_available_actions,
     tracking_summary_fields,
 )
@@ -842,12 +842,7 @@ def _recover_result_payload(
     verification_reason: str | None = None,
 ) -> dict[str, Any]:
     """Build the safe §11.8 recover result (HTTP 200 business result)."""
-    valid_count = 0
-    if isinstance(request, dict):
-        resources = serialize_request_safe_info(request, storage_profile=None).get("resources")
-        if isinstance(resources, dict):
-            count = resources.get("valid_resource_count")
-            valid_count = count if isinstance(count, int) and count >= 0 else 0
+    valid_count = safe_valid_resource_count(request)
     return {
         "tracking_id": record.tracking_id,
         "action": action,

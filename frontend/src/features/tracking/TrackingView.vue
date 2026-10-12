@@ -29,12 +29,15 @@ import {
   sortTrackingItems,
   TRACKING_OVERVIEW_GROUPS,
   TRACKING_STATUS_GROUPS,
+  resubmitRiskMessage,
   type TrackingAction,
   type TrackingCheckResult,
   type TrackingItem,
   type TrackingListSummary,
   type TrackingManagementScope,
   type TrackingOverviewGroup,
+  type TrackingResubmitBinding,
+  type TrackingResubmitResult,
   type TrackingStatusGroup,
 } from './trackingProjection'
 import {
@@ -128,6 +131,12 @@ let writeController: AbortController | null = null
  * so the page only owns its transport sequence and abort controller.
  */
 const checkSession = writes.check
+/**
+ * Issue #184: the risk-confirmed resubmission's own read-only slot, plus the
+ * page's dialog-open flag (the module refuses a second command while it is set).
+ */
+const resubmitSession = writes.resubmit
+const resubmitPending = writes.pending
 const autoCheckArmed = writes.autoCheckArmed
 let checkSequence = 0
 let checkController: AbortController | null = null
@@ -497,8 +506,91 @@ async function runWriteEffects(effects: readonly TrackingWriteEffect[]): Promise
       await recheckAfterAction(effect.trackingId, effect.refreshList)
       continue
     }
+    if (effect.kind === 'confirmResubmitRisk') {
+      await confirmResubmitRisk(effect.trackingId, effect.binding)
+      continue
+    }
     await presentFeedback(effect.feedback)
   }
+}
+
+/**
+ * Ask for the one explicit acceptance of a resubmission's duplicate/resource
+ * risk (issue #184) and then send the confirmation the server offered.
+ *
+ * Cancelling sends nothing at all: no new operation, no external write. The
+ * dialog copy comes from the module's fixed Chinese risk table, never from an
+ * upstream response.
+ */
+async function confirmResubmitRisk(
+  trackingId: string,
+  binding: TrackingResubmitBinding,
+): Promise<void> {
+  const offer = writes.resubmit.value
+  if (!offer || offer.trackingId !== trackingId) return
+  writes.setPending(true)
+  let confirmed = false
+  try {
+    confirmed = (await confirmDialog.value?.confirm({
+      title: '重新提交到 Auto Bangumi？',
+      message: resubmitRiskMessage(offer.reason),
+      itemsLabel: '风险说明',
+      items: [
+        '原提交结果尚未确认：Auto Bangumi 可能已经创建了该订阅并开始处理资源。',
+        '重新提交会以新操作再次创建订阅；MiGuOrca 无法去重，也不会改写或删除原提交记录。',
+      ],
+      confirmLabel: '确认重新提交',
+      cancelLabel: '取消',
+    })) ?? false
+  } finally {
+    writes.setPending(false)
+  }
+  if (!confirmed) {
+    writes.cancelResubmit(trackingId)
+    return
+  }
+  const started = writes.beginResubmitConfirmation(binding, {
+    storageDir: storageQuery().storage_dir,
+  })
+  if (!started.accepted || !started.request) {
+    await runWriteEffects(started.effects)
+    return
+  }
+  await runSessionTransport<TrackingResubmitResult>({
+    request: started.request,
+    settle: (result) => writes.finishSubmit(result),
+    fail: (error) => writes.failSubmit(error),
+  })
+}
+
+/**
+ * Run one risk-confirmed single manual resubmission (issue #184).
+ *
+ * The module owns the phase decision: the first call is the bounded read-only
+ * check (a proven subscription converges with zero external writes), while an
+ * unresolved earlier confirmation of the same item replays its exact body — so
+ * one confirmation can never create a second operation. The page only owns the
+ * transport, the effects and the risk dialog.
+ */
+async function runTrackingResubmit(payload: { item: TrackingItem }): Promise<void> {
+  const started = writes.beginResubmit(payload, { storageDir: storageQuery().storage_dir })
+  if (!started.accepted || !started.request) {
+    await runWriteEffects(started.effects)
+    return
+  }
+  if (started.resubmitPhase === 'CONFIRMATION') {
+    await runSessionTransport<TrackingResubmitResult>({
+      request: started.request,
+      settle: (result) => writes.finishSubmit(result),
+      fail: (error) => writes.failSubmit(error),
+    })
+    return
+  }
+  await runSessionTransport<TrackingResubmitResult>({
+    request: started.request,
+    settle: (result) => writes.finishResubmitOffer(result),
+    fail: (error) => writes.failResubmitOffer(error),
+  })
 }
 
 // -- explicit batch submit (issue #87) --------------------------------------
@@ -992,6 +1084,8 @@ onBeforeUnmount(() => {
           :connection-ready="Boolean(savedRef)"
           :sessions="writeSessions"
           :check-session="checkSession"
+          :resubmit-session="resubmitSession"
+          :resubmit-pending="resubmitPending"
           :auto-check-armed="autoCheckArmed"
           :write-busy="inspectorIntentBusy"
           :intent-notice="selectedIntentNotice"
@@ -1002,6 +1096,7 @@ onBeforeUnmount(() => {
           @write-requested="runTrackingWrite"
           @recovery-requested="runTrackingRecovery"
           @check-requested="runTrackingCheck"
+          @resubmit-requested="runTrackingResubmit"
           @management-requested="runTrackingManagement"
         />
         <template v-else>

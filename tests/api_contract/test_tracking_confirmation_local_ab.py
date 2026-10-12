@@ -43,6 +43,12 @@ class _AbState:
 
     def __init__(self) -> None:
         self.mode = "match"          # match | empty | drop_list | auth_fail_list
+        self.version = "3.1.18"      # issue #184: a test may pin another version
+        #: Issue #184: when set, the subscription only becomes visible once this
+        #: many subscribe writes happened ("eventually visible"), so one test can
+        #: hold a pending submit, refuse the resubmit offer, and still let the
+        #: second write be confirmed. ``None`` keeps the #183 behavior.
+        self.visible_after_writes: int | None = None
         self.drop_write = False      # accept the write, then answer nothing
         self.rss_url: str | None = None
         self.subscribe_bodies: list[dict[str, Any]] = []
@@ -59,8 +65,16 @@ class _AbState:
             return len(self.subscribe_bodies), self.list_requests
 
 
+def _visible(state: _AbState) -> bool:
+    if not state.rss_url:
+        return False
+    if state.visible_after_writes is not None:
+        return len(state.subscribe_bodies) >= state.visible_after_writes
+    return state.mode == "match"
+
+
 def _subscriptions(state: _AbState) -> list[dict[str, Any]]:
-    if state.mode != "match" or not state.rss_url:
+    if not _visible(state):
         return []
     return [{
         "id": 42, "official_title": "葬送的芙莉莲", "title_raw": "Frieren",
@@ -70,7 +84,7 @@ def _subscriptions(state: _AbState) -> list[dict[str, Any]]:
 
 
 def _rss_items(state: _AbState) -> list[dict[str, Any]]:
-    if state.mode != "match" or not state.rss_url:
+    if not _visible(state):
         return []
     return [{
         "id": 7, "name": "RSS", "url": state.rss_url,
@@ -126,7 +140,7 @@ class _Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         self.state.record(f"GET {path}")
         if path == "/api/v1/status":
-            return self._reply(200, {"version": "3.1.18"})
+            return self._reply(200, {"version": self.state.version})
         if path in ("/api/v1/bangumi/get/all", "/api/v1/rss"):
             with self.state._lock:
                 self.state.list_requests += 1

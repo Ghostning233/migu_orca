@@ -509,3 +509,49 @@ def test_submission_mode_round_trips_and_defaults_for_old_versions() -> None:
             submission_mode="SOMETHING_ELSE",
             now=NOW,
         )
+
+
+def test_resubmit_operation_records_its_previous_operation_round_trip() -> None:
+    """Issue #184 AC 5: a risk-confirmed resubmit must be traceable to the
+    operation it replaces, without changing the frozen v4 binding fields."""
+    previous = _operation()
+    resubmit = create_tracking_operation(
+        tracking_id=TRACKING_ID,
+        idempotency_key="resubmit-key-a1",
+        expected_revision=6,
+        request_fingerprint=FINGERPRINT,
+        previous_operation_id=previous.operation_id,
+        now=NOW,
+    )
+
+    assert resubmit.previous_operation_id == previous.operation_id
+    assert resubmit.operation_id != previous.operation_id
+    payload = operation_to_storage_dict(resubmit)
+    assert payload["previous_operation_id"] == previous.operation_id
+    assert operation_from_storage_dict(payload) == resubmit
+
+    # An ordinary operation stays byte-compatible: the field is only written
+    # when a previous operation really exists.
+    assert "previous_operation_id" not in operation_to_storage_dict(previous)
+    assert operation_from_storage_dict(operation_to_storage_dict(previous)).previous_operation_id is None
+
+
+@pytest.mark.parametrize("bad_value", ["", "  ", "op/x", "https://secret.invalid", "a" * 200])
+def test_previous_operation_id_rejects_unsafe_values(bad_value: str) -> None:
+    with pytest.raises(ValueError):
+        create_tracking_operation(
+            tracking_id=TRACKING_ID,
+            idempotency_key="resubmit-key-a1",
+            expected_revision=6,
+            request_fingerprint=FINGERPRINT,
+            previous_operation_id=bad_value,
+            now=NOW,
+        )
+
+
+def test_previous_operation_id_is_rejected_when_unknown_field() -> None:
+    """The strict whitelist still fails closed on an unexpected top-level key."""
+    payload = operation_to_storage_dict(_operation())
+    payload["previous_operation"] = "op_x"
+    with pytest.raises(ValueError):
+        operation_from_storage_dict(payload)

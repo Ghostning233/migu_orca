@@ -60,6 +60,7 @@ from apps.migu_orca_web.api_contract import (
     TrackingManagementResultDTO,
     TrackingPlanDeleteResultDTO,
     TrackingRecoverResultDTO,
+    TrackingResubmitResultDTO,
     TrackingRevalidateResultDTO,
     TrackingSubmitResultDTO,
     TrackingSyncResultDTO,
@@ -1246,6 +1247,64 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "tracking_revision_conflict": "追番记录版本已变化，请刷新后重试",
                 "tracking_state_conflict": "当前追番记录没有可核验的待确认提交",
                 "tracking_check_in_progress": "该追番记录的只读检查正在进行",
+            },
+            "500": {
+                "storage_error": "写入/读取追番记录失败",
+                "storage_json_error": "追番记录 JSON 损坏",
+                "tracking_storage_error": "追番记录存储失败",
+                "tracking_migration_error": "历史数据迁移失败",
+            },
+        },
+    },
+    "POST /api/v1/tracking/items/<path:tracking_id>/resubmit": {
+        "operationId": "resubmitTrackingItem",
+        "summary": "风险确认后的单条主动重新提交",
+        "description": "issue #184：对结果待确认的持续追番提交提供单条主动重新提交。confirm=false 先执行与原提交绑定连接的有界只读检查：已确认外部订阅存在时收敛为追番中且外部写入为零；仍待确认时返回已证实的原因分类与精确绑定（revision + 原 operation + 连接 generation），页面据此渲染固定的重复/资源风险文案。confirm=true 必须携带该绑定，过期或改绑返回 409；服务端复检一次，命中仍零写收敛，否则以新幂等键创建可追溯原 operation 的单个新 operation 并执行一次既有可靠提交序列。外部写可能仍在执行、连接/版本无效或方案不满足提交前提时禁止重发并返回已证实原因；不提供批量强制重发，原未决记录与审计保留。",
+        "requestBody": {
+            "type": "object",
+            "required": ["expected_revision"],
+            "properties": {
+                "expected_revision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "客户端最后观察到的追番记录 revision；confirm=true 时必须等于确认发布时的 revision。",
+                },
+                "confirm": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "false=只做只读检查；true=用户已确认重复/资源风险，携带精确绑定后创建一次新提交。",
+                },
+                "previous_operation_id": {
+                    "type": "string",
+                    "description": "只读检查发布的原待确认 operation id；confirm=true 必填，省略表示只读阶段。不能改绑其他 operation。",
+                },
+                "connection_ref": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "原 operation 绑定的已保存连接 generation；confirm=true 必填，省略表示只读阶段。客户端不能提供其他连接。",
+                },
+                "storage_dir": {
+                    "type": "string",
+                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
+                },
+            },
+        },
+        "success": TrackingResubmitResultDTO,
+        "errors": {
+            "400": {
+                "data_validation_errors": "请求参数校验失败",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+                "invalid_tracking_id": "tracking_id 包含不合法字符或路径片段",
+                "tracking_operation_not_found": "未找到该提交操作",
+            },
+            "404": {"tracking_not_found": "未找到该追番记录"},
+            "409": {
+                "tracking_revision_conflict": "追番记录版本已变化，请刷新后重新检查",
+                "tracking_state_conflict": "当前追番记录没有可核验的待确认提交",
+                "tracking_check_in_progress": "该追番记录的只读检查正在进行",
+                "tracking_resubmit_binding_conflict": "本次重新提交绑定的操作或连接已变化，请重新检查后再确认",
+                "tracking_operation_in_progress": "存在尚未完成的提交操作，请先恢复后再提交",
+                "tracking_idempotency_conflict": "同一幂等键已绑定不同的提交内容，不能复用",
             },
             "500": {
                 "storage_error": "写入/读取追番记录失败",

@@ -295,3 +295,268 @@ describe('TrackingView bounded read-only check (issue #183)', () => {
     expect(families).toEqual(['/api/v1/tracking/items/{tracking_id}/check'])
   })
 })
+
+// -- Issue #184: risk-confirmed single manual resubmission -------------------
+
+function resubmitCalls() {
+  return apiPost.mock.calls.filter((call) => call[0] === '/api/v1/tracking/items/{tracking_id}/resubmit')
+}
+
+function offerResult(overrides: Record<string, unknown> = {}) {
+  return {
+    tracking_id: 'tracking-1', confirm: false, check_status: 'UNRESOLVED',
+    outcome: 'RECOVERY_REQUIRED', requires_risk_confirmation: true,
+    blocked_reason: null, verification_reason: 'NOT_FOUND',
+    binding: {
+      expected_revision: 5,
+      previous_operation_id: 'operation-1',
+      connection_ref: '11111111-1111-4111-8111-111111111111',
+    },
+    checked_revision: 4, next_revision: 5, checked_at: '2026-10-11T00:00:00Z',
+    operation_id: 'operation-1', previous_operation_id: null,
+    failure_category: null, diagnostics: {}, issues: [], tracking: pendingRow(),
+    ...overrides,
+  }
+}
+
+function writeResult(overrides: Record<string, unknown> = {}) {
+  return {
+    tracking_id: 'tracking-1', confirm: true, check_status: 'UNRESOLVED',
+    outcome: 'ACTIVE', requires_risk_confirmation: false, blocked_reason: null,
+    verification_reason: null, binding: null,
+    checked_revision: 5, next_revision: 6, checked_at: '2026-10-11T00:01:00Z',
+    operation_id: 'operation-2', previous_operation_id: 'operation-1',
+    failure_category: null, diagnostics: {}, issues: [], tracking: pendingRow(),
+    ...overrides,
+  }
+}
+
+describe('TrackingView risk-confirmed resubmission (issue #184)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  it('offers the risk first and writes only after the explicit confirmation', async () => {
+    apiPost.mockImplementation(async (path: string, options?: { body?: unknown }) => {
+      const sentBody = options?.body as Record<string, unknown> | undefined
+      if (path === '/api/v1/tracking/items/{tracking_id}/check') {
+        return {
+          tracking_id: 'tracking-1', action: 'VERIFY_EXTERNAL', outcome: 'RECOVERY_REQUIRED',
+          checked_revision: 4, next_revision: 5, checked_at: '2026-10-11T00:00:00Z',
+          operation_id: 'operation-1', needs_manual: true, verification_reason: 'NOT_FOUND',
+          tracking: pendingRow(),
+        } as never
+      }
+      expect(path).toBe('/api/v1/tracking/items/{tracking_id}/resubmit')
+      return (sentBody?.confirm === true ? writeResult() : offerResult()) as never
+    })
+    const wrapper = await mountPending()
+    await flushPromises()
+
+    await wrapper.find('#tracking-resubmit').trigger('click')
+    await flushPromises()
+
+    // Only the read-only phase ran: no binding, no key, no connection, no write.
+    let calls = resubmitCalls()
+    expect(calls).toHaveLength(1)
+    const [, first] = calls[0] as [string, { body: Record<string, unknown> }]
+    expect(first.body).toEqual({ expected_revision: 4, confirm: false })
+    expect(JSON.stringify(first.body)).not.toContain('connection_ref')
+    // The dialog states the proven risk and sends nothing until it is confirmed.
+    expect(wrapper.find('.confirm-dialog-message').text()).toContain('重复订阅')
+    expect(resubmitCalls()).toHaveLength(1)
+
+    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
+    await flushPromises()
+
+    calls = resubmitCalls()
+    expect(calls).toHaveLength(2)
+    const [, second] = calls[1] as [string, { body: Record<string, unknown> }]
+    expect(second.body).toEqual({
+      expected_revision: 5,
+      confirm: true,
+      previous_operation_id: 'operation-1',
+      connection_ref: '11111111-1111-4111-8111-111111111111',
+    })
+    expect(wrapper.find('#tracking-submit-result').text()).toContain('提交成功')
+  })
+
+  it('cancelling the risk confirmation sends no second request at all', async () => {
+    apiPost.mockImplementation(async (path: string) => (
+      path.endsWith('/check')
+        ? {
+            tracking_id: 'tracking-1', action: 'VERIFY_EXTERNAL', outcome: 'RECOVERY_REQUIRED',
+            checked_revision: 4, next_revision: 5, checked_at: '2026-10-11T00:00:00Z',
+            operation_id: 'operation-1', needs_manual: true, verification_reason: 'NOT_FOUND',
+            tracking: pendingRow(),
+          } as never
+        : offerResult() as never
+    ))
+    const wrapper = await mountPending()
+    await flushPromises()
+
+    await wrapper.find('#tracking-resubmit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.confirm-dialog .secondary-button').trigger('click')
+    await flushPromises()
+
+    expect(resubmitCalls()).toHaveLength(1)
+    expect(wrapper.find('#tracking-resubmit-result').text()).toContain('已取消重新提交')
+  })
+
+  it('never opens the risk dialog when the server refuses the resubmit', async () => {
+    apiPost.mockImplementation(async (path: string) => (
+      path.endsWith('/check')
+        ? {
+            tracking_id: 'tracking-1', action: 'VERIFY_EXTERNAL', outcome: 'RECOVERY_REQUIRED',
+            checked_revision: 4, next_revision: 5, checked_at: '2026-10-11T00:00:00Z',
+            operation_id: 'operation-1', needs_manual: true, verification_reason: 'NOT_FOUND',
+            tracking: pendingRow(),
+          } as never
+        : offerResult({
+            check_status: 'BLOCKED', requires_risk_confirmation: false, binding: null,
+            blocked_reason: 'EXTERNAL_WRITE_IN_PROGRESS',
+          }) as never
+    ))
+    const wrapper = await mountPending()
+    await flushPromises()
+
+    await wrapper.find('#tracking-resubmit').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.confirm-dialog').exists()).toBe(false)
+    expect(resubmitCalls()).toHaveLength(1)
+    expect(wrapper.find('#tracking-resubmit-result').text()).toContain('可能仍在执行')
+  })
+
+  it('a proven subscription converges from the read-only phase with zero writes', async () => {
+    apiPost.mockImplementation(async (path: string) => (
+      path.endsWith('/check')
+        ? {
+            tracking_id: 'tracking-1', action: 'VERIFY_EXTERNAL', outcome: 'ACTIVE',
+            checked_revision: 4, next_revision: 5, checked_at: '2026-10-11T00:00:00Z',
+            operation_id: 'operation-1', needs_manual: false, verification_reason: null,
+            tracking: pendingRow(),
+          } as never
+        : offerResult({
+            check_status: 'CONFIRMED', outcome: 'ACTIVE', requires_risk_confirmation: false,
+            binding: null, verification_reason: null,
+          }) as never
+    ))
+    const wrapper = await mountPending()
+    await flushPromises()
+
+    await wrapper.find('#tracking-resubmit').trigger('click')
+    await flushPromises()
+
+    expect(resubmitCalls()).toHaveLength(1)
+    expect(wrapper.find('#tracking-resubmit-result').text()).toContain('已确认订阅存在')
+    expect(wrapper.find('.confirm-dialog').exists()).toBe(false)
+  })
+
+  it('treats a stale confirmation as a conflict and starts over from a new check', async () => {
+    let offers = 0
+    apiPost.mockImplementation(async (path: string, options?: { body?: unknown }) => {
+      if (path.endsWith('/check')) {
+        return {
+          tracking_id: 'tracking-1', action: 'VERIFY_EXTERNAL', outcome: 'RECOVERY_REQUIRED',
+          checked_revision: 4, next_revision: 5, checked_at: '2026-10-11T00:00:00Z',
+          operation_id: 'operation-1', needs_manual: true, verification_reason: 'NOT_FOUND',
+          tracking: pendingRow(),
+        } as never
+      }
+      const body = options?.body as Record<string, unknown> | undefined
+      if (body?.confirm === true) {
+        throw { type: 'tracking_revision_conflict', status: 409, httpError: true }
+      }
+      offers += 1
+      return offerResult() as never
+    })
+    const wrapper = await mountPending()
+    await flushPromises()
+
+    await wrapper.find('#tracking-resubmit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
+    await flushPromises()
+
+    // The 409 refuses the confirmation before the external boundary, states the
+    // proven reason in the ordinary submit panel, and spends the binding: the
+    // next click starts a fresh read-only phase instead of replaying it.
+    expect(wrapper.find('#tracking-submit-result').text()).toContain('追番记录已变化')
+    expect(offers).toBe(1)
+
+    await wrapper.find('#tracking-resubmit').trigger('click')
+    await flushPromises()
+    expect(offers).toBe(2)
+  })
+
+  it('states the proven reason when the read-only phase itself conflicts', async () => {
+    apiPost.mockImplementation(async (path: string, options?: { body?: unknown }) => {
+      if (path.endsWith('/check')) {
+        return {
+          tracking_id: 'tracking-1', action: 'VERIFY_EXTERNAL', outcome: 'RECOVERY_REQUIRED',
+          checked_revision: 4, next_revision: 5, checked_at: '2026-10-11T00:00:00Z',
+          operation_id: 'operation-1', needs_manual: true, verification_reason: 'NOT_FOUND',
+          tracking: pendingRow(),
+        } as never
+      }
+      const body = options?.body as Record<string, unknown> | undefined
+      if (body?.confirm === false) {
+        // AC 6/3: the oldest write may still be running; the page must state
+        // that proven condition instead of claiming a binding change.
+        throw { type: 'tracking_operation_in_progress', status: 409, httpError: true }
+      }
+      return writeResult() as never
+    })
+    const wrapper = await mountPending()
+    await flushPromises()
+
+    await wrapper.find('#tracking-resubmit').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#tracking-resubmit-result').text()).toContain('存在尚未完成的提交操作')
+    expect(wrapper.find('#tracking-resubmit-result').text()).not.toContain('绑定已变化')
+    expect(wrapper.find('.confirm-dialog').exists()).toBe(false)
+    expect(resubmitCalls()).toHaveLength(1)
+  })
+
+  it('replays the identical confirmation when the write result is unreadable', async () => {
+    let confirmedAttempts = 0
+    apiPost.mockImplementation(async (path: string, options?: { body?: unknown }) => {
+      const sentBody = options?.body as Record<string, unknown> | undefined
+      if (path.endsWith('/check')) {
+        return {
+          tracking_id: 'tracking-1', action: 'VERIFY_EXTERNAL', outcome: 'RECOVERY_REQUIRED',
+          checked_revision: 4, next_revision: 5, checked_at: '2026-10-11T00:00:00Z',
+          operation_id: 'operation-1', needs_manual: true, verification_reason: 'NOT_FOUND',
+          tracking: pendingRow(),
+        } as never
+      }
+      if (sentBody?.confirm !== true) return offerResult() as never
+      confirmedAttempts += 1
+      if (confirmedAttempts === 1) throw { type: 'network_error', status: 0, network: true }
+      return writeResult() as never
+    })
+    const wrapper = await mountPending()
+    await flushPromises()
+
+    await wrapper.find('#tracking-resubmit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
+    await flushPromises()
+
+    const confirmed = resubmitCalls()[1]
+    expect(confirmed).toBeTruthy()
+    const firstBody = (confirmed as [string, { body: Record<string, unknown> }])[1].body
+    expect(resubmitCalls()).toHaveLength(2)
+
+    // The retry replays the exact same confirmation body: no new offer, no new key.
+    await wrapper.find('#tracking-resubmit').trigger('click')
+    await flushPromises()
+
+    const calls = resubmitCalls()
+    expect(calls).toHaveLength(3)
+    const replayed = calls[2]
+    expect(replayed).toBeTruthy()
+    expect((replayed as [string, { body: Record<string, unknown> }])[1].body).toEqual(firstBody)
+  })
+})
