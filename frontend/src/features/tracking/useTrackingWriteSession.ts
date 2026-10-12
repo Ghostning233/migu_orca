@@ -442,7 +442,7 @@ const WRITE_FAILURE_PRESENTATIONS: Readonly<Record<WriteFailureCategory, WriteFa
     channel: 'item',
   },
   OUTCOME_UNKNOWN: {
-    title: '提交结果未知',
+    title: '提交结果待确认',
     message: '无法确认 Auto Bangumi 是否已创建订阅。请先使用恢复核验，未确认前不会再次提交。',
     channel: 'recovery',
   },
@@ -462,14 +462,14 @@ const SUBMIT_MESSAGES: Record<SubmitWriteState, string> = {
   ADDED_TO_DOWNLOAD: '已加入下载：Auto Bangumi 已接受本次下载现有资源的请求，不代表资源已下载完成。',
   SUBMIT_FAILED: '提交明确失败，尚未创建外部订阅；可在确认后显式重试。',
   NEEDS_RECONFIRM: '本地方案已变化，本次尚未创建外部订阅；请返回修改方案后重新确认。',
-  VERIFYING_EXTERNAL: '外部提交结果未知，正在只读回查；请勿重复提交。',
+  VERIFYING_EXTERNAL: '外部提交结果待确认，正在只读回查；请勿重复提交。',
   RECOVERY_REQUIRED: '本地结果未完成落盘，需要恢复；请勿重复提交。',
   CONFLICT: '追番记录已变化或当前状态不允许提交，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认后再提交。',
   // A structured non-409 4xx is decided before the external boundary, so the
   // copy states plainly that nothing was created; the raw error_type/status is
   // deliberately never rendered.
   REJECTED: '服务端明确拒绝了本次请求，本次未创建 Auto Bangumi 外部订阅；正在刷新最新详情，请重新确认后再提交。',
-  UNKNOWN: '提交结果未知，正在只读回查；未确认生效前不会再次提交。',
+  UNKNOWN: '提交结果待确认，正在只读回查；未确认生效前不会再次提交。',
 }
 
 /** Issue #101 AC 1: a one-time failure never claims an external effect either way. */
@@ -695,7 +695,7 @@ const RECOVERY_MESSAGES: Record<RecoveryWriteState, string> = {
   RECOVERY_REQUIRED: '结果仍无法确认，保持恢复状态；未确认前不会自动提交。',
   CONFLICT: '追番记录已变化或当前状态不允许恢复，本次未执行恢复；正在刷新最新详情，请重新确认。',
   REJECTED: '服务端明确拒绝了本次恢复请求，本次未执行任何外部操作；正在刷新最新详情，请重新确认。',
-  UNKNOWN: '恢复结果未知，正在只读回查；未确认前不会自动重发。',
+  UNKNOWN: '恢复结果待确认，正在只读回查；未确认前不会自动重发。',
 }
 
 /** Shown whenever a recovery could not be concluded without a human verdict. */
@@ -1025,7 +1025,7 @@ const MANAGEMENT_ACTION_MESSAGES: Record<
     FAILED: '外部修改明确失败，Auto Bangumi 未应用本次修改；可核对后重新发起。',
     CONFLICT: '追番记录已变化或当前状态不允许本次管理操作，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
     REJECTED: '服务端明确拒绝了本次管理请求，本次未修改 Auto Bangumi 外部订阅；正在刷新最新详情，请重新确认。',
-    UNKNOWN: '外部修改结果未知，正在只读回查；未确认生效前不会自动重试。',
+    UNKNOWN: '外部修改结果待确认，正在只读回查；未确认生效前不会自动重试。',
   },
   SET_ENABLED: {
     IN_FLIGHT: '正在提交外部启停，请稍候…',
@@ -1033,7 +1033,7 @@ const MANAGEMENT_ACTION_MESSAGES: Record<
     FAILED: '外部启停明确失败，Auto Bangumi 未应用本次启用或停用；可核对后重新发起。',
     CONFLICT: '追番记录已变化或当前状态不允许本次启停，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
     REJECTED: '服务端明确拒绝了本次启停请求，本次未改变 Auto Bangumi 的启用状态；正在刷新最新详情，请重新确认。',
-    UNKNOWN: '外部启停结果未知，正在只读回查；未确认生效前不会自动重试。',
+    UNKNOWN: '外部启停结果待确认，正在只读回查；未确认生效前不会自动重试。',
   },
   REFRESH_RSS: {
     IN_FLIGHT: '正在请求立即刷新资源，请稍候…',
@@ -1041,7 +1041,7 @@ const MANAGEMENT_ACTION_MESSAGES: Record<
     FAILED: '关联 RSS 刷新明确失败，Auto Bangumi 未接受本次刷新；可核对后重新发起。',
     CONFLICT: '追番记录已变化或当前状态不允许立即刷新资源，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
     REJECTED: '服务端明确拒绝了本次刷新请求，本次未刷新 Auto Bangumi 关联 RSS；正在刷新最新详情，请重新确认。',
-    UNKNOWN: '关联 RSS 刷新结果未知，正在只读回查；未确认完成前不会自动重试。',
+    UNKNOWN: '关联 RSS 刷新结果待确认，正在只读回查；未确认完成前不会自动重试。',
   },
   DELETE_EXTERNAL: {
     IN_FLIGHT: '正在提交外部删除，请稍候…',
@@ -1049,7 +1049,7 @@ const MANAGEMENT_ACTION_MESSAGES: Record<
     FAILED: '外部删除明确失败，Auto Bangumi 未删除该外部对象；本地方案与已下载媒体未受影响，可核对后重新发起。',
     CONFLICT: '追番记录已变化或当前状态不允许本次删除，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
     REJECTED: '服务端明确拒绝了本次删除请求，本次未删除 Auto Bangumi 外部对象；正在刷新最新详情，请重新确认。',
-    UNKNOWN: '外部删除结果未知，正在只读回查；未确认删除前不会自动重试，本地方案与已下载媒体未受影响。',
+    UNKNOWN: '外部删除结果待确认，正在只读回查；未确认删除前不会自动重试，本地方案与已下载媒体未受影响。',
   },
 }
 
@@ -1483,7 +1483,7 @@ const PLAN_DELETE_MESSAGES: Record<TrackingPlanDeleteSession['state'], string> =
   IN_FLIGHT: '正在删除追番方案，请稍候…',
   DELETED: '追番方案已删除。',
   EXTERNAL_FAILED: 'Auto Bangumi 未删除该受控外部订阅，本地方案与追番记录均已保留；请核对后重试。',
-  EXTERNAL_UNKNOWN: '外部删除结果未知，本地方案与追番记录均已保留；请先恢复核验后再决定。',
+  EXTERNAL_UNKNOWN: '外部删除结果待确认，本地方案与追番记录均已保留；请先恢复核验后再决定。',
 }
 
 function createPlanDeleteSession(
@@ -1719,7 +1719,7 @@ function projectBatchOutcome(result: {
         failureCategory: item.result?.failure_category ?? null,
         errorType: item.error_type ?? null,
         message: item.result
-          ? '提交结果未知，请先恢复核验；本次不会自动重发。'
+          ? '提交结果待确认，请先恢复核验；本次不会自动重发。'
           : '服务端在外部提交前拒绝了该条目，正在刷新最新详情，请重新确认。',
       })
       continue
@@ -2208,7 +2208,7 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
     if (isDefiniteWriteRejection(error)) {
       // D38-08.5: a documented JSON 400/404 is a definite refusal raised before
       // the external boundary — Auto Bangumi was never written. This is *not*
-      // "结果未知": the intent is released and the page only reads back.
+      // "结果待确认": the intent is released and the page only reads back.
       submitIntent = null
       submitSession.value = createSubmitSession(trackingId, action, 'REJECTED')
       return [recheck(trackingId, true)]
@@ -2668,7 +2668,7 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
     batchOutcome.value = outcome
     batchSelection.value = selectionAfterBatch(batchSelection.value, outcome)
     const unknown = outcome.unresolved.length
-    batchNotice.value = `本次批量提交：成功 ${outcome.succeeded} 条，失败 ${outcome.failed} 条${unknown ? `，其中 ${unknown} 条结果未知需先恢复` : ''}。`
+    batchNotice.value = `本次批量提交：成功 ${outcome.succeeded} 条，失败 ${outcome.failed} 条${unknown ? `，其中 ${unknown} 条结果待确认需先恢复` : ''}。`
     batchLoading.value = false
     const effects: TrackingWriteEffect[] = [recheck(null, true)]
     if (outcome.succeeded) {

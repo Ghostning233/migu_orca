@@ -117,11 +117,11 @@ const SUBMIT_MESSAGES: Record<string, string> = {
   ADDED_TO_DOWNLOAD: '已加入下载：Auto Bangumi 已接受本次下载现有资源的请求，不代表资源已下载完成。',
   SUBMIT_FAILED: '提交明确失败，尚未创建外部订阅；可在确认后显式重试。',
   NEEDS_RECONFIRM: '本地方案已变化，本次尚未创建外部订阅；请返回修改方案后重新确认。',
-  VERIFYING_EXTERNAL: '外部提交结果未知，正在只读回查；请勿重复提交。',
+  VERIFYING_EXTERNAL: '外部提交结果待确认，正在只读回查；请勿重复提交。',
   RECOVERY_REQUIRED: '本地结果未完成落盘，需要恢复；请勿重复提交。',
   CONFLICT: '追番记录已变化或当前状态不允许提交，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认后再提交。',
   REJECTED: '服务端明确拒绝了本次请求，本次未创建 Auto Bangumi 外部订阅；正在刷新最新详情，请重新确认后再提交。',
-  UNKNOWN: '提交结果未知，正在只读回查；未确认生效前不会再次提交。',
+  UNKNOWN: '提交结果待确认，正在只读回查；未确认生效前不会再次提交。',
 }
 
 const WRITE_CONFLICT_MESSAGES: Record<string, string> = {
@@ -142,19 +142,19 @@ const MANAGEMENT_MESSAGES: Record<string, Record<string, string>> = {
     IN_FLIGHT: '正在提交外部修改，请稍候…',
     SUCCEEDED: '外部修改已完成：Auto Bangumi 已应用本次修改。',
     FAILED: '外部修改明确失败，Auto Bangumi 未应用本次修改；可核对后重新发起。',
-    UNKNOWN: '外部修改结果未知，正在只读回查；未确认生效前不会自动重试。',
+    UNKNOWN: '外部修改结果待确认，正在只读回查；未确认生效前不会自动重试。',
   },
   SET_ENABLED: {
     IN_FLIGHT: '正在提交外部启停，请稍候…',
     SUCCEEDED: '外部启停已完成：Auto Bangumi 已应用本次启用或停用。',
     FAILED: '外部启停明确失败，Auto Bangumi 未应用本次启用或停用；可核对后重新发起。',
     REJECTED: '服务端明确拒绝了本次启停请求，本次未改变 Auto Bangumi 的启用状态；正在刷新最新详情，请重新确认。',
-    UNKNOWN: '外部启停结果未知，正在只读回查；未确认生效前不会自动重试。',
+    UNKNOWN: '外部启停结果待确认，正在只读回查；未确认生效前不会自动重试。',
   },
   REFRESH_RSS: {
     IN_FLIGHT: '正在请求立即刷新资源，请稍候…',
     FAILED: '关联 RSS 刷新明确失败，Auto Bangumi 未接受本次刷新；可核对后重新发起。',
-    UNKNOWN: '关联 RSS 刷新结果未知，正在只读回查；未确认完成前不会自动重试。',
+    UNKNOWN: '关联 RSS 刷新结果待确认，正在只读回查；未确认完成前不会自动重试。',
   },
   DELETE_EXTERNAL: {
     SUCCEEDED: '外部删除已完成：Auto Bangumi 已删除该外部对象；MiGuOrca 本地订阅方案、追番记录、审计记录、下载任务和已下载媒体文件均保留。',
@@ -170,7 +170,7 @@ const RECOVERY_MESSAGES: Record<string, string> = {
   RECOVERY_REQUIRED: '结果仍无法确认，保持恢复状态；未确认前不会自动提交。',
   CONFLICT: '追番记录已变化或当前状态不允许恢复，本次未执行恢复；正在刷新最新详情，请重新确认。',
   REJECTED: '服务端明确拒绝了本次恢复请求，本次未执行任何外部操作；正在刷新最新详情，请重新确认。',
-  UNKNOWN: '恢复结果未知，正在只读回查；未确认前不会自动重发。',
+  UNKNOWN: '恢复结果待确认，正在只读回查；未确认前不会自动重发。',
 }
 
 const MANAGEMENT_UNBUILDABLE_MESSAGE =
@@ -426,7 +426,7 @@ describe('tracking submit-family write session (US-310, US-311)', () => {
     expect(settled.message).not.toContain('400')
     expect(settled.message).not.toContain('409')
     expect(settled.message).not.toMatch(/可能.*创建/)
-    expect(settled.message).not.toContain('结果未知')
+    expect(settled.message).not.toContain('结果待确认')
     expect(effects).toEqual([{ kind: 'recheck', trackingId: 'tracking-1', refreshList: true }])
   })
 
@@ -1573,7 +1573,7 @@ describe('tracking plan delete session (issue #92)', () => {
     keepExternal.beginPlanDelete({ item: item(), deleteExternal: false }, { connection: null })
     const effects = keepExternal.finishPlanDelete(planDeleteResult({ outcome: 'SOMETHING_NEW' }))
     expect(keepExternal.planDelete.value!.state).toBe('EXTERNAL_UNKNOWN')
-    expect(keepExternal.planDelete.value!.message).toContain('外部删除结果未知')
+    expect(keepExternal.planDelete.value!.message).toContain('外部删除结果待确认')
     expect(effects).toEqual([{ kind: 'recheck', trackingId: 'tracking-1', refreshList: true }])
   })
 

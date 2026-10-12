@@ -1165,7 +1165,7 @@ def test_management_unknown_keeps_lock_and_does_not_resend(page, live_server_url
                         "action": "MODIFY",
                         "management_status": "UNKNOWN",
                         "needs_manual": True,
-                        "safe_message": "结果未知，请人工恢复",
+                        "safe_message": "结果待确认，请人工恢复",
                         "operation_id": "op-unknown",
                         "tracking": item,
                     },
@@ -1441,7 +1441,7 @@ def test_submit_unknown_lock_survives_new_generation_refresh(page, live_server_u
     page.wait_for_selector("#tracking-submit")
     page.wait_for_timeout(300)
     assert len(posts) == 1
-    assert "提交结果未知" in page.locator(".tracking-inspector").inner_text() or True
+    assert "提交结果待确认" in page.locator(".tracking-inspector").inner_text() or True
 
 
 @pytest.mark.browser

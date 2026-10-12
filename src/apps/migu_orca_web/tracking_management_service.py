@@ -454,7 +454,7 @@ def _persist_management_recovery(
     message = (
         "Auto Bangumi 管理结果已通过只读回查确认"
         if success or definite_failure
-        else "外部管理结果仍未知，请人工恢复；不会自动重试"
+        else "外部管理结果仍待确认，请人工恢复；不会自动重试"
     )
     next_record = transition_record(
         record, status=status, audit_action=audit, operation_id=operation.operation_id,
@@ -665,7 +665,7 @@ def _finish_management(*, config: StorageConfig, record: TrackingRecord, operati
         status = TRACKING_STATUS_VERIFYING_EXTERNAL if outcome == MANAGEMENT_OUTCOME_UNKNOWN else TRACKING_STATUS_RECOVERY_REQUIRED
         action = TRACKING_AUDIT_MANAGEMENT_UNKNOWN
         target_state = "OUTCOME_UNKNOWN" if outcome == MANAGEMENT_OUTCOME_UNKNOWN else "RECOVERY_REQUIRED"
-        message = "外部管理结果未知，请人工恢复；不会自动重试"
+        message = "外部管理结果待确认，请人工恢复；不会自动重试"
         if operation.operation in {TRACKING_OPERATION_KIND_DELETE_EXTERNAL, TRACKING_OPERATION_KIND_REFRESH_RSS}:
             status = TRACKING_STATUS_RECOVERY_REQUIRED
             target_state = "RECOVERY_REQUIRED"

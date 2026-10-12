@@ -348,11 +348,11 @@ describe('TrackingInspector explicit submission (US-310)', () => {
 
   it('renders only the fixed write copy and the documented §11.5 issues', async () => {
     const wrapper = await mountSubmittable({ sessions: sessions({ submit: writeSession({
-      state: 'VERIFYING_EXTERNAL', message: '外部提交结果未知，正在只读回查；请勿重复提交。',
+      state: 'VERIFYING_EXTERNAL', message: '外部提交结果待确认，正在只读回查；请勿重复提交。',
       issues: [{ code: 'OPERATION_IN_PROGRESS', message: '本地方案尚未通过提交前复核。' }],
     }) }) })
     const result = wrapper.find('#tracking-submit-result')
-    expect(result.text()).toContain('外部提交结果未知')
+    expect(result.text()).toContain('外部提交结果待确认')
     expect(result.text()).toContain('请勿重复提交')
     expect(result.find('.tracking-submit-issues').text()).toContain('本地方案尚未通过提交前复核')
     expect(wrapper.text()).not.toContain('VERIFYING_EXTERNAL')
@@ -1044,7 +1044,7 @@ describe('pending submission check (issue #183)', () => {
     // Issue #181: the standalone recovery panel is gone for a submit result.
     expect(wrapper.find('#tracking-recovery-heading').exists()).toBe(false)
     expect(wrapper.find('#tracking-recover-auto').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('结果未知恢复')
+    expect(wrapper.text()).not.toContain('结果待确认恢复')
   })
 
   it('keeps the recovery panel for a management operation with an unknown outcome', async () => {
