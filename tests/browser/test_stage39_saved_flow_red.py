@@ -1165,7 +1165,7 @@ def test_management_unknown_keeps_lock_and_does_not_resend(page, live_server_url
                         "action": "MODIFY",
                         "management_status": "UNKNOWN",
                         "needs_manual": True,
-                        "safe_message": "结果未知，请人工恢复",
+                        "safe_message": "结果待确认，请人工恢复",
                         "operation_id": "op-unknown",
                         "tracking": item,
                     },
@@ -1434,6 +1434,14 @@ def test_submit_unknown_lock_survives_new_generation_refresh(page, live_server_u
     page.locator("#tracking-mode-continue").click()
     page.wait_for_timeout(200)
     assert len(posts) == 1 and posts[0]["connection_ref"] == ref_a
+    # Issue #169: an indeterminate submit shows its 结果待确认 recovery copy in
+    # place. The presentation's title is dialog-channel only, so the sentence
+    # that must render here is the recovery message; the page must never claim
+    # the submission succeeded.
+    inspector = page.locator(".tracking-inspector")
+    expect(inspector).to_contain_text("无法确认 Auto Bangumi 是否已创建订阅")
+    expect(inspector).to_contain_text("请先使用恢复核验")
+    expect(inspector).not_to_contain_text("已在 Auto Bangumi 创建外部订阅")
 
     # The indeterminate result is never resent on its own, even after the saved
     # generation changes and the page re-reads everything.
@@ -1441,7 +1449,6 @@ def test_submit_unknown_lock_survives_new_generation_refresh(page, live_server_u
     page.wait_for_selector("#tracking-submit")
     page.wait_for_timeout(300)
     assert len(posts) == 1
-    assert "提交结果未知" in page.locator(".tracking-inspector").inner_text() or True
 
 
 @pytest.mark.browser
@@ -1551,6 +1558,18 @@ def test_manual_recovery_is_local_and_confirmed(page, live_server_url, action):
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
     selector = f"#tracking-recover-{'succeeded' if action == 'MARK_SUCCEEDED' else 'failed'}"
     page.wait_for_selector(selector)
+    # Issue #169 AC4: the renamed recovery heading must stay a single line, so the
+    # copy change introduces no layout change in the panel it titles.
+    heading = page.locator("#tracking-recovery-heading")
+    expect(heading).to_have_text("结果待确认恢复")
+    metrics = heading.evaluate(
+        """(el) => {
+            const style = getComputedStyle(el);
+            const line = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2;
+            return { height: el.getBoundingClientRect().height, line };
+        }"""
+    )
+    assert metrics["height"] <= metrics["line"] * 1.5, metrics
     page.locator(selector).click()
     expect(page.locator(".confirm-dialog")).to_be_visible()
     page.locator(".confirm-dialog .danger-button, .confirm-dialog .primary-button").last.click()

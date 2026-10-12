@@ -255,6 +255,10 @@ def test_write_timeout_connection_5xx_and_unknown_response_are_outcome_unknown(t
     result = _run(config, record, _FakeClient(), [], write=lambda _target, _payload: response)
     assert result["outcome"] == "OUTCOME_UNKNOWN"
     assert load_tracking_operation(config, result["operation_id"]).state == "OUTCOME_UNKNOWN"
+    # Issue #169: the pending-confirmation audit copy is pinned verbatim.
+    assert load_tracking_record(config, record.tracking_id).audit_events[-1]["safe_message"] == (
+        "外部管理结果待确认，请人工恢复；不会自动重试"
+    )
 
 
 @pytest.mark.parametrize("error", [TimeoutError(), ConnectionError()])
@@ -450,6 +454,10 @@ def test_management_refresh_recovery_never_infers_success(tmp_path: Path) -> Non
     assert result["outcome"] == "OUTCOME_UNKNOWN"
     assert result["needs_manual"] is True
     assert load_tracking_operation(config, first["operation_id"]).state == TRACKING_OPERATION_STATE_RECOVERY_REQUIRED
+    # Issue #169: an unresolved recovery keeps the pending-confirmation wording.
+    assert load_tracking_record(config, record.tracking_id).audit_events[-1]["safe_message"] == (
+        "外部管理结果仍待确认，请人工恢复；不会自动重试"
+    )
 
 
 def test_terminal_same_key_replay_returns_persisted_outcome_without_external_io(tmp_path: Path) -> None:

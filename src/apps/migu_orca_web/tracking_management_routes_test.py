@@ -75,6 +75,16 @@ def test_management_result_distinguishes_explicit_failure_from_unknown(monkeypat
     assert result["safe_message"] == "管理操作明确失败，外部系统未确认应用"
     assert result["outcome"] == "DEFINITE_FAILURE"
 
+    # Issue #169: an indeterminate management write is 结果待确认, not a failure.
+    unknown = routes_tracking._management_result(
+        object(), tracking_id=record.tracking_id, action="MODIFY",
+        result={"operation_id": "op_test", "management_status": "OUTCOME_UNKNOWN",
+                "outcome": "OUTCOME_UNKNOWN", "needs_manual": True},
+    )
+    assert unknown["needs_manual"] is True
+    assert unknown["management_status"] == "OUTCOME_UNKNOWN"
+    assert unknown["safe_message"] == "外部管理结果待确认，请人工恢复；不会自动重试"
+
 
 def test_rss_mixed_write_statuses_are_not_reduced_to_the_first_failure() -> None:
     class Client:

@@ -156,7 +156,7 @@ class TestPendingSubmissionCheck:
         expect(page.locator("#tracking-recovery-heading")).to_have_count(0)
         expect(page.locator("#tracking-recover-auto")).to_have_count(0)
         expect(page.locator("#tracking-recover-succeeded")).to_have_count(0)
-        expect(page.locator("body")).not_to_contain_text("结果未知恢复")
+        expect(page.locator("body")).not_to_contain_text("结果待确认恢复")
 
         # Nothing sensitive leaks, and no history/state is written for the check.
         for forbidden in (REF, "auto-bangumi", "token"):

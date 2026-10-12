@@ -842,7 +842,7 @@ defineExpose({ reload: () => fetchDetail(true) })
         class="tracking-inspector-section tracking-recovery"
         aria-labelledby="tracking-recovery-heading"
       >
-        <h4 id="tracking-recovery-heading">结果未知恢复</h4>
+        <h4 id="tracking-recovery-heading">结果待确认恢复</h4>
         <p class="field-help">恢复只用本地证据或只读外部核验，不会重新提交，也不会创建、修改或删除 Auto Bangumi 订阅。</p>
         <div class="tracking-recovery-actions">
           <BaseButton
