@@ -1,7 +1,8 @@
 """Request-scoped Auto Bangumi 3.1.18 management adapter."""
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+import time
+from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 from urllib.parse import quote, urlsplit
@@ -21,21 +22,41 @@ _MAX_RSS_PER_SUBSCRIPTION = 100
 
 
 class AutoBangumiManagementClient(Protocol):
-    def read_snapshot(self) -> tuple[AutoBangumiCapabilities, list[ExternalSubscription], list[ExternalRss]]: ...
+    def read_snapshot(
+        self, *, deadline: float | None = None
+    ) -> tuple[AutoBangumiCapabilities, list[ExternalSubscription], list[ExternalRss]]:
+        """Read one snapshot; ``deadline`` bounds every sub-request together."""
 
 
 class Legacy31ManagementClient:
     """One-request session adapter; no credential is retained after read_snapshot."""
 
-    def __init__(self, config: AutoBangumiConfig, *, transport: AutoBangumiLegacyTransport, timeout: float = 30) -> None:
+    def __init__(
+        self,
+        config: AutoBangumiConfig,
+        *,
+        transport: AutoBangumiLegacyTransport,
+        timeout: float = 30,
+        monotonic: Callable[[], float] | None = None,
+    ) -> None:
         self._config = config
         self._transport = transport
         self._timeout = timeout
         self._token: str | None = None
+        # One shared deadline for a multi-request read (issue #183 review): every
+        # sub-request gets the *remaining* time, so four serial requests cannot
+        # accumulate four times the endpoint budget.
+        self._deadline: float | None = None
+        self._monotonic = monotonic or time.monotonic
 
-    def read_snapshot(self) -> tuple[AutoBangumiCapabilities, list[ExternalSubscription], list[ExternalRss]]:
+    def read_snapshot(
+        self, *, deadline: float | None = None
+    ) -> tuple[AutoBangumiCapabilities, list[ExternalSubscription], list[ExternalRss]]:
+        """Read one snapshot; ``deadline`` bounds all four requests together."""
         if self._config.auth_mode != "password":
             raise Stage1Error("ab_management_unsupported", "当前 Auto Bangumi 认证模式不支持管理读取", "ab_management")
+        previous_deadline = self._deadline
+        self._deadline = deadline
         try:
             self._authenticate()
             headers = {"Accept": "application/json", "Cookie": self._cookie()}
@@ -43,8 +64,8 @@ class Legacy31ManagementClient:
             version = _version(status)
             if version != "3.1.18":
                 raise Stage1Error("ab_unsupported_version", "当前 Auto Bangumi 版本暂不受支持", "ab_management")
-            subscriptions = _subscriptions(self._request("GET", "/api/v1/bangumi/get/all", headers))
-            rss = _rss_items(self._request("GET", "/api/v1/rss", headers))
+            subscriptions = _subscriptions(self._request_value("GET", "/api/v1/bangumi/get/all", headers))
+            rss = _rss_items(self._request_value("GET", "/api/v1/rss", headers))
             capabilities = AutoBangumiCapabilities(
                 probe_status="VERIFIED", version=version, adapter="legacy_3_1",
                 subscription_list="SUPPORTED", subscription_detail="SUPPORTED",
@@ -58,6 +79,7 @@ class Legacy31ManagementClient:
             )
             return capabilities, subscriptions, rss
         finally:
+            self._deadline = previous_deadline
             self._token = None
 
     def probe_capabilities(self) -> AutoBangumiCapabilities:
@@ -202,16 +224,60 @@ class Legacy31ManagementClient:
         headers: Mapping[str, str],
         payload: Any = None,
     ) -> dict[str, Any]:
+        """One request whose endpoint contract is a JSON *object* (issue #182)."""
+        value = self._request_value(method, path, headers, payload)
+        if not isinstance(value, Mapping):
+            raise Stage1Error(
+                "invalid_ab_response", "Auto Bangumi 响应必须是 JSON 对象", "ab_management"
+            )
+        return dict(value)
+
+    def _request_value(
+        self,
+        method: Literal["GET", "POST", "PATCH", "DELETE"],
+        path: str,
+        headers: Mapping[str, str],
+        payload: Any = None,
+    ) -> Any:
+        """One request whose top-level shape is validated by its own endpoint.
+
+        This is only for the verified 3.1.18 list endpoints, which answer with a
+        bare JSON array; the shape is still checked by ``_items`` immediately
+        after, so nothing becomes shape-agnostic (issue #182).
+        """
+        timeout = self._timeout
+        if self._deadline is not None:
+            remaining = self._deadline - self._monotonic()
+            if remaining <= 0:
+                raise Stage1Error(
+                    "ab_timeout", "Auto Bangumi HTTP 请求超时", "ab_management",
+                    {"category": "timeout"},
+                )
+            timeout = min(timeout, remaining)
         try:
-            return self._transport.request_json(method, _api_endpoint(self._config.base_url, path), headers, payload, timeout=self._timeout)
+            return self._transport.request_json(method, _api_endpoint(self._config.base_url, path), headers, payload, timeout=timeout)
         except Stage1Error:
             raise
         except Exception as exc:
             raise Stage1Error("ab_management_failed", "Auto Bangumi 管理请求失败", "ab_management", {"reason": exc.__class__.__name__}) from exc
 
 
-def create_legacy_31_management_client(config: AutoBangumiConfig, *, transport: AutoBangumiLegacyTransport) -> Legacy31ManagementClient:
-    return Legacy31ManagementClient(config, transport=transport)
+def create_legacy_31_management_client(
+    config: AutoBangumiConfig,
+    *,
+    transport: AutoBangumiLegacyTransport,
+    timeout: float = 30,
+    monotonic: Callable[[], float] | None = None,
+) -> Legacy31ManagementClient:
+    """Build one request-scoped management client.
+
+    ``timeout`` bounds a *single* HTTP call; callers that run inside an
+    endpoint-level budget pass a derived per-attempt timeout through here
+    (issue #183) instead of widening any global default.
+    """
+    return Legacy31ManagementClient(
+        config, transport=transport, timeout=timeout, monotonic=monotonic
+    )
 
 
 def _unknown_capabilities(adapter: Literal["legacy_3_1", "api_token"], version: str | None) -> AutoBangumiCapabilities:
@@ -255,14 +321,22 @@ def checked_capabilities(capabilities: AutoBangumiCapabilities) -> AutoBangumiCa
     )
 
 
-def _unwrap(response: Mapping[str, Any], step: str) -> Any:
+def _unwrap(response: Any, step: str) -> Any:
+    """Unwrap an optional ``data`` envelope; a bare array is already the value.
+
+    Auto Bangumi 3.1.18 answers its list endpoints with a bare JSON array, so no
+    wrapper is ever required or invented (issue #182); the historical
+    ``{"data": [...]}`` tolerance is kept for already-adapted shapes.
+    """
+    if not isinstance(response, Mapping):
+        return response
     value = response.get("data", response)
     if isinstance(value, Mapping) and "data" in value:
         value = value["data"]
     return value
 
 
-def _items(response: Mapping[str, Any], step: str) -> list[Any]:
+def _items(response: Any, step: str) -> list[Any]:
     value = _unwrap(response, step)
     if not isinstance(value, list) or len(value) > _MAX_ITEMS:
         raise Stage1Error("invalid_ab_response", "Auto Bangumi 列表响应无效", "ab_management", {"field": step})

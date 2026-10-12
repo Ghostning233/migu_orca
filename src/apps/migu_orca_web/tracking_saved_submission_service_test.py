@@ -53,7 +53,7 @@ FIXTURE_RSS_URL = "https://example.invalid/rss/frieren-moe.xml"
 def _empty_readback():
     """Issue #97 AC 5: a readable read-back that confirms no external object."""
 
-    def read_snapshot():
+    def read_snapshot(deadline=None):
         return (None, [], [])
 
     return read_snapshot
@@ -62,7 +62,7 @@ def _empty_readback():
 def _unreadable_readback():
     """Issue #97 AC 6: a read-back that cannot prove anything."""
 
-    def read_snapshot():
+    def read_snapshot(deadline=None):
         return None
 
     return read_snapshot
@@ -71,7 +71,7 @@ def _unreadable_readback():
 def _matching_readback(external_id: str = "saved-subscription-1"):
     """Issue #97: an exact read-back proving the controlled subscription."""
 
-    def read_snapshot():
+    def read_snapshot(deadline=None):
         from ab_engine.models.management import ExternalRss, ExternalSubscription
 
         return (

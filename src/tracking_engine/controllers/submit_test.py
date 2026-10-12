@@ -7,13 +7,19 @@ import pytest
 from ab_engine.models.management import ExternalRss, ExternalSubscription
 from tracking_engine.controllers.revalidate import REVALIDATABLE_STATUSES
 from tracking_engine.controllers.submit import (
+    CONFIRM_REASON_AMBIGUOUS,
+    CONFIRM_REASON_CONFIRMED,
+    CONFIRM_REASON_NOT_FOUND,
+    CONFIRM_REASON_UNREADABLE,
     OPERATION_OUTCOME_TRACKING_STATUS,
     SUBMIT_FAILURE_CATEGORIES,
     SUBMIT_FROM_STATUSES,
     classify_external_submit_result,
+    confirm_reason_for_error,
     confirm_subscription_outcome,
     external_submit_error_type,
     external_submit_result_id,
+    match_subscription_by_exact_rss,
     submit_failure_category,
     tracking_status_for_operation_state,
 )
@@ -211,37 +217,50 @@ def test_confirm_read_back_overrides_a_non_success_write_with_a_safe_warning() -
     assert outcome.resource_warning is True
 
 
-def test_confirm_read_back_without_the_expected_rss_is_a_definite_failure() -> None:
+def test_confirm_read_back_without_the_expected_rss_stays_pending() -> None:
+    """Issue #182: one read-back miss never proves the write did not create."""
     outcome = confirm_subscription_outcome(
         ab_result={"success": False},
         expected_rss_url=RSS_URL,
         snapshot=_snapshot([ExternalRss("rss-1", "别的", "https://mikanani.me/RSS/Other")], [_subscription()]),
     )
 
-    assert outcome.classification == TRACKING_OPERATION_STATE_FAILED
+    assert outcome.classification == TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN
     assert outcome.external_id is None
+    assert outcome.reason == CONFIRM_REASON_NOT_FOUND
+
+
+def test_confirm_read_back_of_an_empty_list_stays_pending() -> None:
+    outcome = confirm_subscription_outcome(
+        ab_result={"success": True},
+        expected_rss_url=RSS_URL,
+        snapshot=_snapshot([], []),
+    )
+
+    assert outcome.classification == TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN
+    assert outcome.reason == CONFIRM_REASON_NOT_FOUND
 
 
 @pytest.mark.parametrize(
     ("snapshot", "reason"),
     [
-        (None, "回查不可读"),
+        (None, CONFIRM_REASON_UNREADABLE),
         (
             _snapshot([ExternalRss("rss-1", "a", RSS_URL), ExternalRss("rss-2", "b", RSS_URL)], [_subscription()]),
-            "多个同 URL 的 RSS",
+            CONFIRM_REASON_AMBIGUOUS,
         ),
         (
             _snapshot(
                 [ExternalRss("rss-1", "a", RSS_URL)],
                 [_subscription("sub-1"), _subscription("sub-2")],
             ),
-            "多个归属订阅",
+            CONFIRM_REASON_AMBIGUOUS,
         ),
-        (("not", "a", "snapshot"), "结构非法"),
+        (("not", "a", "snapshot"), CONFIRM_REASON_UNREADABLE),
     ],
 )
 def test_confirm_read_back_stays_unresolved_when_it_cannot_prove(
-    snapshot, reason: str  # noqa: ARG001 - the reason documents each case
+    snapshot, reason: str
 ) -> None:
     outcome = confirm_subscription_outcome(
         ab_result={"success": True},
@@ -251,6 +270,37 @@ def test_confirm_read_back_stays_unresolved_when_it_cannot_prove(
 
     assert outcome.classification == TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN
     assert outcome.external_id is None
+    assert outcome.reason == reason
+
+
+def test_exact_rss_match_is_the_single_shared_rule() -> None:
+    """Issue #182: submit and later checks use one matcher, not two rule sets."""
+    matched = match_subscription_by_exact_rss(
+        RSS_URL, _snapshot([ExternalRss("rss-1", "a", RSS_URL)], [_subscription()])
+    )
+    assert matched.status == CONFIRM_REASON_CONFIRMED
+    assert matched.subscription is not None
+    assert matched.rss_id == "rss-1"
+
+    missing = match_subscription_by_exact_rss(RSS_URL, _snapshot([], []))
+    assert missing.status == CONFIRM_REASON_NOT_FOUND
+    assert missing.subscription is None
+
+
+@pytest.mark.parametrize(
+    ("error_type", "reason"),
+    [
+        ("ab_connection_failed", "CONNECTION"),
+        ("ab_timeout_pre_write", "CONNECTION"),
+        ("ab_auth_failed", "AUTHENTICATION"),
+        ("ab_unsupported_version", "VERSION"),
+        ("ab_management_unsupported", "CAPABILITY"),
+        ("something_unknown", CONFIRM_REASON_UNREADABLE),
+        (None, CONFIRM_REASON_UNREADABLE),
+    ],
+)
+def test_confirm_reason_only_publishes_proven_classes(error_type, reason: str) -> None:
+    assert confirm_reason_for_error(error_type) == reason
 
 
 @pytest.mark.parametrize("expected", [None, "", "   "])

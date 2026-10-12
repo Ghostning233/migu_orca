@@ -74,7 +74,7 @@ class FakeClient:
             rss_disable="SUPPORTED",
         )
 
-    def read_snapshot(self):
+    def read_snapshot(self, *, deadline=None):
         self.reads += 1
         return self.capabilities, ([self.sub] if self.sub is not None else []), [self.rss]
 

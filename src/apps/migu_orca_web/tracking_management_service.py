@@ -86,7 +86,7 @@ from tracking_engine.models.tracking import (
 
 
 class ManagementSnapshotClient(Protocol):
-    def read_snapshot(self) -> tuple[AutoBangumiCapabilities, list[Any], list[Any]]: ...
+    def read_snapshot(self, *, deadline: float | None = None) -> tuple[AutoBangumiCapabilities, list[Any], list[Any]]: ...
 
 
 ManagementWriter = Callable[[ResolvedManagementTarget, Mapping[str, Any] | None], Any]

@@ -108,6 +108,8 @@ _HTTP_CONFLICT_ERROR_TYPES = {
     # operation that only recovery may resolve (Stage 29 PRD §14).
     "tracking_idempotency_conflict",
     "tracking_operation_in_progress",
+    # Issue #183: one effective read-only confirmation per tracking record.
+    "tracking_check_in_progress",
     # US-245: a management operation already owns the record or key.
     "tracking_management_state_conflict",
     "configuration_revision_conflict",

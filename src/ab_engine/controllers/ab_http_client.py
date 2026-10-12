@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import re
-from collections.abc import Mapping
+import socket
+import ssl
+import time
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from typing import Any, Literal, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from ab_engine.controllers.ab_client import AutoBangumiClient
 from ab_engine.controllers.ab_config import AutoBangumiConfig
@@ -35,8 +38,11 @@ class AutoBangumiHttpTransport(Protocol):
         payload: Any | None = None,
         *,
         timeout: float,
-    ) -> dict[str, Any]:
-        """Make one JSON request without following credentialed redirects."""
+    ) -> Any:
+        """Make one JSON request without following credentialed redirects.
+
+        The decoded top-level shape is intentionally not constrained here: the
+        endpoint that knows its contract validates it (issue #182)."""
 
 
 class AutoBangumiLegacyTransport(Protocol):
@@ -50,8 +56,11 @@ class AutoBangumiLegacyTransport(Protocol):
         payload: Any | None = None,
         *,
         timeout: float,
-    ) -> dict[str, Any]:
-        """Make one JSON API request without following redirects."""
+    ) -> Any:
+        """Make one JSON API request without following redirects.
+
+        The decoded top-level shape is intentionally not constrained here: the
+        endpoint that knows its contract validates it (issue #182)."""
 
     def post_json_same_origin(
         self,
@@ -65,7 +74,18 @@ class AutoBangumiLegacyTransport(Protocol):
 
 
 class UrlopenAutoBangumiHttpTransport:
-    """urllib-backed HTTP transport for Auto Bangumi JSON requests."""
+    """Stdlib HTTP/1.1 transport for Auto Bangumi JSON requests.
+
+    The class name is kept for the historical seam, but the exchange is
+    performed here rather than through ``urllib.request``: ``urlopen(timeout=)``
+    bounds one socket operation, so a peer that keeps trickling headers or a
+    body can hold the read open well past the budget, and closing a response
+    from another thread does not interrupt the blocked read (issue #183
+    review). One absolute deadline now covers connect, request send, response
+    headers and response body, and the connection is always closed on exit.
+    Redirects are never followed: a 3xx is an error, so a session Cookie can
+    never leave the configured origin.
+    """
 
     def post_json(
         self,
@@ -75,39 +95,12 @@ class UrlopenAutoBangumiHttpTransport:
         *,
         timeout: float,
     ) -> dict[str, Any]:
-        request = Request(
-            endpoint,
-            data=json.dumps(deepcopy(payload), ensure_ascii=False).encode("utf-8"),
-            headers=dict(headers),
-            method="POST",
+        body = json.dumps(deepcopy(payload), ensure_ascii=False).encode("utf-8")
+        status, _headers, raw = _exchange(
+            "POST", endpoint, headers, body, timeout=timeout, step="create_ab_subscription"
         )
-
-        try:
-            with urlopen(request, timeout=timeout) as response:
-                response_body = response.read()
-        except HTTPError as exc:
-            raise _http_error_to_stage1_error(exc) from exc
-        except URLError as exc:
-            raise _network_error_to_stage1_error(exc) from exc
-        except TimeoutError as exc:
-            raise _timeout_error() from exc
-
-        try:
-            ab_response = json.loads(response_body.decode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise Stage1Error(
-                "invalid_ab_response",
-                "Auto Bangumi 响应不是合法 JSON",
-                "create_ab_subscription",
-            ) from exc
-
-        if not isinstance(ab_response, dict):
-            raise Stage1Error(
-                "invalid_ab_response",
-                "Auto Bangumi 响应必须是 JSON 对象",
-                "create_ab_subscription",
-            )
-        return ab_response
+        _raise_for_status(status, step="create_ab_subscription")
+        return _decode_object(raw, step="create_ab_subscription")
 
     def request_json(
         self,
@@ -117,27 +110,14 @@ class UrlopenAutoBangumiHttpTransport:
         payload: Any | None = None,
         *,
         timeout: float,
-    ) -> dict[str, Any]:
-        data = None
+    ) -> Any:
         request_headers = dict(headers)
-        if payload is not None:
-            if method == "PATCH" or isinstance(payload, list):
-                data = json.dumps(deepcopy(payload), ensure_ascii=False).encode("utf-8")
-                request_headers.setdefault("Content-Type", "application/json")
-            else:
-                data = urlencode(dict(payload)).encode("utf-8")
-        request = Request(endpoint, data=data, headers=request_headers, method=method)
-        try:
-            # Never follow redirects: a token Cookie must not leave the service origin.
-            with build_opener(_RejectRedirects()).open(request, timeout=timeout) as response:
-                response_body = response.read()
-        except HTTPError as exc:
-            raise _http_error_to_stage1_error(exc, step="probe_ab_connection") from exc
-        except URLError as exc:
-            raise _network_error_to_stage1_error(exc, step="probe_ab_connection") from exc
-        except TimeoutError as exc:
-            raise _timeout_error("probe_ab_connection") from exc
-        return _decode_response(response_body, step="probe_ab_connection")
+        body = _encode_request_payload(method, request_headers, payload)
+        _status, _headers, raw = _exchange(
+            method, endpoint, request_headers, body, timeout=timeout, step="probe_ab_connection"
+        )
+        _raise_for_status(_status, step="probe_ab_connection")
+        return _decode_json(raw, step="probe_ab_connection")
 
     def post_json_same_origin(
         self,
@@ -147,30 +127,12 @@ class UrlopenAutoBangumiHttpTransport:
         *,
         timeout: float,
     ) -> dict[str, Any]:
-        request = Request(
-            endpoint,
-            data=json.dumps(deepcopy(payload), ensure_ascii=False).encode("utf-8"),
-            headers=dict(headers),
-            method="POST",
+        body = json.dumps(deepcopy(payload), ensure_ascii=False).encode("utf-8")
+        status, _headers, raw = _exchange(
+            "POST", endpoint, headers, body, timeout=timeout, step="create_ab_subscription"
         )
-        try:
-            # A session Cookie must never be forwarded by a redirect.
-            with build_opener(_RejectRedirects()).open(request, timeout=timeout) as response:
-                response_body = response.read()
-        except HTTPError as exc:
-            raise _http_error_to_stage1_error(exc) from exc
-        except URLError as exc:
-            raise _network_error_to_stage1_error(exc) from exc
-        except TimeoutError as exc:
-            raise _timeout_error() from exc
-        return _decode_response(response_body, step="create_ab_subscription")
-
-
-class _RejectRedirects(HTTPRedirectHandler):
-    """Fail closed on redirects so request-scoped credentials stay same-origin."""
-
-    def redirect_request(self, *args: Any, **kwargs: Any) -> Request | None:
-        return None
+        _raise_for_status(status, step="create_ab_subscription")
+        return _decode_object(raw, step="create_ab_subscription")
 
 
 class AutoBangumiHttpClient:
@@ -386,7 +348,7 @@ class LegacyAutoBangumi31Client:
         payload: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         try:
-            return self._transport.request_json(
+            response = self._transport.request_json(
                 method, endpoint, headers, payload, timeout=self._timeout
             )
         except Stage1Error:
@@ -404,6 +366,13 @@ class LegacyAutoBangumi31Client:
                 "probe_ab_connection",
                 {"category": "connection"},
             ) from exc
+        if not isinstance(response, dict):
+            raise Stage1Error(
+                "invalid_ab_response",
+                "Auto Bangumi 响应必须是 JSON 对象",
+                "probe_ab_connection",
+            )
+        return response
 
     def _post_json(
         self,
@@ -477,6 +446,361 @@ def create_auto_bangumi_submit_client(
     return create_auto_bangumi_http_client(config, transport=transport)
 
 
+#: One blocking receive may never wait longer than this slice: a peer that keeps
+#: trickling bytes cannot hold a read open past the absolute deadline, because
+#: the loop re-checks the deadline between slices.
+_READ_SLICE_SECONDS = 0.25
+_READ_CHUNK_BYTES = 65536
+_MAX_RESPONSE_HEADER_BYTES = 65536
+_MAX_RESPONSE_BODY_BYTES = 8 * 1024 * 1024
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+class _Deadline:
+    """One absolute wall-clock deadline shared by every phase of a request."""
+
+    __slots__ = ("_end", "_monotonic")
+
+    def __init__(self, budget: float, monotonic: Callable[[], float]) -> None:
+        self._monotonic = monotonic
+        self._end = monotonic() + max(float(budget), 0.0)
+
+    def remaining(self) -> float:
+        return self._end - self._monotonic()
+
+    def expired(self) -> bool:
+        return self.remaining() <= 0
+
+    def slice(self) -> float:
+        """The timeout for one blocking operation: never more than what is left."""
+        return min(self.remaining(), _READ_SLICE_SECONDS)
+
+
+def _exchange(
+    method: str,
+    endpoint: str,
+    headers: Mapping[str, str],
+    body: bytes | None,
+    *,
+    timeout: float,
+    step: str,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> tuple[int, dict[str, str], bytes]:
+    """Perform exactly one HTTP/1.1 exchange under a single absolute deadline.
+
+    Connect, request send, response headers and response body each use only the
+    remaining time, and the connection is always closed before returning. No
+    redirect is ever followed.
+    """
+    parsed = urlsplit(endpoint)
+    scheme = parsed.scheme.lower()
+    if scheme not in _DEFAULT_PORTS or not parsed.hostname:
+        raise Stage1Error("config_error", "Auto Bangumi 配置无效", step)
+    deadline = _Deadline(timeout, monotonic)
+    if deadline.expired():
+        raise _timeout_error(step)
+    port = parsed.port or _DEFAULT_PORTS[scheme]
+    connection = _open_connection(scheme, parsed.hostname, port, deadline, step)
+    try:
+        target = parsed.path or "/"
+        if parsed.query:
+            target = f"{target}?{parsed.query}"
+        request_bytes = _request_bytes(method, target, parsed, headers, body)
+        _send_bounded(connection, request_bytes, deadline, step)
+        status, response_headers, buffered = _read_headers(connection, deadline, step)
+        # The status is decided by the header block: a non-2xx is classified
+        # before the body, so a stalled rejection body can never turn a proven
+        # authentication/HTTP failure into an unproven timeout (issue review).
+        _raise_for_status(status, step=step)
+        payload = _read_body(
+            connection, deadline, response_headers, status=status, method=method,
+            buffered=buffered, step=step,
+        )
+    finally:
+        with contextlib.suppress(OSError):
+            connection.close()
+    return status, response_headers, payload
+
+
+def _open_connection(scheme: str, host: str, port: int, deadline: _Deadline, step: str) -> Any:
+    """Connect (and, for https, handshake) inside the deadline.
+
+    The socket is created here and owned by the caller, so a failed connect or
+    a failed TLS handshake is always cleaned up by this function (issue review):
+    nothing is left half-open when a later phase never starts.
+    """
+    if deadline.expired():
+        raise _timeout_error(step)
+    sock: Any = None
+    try:
+        sock = _connect_bounded(
+            _resolved_addresses(host, port), timeout=max(deadline.remaining(), 0.001)
+        )
+        if deadline.expired():
+            raise _timeout_error(step)
+        if scheme == "https":
+            # TCP and TLS share one budget: the handshake gets what is left, not
+            # the original timeout (issue review).
+            sock.settimeout(max(deadline.remaining(), 0.001))
+            context = ssl.create_default_context()
+            sock = context.wrap_socket(sock, server_hostname=host)
+            if deadline.expired():
+                raise _timeout_error(step)
+        sock.settimeout(max(deadline.remaining(), 0.001))
+    except TimeoutError as exc:
+        _close_quietly(sock)
+        raise _timeout_error(step) from exc
+    except (ssl.SSLError, OSError) as exc:
+        _close_quietly(sock)
+        raise _network_error_to_stage1_error(exc, step=step) from exc
+    except BaseException:
+        _close_quietly(sock)
+        raise
+    return sock
+
+
+def _connect_bounded(addresses: list[Any], *, timeout: float) -> Any:
+    """Connect to one of the already-resolved addresses (never re-resolving)."""
+    last_error: OSError | None = None
+    for family, socktype, proto, _canonical, sockaddr in addresses:
+        candidate: Any = None
+        try:
+            candidate = socket.socket(family, socktype, proto)
+            candidate.settimeout(timeout)
+            candidate.connect(sockaddr)
+            return candidate
+        except OSError as exc:
+            last_error = exc
+            _close_quietly(candidate)
+    raise last_error or OSError("Auto Bangumi 地址不可达")
+
+
+def _close_quietly(sock: Any) -> None:
+    if sock is None:
+        return
+    with contextlib.suppress(OSError):
+        sock.close()
+
+
+def _resolved_addresses(host: str, port: int) -> list[Any]:
+    """Addresses for one connect, skipping DNS whenever the host is literal.
+
+    ``socket.getaddrinfo`` has no timeout parameter in the standard library, so
+    a *hostname* resolves only as fast as the operating system resolver allows.
+    Literal IPv4/IPv6 addresses and ``localhost`` never reach it, which is the
+    common Auto Bangumi deployment (a LAN address or the local machine).
+    """
+    for family in (socket.AF_INET, socket.AF_INET6):
+        try:
+            socket.inet_pton(family, host)
+        except OSError:
+            continue
+        if family == socket.AF_INET:
+            return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", (host, port))]
+        return [(socket.AF_INET6, socket.SOCK_STREAM, 0, "", (host, port, 0, 0))]
+    if host.rstrip(".").lower() == "localhost":
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", port))]
+    return socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+
+
+def _request_bytes(
+    method: str,
+    target: str,
+    parsed: Any,
+    headers: Mapping[str, str],
+    body: bytes | None,
+) -> bytes:
+    """Build one HTTP/1.1 request; the caller's headers stay authoritative."""
+    host_header = parsed.netloc.decode("ascii") if isinstance(parsed.netloc, bytes) else parsed.netloc
+    lowered = {name.lower() for name in headers}
+    lines = [f"{method} {target} HTTP/1.1", f"Host: {host_header}"]
+    if body is not None and "content-length" not in lowered:
+        lines.append(f"Content-Length: {len(body)}")
+    if "connection" not in lowered:
+        # One exchange per connection: the response may then be EOF delimited and
+        # the socket is reclaimed by the caller no matter how the read ends.
+        lines.append("Connection: close")
+    lines.extend(f"{name}: {value}" for name, value in headers.items())
+    raw = ("\r\n".join(lines) + "\r\n\r\n").encode("iso-8859-1")
+    return raw + body if body else raw
+
+
+def _send_bounded(connection: Any, data: bytes, deadline: _Deadline, step: str) -> None:
+    """Send the request, re-checking the remaining time before every chunk."""
+    view = memoryview(data)
+    sent = 0
+    while sent < len(view):
+        if deadline.expired():
+            raise _timeout_error(step)
+        connection.settimeout(max(deadline.remaining(), 0.001))
+        try:
+            sent += connection.send(view[sent : sent + _READ_CHUNK_BYTES])
+        except TimeoutError as exc:
+            raise _timeout_error(step) from exc
+        except OSError as exc:
+            raise _network_error_to_stage1_error(exc, step=step) from exc
+
+
+def _recv_bounded(connection: Any, deadline: _Deadline, step: str) -> bytes:
+    """One receive that can never block past the deadline; b"" means EOF."""
+    while True:
+        if deadline.expired():
+            raise _timeout_error(step)
+        connection.settimeout(max(deadline.slice(), 0.001))
+        try:
+            return connection.recv(_READ_CHUNK_BYTES)
+        except TimeoutError:
+            # A quiet moment is not a failure: only the absolute deadline ends it.
+            continue
+        except OSError as exc:
+            raise _network_error_to_stage1_error(exc, step=step) from exc
+
+
+def _read_headers(
+    connection: Any, deadline: _Deadline, step: str
+) -> tuple[int, dict[str, str], bytes]:
+    """Read and parse the status line and headers under the deadline."""
+    buffer = b""
+    while b"\r\n\r\n" not in buffer:
+        chunk = _recv_bounded(connection, deadline, step)
+        if not chunk:
+            raise Stage1Error(
+                "invalid_ab_response", "Auto Bangumi 响应头不完整", step
+            )
+        buffer += chunk
+        if len(buffer) > _MAX_RESPONSE_HEADER_BYTES:
+            raise Stage1Error("invalid_ab_response", "Auto Bangumi 响应头过大", step)
+    head, buffered = buffer.split(b"\r\n\r\n", 1)
+    lines = head.decode("iso-8859-1").split("\r\n")
+    parts = lines[0].split(" ", 2)
+    if len(parts) < 2 or not parts[1].isdigit():
+        raise Stage1Error("invalid_ab_response", "Auto Bangumi 状态行无效", step)
+    status = int(parts[1])
+    response_headers: dict[str, str] = {}
+    for line in lines[1:]:
+        if not line:
+            continue
+        name, separator, value = line.partition(":")
+        if not separator:
+            raise Stage1Error("invalid_ab_response", "Auto Bangumi 响应头无效", step)
+        response_headers[name.strip().lower()] = value.strip()
+    return status, response_headers, buffered
+
+
+def _read_body(
+    connection: Any,
+    deadline: _Deadline,
+    headers: Mapping[str, str],
+    *,
+    status: int,
+    method: str,
+    buffered: bytes,
+    step: str,
+) -> bytes:
+    """Read the framed body (Content-Length / chunked / EOF) under the deadline."""
+    if method.upper() == "HEAD" or status in (204, 304) or 100 <= status < 200:
+        return b""
+    if "chunked" in headers.get("transfer-encoding", "").lower():
+        return _read_chunked(connection, deadline, buffered, step)
+    declared = headers.get("content-length")
+    if declared is not None:
+        try:
+            length = int(declared)
+        except ValueError as exc:
+            raise Stage1Error("invalid_ab_response", "Auto Bangumi 内容长度无效", step) from exc
+        if length < 0 or length > _MAX_RESPONSE_BODY_BYTES:
+            raise Stage1Error("invalid_ab_response", "Auto Bangumi 响应过大", step)
+        return _read_exact(connection, deadline, buffered, length, step)
+    return _read_until_eof(connection, deadline, buffered, step)
+
+
+def _read_exact(
+    connection: Any, deadline: _Deadline, buffered: bytes, length: int, step: str
+) -> bytes:
+    body = bytearray(buffered[:length])
+    while len(body) < length:
+        chunk = _recv_bounded(connection, deadline, step)
+        if not chunk:
+            raise Stage1Error("invalid_ab_response", "Auto Bangumi 响应正文不完整", step)
+        body.extend(chunk)
+    return bytes(body[:length])
+
+
+def _read_chunked(
+    connection: Any, deadline: _Deadline, buffered: bytes, step: str
+) -> bytes:
+    """Decode one ``Transfer-Encoding: chunked`` body under the deadline."""
+    body = bytearray()
+    pending = buffered
+    while True:
+        while b"\r\n" not in pending:
+            chunk = _recv_bounded(connection, deadline, step)
+            if not chunk:
+                raise Stage1Error("invalid_ab_response", "Auto Bangumi 分块响应不完整", step)
+            pending += chunk
+        line, pending = pending.split(b"\r\n", 1)
+        size_text = line.split(b";", 1)[0].strip()
+        try:
+            size = int(size_text, 16)
+        except ValueError as exc:
+            raise Stage1Error("invalid_ab_response", "Auto Bangumi 分块长度无效", step) from exc
+        if size == 0:
+            return bytes(body)
+        if len(body) + size > _MAX_RESPONSE_BODY_BYTES:
+            raise Stage1Error("invalid_ab_response", "Auto Bangumi 响应过大", step)
+        while len(pending) < size + 2:
+            chunk = _recv_bounded(connection, deadline, step)
+            if not chunk:
+                raise Stage1Error("invalid_ab_response", "Auto Bangumi 分块响应不完整", step)
+            pending += chunk
+        body.extend(pending[:size])
+        pending = pending[size + 2 :]
+
+
+def _read_until_eof(
+    connection: Any, deadline: _Deadline, buffered: bytes, step: str
+) -> bytes:
+    body = bytearray(buffered)
+    if len(body) > _MAX_RESPONSE_BODY_BYTES:
+        raise Stage1Error("invalid_ab_response", "Auto Bangumi 响应过大", step)
+    while True:
+        chunk = _recv_bounded(connection, deadline, step)
+        if not chunk:
+            return bytes(body)
+        body.extend(chunk)
+        if len(body) > _MAX_RESPONSE_BODY_BYTES:
+            raise Stage1Error("invalid_ab_response", "Auto Bangumi 响应过大", step)
+
+
+def _encode_request_payload(
+    method: str, headers: dict[str, str], payload: Any | None
+) -> bytes | None:
+    """Encode one request body exactly as the Auto Bangumi 3.1 contract needs.
+
+    ``headers`` is the caller's private copy: a JSON body declares its own
+    Content-Type, exactly like the previous urllib transport did.
+    """
+    if payload is None:
+        return None
+    if method == "PATCH" or isinstance(payload, list):
+        headers.setdefault("Content-Type", "application/json")
+        return json.dumps(deepcopy(payload), ensure_ascii=False).encode("utf-8")
+    return urlencode(dict(payload)).encode("utf-8")
+
+
+def _raise_for_status(status: int, *, step: str) -> None:
+    """Map a non-2xx status exactly like the previous HTTPError classification."""
+    if 200 <= status < 300:
+        return
+    if status in (401, 403):
+        raise Stage1Error(
+            "ab_auth_failed", "Auto Bangumi 认证失败", step, {"status_code": status}
+        )
+    raise Stage1Error(
+        "ab_submit_failed", "Auto Bangumi HTTP 提交失败", step, {"status_code": status}
+    )
+
+
 def _api_endpoint(base_url: str, path: str) -> str:
     """Append a fixed API path after re-checking the configured service origin."""
     parsed = urlsplit(base_url)
@@ -485,7 +809,13 @@ def _api_endpoint(base_url: str, path: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}{path}"
 
 
-def _status_version(status: Mapping[str, Any]) -> str:
+def _status_version(status: Any) -> str:
+    if not isinstance(status, Mapping):
+        raise Stage1Error(
+            "invalid_ab_response",
+            "Auto Bangumi 状态响应必须是 JSON 对象",
+            "probe_ab_connection",
+        )
     value = status.get("version")
     if value is None and isinstance(status.get("data"), Mapping):
         value = status["data"].get("version")
@@ -498,11 +828,22 @@ def _status_version(status: Mapping[str, Any]) -> str:
     return value.strip()
 
 
-def _decode_response(response_body: bytes, *, step: str) -> dict[str, Any]:
+def _decode_json(response_body: bytes, *, step: str) -> Any:
+    """Decode one bounded JSON body without assuming its top-level shape.
+
+    The verified 3.1.18 list endpoints answer with a bare JSON array while
+    every other endpoint answers with an object, so the *shape* contract is
+    enforced by the endpoint that knows it (``_decode_object`` here and the
+    management adapter for lists) instead of globally here (issue #182).
+    """
     try:
-        ab_response = json.loads(response_body.decode("utf-8"))
+        return json.loads(response_body.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise Stage1Error("invalid_ab_response", "Auto Bangumi 响应不是合法 JSON", step) from exc
+
+
+def _decode_object(response_body: bytes, *, step: str) -> dict[str, Any]:
+    ab_response = _decode_json(response_body, step=step)
     if not isinstance(ab_response, dict):
         raise Stage1Error("invalid_ab_response", "Auto Bangumi 响应必须是 JSON 对象", step)
     return ab_response
@@ -671,7 +1012,7 @@ def _http_error_to_stage1_error(error: HTTPError, *, step: str = "create_ab_subs
     )
 
 
-def _network_error_to_stage1_error(error: URLError, *, step: str = "create_ab_subscription") -> Stage1Error:
+def _network_error_to_stage1_error(error: BaseException, *, step: str = "create_ab_subscription") -> Stage1Error:
     reason = getattr(error, "reason", None)
     if isinstance(reason, TimeoutError):
         return _timeout_error(step)

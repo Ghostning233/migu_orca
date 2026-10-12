@@ -9,8 +9,10 @@ Flask app with an isolated temporary storage root and a programmable Auto
 Bangumi seam, so no external system is ever touched.
 """
 
+import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 from flask.testing import FlaskClient
@@ -26,7 +28,10 @@ from storage_engine.controllers.autobangumi_config_repository import (
     build_stored_autobangumi_config,
 )
 from storage_engine.controllers.operation_repository import load_tracking_operation
-from storage_engine.controllers.request_repository import save_request_snapshot
+from storage_engine.controllers.request_repository import (
+    load_request_snapshot,
+    save_request_snapshot,
+)
 from storage_engine.controllers.storage_config import (
     StorageConfig,
     load_storage_config,
@@ -39,6 +44,7 @@ from tracking_engine.models.operation import (
 )
 from tracking_engine.models.tracking import (
     TRACKING_ORIGIN_SAVE_CONFIRM,
+    TRACKING_STATUS_VERIFYING_EXTERNAL,
     TrackingRecord,
 )
 
@@ -307,7 +313,7 @@ def _patch_readback(
     write reads back nothing, which the server must treat as a definite failure.
     """
 
-    def read_snapshot() -> Any:
+    def read_snapshot(deadline=None) -> Any:
         classification = classify_external_submit_result(state.get("result"))
         if classification != TRACKING_OPERATION_STATE_SUCCEEDED:
             # A definite failure confirms there is no object; an unresolved write
@@ -410,3 +416,144 @@ def test_batch_defaults_to_continue_tracking(
     assert load_tracking_operation(config, stored.current_operation_id).submission_mode == (
         "CONTINUE_TRACKING"
     )
+
+class _EmptyListAbOpener:
+    """A verified 3.1.18 session whose list endpoints answer ``[]`` in bytes."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def exchange(
+        self, method: str, endpoint: str, headers: Any, body: Any, **kwargs: Any
+    ) -> tuple[int, dict[str, str], bytes]:
+        path = urlsplit(endpoint).path
+        self.calls.append(f"{method} {path}")
+        if path == "/api/v1/auth/login":
+            return 200, {}, b'{"access_token": "ab-session"}'
+        if path == "/api/v1/status":
+            return 200, {}, b'{"version": "3.1.18"}'
+        if path == "/api/v1/rss/subscribe":
+            return 200, {}, b'{"status": true}'
+        if path in ("/api/v1/bangumi/get/all", "/api/v1/rss"):
+            return 200, {}, b"[]"
+        raise AssertionError(f"unexpected Auto Bangumi path: {path}")  # pragma: no cover
+
+
+def test_batch_single_miss_on_a_real_bare_list_keeps_every_item_pending(
+    tmp_path: Path,
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #182: batch shares the single-item rule through the real decoder.
+
+    Two independent writes succeed, the real list endpoints answer a legal bare
+    empty array, and one miss per item stays 结果待确认 instead of turning into a
+    safely retryable failure.
+    """
+    connection, records = _seed_records(tmp_path, 2)
+    opener = _EmptyListAbOpener()
+    monkeypatch.setattr("ab_engine.controllers.ab_http_client._exchange", opener.exchange)
+
+    response = _post(client, _batch_body(connection, records))
+
+    assert response.status_code == 200
+    items = response.get_json()["result"]["items"]
+    assert len(items) == 2
+    assert all(item["ok"] is False for item in items)
+    for entry in items:
+        assert entry["result"]["outcome"] == TRACKING_STATUS_VERIFYING_EXTERNAL
+        assert entry["result"]["failure_category"] == "OUTCOME_UNKNOWN"
+        assert entry["result"]["tracking"]["status"] == TRACKING_STATUS_VERIFYING_EXTERNAL
+    for record in records:
+        stored = load_tracking_record(_config(tmp_path), record.tracking_id)
+        assert stored.external_mapping is None
+        assert stored.last_error is not None
+        assert stored.last_error.get("reason_code") == "NOT_FOUND"
+    assert opener.calls.count("POST /api/v1/rss/subscribe") == 2
+
+
+class _PerItemAbOpener:
+    """Serve one distinct subscription per RSS URL that was actually written."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.registered: dict[str, int] = {}
+
+    def _handle(self, method: str, endpoint: str, body: Any) -> tuple[int, dict[str, str], bytes]:
+        path = urlsplit(endpoint).path
+        self.calls.append(f"{method} {path}")
+        if path == "/api/v1/auth/login":
+            return 200, {}, b'{"access_token": "ab-session"}'
+        if path == "/api/v1/status":
+            return 200, {}, b'{"version": "3.1.18"}'
+        if path == "/api/v1/rss/subscribe":
+            payload = json.loads((body or b"{}").decode("utf-8"))
+            url = payload.get("rss", {}).get("url")
+            if isinstance(url, str) and url not in self.registered:
+                self.registered[url] = len(self.registered) + 1
+            return 200, {}, b'{"status": true}'
+        if path == "/api/v1/bangumi/get/all":
+            rows = [
+                {
+                    "id": 40 + index, "official_title": "\u846c\u9001\u7684\u8299\u8389\u83b2",
+                    "season": 1, "group_name": "\u5b57\u5e55\u7ec4", "rss_ids": [index],
+                    "rss_link": url, "deleted": False,
+                }
+                for url, index in self.registered.items()
+            ]
+            return 200, {}, json.dumps(rows).encode("utf-8")
+        if path == "/api/v1/rss":
+            rows = [
+                {"id": index, "name": "RSS", "url": url, "aggregate": False, "parser": "rss", "enabled": True}
+                for url, index in self.registered.items()
+            ]
+            return 200, {}, json.dumps(rows).encode("utf-8")
+        raise AssertionError(f"unexpected Auto Bangumi path: {path}")  # pragma: no cover
+
+    def exchange(self, method: str, endpoint: str, headers: Any, body: Any, **kwargs: Any):
+        return self._handle(method, endpoint, body)
+
+
+def _distinct_rss_urls(tmp_path: Path, records: list[TrackingRecord]) -> list[str]:
+    """Give every seeded plan its own exact RSS identity."""
+    config = _config(tmp_path)
+    urls: list[str] = []
+    for index, record in enumerate(records):
+        url = f"https://example.invalid/rss/batch-{index}.xml"
+        request = load_request_snapshot(config, record.request_id)
+        assert isinstance(request.get("confirmable_config"), dict)
+        request["confirmable_config"]["selected_rss_url"] = url
+        save_request_snapshot(config, request)
+        urls.append(url)
+    return urls
+
+
+def test_batch_confirms_every_item_through_the_real_bare_array_transport(
+    tmp_path: Path,
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #183 review: batch success must be proven, not assumed.
+
+    The real write adapter, the real urllib decoder, the real management adapter
+    and the real persistence all run; only the HTTP socket is replaced, and the
+    list endpoints answer the bare arrays the real 3.1.18 service returns.
+    """
+    connection, records = _seed_records(tmp_path, 2)
+    urls = _distinct_rss_urls(tmp_path, records)
+    opener = _PerItemAbOpener()
+    monkeypatch.setattr("ab_engine.controllers.ab_http_client._exchange", opener.exchange)
+    response = _post(client, _batch_body(connection, records))
+
+    assert response.status_code == 200
+    result = response.get_json()["result"]
+    assert result["summary"]["succeeded"] == 2, result
+    for entry in result["items"]:
+        assert entry["ok"] is True
+        assert entry["result"]["outcome"] == "ACTIVE"
+    stored = [load_tracking_record(_config(tmp_path), record.tracking_id) for record in records]
+    assert [item.status for item in stored] == ["ACTIVE", "ACTIVE"]
+    ids = [item.external_mapping["subscription_id"] for item in stored if item.external_mapping]
+    assert ids == ["41", "42"], ids
+    assert opener.calls.count("POST /api/v1/rss/subscribe") == 2
+    assert set(opener.registered) == set(urls)

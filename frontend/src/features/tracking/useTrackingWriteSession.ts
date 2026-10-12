@@ -38,12 +38,18 @@ import type { operations, paths } from '@/api/generated/api'
 
 import {
   canVerifyExternally,
+  createCheckSession,
   executableTrackingActions,
   isTrackingManagementScope,
+  projectCheckResult,
   projectRevalidateIssues,
+  TRACKING_CHECK_ENDPOINT,
   type CapabilityResult,
   type TrackingAction,
   type TrackingActionCode,
+  type TrackingCheckBody,
+  type TrackingCheckResult,
+  type TrackingCheckSession,
   type TrackingItem,
   type TrackingManagementScope,
   type TrackingRevalidateIssueView,
@@ -1759,6 +1765,11 @@ export interface TrackingWriteSessionApi {
   /** True while an impact confirmation is open. */
   readonly pending: Ref<boolean>
   readonly planDelete: Ref<TrackingPlanDeleteSession | null>
+  /** The page's bounded read-only check of a pending submission (issue #183). */
+  readonly check: Ref<TrackingCheckSession | null>
+  readonly checkLoading: Ref<boolean>
+  /** True while the page still owes this item one automatic check (issue #183). */
+  readonly autoCheckArmed: Ref<boolean>
   readonly batchSelection: Ref<TrackingBatchSelection>
   readonly batchOutcome: Ref<TrackingBatchOutcome | null>
   readonly batchLoading: Ref<boolean>
@@ -1828,6 +1839,21 @@ export interface TrackingWriteSessionApi {
   failPlanDelete: (error: TrackingWriteError) => readonly TrackingWriteEffect[]
   resetPlanDelete: () => void
 
+  // -- bounded read-only check (issue #183) ---------------------------------
+  /**
+   * Arm/disarm the one automatic read-only check a reopened 结果待确认
+   * submission is owed.  A started check consumes the flag; a refused one
+   * leaves it armed so it is retried instead of silently dropped.
+   */
+  setAutoCheck: (armed: boolean) => void
+  beginCheck: (
+    payload: { readonly item: TrackingItem; readonly automatic: boolean },
+    options?: TrackingWriteBeginOptions,
+  ) => TrackingWriteStart
+  finishCheck: (result: TrackingCheckResult) => readonly TrackingWriteEffect[]
+  failCheck: (error: TrackingWriteError) => readonly TrackingWriteEffect[]
+
+
   // -- batch submit ---------------------------------------------------------
   isBatchSelected: (trackingId: string) => boolean
   toggleBatchRow: (trackingId: string) => void
@@ -1851,6 +1877,9 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
   const loading = ref(false)
   const pending = ref(false)
   const planDelete = ref<TrackingPlanDeleteSession | null>(null)
+  const check = ref<TrackingCheckSession | null>(null)
+  const checkLoading = ref(false)
+  const autoCheckArmed = ref(false)
   const batchSelection = ref<TrackingBatchSelection>(EMPTY_BATCH_SELECTION)
   const batchOutcome = ref<TrackingBatchOutcome | null>(null)
   const batchLoading = ref(false)
@@ -1868,6 +1897,8 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
   let managementConfigSnapshot: TrackingWriteConfig | null = null
   let active: ActiveTransport | null = null
   let planDeleteExternal = false
+  /** The read-only check that is in flight; one runs at a time (issue #183). */
+  let checkAttempt: { readonly trackingId: string; readonly revision: number } | null = null
   /** The last fixed refusal reason, scoped to the record the user acted on. */
   const refusalNotice = ref<{ readonly trackingId: string; readonly message: string } | null>(null)
 
@@ -1939,6 +1970,7 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
     recoverySession.value = null
     managementSession.value = null
     planDelete.value = null
+    resetCheck()
     submitIntent = null
     managementIntent = null
     submitReplayBlocked = false
@@ -1990,6 +2022,9 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
       recoverySession.value = createRecoverySession(
         recovery.trackingId, recovery.operation as TrackingRecoveryActionCode, 'UNKNOWN',
       )
+      // Issue #183: the same clear invalidates the read-only check this page
+      // owed (its result would describe a connection that is gone).
+      resetCheck()
     } else {
       recoverySession.value = null
     }
@@ -2144,7 +2179,13 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
     active = null
     const session = projectSubmitOutcome(transport.trackingId, transport.action, result, transport.mode)
     submitSession.value = session
-    if (!session.keepsIntent) submitIntent = null
+    if (!session.keepsIntent) {
+      submitIntent = null
+    } else {
+      // Issue #183: a submit whose result is still unproven owes one automatic
+      // bounded read-only check, which is exactly what the submit area shows.
+      autoCheckArmed.value = true
+    }
     return [recheck(transport.trackingId, false), ...submitFeedback(session)]
   }
 
@@ -2482,6 +2523,106 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
 
   // -- explicit batch submit (issue #87) -----------------------------------
 
+  // -- bounded read-only check of a pending submission (issue #183) ---------
+
+  /**
+   * A read-only check that proved the exact external object settles the pending
+   * *submission*: only that family's intent is released, so a recovery or
+   * management lock that is still unresolved stays locked and the server's
+   * operation/audit history is untouched.
+   */
+  function releaseSettledSubmission(trackingId: string): void {
+    const submit = submitSession.value
+    if (submit?.trackingId !== trackingId || !submit.keepsIntent) return
+    submitSession.value = null
+    submitIntent = null
+    submitReplayBlocked = false
+    submitConfigSnapshot = null
+  }
+
+  function setAutoCheck(armed: boolean): void {
+    autoCheckArmed.value = armed
+  }
+
+  function resetCheck(): void {
+    checkAttempt = null
+    checkLoading.value = false
+    check.value = null
+    autoCheckArmed.value = false
+  }
+
+  /**
+   * Begin one bounded read-only confirmation of a pending submission.
+   *
+   * The request carries only the revision the user is looking at; the server
+   * resolves the original operation's saved connection, so nothing here can
+   * rebind it.  A stale revision is a 409 before any read.  A check holds no
+   * page-level intent: another record's unresolved intent refuses a manual
+   * attempt (with the fixed reason) and leaves the owed automatic one armed, so
+   * it is retried instead of being silently dropped.
+   */
+  function beginCheck(
+    payload: { readonly item: TrackingItem; readonly automatic: boolean },
+    options: TrackingWriteBeginOptions = {},
+  ): TrackingWriteStart {
+    const trackingId = payload.item.tracking_id
+    const revision = payload.item.revision
+    if (typeof revision !== 'number') return ignoredStart()
+    if (payload.automatic && !autoCheckArmed.value) return ignoredStart()
+    if (checkLoading.value) return ignoredStart()
+    if (unresolvedOwner(trackingId)) {
+      if (payload.automatic) return ignoredStart()
+      return refuseAndStart(trackingId, 'INTENT')
+    }
+    if (payload.automatic) autoCheckArmed.value = false
+    refusalNotice.value = null
+    const storageDir = options.storageDir
+    const body: TrackingCheckBody = {
+      expected_revision: revision,
+      ...(storageDir ? { storage_dir: storageDir } : {}),
+    }
+    checkAttempt = { trackingId, revision }
+    checkLoading.value = true
+    check.value = createCheckSession(trackingId, 'IN_FLIGHT', null, revision)
+    return {
+      accepted: true,
+      refusal: null,
+      ask: null,
+      confirmation: null,
+      request: {
+        endpoint: TRACKING_CHECK_ENDPOINT,
+        path: { tracking_id: trackingId },
+        body,
+      },
+      effects: [],
+    }
+  }
+
+  function finishCheck(result: TrackingCheckResult): readonly TrackingWriteEffect[] {
+    const attempt = checkAttempt
+    if (!attempt) return []
+    checkAttempt = null
+    checkLoading.value = false
+    const session = projectCheckResult(attempt.trackingId, result, attempt.revision)
+    check.value = session
+    if (session.state === 'CONFIRMED') releaseSettledSubmission(attempt.trackingId)
+    return [recheck(attempt.trackingId, true)]
+  }
+
+  function failCheck(error: TrackingWriteError): readonly TrackingWriteEffect[] {
+    const attempt = checkAttempt
+    if (!attempt) return []
+    checkAttempt = null
+    checkLoading.value = false
+    // A cancellation that cannot have reached the server is not a result: the
+    // in-flight session stays as it is, exactly as the write families do.
+    if (error.cancelled === true && error.httpError !== true) return []
+    check.value = error.status === 409
+      ? createCheckSession(attempt.trackingId, 'CONFLICT', null, attempt.revision)
+      : createCheckSession(attempt.trackingId, 'UNKNOWN', null, attempt.revision)
+    return [recheck(attempt.trackingId, true)]
+  }
+
   function beginBatchSubmit(
     payload: { readonly items: readonly TrackingItem[]; readonly mode: TrackingSubmissionMode | null },
     options: TrackingWriteBeginOptions = {},
@@ -2557,6 +2698,9 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
     loading,
     pending,
     planDelete,
+    check,
+    checkLoading,
+    autoCheckArmed,
     batchSelection,
     batchOutcome,
     batchLoading,
@@ -2583,6 +2727,10 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
     finishPlanDelete,
     failPlanDelete,
     resetPlanDelete,
+    setAutoCheck,
+    beginCheck,
+    finishCheck,
+    failCheck,
     isBatchSelected: (trackingId: string) => isBatchSelected(batchSelection.value, trackingId),
     toggleBatchRow(trackingId: string) {
       batchSelection.value = toggleBatchSelection(batchSelection.value, trackingId)

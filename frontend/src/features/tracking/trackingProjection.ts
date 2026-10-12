@@ -7,7 +7,9 @@
  * transport and stores no session, intent, key or request state — every local
  * session of an external write lives in ``useTrackingWriteSession`` (issue #168).
  */
-import type { operations } from '@/api/generated/api'
+import type { operations, paths } from '@/api/generated/api'
+
+type ApiPath = Extract<keyof paths, string>
 
 export type TrackingListResult = NonNullable<
   operations['listTrackingItems']['responses']['200']['content']['application/json']['result']
@@ -386,3 +388,159 @@ export const MANAGEMENT_ACTIONS_HELP =
 /** Fixed copy for the per-record external delete section (US-315). */
 export const DELETE_EXTERNAL_HELP =
   '删除按当前追番逐条执行：没有勾选、批量或全局删除，也只会删除你明确选择的那一个 Auto Bangumi 外部对象；MiGuOrca 本地订阅方案、追番记录、审计记录、下载任务和已下载媒体文件都会保留，且不会删除任何媒体文件。'
+
+/**
+ * Bounded read-only confirmation of a pending submission (issue #183).
+ *
+ * A persistent ``提交`` whose outcome could not be proven shows 结果待确认. The
+ * page explains it from the server's *proven* reason class and offers exactly
+ * one next step: a read-only 重新检查. The page never supplies a connection —
+ * the server resolves the original submit operation's bound Auto Bangumi
+ * instance — and it can never rebind, create or resubmit anything.
+ */
+export type TrackingCheckBody = NonNullable<
+  operations['checkTrackingItem']['requestBody']
+>['content']['application/json']
+export type TrackingCheckResult = NonNullable<
+  operations['checkTrackingItem']['responses']['200']['content']['application/json']['result']
+>
+
+export const TRACKING_CHECK_ENDPOINT =
+  '/api/v1/tracking/items/{tracking_id}/check' as const satisfies ApiPath
+
+/** Every proven reason class the server may publish for an unresolved check. */
+export const TRACKING_CHECK_REASONS = [
+  'NOT_FOUND', 'AMBIGUOUS', 'UNREADABLE',
+  'CONNECTION', 'AUTHENTICATION', 'VERSION', 'CAPABILITY',
+  'CONNECTION_CHANGED',
+] as const
+
+export type TrackingCheckReason = (typeof TRACKING_CHECK_REASONS)[number]
+
+/** Parse the server's published reason; anything unknown fails closed to null. */
+export function trackingCheckReason(value: unknown): TrackingCheckReason | null {
+  return typeof value === 'string' && (TRACKING_CHECK_REASONS as readonly string[]).includes(value)
+    ? (value as TrackingCheckReason)
+    : null
+}
+
+/**
+ * Fixed copy per proven reason. A reason we cannot prove yields the honest
+ * generic sentence, never an invented cause.
+ */
+const CHECK_REASON_MESSAGES: Readonly<Record<TrackingCheckReason, string>> = {
+  NOT_FOUND: '暂时没有在 Auto Bangumi 中找到该订阅。订阅可能仍在处理，也可能尚未建立；未确认前不会再次提交。',
+  AMBIGUOUS: '在 Auto Bangumi 中找到多个相同身份的订阅，无法确认哪一条属于本方案；未确认前不会再次提交。',
+  UNREADABLE: '无法读取 Auto Bangumi 的当前状态，暂时无法确认；未确认前不会再次提交。',
+  CONNECTION: '保存的 Auto Bangumi 连接当前无法访问，暂时无法确认；请检查网络或设置后重新检查。',
+  AUTHENTICATION: 'Auto Bangumi 拒绝了保存的连接凭据，暂时无法确认；请前往设置更新账号或密码后重新检查。',
+  VERSION: '当前 Auto Bangumi 版本不在已验证范围内，暂时无法确认；请前往设置确认版本后重新检查。',
+  CAPABILITY: '保存的连接不支持只读核验，暂时无法确认；请前往设置检查连接类型。',
+  CONNECTION_CHANGED: '保存的连接已被更换，原提交绑定的实例不再可用；不会用新连接认领旧结果。',
+}
+
+export const CHECK_PENDING_UNKNOWN_MESSAGE =
+  '尚未确认 Auto Bangumi 是否已建立该订阅；未确认前不会再次提交。'
+
+export function trackingCheckReasonMessage(reason: TrackingCheckReason | null): string {
+  return reason ? CHECK_REASON_MESSAGES[reason] : CHECK_PENDING_UNKNOWN_MESSAGE
+}
+
+/**
+ * The tracking statuses whose persistent-submit result is still unproven.
+ * ``ACTIVE``/``SUBMIT_FAILED``/``ADDED_TO_DOWNLOAD`` are decided outcomes.
+ */
+export const PENDING_SUBMISSION_STATUSES = [
+  'VERIFYING_EXTERNAL', 'RECOVERY_REQUIRED', 'UNKNOWN',
+] as const
+
+export type PendingSubmissionStatus = (typeof PENDING_SUBMISSION_STATUSES)[number]
+
+export function isPendingSubmissionStatus(value: unknown): value is PendingSubmissionStatus {
+  return typeof value === 'string'
+    && (PENDING_SUBMISSION_STATUSES as readonly string[]).includes(value)
+}
+
+/**
+ * True only for a *persistent submit* whose result is still unproven.
+ *
+ * Both facts come from the server (the record status and the current
+ * operation's own kind); this routes the item to the read-only check flow
+ * instead of the management/recovery controls — it grants nothing, because the
+ * check endpoint re-validates every precondition server-side.
+ */
+export function isPendingSubmission(
+  status: unknown,
+  operationKind: unknown,
+  submissionMode: unknown,
+): boolean {
+  if (!isPendingSubmissionStatus(status)) return false
+  if (operationKind !== 'SUBMIT') return false
+  // A one-time "download existing resources" request never establishes an
+  // external subscription, so it is never a pending persistent submission.
+  return submissionMode !== 'DOWNLOAD_EXISTING'
+}
+
+export type TrackingCheckState = 'IN_FLIGHT' | 'CONFIRMED' | 'PENDING' | 'CONFLICT' | 'UNKNOWN'
+
+export interface TrackingCheckSession {
+  readonly trackingId: string
+  /** The revision this check acted on; a stale one never overwrites a newer result. */
+  readonly revision: number | null
+  readonly state: TrackingCheckState
+  readonly message: string
+  readonly reason: TrackingCheckReason | null
+}
+
+export function createCheckSession(
+  trackingId: string,
+  state: TrackingCheckState,
+  reason: TrackingCheckReason | null = null,
+  revision: number | null = null,
+  message?: string,
+): TrackingCheckSession {
+  return {
+    trackingId,
+    revision,
+    state,
+    reason,
+    message: message ?? (state === 'PENDING' ? trackingCheckReasonMessage(reason) : checkStateMessage(state)),
+  }
+}
+
+function checkStateMessage(state: TrackingCheckState): string {
+  switch (state) {
+    case 'IN_FLIGHT': return '正在只读核验 Auto Bangumi 的当前状态…'
+    case 'CONFIRMED': return '已确认订阅存在，追番状态已更新。'
+    case 'CONFLICT': return '追番记录已变化，本次检查未生效；正在读取最新详情，请重新检查。'
+    default: return '暂时无法完成只读核验；未确认前不会再次提交。'
+  }
+}
+
+/**
+ * Project one successful check response. The server's ``outcome`` decides the
+ * session state; ``verification_reason`` is only trusted for an unresolved one.
+ */
+export function projectCheckResult(
+  trackingId: string,
+  result: TrackingCheckResult,
+  checkedRevision: number,
+): TrackingCheckSession {
+  const reason = trackingCheckReason(result.verification_reason)
+  if (result.outcome === 'ACTIVE' || result.outcome === 'DISABLED') {
+    return createCheckSession(trackingId, 'CONFIRMED', null, checkedRevision)
+  }
+  return createCheckSession(trackingId, 'PENDING', reason, checkedRevision)
+}
+
+/**
+ * A stale check result must never overwrite a newer one: the session is only
+ * accepted when it acts on the revision currently displayed.
+ */
+export function checkSessionIsCurrent(
+  session: TrackingCheckSession | null | undefined,
+  trackingId: string,
+  revision: number | null,
+): boolean {
+  return Boolean(session) && session!.trackingId === trackingId && session!.revision === revision
+}

@@ -5,7 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '@/api/client'
 import { clearReuseHandoff, consumeReuseHandoff } from '@/features/requests/reuseHandoff'
 import TrackingInspector from './TrackingInspector.vue'
-import type { CapabilityResult, TrackingManagementScope } from './trackingProjection'
+import { createCheckSession } from './trackingProjection'
+import type { CapabilityResult, TrackingCheckSession, TrackingManagementScope } from './trackingProjection'
 import type {
   TrackingManagementActionCode,
   TrackingWriteSession,
@@ -1013,5 +1014,84 @@ describe('TrackingInspector settled-operation delete (issue #96)', () => {
       const wrapper = await mountInspector()
       expect(wrapper.find('#tracking-delete-plan').exists()).toBe(false)
     }
+  })
+})
+
+describe('pending submission check (issue #183)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  const pendingDetail = () => detail({
+    status: 'VERIFYING_EXTERNAL', status_label: '核验外部结果中', status_group: 'PROCESSING',
+    submission_mode: 'CONTINUE_TRACKING',
+    current_operation: {
+      operation_id: 'operation-1', operation: 'SUBMIT', state: 'OUTCOME_UNKNOWN', attempt: 1,
+      external_result_id: null, error_type: null, created_at: null, updated_at: null, completed_at: null,
+    },
+    available_actions: [
+      { code: 'RECOVER_AUTO', label: '自动恢复', style: 'SECONDARY', requires_confirmation: false, target_scopes: [] },
+      { code: 'MARK_SUCCEEDED', label: '标记为成功', style: 'PRIMARY', requires_confirmation: true, target_scopes: [] },
+    ],
+  })
+
+  it('offers only a read-only 重新检查 in the submit area and hides the recovery panel', async () => {
+    apiGet.mockResolvedValue(pendingDetail() as never)
+    const wrapper = await mountInspector('tracking-1', {
+      checkSession: createCheckSession('tracking-1', 'PENDING', 'NOT_FOUND', 2),
+    })
+
+    expect(wrapper.find('#tracking-check').exists()).toBe(true)
+    expect(wrapper.find('#tracking-check-result').text()).toContain('暂时没有在 Auto Bangumi 中找到该订阅')
+    // Issue #181: the standalone recovery panel is gone for a submit result.
+    expect(wrapper.find('#tracking-recovery-heading').exists()).toBe(false)
+    expect(wrapper.find('#tracking-recover-auto').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('结果未知恢复')
+  })
+
+  it('keeps the recovery panel for a management operation with an unknown outcome', async () => {
+    apiGet.mockResolvedValue(detail({
+      status: 'RECOVERY_REQUIRED', status_group: 'ATTENTION',
+      current_operation: {
+        operation_id: 'operation-2', operation: 'MODIFY', state: 'OUTCOME_UNKNOWN', attempt: 1,
+        external_result_id: null, error_type: null, created_at: null, updated_at: null, completed_at: null,
+      },
+      available_actions: [
+        { code: 'RECOVER_AUTO', label: '自动恢复', style: 'SECONDARY', requires_confirmation: false, target_scopes: [] },
+      ],
+    }) as never)
+    const wrapper = await mountInspector()
+
+    expect(wrapper.find('#tracking-recovery-heading').exists()).toBe(true)
+    expect(wrapper.find('#tracking-check').exists()).toBe(false)
+  })
+
+  it('emits one automatic check when armed and a manual one on demand', async () => {
+    apiGet.mockResolvedValue(pendingDetail() as never)
+    const wrapper = await mountInspector('tracking-1', { autoCheckArmed: true })
+
+    expect(wrapper.emitted('check-requested')).toHaveLength(1)
+    expect(wrapper.emitted('check-requested')![0]![0]).toMatchObject({ automatic: true })
+
+    await wrapper.find('#tracking-check').trigger('click')
+    const events = wrapper.emitted('check-requested')!
+    expect(events).toHaveLength(2)
+    expect(events[1]![0]).toMatchObject({ automatic: false })
+  })
+
+  it('never auto-checks while the page has not armed it', async () => {
+    apiGet.mockResolvedValue(pendingDetail() as never)
+    const wrapper = await mountInspector('tracking-1', { autoCheckArmed: false })
+
+    expect(wrapper.emitted('check-requested')).toBeUndefined()
+    expect(wrapper.find('#tracking-check').exists()).toBe(true)
+  })
+
+  it('shows the in-flight check copy instead of a second request', async () => {
+    apiGet.mockResolvedValue(pendingDetail() as never)
+    const wrapper = await mountInspector('tracking-1', {
+      checkSession: createCheckSession('tracking-1', 'IN_FLIGHT', null, 2) as TrackingCheckSession,
+    })
+
+    expect(wrapper.find('#tracking-check-result').text()).toContain('正在只读核验')
+    expect(wrapper.find('#tracking-check').attributes('disabled')).toBeDefined()
   })
 })

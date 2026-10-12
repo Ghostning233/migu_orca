@@ -713,6 +713,28 @@ class TrackingRevalidatePayload(BaseModel):
         return tracking_id
 
 
+class TrackingCheckPayload(BaseModel):
+    """Body for ``POST /api/v1/tracking/items/{tracking_id}/check`` (issue #183).
+
+    A check carries only the server-observed ``expected_revision`` and an
+    optional storage profile.  The Auto Bangumi instance is resolved server-side
+    from the original submit operation, so the browser never supplies a
+    connection and can never rebind the check to another instance, and
+    ``extra="forbid"`` rejects any leaked field.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tracking_id: str
+    expected_revision: StrictInt = Field(ge=1)
+    storage_dir: str | None = None
+
+    @field_validator("tracking_id")
+    @classmethod
+    def _clean_check_tracking_id(cls, value: str) -> str:
+        return value.strip()
+
+
 #: Opaque idempotency-key shape for the unified submit (mirrors the operation
 #: model's printable-token contract so a bad key fails at the boundary).
 _IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-:=]{0,199}$")

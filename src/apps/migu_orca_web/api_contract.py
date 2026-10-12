@@ -1085,6 +1085,11 @@ class TrackingSubmitResultDTO(_StrictBase):
         "REJECTED",
         "OUTCOME_UNKNOWN",
     ] | None = None
+    #: Issue #183: the proven reason class of a ``VERIFYING_EXTERNAL`` /
+    #: ``RECOVERY_REQUIRED`` outcome (``NOT_FOUND``/``AMBIGUOUS``/``UNREADABLE``/
+    #: ``CONNECTION``/``AUTHENTICATION``/``VERSION``/``CAPABILITY``), so the page
+    #: explains 待确认 from evidence. ``None`` for a resolved outcome.
+    verification_reason: str | None = None
     issues: list[TrackingRevalidationIssueDTO] = Field(default_factory=list)
     tracking: TrackingItemDTO
 
@@ -1159,6 +1164,37 @@ class TrackingRecoverResultDTO(_StrictBase):
     checked_at: str
     operation_id: str | None = None
     needs_manual: bool = False
+    #: Issue #183: proven reason class of a read-only external verification.
+    verification_reason: str | None = None
+    tracking: TrackingItemDTO
+
+
+class TrackingCheckResultDTO(_StrictBase):
+    """Result of ``POST /api/v1/tracking/items/{tracking_id}/check`` (issue #183).
+
+    A bounded, read-only confirmation of a pending persistent submission.  The
+    request never carries a connection: the server resolves the original submit
+    operation's bound Auto Bangumi instance.  ``outcome`` is the record's status
+    after the check (``ACTIVE``/``DISABLED`` when the exact subscription was
+    proven, otherwise the unchanged 待确认 status).  ``verification_reason`` is
+    the proven reason class (``NOT_FOUND``/``AMBIGUOUS``/``UNREADABLE``/
+    ``CONNECTION``/``AUTHENTICATION``/``VERSION``/``CAPABILITY``/
+    ``CONNECTION_CHANGED``) and is ``None`` only when the subscription was
+    confirmed.  ``checked_revision`` is the revision the client acted on and
+    ``next_revision`` the revision after the check persisted anything.
+    """
+
+    tracking_id: str
+    action: Literal["VERIFY_EXTERNAL"]
+    outcome: Literal[
+        "ACTIVE", "DISABLED", "VERIFYING_EXTERNAL", "RECOVERY_REQUIRED", "UNKNOWN",
+    ]
+    checked_revision: int
+    next_revision: int
+    checked_at: str
+    operation_id: str | None = None
+    needs_manual: bool = False
+    verification_reason: str | None = None
     tracking: TrackingItemDTO
 
 

@@ -60,6 +60,7 @@ ENDPOINT_LIFECYCLE: Final[dict[tuple[str, str], EndpointLifecycle]] = {
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/set-enabled"): _entry(_PRIMARY, "外部方案启停", "TrackingRecord + operation"),
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/delete-external"): _entry(_PRIMARY, "外部删除并保留本地数据", "TrackingRecord + operation"),
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/refresh"): _entry(_PRIMARY, "关联 RSS 刷新", "TrackingRecord + operation"),
+    ("POST", "/api/v1/tracking/items/<path:tracking_id>/check"): _entry(_PRIMARY, "结果待确认提交的有界只读确认（已保存连接，只读）", "TrackingRecord + operation"),
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/recover"): _entry(_RECOVERY, "未知结果保守恢复；不得盲目重放", "TrackingRecord + operation"),
     ("POST", "/api/v1/requests/<path:request_id>/accept"): _entry(_RECOVERY, "保存后确认失败的 Request 恢复入口", "Request + TrackingRecord"),
     ("POST", "/api/v1/requests/<path:request_id>/cancel"): _entry(_RECOVERY, "待确认 Request 的显式取消", "Request store"),

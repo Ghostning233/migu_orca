@@ -9,6 +9,7 @@ import pytest
 from ab_engine.controllers.ab_config import AutoBangumiConfig
 from ab_engine.controllers.ab_http_client import (
     AutoBangumiHttpClient,
+    UrlopenAutoBangumiHttpTransport,
     create_auto_bangumi_http_client,
     create_auto_bangumi_submit_client,
     create_legacy_3_1_auto_bangumi_client,
@@ -56,6 +57,68 @@ def _legacy_payload() -> dict[str, Any]:
         SubtitleGroupSelection("Loli", "https://example.invalid/rss.xml", []), FilterRule(must_not_contain="SP"), "番剧",
     ))
     return build_legacy_31_subscription_payload(request)
+
+
+def _stub_exchange(
+    monkeypatch: pytest.MonkeyPatch, bodies: list[bytes | Exception]
+) -> list[str]:
+    """Serve canned raw response bodies through the one-exchange seam."""
+    queue = list(bodies)
+    calls: list[str] = []
+
+    def _exchange(
+        method: str,
+        endpoint: str,
+        headers: Mapping[str, str],
+        body: Any,
+        *,
+        timeout: float,
+        step: str,
+        monotonic: Any = None,
+    ) -> tuple[int, dict[str, str], bytes]:
+        calls.append(f"{method} {endpoint}")
+        result = queue.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return 200, {}, result
+
+    monkeypatch.setattr("ab_engine.controllers.ab_http_client._exchange", _exchange)
+    return calls
+
+
+def test_legacy_transport_decodes_a_bare_json_array(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Issue #182: verified 3.1.18 list endpoints answer with a bare array."""
+    _stub_exchange(monkeypatch, [b'[{"id": 9, "name": "\\u8ba2\\u9605\\u6e90"}]'])
+
+    result = UrlopenAutoBangumiHttpTransport().request_json(
+        "GET", "https://auto-bangumi.example/api/v1/rss",
+        {"Accept": "application/json"}, timeout=5,
+    )
+
+    assert result == [{"id": 9, "name": "订阅源"}]
+
+
+def test_legacy_transport_rejects_non_json_and_keeps_the_stable_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_exchange(monkeypatch, [b"<html>not json</html>"])
+
+    with pytest.raises(Stage1Error) as error:
+        UrlopenAutoBangumiHttpTransport().request_json(
+            "GET", "https://auto-bangumi.example/api/v1/rss", {}, timeout=5
+        )
+
+    assert error.value.error_type == "invalid_ab_response"
+
+
+def test_write_transport_still_requires_a_json_object(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A write response is never shape-agnostic: only the read seam is relaxed."""
+    _stub_exchange(monkeypatch, [b"[]"])
+
+    with pytest.raises(Stage1Error) as error:
+        UrlopenAutoBangumiHttpTransport().post_json_same_origin(
+            "https://auto-bangumi.example/api/v1/rss/subscribe", {}, {}, timeout=5
+        )
+
+    assert error.value.error_type == "invalid_ab_response"
 
 
 def test_token_client_is_protocol_compatible() -> None:

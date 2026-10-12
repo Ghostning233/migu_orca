@@ -14,6 +14,7 @@ payloads or URLs.
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 from flask.testing import FlaskClient
@@ -552,7 +553,7 @@ def _patch_readback(
     write reads back nothing, which the server must treat as a definite failure.
     """
 
-    def read_snapshot() -> Any:
+    def read_snapshot(deadline=None) -> Any:
         if mode == "unreadable":
             return None
         if mode == "empty":
@@ -624,15 +625,42 @@ def test_submit_non_success_write_confirmed_by_readback_is_active_with_warning(
     )
 
 
-def test_submit_success_body_without_a_readback_object_is_a_definite_failure(
+def test_submit_success_body_without_a_readback_object_stays_pending(
     tmp_path: Path,
     client: FlaskClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Issue #97 AC 3/5: a 200 body alone must not create the mapping."""
+    """Issue #97 AC 3/5 + #182: a 200 body alone creates no mapping, and one
+    empty read-back is 结果待确认, never a safely retryable failure."""
     request = _accepted_request(tmp_path)
     record = _seed_tracking(tmp_path, request)
     _patch_result(monkeypatch, {"success": True, "ab_subscription_id": "claimed-by-body"})
+    _patch_readback(monkeypatch, {}, mode="empty")
+
+    response = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/submit", json=_submit_body(record)
+    )
+
+    result = response.get_json()["result"]
+    assert result["tracking"]["status"] == TRACKING_STATUS_VERIFYING_EXTERNAL
+    stored = load_tracking_record(_config(tmp_path), record.tracking_id)
+    assert stored.external_mapping is None
+    assert stored.last_error is not None
+    assert stored.last_error.get("reason_code") == "NOT_FOUND"
+
+
+def test_submit_proven_write_failure_without_a_readback_object_is_submit_failed(
+    tmp_path: Path,
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #182: only evidence that nothing was created stays a failure."""
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    _patch_result(
+        monkeypatch,
+        {"success": False, "error": {"error_type": "ab_auth_failed", "details": {"status_code": 401}}},
+    )
     _patch_readback(monkeypatch, {}, mode="empty")
 
     response = client.post(
@@ -846,3 +874,80 @@ def test_download_existing_fails_closed_without_a_verified_endpoint(
 
     assert response.status_code == 200
     assert response.get_json()["result"]["tracking"]["status"] == TRACKING_STATUS_SUBMIT_FAILED
+
+class _BareArrayAbOpener:
+    """The verified 3.1.18 HTTP surface, served as raw bytes keyed by path.
+
+    Only the outermost network exchange is replaced: the real write adapter, the
+    real JSON decoder, the real management adapter and the real local
+    persistence all run.  The list endpoints answer with the bare JSON arrays
+    the real service returns (issue #182).
+    """
+
+    def __init__(self, rss_url: str) -> None:
+        self.rss_url = rss_url
+        self.calls: list[str] = []
+
+    def exchange(
+        self, method: str, endpoint: str, headers: Any, body: Any, **kwargs: Any
+    ) -> tuple[int, dict[str, str], bytes]:
+        path = urlsplit(endpoint).path
+        self.calls.append(f"{method} {path}")
+        if path == "/api/v1/auth/login":
+            body = b'{"access_token": "ab-session"}'
+        elif path == "/api/v1/status":
+            body = b'{"version": "3.1.18"}'
+        elif path == "/api/v1/bangumi/get/all":
+            body = json.dumps([{
+                "id": 42, "official_title": "\u846c\u9001\u7684\u8299\u8389\u83b2",
+                "title_raw": "Frieren", "season": 1, "season_raw": "1",
+                "group_name": "\u55b5\u840c", "rss_link": self.rss_url,
+                "rss_ids": [7], "deleted": False,
+            }]).encode("utf-8")
+        elif path == "/api/v1/rss":
+            body = json.dumps([{
+                "id": 7, "name": "RSS", "url": self.rss_url,
+                "aggregate": False, "parser": "rss", "enabled": True,
+            }]).encode("utf-8")
+        elif path == "/api/v1/rss/subscribe":
+            body = b'{"status": true}'
+        else:  # pragma: no cover - the fixture must stay exhaustive
+            raise AssertionError(f"unexpected Auto Bangumi path: {path}")
+        return 200, {}, body
+
+
+def test_submit_confirms_through_the_real_http_decoder_and_persists_active(
+    tmp_path: Path,
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #182 AC: the Flask acceptance path really decodes and confirms.
+
+    The write, the read-back and the persisted mapping all run through the real
+    adapters; only the HTTP socket is replaced, so a wrapper-only fake can no
+    longer make an unreadable list look confirmed.
+    """
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    stored_request = load_request_snapshot(_config(tmp_path), request["request_id"])
+    rss_url = stored_request["confirmable_config"]["selected_rss_url"]
+    opener = _BareArrayAbOpener(rss_url)
+    monkeypatch.setattr("ab_engine.controllers.ab_http_client._exchange", opener.exchange)
+
+    response = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/submit", json=_submit_body(record)
+    )
+
+    assert response.status_code == 200
+    result = response.get_json()["result"]
+    assert result["tracking"]["status"] == TRACKING_STATUS_ACTIVE
+    stored = load_tracking_record(_config(tmp_path), record.tracking_id)
+    assert stored.external_mapping is not None
+    assert stored.external_mapping["subscription_id"] == "42"
+    # Exactly one write reached the (replaced) network; the read-back only read.
+    assert opener.calls.count("POST /api/v1/rss/subscribe") == 1
+    assert "GET /api/v1/bangumi/get/all" in opener.calls
+    assert "GET /api/v1/rss" in opener.calls
+    body_text = response.get_data(as_text=True)
+    assert "ab-session" not in body_text
+    assert "example.invalid" not in body_text

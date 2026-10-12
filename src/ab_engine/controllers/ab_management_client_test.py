@@ -88,6 +88,38 @@ def test_snapshot_logs_one_login_and_only_same_origin_reads() -> None:
     assert "https://rss.example/feed" not in repr(rss_items[0])
 
 
+def test_real_bare_array_lists_pass_the_decoder_and_management_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Issue #182: the verified 3.1.18 list shape is a bare JSON array.
+
+    This goes through the *real* urllib JSON decoder and the real management
+    adapter, so a wrapper-only fake can no longer hide the transport defect.
+    """
+    bodies = [
+        b'{"access_token": "session-secret"}',
+        b'{"version": "3.1.18"}',
+        b'[{"id": 42, "official_title": "\\u793a\\u4f8b\\u756a\\u5267", "season": 2, "group_name": "\\u5b57\\u5e55\\u7ec4", "rss_ids": [7]}]',
+        b'[{"id": 7, "name": "\\u8ba2\\u9605\\u6e90", "url": "https://rss.example/feed", "aggregate": false, "parser": "rss", "enabled": true}]',
+    ]
+    queue = list(bodies)
+
+    def _exchange(method, endpoint, headers, body, *, timeout, step, monotonic=None):
+        return 200, {}, queue.pop(0)
+
+    monkeypatch.setattr("ab_engine.controllers.ab_http_client._exchange", _exchange)
+    from ab_engine.controllers.ab_http_client import UrlopenAutoBangumiHttpTransport
+
+    capabilities, subscriptions, rss_items = create_legacy_31_management_client(
+        _config(), transport=UrlopenAutoBangumiHttpTransport()
+    ).read_snapshot()
+
+    assert capabilities.subscription_list == "SUPPORTED"
+    assert [item.external_id for item in subscriptions] == ["42"]
+    assert subscriptions[0].season == 2
+    assert subscriptions[0].rss_ids == ("7",)
+    assert [item.external_id for item in rss_items] == ["7"]
+    assert rss_items[0].url == "https://rss.example/feed"
+
+
 def test_detail_uses_a_fresh_request_scoped_login_and_escapes_id() -> None:
     transport = RecordingTransport([
         {"access_token": "detail-secret"},
@@ -250,3 +282,39 @@ def test_rss_update_cannot_replace_url_and_rss_targets_are_numeric() -> None:
     with pytest.raises(Stage1Error):
         client.enable_rss(["rss-not-numeric"])
     assert transport.calls == []
+
+
+def test_snapshot_deadline_bounds_every_sub_request_together() -> None:
+    """Issue #183 review: four serial requests share one remaining budget.
+
+    Each sub-request gets only the time that is actually left, so a 12s endpoint
+    budget is never extended into four fresh per-request timeouts.
+    """
+    clock = {"now": 0.0}
+    timeouts: list[float] = []
+
+    class _Transport:
+        def request_json(self, method, endpoint, headers, payload=None, *, timeout):
+            timeouts.append(timeout)
+            clock["now"] += 4.0  # every request is slow but "successful"
+            if endpoint.endswith("/auth/login"):
+                return {"access_token": "session-secret"}
+            if endpoint.endswith("/status"):
+                return {"version": "3.1.18"}
+            return []
+
+        def post_json_same_origin(self, *args, **kwargs):  # pragma: no cover
+            raise AssertionError("management adapter must never write")
+
+    client = create_legacy_31_management_client(
+        _config(), transport=_Transport(), monotonic=lambda: clock["now"]
+    )
+
+    with pytest.raises(Stage1Error) as error:
+        client.read_snapshot(deadline=12.0)
+
+    assert error.value.error_type == "ab_timeout"
+    # 12 / 4 = three requests fit; the fourth would exceed the deadline.
+    assert len(timeouts) == 3, timeouts
+    assert timeouts == [12.0, 8.0, 4.0]
+    assert clock["now"] == 12.0

@@ -29,7 +29,7 @@ describe('SubtitleGroupSelect', () => {
     })
 
     expect(wrapper.find('select').element).toHaveProperty('disabled', true)
-    expect(wrapper.text()).toContain('正在重新计算资源')
+    expect(wrapper.text()).toContain('正在重新计算订阅方案')
     expect(wrapper.text()).not.toContain('draft_id')
   })
 })

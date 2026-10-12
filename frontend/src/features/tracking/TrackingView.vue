@@ -30,6 +30,7 @@ import {
   TRACKING_OVERVIEW_GROUPS,
   TRACKING_STATUS_GROUPS,
   type TrackingAction,
+  type TrackingCheckResult,
   type TrackingItem,
   type TrackingListSummary,
   type TrackingManagementScope,
@@ -121,6 +122,15 @@ const writeLoading = writes.loading
 const writePending = writes.pending
 let writeSequence = 0
 let writeController: AbortController | null = null
+/**
+ * Issue #183: the bounded read-only check of a pending submission.  It is its
+ * own session slot rather than a write family — it holds no page-level intent,
+ * so the page only owns its transport sequence and abort controller.
+ */
+const checkSession = writes.check
+const autoCheckArmed = writes.autoCheckArmed
+let checkSequence = 0
+let checkController: AbortController | null = null
 const planDeleteSession = writes.planDelete
 const batchOutcome = writes.batchOutcome
 const batchLoading = writes.batchLoading
@@ -727,6 +737,40 @@ async function runTrackingRecovery(
 }
 
 /**
+ * Run one bounded read-only confirmation of a pending submission (issue #183).
+ *
+ * The session decides whether anything may be sent at all and builds the one
+ * request (revision only); the server resolves the original operation's saved
+ * connection, so nothing here can rebind it.  A stale revision is a 409 before
+ * any read, and every read-only business outcome converges the list and
+ * re-reads the detail.
+ */
+async function runTrackingCheck(payload: { item: TrackingItem; automatic: boolean }): Promise<void> {
+  const started = writes.beginCheck(payload, { storageDir: storageQuery().storage_dir })
+  if (!started.accepted || !started.request) return
+  const request = started.request
+  const sequence = ++checkSequence
+  const controller = new AbortController()
+  checkController?.abort()
+  checkController = controller
+  try {
+    const result = await api.post<TrackingCheckResult>(request.endpoint, {
+      path: request.path, body: request.body, signal: controller.signal,
+    })
+    if (sequence !== checkSequence) return
+    // The returned tracking converges the list row; the detail is re-read so the
+    // check's own verdict is what the submit area shows.
+    applyReturnedTracking(result.tracking)
+    await runWriteEffects(writes.finishCheck(result))
+  } catch (error) {
+    if (sequence !== checkSequence) return
+    await runWriteEffects(writes.failCheck(toApiError(error)))
+  } finally {
+    if (sequence === checkSequence) checkController = null
+  }
+}
+
+/**
  * Run one explicit external management write (US-313, US-314).
  *
  * ``MODIFY``, ``SET_ENABLED``, ``REFRESH_RSS`` and ``DELETE_EXTERNAL`` share
@@ -828,6 +872,10 @@ watch(() => route.query.tracking_id, () => {
   void focusSelection()
 })
 watch(selectedTrackingId, (trackingId) => {
+  // Reopening/refreshing an item owes it one automatic bounded check; the
+  // inspector decides from the server's status + operation kind whether it is a
+  // 结果待确认 submission, and the page consumes the flag here.
+  writes.setAutoCheck(Boolean(trackingId))
   if (trackingId) void focusSelection()
 }, { flush: 'post' })
 onBeforeUnmount(() => {
@@ -943,6 +991,8 @@ onBeforeUnmount(() => {
           :capabilities="savedState?.capabilities ?? null"
           :connection-ready="Boolean(savedRef)"
           :sessions="writeSessions"
+          :check-session="checkSession"
+          :auto-check-armed="autoCheckArmed"
           :write-busy="inspectorIntentBusy"
           :intent-notice="selectedIntentNotice"
           :plan-delete-session="planDeleteSession"
@@ -951,6 +1001,7 @@ onBeforeUnmount(() => {
           @tracking-updated="applyReturnedTracking"
           @write-requested="runTrackingWrite"
           @recovery-requested="runTrackingRecovery"
+          @check-requested="runTrackingCheck"
           @management-requested="runTrackingManagement"
         />
         <template v-else>

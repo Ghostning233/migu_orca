@@ -18,6 +18,17 @@ import {
   sortTrackingItems,
   type CapabilityResult,
   type TrackingItem,
+  CHECK_PENDING_UNKNOWN_MESSAGE,
+  checkSessionIsCurrent,
+  createCheckSession,
+  isPendingSubmission,
+  isPendingSubmissionStatus,
+  projectCheckResult,
+  trackingCheckReason,
+  trackingCheckReasonMessage,
+  TRACKING_CHECK_ENDPOINT,
+  TRACKING_CHECK_REASONS,
+  type TrackingCheckResult,
 } from './trackingProjection'
 
 type ItemAction = NonNullable<TrackingItem['available_actions']>[number]
@@ -224,5 +235,81 @@ describe('submission mode display (issue #99 AC 6/7)', () => {
     expect(MANAGEMENT_ACTIONS_HELP).toContain('不修改 MiGuOrca 本地方案')
     expect(DELETE_EXTERNAL_HELP).toContain('没有勾选、批量或全局删除')
     expect(DELETE_EXTERNAL_HELP).toContain('不会删除任何媒体文件')
+  })
+})
+
+const recoverableAction: ItemAction = {
+  code: 'RECOVER_AUTO', label: '自动恢复', style: 'SECONDARY',
+  requires_confirmation: false, target_scopes: [],
+}
+
+/** A recoverable record: the check projection only needs the item's shape. */
+function recoverableItem(overrides: Partial<TrackingItem> = {}): TrackingItem {
+  return item({
+    status: 'RECOVERY_REQUIRED', status_label: '需要恢复', status_group: 'ATTENTION',
+    available_actions: [recoverableAction], ...overrides,
+  })
+}
+
+function checkResult(overrides: Partial<TrackingCheckResult> = {}): TrackingCheckResult {
+  return {
+    tracking_id: 'tracking-1', action: 'VERIFY_EXTERNAL', outcome: 'RECOVERY_REQUIRED',
+    checked_revision: 3, next_revision: 4, checked_at: '2026-10-11T00:00:00Z',
+    operation_id: 'operation-1', needs_manual: true, verification_reason: 'NOT_FOUND',
+    tracking: recoverableItem({ revision: 4 }), ...overrides,
+  }
+}
+
+describe('bounded read-only check projection (issue #183)', () => {
+  it('binds one read-only endpoint and one proven reason vocabulary', () => {
+    expect(TRACKING_CHECK_ENDPOINT).toBe('/api/v1/tracking/items/{tracking_id}/check')
+    expect(TRACKING_CHECK_REASONS).toContain('CONNECTION_CHANGED')
+    expect(trackingCheckReason('NOT_FOUND')).toBe('NOT_FOUND')
+    // An unpublished reason never becomes a cause.
+    for (const value of ['nope', '', null, undefined, 7, {}]) {
+      expect(trackingCheckReason(value)).toBeNull()
+      expect(trackingCheckReasonMessage(trackingCheckReason(value))).toBe(CHECK_PENDING_UNKNOWN_MESSAGE)
+    }
+  })
+
+  it('routes only a persistent submit with an unproven result to the check flow', () => {
+    expect(isPendingSubmission('VERIFYING_EXTERNAL', 'SUBMIT', 'CONTINUE_TRACKING')).toBe(true)
+    expect(isPendingSubmission('RECOVERY_REQUIRED', 'SUBMIT', null)).toBe(true)
+    // A decided result, another operation kind and a one-time request never do.
+    expect(isPendingSubmission('ACTIVE', 'SUBMIT', 'CONTINUE_TRACKING')).toBe(false)
+    expect(isPendingSubmission('SUBMIT_FAILED', 'SUBMIT', 'CONTINUE_TRACKING')).toBe(false)
+    expect(isPendingSubmission('RECOVERY_REQUIRED', 'MODIFY', 'CONTINUE_TRACKING')).toBe(false)
+    expect(isPendingSubmission('RECOVERY_REQUIRED', 'SUBMIT', 'DOWNLOAD_EXISTING')).toBe(false)
+    expect(isPendingSubmissionStatus('RECOVERY_REQUIRED')).toBe(true)
+    expect(isPendingSubmissionStatus('ACTIVE')).toBe(false)
+  })
+
+  it('projects a confirmed check without a reason and a pending one with it', () => {
+    const confirmed = projectCheckResult('tracking-1', checkResult({ outcome: 'ACTIVE', verification_reason: null }), 3)
+    expect(confirmed.state).toBe('CONFIRMED')
+    expect(confirmed.reason).toBeNull()
+    expect(confirmed.message).toContain('已确认')
+
+    const pending = projectCheckResult('tracking-1', checkResult(), 3)
+    expect(pending.state).toBe('PENDING')
+    expect(pending.reason).toBe('NOT_FOUND')
+    expect(pending.message).toBe(trackingCheckReasonMessage('NOT_FOUND'))
+
+    const disabled = projectCheckResult('tracking-1', checkResult({ outcome: 'DISABLED', verification_reason: null }), 3)
+    expect(disabled.state).toBe('CONFIRMED')
+  })
+
+  it('never lets a stale check result count as the current one', () => {
+    const session = createCheckSession('tracking-1', 'PENDING', 'NOT_FOUND', 3)
+    expect(checkSessionIsCurrent(session, 'tracking-1', 3)).toBe(true)
+    expect(checkSessionIsCurrent(session, 'tracking-1', 4)).toBe(false)
+    expect(checkSessionIsCurrent(session, 'tracking-2', 3)).toBe(false)
+    expect(checkSessionIsCurrent(null, 'tracking-1', 3)).toBe(false)
+  })
+
+  it('states the in-flight and unreadable cases honestly', () => {
+    expect(createCheckSession('tracking-1', 'IN_FLIGHT', null, 3).message).toContain('正在只读核验')
+    expect(createCheckSession('tracking-1', 'UNKNOWN', null, 3).message).toContain('未确认前不会再次提交')
+    expect(createCheckSession('tracking-1', 'CONFLICT', null, 3).message).toContain('最新详情')
   })
 })

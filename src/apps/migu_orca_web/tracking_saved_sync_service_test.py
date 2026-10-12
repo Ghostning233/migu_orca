@@ -38,7 +38,7 @@ class _Client:
     def __init__(self):
         self.subscriptions = [ExternalSubscription("sub-1", "Show", 1, "Group")]
 
-    def read_snapshot(self):
+    def read_snapshot(self, *, deadline=None):
         return (
             AutoBangumiCapabilities(
                 probe_status="VERIFIED", version="3.1.18", adapter="legacy_3_1",
@@ -182,7 +182,7 @@ def test_saved_sync_ambiguous_rss_match_preserves_old_record_bytes(monkeypatch, 
     before = (business / "tracking" / f"{local.tracking_id}.json").read_bytes()
 
     class AmbiguousClient:
-        def read_snapshot(self):
+        def read_snapshot(self, *, deadline=None):
             caps = AutoBangumiCapabilities(
                 probe_status="VERIFIED", version="3.1.18", adapter="legacy_3_1",
                 subscription_list="SUPPORTED", subscription_detail="SUPPORTED",
@@ -272,7 +272,7 @@ def test_saved_sync_partial_or_failed_snapshot_preserves_existing_record(monkeyp
     before = path.read_bytes()
 
     class Broken(_Client):
-        def read_snapshot(self):
+        def read_snapshot(self, *, deadline=None):
             raise RuntimeError("secret-password must not escape")
 
     monkeypatch.setattr(
@@ -340,7 +340,7 @@ def test_saved_sync_lease_blocks_save_and_delete_then_releases(monkeypatch, tmp_
     started, release = Event(), Event()
 
     class Blocking(_Client):
-        def read_snapshot(self):
+        def read_snapshot(self, *, deadline=None):
             started.set()
             release.wait(timeout=5)
             return super().read_snapshot()
@@ -383,7 +383,7 @@ def test_saved_sync_exception_releases_lease(monkeypatch, tmp_path: Path) -> Non
     saved = _save_config(private)
 
     class Broken(_Client):
-        def read_snapshot(self):
+        def read_snapshot(self, *, deadline=None):
             raise RuntimeError("upstream")
 
     monkeypatch.setattr(
