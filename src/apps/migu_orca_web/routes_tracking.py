@@ -24,6 +24,7 @@ from apps.migu_orca_web.schemas import (
     SavedTrackingRecoveryInput,
     SavedTrackingSubmitInput,
     SavedTrackingSyncInput,
+    TrackingCheckPayload,
     TrackingDeleteExternalPayload,
     TrackingDetailQuery,
     TrackingListQuery,
@@ -35,6 +36,7 @@ from apps.migu_orca_web.schemas import (
     TrackingSyncPayload,
 )
 from apps.migu_orca_web.services import _storage_dir
+from apps.migu_orca_web.tracking_check_service import run_saved_tracking_check
 from apps.migu_orca_web.tracking_management_service import management_writer
 from apps.migu_orca_web.tracking_plan_delete_service import run_saved_tracking_plan_delete
 from apps.migu_orca_web.tracking_read_service import (
@@ -260,6 +262,36 @@ class TrackingItemRetryView(PostView):
 
 @class_route(
     api_blueprint,
+    "/api/v1/tracking/items/<path:tracking_id>/check",
+    methods=["POST"],
+)
+class TrackingItemCheckView(PostView):
+    """Run one bounded, read-only confirmation of a pending submission (#183).
+
+    The request carries only ``expected_revision``: the Auto Bangumi instance is
+    the one the original submit operation was bound to, resolved server-side, so
+    the browser never supplies a connection and a replaced saved connection is
+    reported instead of rebinding the old operation.  The check only reads; it
+    never creates, modifies, deletes or resubmits a subscription.  A stale
+    revision (409) or a record with no checkable pending submission (409) raise;
+    every read-only business outcome is HTTP 200.
+    """
+
+    request_validator_model = TrackingCheckPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, TrackingCheckPayload)
+        payload = self.request_validator_model
+        return run_saved_tracking_check(
+            TrackingCheckPayload.model_validate({
+                **payload.model_dump(mode="json", exclude_none=True),
+                "tracking_id": payload.tracking_id,
+            })
+        )
+
+
+@class_route(
+    api_blueprint,
     "/api/v1/tracking/items/<path:tracking_id>/recover",
     methods=["POST"],
 )
@@ -363,6 +395,7 @@ class TrackingItemRefreshView(PostView):
 
 
 __all__ = [
+    "TrackingItemCheckView",
     "TrackingItemDetailView",
     "TrackingItemDeleteExternalView",
     "TrackingItemListView",

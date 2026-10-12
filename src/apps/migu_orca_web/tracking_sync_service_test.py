@@ -27,7 +27,7 @@ class FakeManagementClient:
         self.subscriptions = list(subscriptions)
         self.fail = fail
 
-    def read_snapshot(self):
+    def read_snapshot(self, *, deadline=None):
         if self.fail:
             raise Stage1Error("ab_timeout", "外部读取失败", "test")
         return CAPABILITIES, self.subscriptions, []

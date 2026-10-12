@@ -40,6 +40,12 @@ from ab_engine.controllers.reconcile import ReconcileDecision, normalize_match_t
 from ab_engine.models.management import ExternalSubscription
 from apps.migu_orca_web.save_confirm_service import compute_request_fingerprint
 from apps.migu_orca_web.serializers import serialize_request_safe_info
+from apps.migu_orca_web.tracking_external_check import (
+    DEFAULT_CHECK_POLICY,
+    CheckPolicy,
+    attempt_timeout_seconds,
+    read_snapshot_bounded,
+)
 from apps.migu_orca_web.tracking_management_service import recover_tracking_management
 from apps.migu_orca_web.tracking_migration_service import run_tracking_migration
 from apps.migu_orca_web.tracking_serializers import (
@@ -74,6 +80,15 @@ from tracking_engine.controllers.recover import (
     RecoveryEvidence,
     classify_auto_recovery,
     recovery_outcome_for_manual,
+)
+from tracking_engine.controllers.submit import (
+    CONFIRM_REASON_AMBIGUOUS,
+    CONFIRM_REASON_CAPABILITY,
+    CONFIRM_REASON_CONFIRMED,
+    CONFIRM_REASON_NOT_FOUND,
+    CONFIRM_REASON_UNREADABLE,
+    confirm_reason_for_error,
+    match_subscription_by_exact_rss,
 )
 from tracking_engine.models.operation import (
     TRACKING_OPERATION_STATE_FAILED,
@@ -115,36 +130,61 @@ def _verify_external(
     connection_ref: str | None = None,
     expected_operation: TrackingOperation | None = None,
     expected_record_revision: int | None = None,
+    read_policy: CheckPolicy | None = None,
 ) -> dict[str, Any]:
     """Read-only recovery against one verified management snapshot."""
     try:
-        client = management_client or _management_client(ab_config)
-        capabilities, subscriptions, _rss = client.read_snapshot()
+        policy = read_policy or DEFAULT_CHECK_POLICY
+        client = management_client or _management_client(
+            ab_config, timeout=attempt_timeout_seconds(policy)
+        )
+    except Stage1Error as exc:
+        # A saved connection this build cannot read through is a proven,
+        # non-retriable capability failure, never an unknown object state.
+        return _verification_needs_manual(config, record=record, request=request,
+            checked_revision=checked_revision, timestamp=timestamp,
+            reason=confirm_reason_for_error(exc.error_type))
+    read = read_snapshot_bounded(
+        lambda deadline: client.read_snapshot(deadline=deadline), policy=policy
+    )
+    if read.snapshot is None:
+        # A read that never succeeded proves nothing about the object; only the
+        # proven failure class is reported (issue #183).
+        return _verification_needs_manual(config, record=record, request=request,
+            checked_revision=checked_revision, timestamp=timestamp,
+            reason=read.reason or CONFIRM_REASON_UNREADABLE)
+    try:
+        capabilities, subscriptions, rss_items = read.snapshot
         operation_kind = _load_current_operation(config, record)
         capability_ok = (capabilities.probe_status == "VERIFIED"
                          and capabilities.subscription_list == "SUPPORTED"
                          and capabilities.external_verify == "SUPPORTED")
         if not capability_ok:
-            matches = []
+            matches, match_reason = [], None
         else:
-            matches = _external_matches(
+            matches, match_reason = _external_matches(
                 record, subscriptions, request=request, connection_ref=connection_ref,
                 is_submit=operation_kind is not None and operation_kind.operation == "SUBMIT",
+                rss_items=rss_items,
             )
-    except (TimeoutError, ConnectionError, OSError, ValueError):
+    except Stage1Error:
+        raise
+    except (TimeoutError, ConnectionError, OSError, TypeError, ValueError):
         return _verification_needs_manual(config, record=record, request=request,
             checked_revision=checked_revision, timestamp=timestamp,
-            reason="external_verification_failed")
-    except Exception:
-        raise
+            reason=CONFIRM_REASON_UNREADABLE)
     if not capability_ok:
         return _verification_needs_manual(config, record=record, request=request,
             checked_revision=checked_revision, timestamp=timestamp,
-            reason="external_capability_unknown")
+            reason=CONFIRM_REASON_CAPABILITY)
     if len(matches) != 1:
+        # Issue #183 review: the matcher's own proven reason survives, so several
+        # identical objects are reported as ambiguous instead of "not found".
+        reason = match_reason or (
+            CONFIRM_REASON_AMBIGUOUS if matches else CONFIRM_REASON_NOT_FOUND
+        )
         return _verification_needs_manual(config, record=record, request=request,
-            checked_revision=checked_revision, timestamp=timestamp,
-            reason="external_match_missing" if not matches else "external_match_ambiguous")
+            checked_revision=checked_revision, timestamp=timestamp, reason=reason)
     external = matches[0]
     if expected_operation is not None:
         current_record = load_tracking_record(config, record.tracking_id)
@@ -179,23 +219,45 @@ def _verify_external(
         request=request, checked_revision=checked_revision, needs_manual=False, timestamp=timestamp)
 
 
-def _management_client(config: AutoBangumiConfig) -> Legacy31ManagementClient:
+def _management_client(
+    config: AutoBangumiConfig, *, timeout: float = 30
+) -> Legacy31ManagementClient:
     if config.auth_mode != "password":
         raise Stage1Error("ab_management_unsupported", "当前认证模式不支持外部核验", _RECOVER_FAILED_STEP)
-    return Legacy31ManagementClient(config, transport=UrlopenAutoBangumiHttpTransport())
+    return Legacy31ManagementClient(config, transport=UrlopenAutoBangumiHttpTransport(), timeout=timeout)
 
 
 def _external_matches(
     record: TrackingRecord, subscriptions: list[ExternalSubscription], *, request: dict[str, Any] | None = None,
     connection_ref: str | None = None, is_submit: bool = False,
-) -> list[ExternalSubscription]:
+    rss_items: list[Any] | None = None,
+) -> tuple[list[ExternalSubscription], str | None]:
+    """Return the matched objects plus the proven reason when nothing matched.
+
+    The reason is carried out of the matcher (issue #183 review) instead of being
+    collapsed into "no match": an ambiguous snapshot must never be reported as
+    "not found", because the two lead to different user actions.
+    """
     mapping = record.external_mapping if isinstance(record.external_mapping, dict) else {}
     if connection_ref is not None and not is_submit and (mapping.get("schema_version") != 2 or mapping.get("connection_ref") != connection_ref):
-        return []
+        return [], CONFIRM_REASON_NOT_FOUND
     external_id = mapping.get("subscription_id")
+    if connection_ref is not None and is_submit:
+        # Issue #182: the later read-only check uses exactly the same confirmation
+        # rule as the post-submit read-back — the server-private exact RSS
+        # identity and its unique owning subscription — so the two can never
+        # reach different conclusions about the same snapshot.
+        match = match_subscription_by_exact_rss(
+            _request_selected_rss_url(request),
+            (None, subscriptions, list(rss_items or ())),
+        )
+        if match.status == CONFIRM_REASON_CONFIRMED and match.subscription is not None:
+            matched = match.subscription
+            return [item for item in subscriptions if item.external_id == matched.external_id], None
+        return [], match.status
     if connection_ref is not None:
         if not isinstance(request, dict):
-            return []
+            return [], CONFIRM_REASON_UNREADABLE
         confirmable = request.get("confirmable_config")
         selected_url = confirmable.get("selected_rss_url") if isinstance(confirmable, dict) else None
         summary = record.plan_summary
@@ -204,31 +266,40 @@ def _external_matches(
                 or not isinstance(title, str) or not title.strip()
                 or not isinstance(season, int) or isinstance(season, bool) or season < 1
                 or not isinstance(group, str) or not group.strip()):
-            return []
+            return [], CONFIRM_REASON_UNREADABLE
         return [item for item in subscriptions if item.season == season and item.subtitle_group is not None
                 and isinstance(item.title, str) and item.title.strip()
                 and normalize_match_text(item.title) == normalize_match_text(title)
                 and normalize_match_text(item.subtitle_group) == normalize_match_text(group)
-                and selected_url in item.rss_urls]
+                and selected_url in item.rss_urls], None
     if isinstance(external_id, str) and external_id:
-        return [item for item in subscriptions if item.external_id == external_id]
+        return [item for item in subscriptions if item.external_id == external_id], None
     if connection_ref is not None:
-        return []
+        return [], CONFIRM_REASON_NOT_FOUND
     summary = record.plan_summary
     title = summary.get("title")
     season = summary.get("season")
     group = summary.get("subtitle_group")
     if not isinstance(title, str) or not title.strip() or not isinstance(season, int) or isinstance(season, bool):
-        return []
+        return [], CONFIRM_REASON_UNREADABLE
     if not isinstance(group, str) or not group.strip():
-        return []
+        return [], CONFIRM_REASON_UNREADABLE
     return [
         item for item in subscriptions
         if item.season == season
         and item.subtitle_group is not None
         and " ".join(item.title.split()).casefold() == " ".join(title.split()).casefold()
         and " ".join(item.subtitle_group.split()).casefold() == " ".join(group.split()).casefold()
-    ]
+    ], None
+
+
+def _request_selected_rss_url(request: dict[str, Any] | None) -> str | None:
+    """The server-private exact RSS identity of the saved plan, if any."""
+    confirmable = request.get("confirmable_config") if isinstance(request, dict) else None
+    if not isinstance(confirmable, dict):
+        return None
+    value = confirmable.get("selected_rss_url")
+    return value.strip() if isinstance(value, str) and value.strip() else None
 
 
 def _verification_needs_manual(
@@ -240,7 +311,10 @@ def _verification_needs_manual(
     timestamp: str,
     reason: str,
 ) -> dict[str, Any]:
-    if record.status == TRACKING_STATUS_RECOVERY_REQUIRED:
+    stored_reason = None
+    if isinstance(record.last_error, dict):
+        stored_reason = record.last_error.get("reason_code")
+    if record.status == TRACKING_STATUS_RECOVERY_REQUIRED and stored_reason == reason:
         next_record = record
     else:
         next_record = transition_record(
@@ -252,6 +326,14 @@ def _verification_needs_manual(
             safe_message=RECOVERY_NEEDS_MANUAL_MESSAGE,
             now=timestamp,
         )
+        next_record = replace(
+            next_record,
+            last_error={
+                "error_type": reason,
+                "reason_code": reason,
+                "safe_message": RECOVERY_NEEDS_MANUAL_MESSAGE,
+            },
+        )
         next_record = compare_and_swap_tracking_record(
             config, record.tracking_id, base_revision=record.revision, record=next_record
         )
@@ -260,7 +342,7 @@ def _verification_needs_manual(
         record=next_record, action=RECOVERY_ACTION_VERIFY_EXTERNAL,
         outcome=TRACKING_STATUS_RECOVERY_REQUIRED, checked_revision=checked_revision,
         operation_id=record.current_operation_id, needs_manual=True, request=request,
-        timestamp=timestamp,
+        timestamp=timestamp, verification_reason=reason,
     )
 
 
@@ -277,6 +359,7 @@ def run_tracking_recover(
     connection_ref: str | None = None,
     expected_operation_id: str | None = None,
     expected_operation_kind: str | None = None,
+    read_policy: CheckPolicy | None = None,
 ) -> dict[str, Any]:
     """Run one explicit recovery for a tracking item.
 
@@ -384,6 +467,7 @@ def run_tracking_recover(
             connection_ref=connection_ref,
             expected_operation=operation,
             expected_record_revision=checked_revision,
+            read_policy=read_policy,
         )
 
     if action == RECOVERY_ACTION_AUTO:
@@ -755,6 +839,7 @@ def _recover_result_payload(
     needs_manual: bool,
     request: dict[str, Any] | None,
     timestamp: str,
+    verification_reason: str | None = None,
 ) -> dict[str, Any]:
     """Build the safe §11.8 recover result (HTTP 200 business result)."""
     valid_count = 0
@@ -772,6 +857,9 @@ def _recover_result_payload(
         "checked_at": timestamp,
         "operation_id": operation_id,
         "needs_manual": needs_manual,
+        # Issue #183: the proven reason class of a read-only verification, so the
+        # page explains 待确认 from evidence instead of guessing a cause.
+        "verification_reason": verification_reason,
         "tracking": tracking_summary_fields(record, valid_resource_count=valid_count),
     }
 

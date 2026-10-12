@@ -202,3 +202,96 @@ describe('TrackingView saved connection flow', () => {
     expect(items[0]!.text()).toContain('2026')
   })
 })
+
+// -- Issue #183: bounded read-only check of a pending submission --------------
+
+function pendingRow() {
+  return {
+    ...row([], null),
+    tracking_id: 'tracking-1',
+    status: 'VERIFYING_EXTERNAL',
+    status_label: '核验外部结果中',
+    status_group: 'PROCESSING',
+    revision: 4,
+  }
+}
+
+function pendingDetail() {
+  return {
+    tracking_id: 'tracking-1', request_id: 'request-1', title: '测试番', season: 1,
+    subtitle_group: '字幕组', poster_path: null, status: 'VERIFYING_EXTERNAL',
+    status_label: '核验外部结果中', status_group: 'PROCESSING',
+    submission_mode: 'CONTINUE_TRACKING',
+    available_actions: [
+      { code: 'RECOVER_AUTO', label: '自动恢复', style: 'SECONDARY', requires_confirmation: false, target_scopes: [] },
+    ],
+    valid_resource_count: 1, updated_episode: null, updated_episode_status: 'NOT_IMPLEMENTED',
+    total_episodes: null, revision: 4, origin: 'single', batch_id: null,
+    created_at: '2026-09-14T00:00:00Z', updated_at: '2026-09-14T00:00:00Z', last_synced_at: null,
+    safe_info: null, current_operation: {
+      operation_id: 'operation-1', operation: 'SUBMIT', state: 'OUTCOME_UNKNOWN', attempt: 1,
+      external_result_id: null, error_type: null, created_at: null, updated_at: null, completed_at: null,
+    },
+    revalidation_issues: [], external_mapping: null, audit_events: [], warnings: [],
+  }
+}
+
+async function mountPending() {
+  const router = createRouter({ history: createMemoryHistory('/app/'), routes: [
+    { path: '/tracking', component: TrackingView },
+  ] })
+  await router.push('/tracking?tracking_id=tracking-1'); await router.isReady()
+  apiGet.mockImplementation(async (path) => {
+    if (path === '/api/v1/settings/autobangumi') {
+      return { configured: true, credential_present: true, connection_ref: '11111111-1111-4111-8111-111111111111', configuration_revision: 3, connection_status: 'CONFIGURED', capabilities: null } as never
+    }
+    if (path === '/api/v1/tracking/items/{tracking_id}') return pendingDetail() as never
+    return { items: [pendingRow()], summary: { ...defaultSummary, pending: 0, processing: 1 }, warnings: [] } as never
+  })
+  const wrapper = mount(TrackingView, {
+    attachTo: document.body, global: { plugins: [createPinia(), router], stubs: { Teleport: true } },
+  })
+  await flushPromises()
+  return wrapper
+}
+
+function checkCall() {
+  return apiPost.mock.calls.find((call) => call[0] === '/api/v1/tracking/items/{tracking_id}/check')
+}
+
+describe('TrackingView bounded read-only check (issue #183)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  it('automatically checks a reopened 待确认 submission without any connection', async () => {
+    apiPost.mockResolvedValue({
+      tracking_id: 'tracking-1', action: 'VERIFY_EXTERNAL', outcome: 'RECOVERY_REQUIRED',
+      checked_revision: 4, next_revision: 5, checked_at: '2026-10-11T00:00:00Z',
+      operation_id: 'operation-1', needs_manual: true, verification_reason: 'NOT_FOUND',
+      tracking: pendingRow(),
+    } as never)
+    const wrapper = await mountPending()
+
+    const call = checkCall()
+    expect(call).toBeTruthy()
+    const [, options] = call as [string, { path: { tracking_id: string }; body: Record<string, unknown> }]
+    expect(options.path).toEqual({ tracking_id: 'tracking-1' })
+    expect(options.body).toEqual({ expected_revision: 4 })
+    // No connection is ever supplied by the browser.
+    expect(JSON.stringify(options.body)).not.toContain('connection_ref')
+    await flushPromises()
+    expect(wrapper.find('#tracking-check-result').text()).toContain('暂时没有在 Auto Bangumi 中找到该订阅')
+  })
+
+  it('sends no write-family request while checking', async () => {
+    apiPost.mockResolvedValue({
+      tracking_id: 'tracking-1', action: 'VERIFY_EXTERNAL', outcome: 'ACTIVE',
+      checked_revision: 4, next_revision: 5, checked_at: '2026-10-11T00:00:00Z',
+      operation_id: 'operation-1', needs_manual: false, verification_reason: null,
+      tracking: pendingRow(),
+    } as never)
+    await mountPending()
+
+    const families = apiPost.mock.calls.map((call) => call[0])
+    expect(families).toEqual(['/api/v1/tracking/items/{tracking_id}/check'])
+  })
+})

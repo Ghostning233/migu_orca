@@ -21,6 +21,7 @@ import {
   capabilityStateLabel,
   capabilityVersionLabel,
   createManagementSession,
+  createCheckSession,
   createRecoveryConflictSession,
   createRecoverySession,
   createTrackingActionIntent,
@@ -48,6 +49,8 @@ import {
   sortTrackingItems,
   TRACKING_OVERVIEW_GROUPS,
   type TrackingOverviewGroup,
+  projectCheckResult,
+  TRACKING_CHECK_ENDPOINT,
   TRACKING_RECOVER_ENDPOINT,
   TRACKING_STATUS_GROUPS,
   WRITE_ACTION_CONFIRMATIONS,
@@ -61,6 +64,9 @@ import {
   type TrackingManagementScope,
   type TrackingManagementSession,
   type TrackingPlanDeleteSession,
+  type TrackingCheckBody,
+  type TrackingCheckResult,
+  type TrackingCheckSession,
   type TrackingRecoverResult,
   type TrackingRecoveryActionCode,
   type TrackingRecoverySession,
@@ -175,6 +181,17 @@ const recoveryLoading = ref(false)
 const recoveryPending = ref(false)
 let recoverySequence = 0
 let recoveryController: AbortController | null = null
+// Issue #183: bounded read-only confirmation of a 结果待确认 persistent submit.
+// The page owns one check at a time and holds no connection for it — the server
+// resolves the original submit operation's saved instance — and a check never
+// holds the external-write intent because it writes nothing.
+const checkSession = ref<TrackingCheckSession | null>(null)
+const checkLoading = ref(false)
+let checkSequence = 0
+let checkController: AbortController | null = null
+// One automatic check per opened/armed record: the inspector emits it, the page
+// consumes the flag, so a check that persists a new revision cannot loop.
+const autoCheckArmed = ref(false)
 // External management writes (US-313, US-314).  MODIFY, SET_ENABLED and
 // REFRESH_RSS share the page credential, the impact confirmation, the latest
 // revision and the single page-level intent with the submit family; only the
@@ -476,6 +493,7 @@ function preserveRecoveryLockAfterClear(): void {
   recoveryPending.value = false
   recoveryLoading.value = false
   recoverySession.value = createRecoverySession(session.trackingId, session.action, 'UNKNOWN')
+  resetCheck()
 }
 
 function preserveManagementLockAfterClear(): void {
@@ -635,6 +653,95 @@ async function recheckAfterAction(trackingId: string, refreshList = false): Prom
   if (refreshList) await loadList(true)
   if (selectedTrackingId.value !== trackingId) return
   await inspector.value?.reload()
+}
+
+/**
+ * Run one bounded read-only confirmation of a pending submission (issue #183).
+ *
+ * The request carries only the revision the user is looking at; the server
+ * resolves the original operation's saved connection, so nothing here can
+ * rebind it.  A stale revision is a 409 before any read, and every read-only
+ * business outcome converges the list and re-reads the detail.
+ */
+async function runTrackingCheck(payload: { item: TrackingItem; automatic: boolean }): Promise<void> {
+  const trackingId = payload.item.tracking_id
+  const revision = payload.item.revision
+  if (typeof revision !== 'number') return
+  if (payload.automatic && !autoCheckArmed.value) return
+  if (checkLoading.value) return
+  if (otherItemIntentOwner(trackingId)) {
+    if (!payload.automatic) blockIntent(trackingId)
+    return
+  }
+  if (payload.automatic) {
+    // The owed automatic check is consumed only when one is actually started,
+    // so a refused/blocked attempt is retried rather than silently dropped, and
+    // a check that persists a new revision never re-triggers itself.
+    autoCheckArmed.value = false
+  }
+  blockedIntentNotice.value = null
+  const sequence = ++checkSequence
+  const controller = new AbortController()
+  checkController?.abort()
+  checkController = controller
+  checkLoading.value = true
+  checkSession.value = createCheckSession(trackingId, 'IN_FLIGHT', null, revision)
+  try {
+    const storageDir = storageQuery().storage_dir
+    const body: TrackingCheckBody = {
+      expected_revision: revision,
+      ...(storageDir ? { storage_dir: storageDir } : {}),
+    }
+    const result = await api.post<TrackingCheckResult>(TRACKING_CHECK_ENDPOINT, {
+      path: { tracking_id: trackingId }, body, signal: controller.signal,
+    })
+    if (sequence !== checkSequence) return
+    applyReturnedTracking(result.tracking)
+    const session = projectCheckResult(trackingId, result, revision)
+    checkSession.value = session
+    // Issue #183 review: once the exact object is proven, the pending submit is
+    // no longer ambiguous, so its page-level intent lock is released here —
+    // otherwise the stale intent would keep blocking every other record.
+    if (session.state === 'CONFIRMED') releaseSettledSubmissionIntent(trackingId)
+    await recheckAfterAction(trackingId, true)
+  } catch (error) {
+    if (sequence !== checkSequence) return
+    const apiError = toApiError(error)
+    if (apiError.cancelled && !apiError.httpError) return
+    checkSession.value = apiError.status === 409
+      ? createCheckSession(trackingId, 'CONFLICT', null, revision)
+      : createCheckSession(trackingId, 'UNKNOWN', null, revision)
+    await recheckAfterAction(trackingId, true)
+  } finally {
+    if (sequence === checkSequence) {
+      checkLoading.value = false
+      if (checkController === controller) checkController = null
+    }
+  }
+}
+
+/**
+ * Release a pending *submission* intent that a read-only check has just proven
+ * settled (issue #183 review). Only the submit-family session is released: a
+ * recovery or management lock that is still unresolved stays locked, and the
+ * operation/audit history on the server is untouched.
+ */
+function releaseSettledSubmissionIntent(trackingId: string): void {
+  if (writeSession.value?.trackingId !== trackingId) return
+  if (writeSession.value.state !== 'VERIFYING_EXTERNAL'
+    && writeSession.value.state !== 'RECOVERY_REQUIRED'
+    && writeSession.value.state !== 'UNKNOWN') return
+  writeIntent = null
+  writeSession.value = null
+}
+
+function resetCheck(): void {
+  checkSequence += 1
+  checkController?.abort()
+  checkController = null
+  checkLoading.value = false
+  checkSession.value = null
+  autoCheckArmed.value = false
 }
 
 // -- explicit batch submit (issue #87) --------------------------------------
@@ -1055,6 +1162,9 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
     const session = projectWriteOutcome(trackingId, action, result, requestedMode)
     writeSession.value = session
     if (!writeSessionKeepsIntent(session.state)) writeIntent = null
+    // Issue #183: a submit whose result is still unproven owes one automatic
+    // bounded read-only check, which is exactly what the submit area then shows.
+    else autoCheckArmed.value = true
     await recheckAfterAction(trackingId)
     await presentWriteFeedback(session)
   } catch (error) {
@@ -1374,6 +1484,10 @@ watch(() => route.query.tracking_id, () => {
   void focusSelection()
 })
 watch(selectedTrackingId, (trackingId) => {
+  // Reopening/refreshing an item owes it one automatic bounded check; the
+  // inspector decides from the server's status + operation kind whether it is a
+  // 结果待确认 submission, and the page consumes the flag here.
+  autoCheckArmed.value = Boolean(trackingId)
   if (trackingId) void focusSelection()
 }, { flush: 'post' })
 // A refusal notice only explains a still-pending intent: once every write,
@@ -1386,6 +1500,7 @@ onBeforeUnmount(() => {
   cancelSync()
   resetWrite()
   resetRecovery()
+  resetCheck()
   resetManagement()
   savedState.value = null
 })
@@ -1498,6 +1613,8 @@ onBeforeUnmount(() => {
           :connection-ready="Boolean(savedRef)"
           :write-session="writeSession"
           :recovery-session="recoverySession"
+          :check-session="checkSession"
+          :auto-check-armed="autoCheckArmed"
           :management-session="managementSession"
           :write-busy="inspectorIntentBusy"
           :intent-notice="selectedIntentNotice"
@@ -1507,6 +1624,7 @@ onBeforeUnmount(() => {
           @tracking-updated="applyReturnedTracking"
           @write-requested="runTrackingWrite"
           @recovery-requested="runTrackingRecovery"
+          @check-requested="runTrackingCheck"
           @management-requested="runTrackingManagement"
         />
         <template v-else>

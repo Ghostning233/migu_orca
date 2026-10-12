@@ -44,7 +44,7 @@ class _FakeClient:
             rss_disable="SUPPORTED", rss_delete="SUPPORTED", rss_refresh="SUPPORTED",
         )
 
-    def read_snapshot(self):
+    def read_snapshot(self, *, deadline=None):
         self.reads += 1
         return self.capabilities, [ExternalSubscription("sub-1", "Test", 1, "Group")], [ExternalRss("7", "Feed", "https://rss.invalid")]
 
