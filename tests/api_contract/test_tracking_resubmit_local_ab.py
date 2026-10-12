@@ -361,3 +361,72 @@ def test_no_batch_force_resubmit_path_is_added_for_pending_records(
     assert entry["error_type"] == "tracking_state_conflict"
     assert entry["result"] is None
     assert ab.state.snapshot()[0] == 1, "a batch must not force a pending resubmit"
+
+
+def test_a_one_time_submission_is_never_resubmitted_by_the_server(
+    tmp_path: Path, client: FlaskClient, ab: LocalAb318, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC 1/#184 scope: 「下载现有资源」 keeps its own semantics.
+
+    Its operation reaches a pending-looking status like any other, so the server —
+    not just the page — must refuse the resubmission with a proven reason and
+    without running a second collection.
+    """
+    collect_calls: list[dict[str, Any]] = []
+
+    def _collect_seam():
+        def collect_one(request: dict[str, Any], _config: Any) -> dict[str, Any]:
+            collect_calls.append(request)
+            return {"success": True}
+
+        return collect_one
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.tracking_submission_service.compose_tracking_collect_one",
+        _collect_seam,
+    )
+    ab.state.mode = "match"
+    body, record = _seed(tmp_path, ab)
+    one_time = {**body, "submission_mode": "DOWNLOAD_EXISTING"}
+    submitted = client.post(SUBMIT.format(tracking_id=record.tracking_id), json=one_time)
+    assert submitted.status_code == 200, submitted.get_json()
+    assert submitted.get_json()["result"]["outcome"] == "ADDED_TO_DOWNLOAD"
+    assert len(collect_calls) == 1
+    assert ab.state.snapshot()[0] == 0, "the injected collection seam never hits the stand-in"
+
+    stored = load_tracking_record(_cfg(tmp_path), record.tracking_id)
+    operation_id = stored.current_operation_id
+    assert operation_id is not None
+    assert load_tracking_operation(_cfg(tmp_path), operation_id).submission_mode == "DOWNLOAD_EXISTING"
+
+    offer = client.post(
+        RESUBMIT.format(tracking_id=record.tracking_id),
+        json={"expected_revision": stored.revision, "confirm": False, "storage_dir": "storage"},
+    )
+
+    assert offer.status_code == 200, offer.get_json()
+    result = offer.get_json()["result"]
+    assert result["check_status"] == "BLOCKED"
+    assert result["blocked_reason"] == "ONE_TIME_SUBMISSION"
+    assert result["requires_risk_confirmation"] is False
+    assert result["binding"] is None
+
+    # A hand-built confirmation is refused too: the gate is not the page's alone.
+    confirmed = client.post(
+        RESUBMIT.format(tracking_id=record.tracking_id),
+        json={
+            "expected_revision": stored.revision,
+            "confirm": True,
+            "previous_operation_id": operation_id,
+            "connection_ref": body["connection_ref"],
+            "storage_dir": "storage",
+        },
+    )
+    assert confirmed.status_code == 200, confirmed.get_json()
+    assert confirmed.get_json()["result"]["blocked_reason"] == "ONE_TIME_SUBMISSION"
+    assert len(collect_calls) == 1, "a one-time collection must never be re-run"
+    after = load_tracking_record(_cfg(tmp_path), record.tracking_id)
+    assert after.current_operation_id == operation_id
+    assert not any(
+        event["action"] == "RESUBMIT_RISK_CONFIRMED" for event in after.audit_events
+    )

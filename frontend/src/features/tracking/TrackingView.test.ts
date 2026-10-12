@@ -478,9 +478,10 @@ describe('TrackingView risk-confirmed resubmission (issue #184)', () => {
     await wrapper.find('.confirm-dialog .primary-button').trigger('click')
     await flushPromises()
 
-    // The 409 refuses the confirmation before the external boundary and the
-    // binding is spent: the page re-reads and asks for a new read-only phase.
-    expect(wrapper.find('#tracking-resubmit-result').text()).toContain('绑定已变化')
+    // The 409 refuses the confirmation before the external boundary, states the
+    // proven reason in the ordinary submit panel, and spends the binding: the
+    // next click starts a fresh read-only phase instead of replaying it.
+    expect(wrapper.find('#tracking-submit-result').text()).toContain('追番记录已变化')
     expect(offers).toBe(1)
 
     await wrapper.find('#tracking-resubmit').trigger('click')

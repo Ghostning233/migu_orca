@@ -1259,7 +1259,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     "POST /api/v1/tracking/items/<path:tracking_id>/resubmit": {
         "operationId": "resubmitTrackingItem",
         "summary": "风险确认后的单条主动重新提交",
-        "description": "issue #184：对结果待确认的持续追番提交提供单条主动重新提交。confirm=false 先执行与原提交绑定连接的有界只读检查：已确认外部订阅存在时收敛为追番中且外部写入为零；仍待确认时返回已证实原因、具体重复/资源风险与精确绑定（revision + 原 operation + 连接 generation）。confirm=true 必须携带该绑定，过期或改绑返回 409；服务端复检一次，命中仍零写收敛，否则以新幂等键创建可追溯原 operation 的单个新 operation 并执行一次既有可靠提交序列。外部写可能仍在执行、连接/版本无效或方案不满足提交前提时禁止重发并返回已证实原因；不提供批量强制重发，原未决记录与审计保留。",
+        "description": "issue #184：对结果待确认的持续追番提交提供单条主动重新提交。confirm=false 先执行与原提交绑定连接的有界只读检查：已确认外部订阅存在时收敛为追番中且外部写入为零；仍待确认时返回已证实的原因分类与精确绑定（revision + 原 operation + 连接 generation），页面据此渲染固定的重复/资源风险文案。confirm=true 必须携带该绑定，过期或改绑返回 409；服务端复检一次，命中仍零写收敛，否则以新幂等键创建可追溯原 operation 的单个新 operation 并执行一次既有可靠提交序列。外部写可能仍在执行、连接/版本无效或方案不满足提交前提时禁止重发并返回已证实原因；不提供批量强制重发，原未决记录与审计保留。",
         "requestBody": {
             "type": "object",
             "required": ["expected_revision"],
@@ -1275,13 +1275,13 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                     "description": "false=只做只读检查；true=用户已确认重复/资源风险，携带精确绑定后创建一次新提交。",
                 },
                 "previous_operation_id": {
-                    "type": ["string", "null"],
-                    "description": "只读检查发布的原待确认 operation id；confirm=true 必填，不能改绑其他 operation。",
+                    "type": "string",
+                    "description": "只读检查发布的原待确认 operation id；confirm=true 必填，省略表示只读阶段。不能改绑其他 operation。",
                 },
                 "connection_ref": {
-                    "type": ["string", "null"],
+                    "type": "string",
                     "format": "uuid",
-                    "description": "原 operation 绑定的已保存连接 generation；confirm=true 必填，客户端不能提供其他连接。",
+                    "description": "原 operation 绑定的已保存连接 generation；confirm=true 必填，省略表示只读阶段。客户端不能提供其他连接。",
                 },
                 "storage_dir": {
                     "type": "string",
@@ -1295,6 +1295,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "data_validation_errors": "请求参数校验失败",
                 "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
                 "invalid_tracking_id": "tracking_id 包含不合法字符或路径片段",
+                "tracking_operation_not_found": "未找到该提交操作",
             },
             "404": {"tracking_not_found": "未找到该追番记录"},
             "409": {

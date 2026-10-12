@@ -18,7 +18,7 @@ is whitelisted and scrubbed at the boundary:
 import re
 from typing import Any
 
-from apps.migu_orca_web.serializers import _safe_label
+from apps.migu_orca_web.serializers import _safe_label, serialize_request_safe_info
 from tracking_engine.controllers.management_state import management_actions_for_status
 from tracking_engine.models.operation import TrackingOperation
 from tracking_engine.models.tracking import (
@@ -113,6 +113,21 @@ def tracking_available_actions(
     # REVALIDATING / SUBMITTING / EXTERNAL_DELETED / EXTERNAL_ONLY have no
     # currently-executable state-changing action.
     return actions
+
+
+def safe_valid_resource_count(request: Any) -> int:
+    """The published effective resource count of one Request, or 0.
+
+    One shared projection so the submit-family result and the resubmission result
+    can never disagree about the count they show (issue #184 review).
+    """
+    if not isinstance(request, dict):
+        return 0
+    resources = serialize_request_safe_info(request, storage_profile=None).get("resources")
+    if not isinstance(resources, dict):
+        return 0
+    count = resources.get("valid_resource_count")
+    return count if isinstance(count, int) and count >= 0 else 0
 
 
 def tracking_summary_fields(

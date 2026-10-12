@@ -51,11 +51,13 @@ from typing import Any
 
 from apps.migu_orca_web.save_confirm_service import compute_request_fingerprint
 from apps.migu_orca_web.schemas import TrackingCheckPayload, TrackingResubmitPayload
-from apps.migu_orca_web.serializers import serialize_request_safe_info
 from apps.migu_orca_web.services import _storage_dir
 from apps.migu_orca_web.tracking_check_service import run_saved_tracking_check_locked
 from apps.migu_orca_web.tracking_external_check import CheckPolicy, single_flight_check
-from apps.migu_orca_web.tracking_serializers import tracking_summary_fields
+from apps.migu_orca_web.tracking_serializers import (
+    safe_valid_resource_count,
+    tracking_summary_fields,
+)
 from apps.migu_orca_web.tracking_submission_service import (
     _find_operation,
     compose_tracking_readback_external,
@@ -94,6 +96,7 @@ from tracking_engine.models.operation import (
     TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN,
     TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
     TRACKING_OPERATION_TERMINAL_STATES,
+    TRACKING_SUBMISSION_MODE_CONTINUE,
     TrackingOperation,
 )
 from tracking_engine.models.tracking import (
@@ -151,6 +154,11 @@ RESUBMIT_BLOCKED_PLAN_NOT_SUBMITTABLE = "PLAN_NOT_SUBMITTABLE"
 RESUBMIT_BLOCKED_CONNECTION_CHANGED = "CONNECTION_CHANGED"
 #: A resubmit refused because the saved connection cannot be resolved at all.
 RESUBMIT_BLOCKED_CONFIG_ERROR = "CONFIG_ERROR"
+#: A resubmit refused because the pending operation was a one-time
+#: "download existing resources" request.  Issue #184 covers persistent
+#: submissions only (ADR-0001/ADR-0002), so the feature never re-runs a one-time
+#: collection under a risk confirmation.
+RESUBMIT_BLOCKED_ONE_TIME_SUBMISSION = "ONE_TIME_SUBMISSION"
 #: A resubmit refused because the unresolved check published no proven cause we
 #: may act on; a fail-closed code that never doubles as an offerable reason.
 RESUBMIT_BLOCKED_RESULT_UNPROVEN = "RESULT_UNPROVEN"
@@ -234,6 +242,23 @@ def _check_only_resubmit(
     now: str | None,
 ) -> dict[str, Any]:
     timestamp = now or utc_now()
+    # Issue #184 review: the feature is scoped to persistent submissions, and the
+    # server (not the page) enforces it — a one-time "download existing
+    # resources" operation is refused before any read, so it can never converge
+    # into a subscription nor re-run a collection.
+    current = load_tracking_record(config, payload.tracking_id)
+    _guard_expected_revision(payload.expected_revision, current)
+    current_operation = _current_operation(config, current)
+    if _is_one_time_submission(current_operation):
+        return _resubmit_response(
+            current,
+            confirm=False,
+            check_status=RESUBMIT_STATUS_BLOCKED,
+            checked_revision=payload.expected_revision,
+            timestamp=timestamp,
+            blocked_reason=RESUBMIT_BLOCKED_ONE_TIME_SUBMISSION,
+            operation_id=current_operation.operation_id if current_operation is not None else None,
+        )
     check, plan_identity_changed = _run_identity_safe_check(
         payload,
         config_root=config_root,
@@ -343,6 +368,16 @@ def _confirmed_resubmit(
     record = load_tracking_record(config, payload.tracking_id)
     _guard_expected_revision(payload.expected_revision, record)
     operation = _guard_confirmation_binding(config, record, payload)
+    if _is_one_time_submission(operation):
+        return _resubmit_response(
+            record,
+            confirm=True,
+            check_status=RESUBMIT_STATUS_BLOCKED,
+            checked_revision=payload.expected_revision,
+            timestamp=timestamp,
+            blocked_reason=RESUBMIT_BLOCKED_ONE_TIME_SUBMISSION,
+            operation_id=operation.operation_id,
+        )
     # The success path first: a changed snapshot that now proves the subscription
     # must converge with zero external writes, exactly like the plain check.
     check, plan_identity_changed = _run_identity_safe_check(
@@ -442,6 +477,16 @@ def _replay_confirmed_resubmit(
             "本次重新提交绑定的操作或连接已变化，请重新检查后再确认",
             _RESUBMIT_FAILED_STEP,
             {"field": "previous_operation_id"},
+        )
+    if _is_one_time_submission(existing):
+        return _resubmit_response(
+            load_tracking_record(config, payload.tracking_id),
+            confirm=True,
+            check_status=RESUBMIT_STATUS_BLOCKED,
+            checked_revision=payload.expected_revision,
+            timestamp=timestamp,
+            blocked_reason=RESUBMIT_BLOCKED_ONE_TIME_SUBMISSION,
+            operation_id=existing.operation_id,
         )
     record = load_tracking_record(config, payload.tracking_id)
     request, fingerprint, _issues = _plan_preconditions(config, record)
@@ -550,6 +595,16 @@ def _plan_identity_blocked_response(
     timestamp: str,
 ) -> dict[str, Any]:
     _request, _fingerprint, issues = _plan_preconditions(config, record)
+    if not any(issue.code == REVALIDATE_ISSUE_REQUEST_CHANGED for issue in issues):
+        # The verification refused because the historical operation/mapping
+        # binding changed, not because the plan changed: that is a stale
+        # confirmation, never a plan problem (issue #184 review).
+        raise Stage1Error(
+            "tracking_resubmit_binding_conflict",
+            "历史操作绑定已变化，请重新检查后再确认",
+            _RESUBMIT_FAILED_STEP,
+            {"field": "previous_operation_id"},
+        )
     return _resubmit_response(
         record,
         confirm=confirm,
@@ -572,6 +627,15 @@ def _check_confirmed(check: dict[str, Any]) -> bool:
 def _check_operation_id(check: dict[str, Any]) -> str | None:
     value = check.get("operation_id")
     return value if isinstance(value, str) and value else None
+
+
+def _is_one_time_submission(operation: TrackingOperation | None) -> bool:
+    """True when the pending operation was a one-time collection (AC 1/#184 scope)."""
+    return (
+        operation is not None
+        and operation.operation == TRACKING_OPERATION_KIND_SUBMIT
+        and operation.submission_mode != TRACKING_SUBMISSION_MODE_CONTINUE
+    )
 
 
 def _current_operation(
@@ -859,12 +923,7 @@ def _resubmit_response(
     request: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build one safe two-phase resubmit result (HTTP 200 business result)."""
-    valid_count = 0
-    if isinstance(request, dict):
-        resources = serialize_request_safe_info(request, storage_profile=None).get("resources")
-        if isinstance(resources, dict):
-            count = resources.get("valid_resource_count")
-            valid_count = count if isinstance(count, int) and count >= 0 else 0
+    valid_count = safe_valid_resource_count(request)
     reason = check.get("verification_reason") if isinstance(check, dict) else None
     return {
         "tracking_id": record.tracking_id,
@@ -913,6 +972,7 @@ __all__ = [
     "RESUBMIT_BLOCKED_CONFIG_ERROR",
     "RESUBMIT_BLOCKED_CONNECTION_CHANGED",
     "RESUBMIT_BLOCKED_EXTERNAL_WRITE_IN_PROGRESS",
+    "RESUBMIT_BLOCKED_ONE_TIME_SUBMISSION",
     "RESUBMIT_BLOCKED_PLAN_NOT_SUBMITTABLE",
     "RESUBMIT_BLOCKED_RESULT_UNPROVEN",
     "RESUBMIT_BLOCKED_REASONS",

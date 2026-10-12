@@ -9,6 +9,7 @@ The real Flask + localhost Auto Bangumi main chain lives in
 ``tests/api_contract/test_tracking_resubmit_local_ab.py``.
 """
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -24,6 +25,8 @@ from apps.migu_orca_web.tracking_resubmit_service import (
     RESUBMIT_STATUS_CONFIRMED,
     RESUBMIT_STATUS_UNRESOLVED,
     _blocked_reason_for_unresolved,
+    _record_risk_confirmation,
+    resubmit_idempotency_key,
     run_saved_tracking_resubmit,
 )
 from apps.migu_orca_web.tracking_saved_recovery_service_test import (
@@ -35,12 +38,19 @@ from storage_engine.controllers.autobangumi_config_repository import (
     AutoBangumiConfigRepository,
     build_stored_autobangumi_config,
 )
-from storage_engine.controllers.operation_repository import load_tracking_operation
+from storage_engine.controllers.operation_repository import (
+    bind_tracking_operation,
+    compare_and_swap_tracking_operation,
+    load_tracking_operation,
+)
 from storage_engine.controllers.request_repository import (
     load_request_snapshot,
     save_request_snapshot,
 )
-from storage_engine.controllers.tracking_repository import load_tracking_record
+from storage_engine.controllers.tracking_repository import (
+    compare_and_swap_tracking_record,
+    load_tracking_record,
+)
 from tracking_engine.controllers.submit import CONFIRM_REASON_CONNECTION
 from tracking_engine.models.operation import (
     TRACKING_OPERATION_STATE_IN_PROGRESS,
@@ -411,6 +421,234 @@ def test_a_connection_replaced_after_the_offer_leaves_no_confirmation_behind(
     )
     # A refused resubmit never manufactures a revision the client did not confirm.
     assert after.revision == before.revision
+
+
+def _point_record_at(config, record, operation_id: str):
+    """Rebind one record to an operation the scenario did not create."""
+    return compare_and_swap_tracking_record(
+        config,
+        record.tracking_id,
+        base_revision=record.revision,
+        record=replace(record, current_operation_id=operation_id, revision=record.revision + 1),
+    )
+
+
+def _one_time_operation(config, record, connection_ref: str):
+    operation, created = bind_tracking_operation(
+        config,
+        tracking_id=record.tracking_id,
+        operation="SUBMIT",
+        idempotency_key="resubmit-one-time-key-1",
+        expected_revision=record.revision,
+        request_fingerprint=record.request_fingerprint or "sha256:x",
+        connection_ref=connection_ref,
+        submission_mode="DOWNLOAD_EXISTING",
+        now="2026-09-14T00:00:00+00:00",
+    )
+    assert created
+    in_progress = compare_and_swap_tracking_operation(
+        config, operation.operation_id, expected_state="PREPARED",
+        record=transition_tracking_operation(
+            operation, state=TRACKING_OPERATION_STATE_IN_PROGRESS, now="2026-09-14T00:00:00+00:00"
+        ),
+    )
+    return compare_and_swap_tracking_operation(
+        config, in_progress.operation_id, expected_state=TRACKING_OPERATION_STATE_IN_PROGRESS,
+        record=transition_tracking_operation(
+            in_progress, state=TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN,
+            now="2026-09-14T00:00:00+00:00",
+        ),
+    )
+
+
+def test_a_one_time_submission_is_refused_by_the_server_without_any_read(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """AC 1/#184 scope: only persistent submissions may be resubmitted.
+
+    A 「下载现有资源」operation whose result was never persisted reaches the same
+    pending statuses as a persistent one, so the page alone cannot scope the
+    feature; the server must refuse it before it reads or collects anything.
+    """
+    class _ExplodingClient:
+        reads = 0
+
+        def read_snapshot(self, *, deadline=None):
+            self.reads += 1
+            raise AssertionError("a one-time submission must be refused before any read")
+
+    submit_one = _SubmitSpy()
+    config, _record, saved, op, verifying = _bound_submit_scenario(
+        monkeypatch, tmp_path, TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN, plan_ready=True
+    )
+    one_time = _one_time_operation(config, verifying, str(saved.connection_ref))
+    verifying = _point_record_at(config, verifying, one_time.operation_id)
+    client = _ExplodingClient()
+
+    offer = run_saved_tracking_resubmit(
+        _check_payload(verifying),
+        config_root=tmp_path / "private",
+        management_client=client,
+        submit_one=submit_one,
+        read_policy=_FAST_POLICY,
+    )
+
+    assert offer["check_status"] == RESUBMIT_STATUS_BLOCKED
+    assert offer["blocked_reason"] == "ONE_TIME_SUBMISSION"
+    assert offer["requires_risk_confirmation"] is False
+    assert offer["binding"] is None
+    assert client.reads == 0
+    assert submit_one.calls == []
+    after = load_tracking_record(config, verifying.tracking_id)
+    assert after.current_operation_id == one_time.operation_id
+    assert load_tracking_operation(config, op.operation_id).state == TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN
+    assert not any(
+        event["action"] == TRACKING_AUDIT_RESUBMIT_CONFIRMED for event in after.audit_events
+    )
+
+
+def test_a_one_time_submission_confirmation_is_refused_before_any_collect(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """AC 1: an already-issued confirmation can never re-run a one-time collect."""
+    config, _record, saved, _op, verifying = _bound_submit_scenario(
+        monkeypatch, tmp_path, TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN, plan_ready=True
+    )
+    one_time = _one_time_operation(config, verifying, str(saved.connection_ref))
+    verifying = _point_record_at(config, verifying, one_time.operation_id)
+    collect_one = _SubmitSpy({"success": True})
+
+    result = run_saved_tracking_resubmit(
+        _check_payload(
+            verifying,
+            confirm=True,
+            previous_operation_id=one_time.operation_id,
+            connection_ref=str(saved.connection_ref),
+        ),
+        config_root=tmp_path / "private",
+        management_client=_reading_client(),
+        submit_one=None,
+        read_policy=_FAST_POLICY,
+    )
+
+    assert result["check_status"] == RESUBMIT_STATUS_BLOCKED
+    assert result["blocked_reason"] == "ONE_TIME_SUBMISSION"
+    assert collect_one.calls == []
+    assert load_tracking_record(config, verifying.tracking_id).current_operation_id == (
+        one_time.operation_id
+    )
+
+
+def test_a_crash_between_the_bind_and_submitting_resumes_that_operation(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """AC 5: the confirmation's own operation is resumed, never a misleading 409.
+
+    The durable binder is on disk but the record has not reached SUBMITTING yet:
+    PREPARED proves the external was never called, so the replayed confirmation
+    resumes it exactly like a same-key submit resume.
+    """
+    config, _record, saved, op, verifying = _bound_submit_scenario(
+        monkeypatch, tmp_path, TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN, plan_ready=True
+    )
+    offer = run_saved_tracking_resubmit(
+        _check_payload(verifying),
+        config_root=tmp_path / "private",
+        management_client=_empty_client(),
+        read_policy=_FAST_POLICY,
+        now="2026-09-14T00:00:00+00:00",
+    )
+    binding = offer["binding"]
+    key = resubmit_idempotency_key(
+        tracking_id=verifying.tracking_id,
+        previous_operation_id=binding["previous_operation_id"],
+        expected_revision=binding["expected_revision"],
+        connection_ref=str(binding["connection_ref"]),
+    )
+    # The real flow writes the USER verdict and binds the operation, then crashes
+    # before the record reaches SUBMITTING.
+    record = load_tracking_record(config, verifying.tracking_id)
+    record = _record_risk_confirmation(
+        config, record=record, operation=op, timestamp="2026-09-14T00:00:01+00:00"
+    )
+    bound, created = bind_tracking_operation(
+        config,
+        tracking_id=verifying.tracking_id,
+        operation="SUBMIT",
+        idempotency_key=key,
+        expected_revision=record.revision,
+        request_fingerprint=record.request_fingerprint or "sha256:x",
+        connection_ref=str(binding["connection_ref"]),
+        previous_operation_id=op.operation_id,
+        now="2026-09-14T00:00:01+00:00",
+    )
+    assert created
+    assert load_tracking_operation(config, bound.operation_id).state == "PREPARED"
+
+    submit_one = _SubmitSpy()
+    external, rss = _matching_snapshot()
+    result = run_saved_tracking_resubmit(
+        _check_payload(
+            verifying,
+            expected_revision=binding["expected_revision"],
+            confirm=True,
+            previous_operation_id=binding["previous_operation_id"],
+            connection_ref=str(binding["connection_ref"]),
+        ),
+        config_root=tmp_path / "private",
+        management_client=_empty_client(),
+        submit_one=submit_one,
+        readback_external=lambda: (None, [external], [rss]),
+        read_policy=_FAST_POLICY,
+        now="2026-09-14T00:00:02+00:00",
+    )
+
+    assert result["operation_id"] == bound.operation_id
+    assert result["outcome"] == TRACKING_STATUS_ACTIVE
+    assert len(submit_one.calls) == 1
+    assert load_tracking_operation(config, bound.operation_id).state == TRACKING_OPERATION_STATE_SUCCEEDED
+
+
+def test_a_binding_change_that_is_not_a_plan_change_is_refused_as_a_stale_confirmation(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """AC 4: an operation/mapping binding change is a 409, not a plan verdict."""
+    config, _record, saved, op, verifying = _bound_submit_scenario(
+        monkeypatch, tmp_path, TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN, plan_ready=True
+    )
+    # A legacy mapping the bound generation does not own: the read-only
+    # verification refuses the identity while the plan itself is unchanged.
+    verifying = compare_and_swap_tracking_record(
+        config,
+        verifying.tracking_id,
+        base_revision=verifying.revision,
+        record=replace(
+            verifying,
+            external_mapping={
+                "schema_version": 1,
+                "adapter": "legacy_3_1",
+                "subscription_id": "external-legacy",
+                "rss_ids": [],
+                "match_reason": "EXTERNAL_ID",
+                "external_deleted": False,
+                "enabled": True,
+                "missing_sync_count": 0,
+                "last_verified_at": None,
+            },
+            revision=verifying.revision + 1,
+        ),
+    )
+
+    with pytest.raises(Stage1Error) as error:
+        run_saved_tracking_resubmit(
+            _check_payload(verifying),
+            config_root=tmp_path / "private",
+            management_client=_reading_client(),
+            read_policy=_FAST_POLICY,
+        )
+
+    assert error.value.error_type == "tracking_resubmit_binding_conflict"
+    assert load_tracking_record(config, verifying.tracking_id).current_operation_id == op.operation_id
 
 
 def test_confirmed_resubmit_refuses_a_stale_revision_before_any_read(monkeypatch, tmp_path: Path) -> None:

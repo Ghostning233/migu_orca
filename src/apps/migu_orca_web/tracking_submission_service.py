@@ -434,6 +434,28 @@ def run_tracking_resubmit_after_risk_confirmation(
             fingerprint=fingerprint,
             connection_ref=connection_ref,
         )
+        if existing.state == TRACKING_OPERATION_STATE_PREPARED:
+            # Issue #184 review: the binder is durable but the external system was
+            # provably never called, and the crash may have happened before the
+            # record reached SUBMITTING.  Resuming that very operation is the same
+            # guarantee a same-key submit resume gives, so a crash in that window
+            # never turns the user's confirmation into a misleading 409.
+            return _submit_through_external(
+                config,
+                record=current,
+                request=request,
+                fingerprint=fingerprint,
+                expected_revision=existing.expected_revision,
+                idempotency_key=idempotency_key,
+                ab_config=ab_config,
+                connection_ref=connection_ref,
+                operation=existing,
+                submit_one=submit_one,
+                persist_ab_result=persist_ab_result,
+                readback_external=readback_external,
+                submission_mode=existing.submission_mode,
+                timestamp=timestamp,
+            )
         return _resolve_existing_operation(
             config,
             record=current,
