@@ -1794,8 +1794,16 @@ const TRACKING_BATCH_SUBMIT_ENDPOINT = '/api/v1/tracking/batch-submit' as const 
 /** The transport that is currently in flight; one write runs at a time. */
 type ActiveTransport =
   | { readonly family: 'SUBMIT'; readonly trackingId: string; readonly action: TrackingWriteActionCode; readonly mode: TrackingSubmissionMode | null }
-  /** One risk-confirmed resubmission: a submit-family outcome, one new operation. */
-  | { readonly family: 'RESUBMIT'; readonly trackingId: string; readonly action: 'SUBMIT' }
+  /**
+   * One risk-confirmed resubmission: a submit-family outcome, one new operation.
+   * It repeats a persistent submission, so its mode is always 持续追番.
+   */
+  | {
+      readonly family: 'RESUBMIT'
+      readonly trackingId: string
+      readonly action: 'SUBMIT'
+      readonly mode: TrackingSubmissionMode
+    }
   | { readonly family: 'RECOVERY'; readonly trackingId: string; readonly action: TrackingRecoveryActionCode }
   | { readonly family: 'MANAGEMENT'; readonly trackingId: string; readonly action: TrackingManagementActionCode; readonly targetScope: TrackingManagementScope }
 
@@ -2278,10 +2286,7 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
     if (!transport || (transport.family !== 'SUBMIT' && transport.family !== 'RESUBMIT')) return []
     active = null
     const session = projectSubmitOutcome(
-      transport.trackingId,
-      transport.action,
-      result,
-      transport.family === 'SUBMIT' ? transport.mode : null,
+      transport.trackingId, transport.action, result, transport.mode,
     )
     submitSession.value = session
     if (!session.keepsIntent) {
@@ -2766,7 +2771,9 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
     if (locked) {
       if (submitReplayBlocked) return refuseAndStart(trackingId, 'REPLAY')
       refusalNotice.value = null
-      active = { family: 'RESUBMIT', trackingId, action: 'SUBMIT' }
+      active = {
+        family: 'RESUBMIT', trackingId, action: 'SUBMIT', mode: 'CONTINUE_TRACKING',
+      }
       loading.value = true
       submitSession.value = createSubmitSession(trackingId, 'SUBMIT', 'IN_FLIGHT')
       return {
@@ -2873,7 +2880,7 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
     // The confirmation is a submit-family external write: one new operation and
     // the ordinary submit result panel.
     submitConfigSnapshot = null
-    active = { family: 'RESUBMIT', trackingId, action: 'SUBMIT' }
+    active = { family: 'RESUBMIT', trackingId, action: 'SUBMIT', mode: 'CONTINUE_TRACKING' }
     loading.value = true
     submitSession.value = createSubmitSession(trackingId, 'SUBMIT', 'IN_FLIGHT')
     return {

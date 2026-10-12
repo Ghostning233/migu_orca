@@ -32,9 +32,9 @@ changed plan keeps reporting ``REQUEST_CHANGED`` until it is confirmed.
 from typing import Any
 
 from apps.migu_orca_web.save_confirm_service import compute_request_fingerprint
-from apps.migu_orca_web.serializers import serialize_request_safe_info
 from apps.migu_orca_web.tracking_migration_service import run_tracking_migration
 from apps.migu_orca_web.tracking_serializers import (
+    safe_valid_resource_count,
     tracking_available_actions,
     tracking_summary_fields,
 )
@@ -269,12 +269,7 @@ def _result_payload(
     checked_at: str,
 ) -> dict[str, Any]:
     """Build the safe §11.5 revalidate result (HTTP 200 for business results)."""
-    valid_count = 0
-    if isinstance(request, dict):
-        resources = serialize_request_safe_info(request, storage_profile=None).get("resources")
-        if isinstance(resources, dict):
-            count = resources.get("valid_resource_count")
-            valid_count = count if isinstance(count, int) and count >= 0 else 0
+    valid_count = safe_valid_resource_count(request)
     return {
         "tracking_id": record.tracking_id,
         "ready": ready,

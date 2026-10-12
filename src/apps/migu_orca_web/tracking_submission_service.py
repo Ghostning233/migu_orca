@@ -52,7 +52,6 @@ from apps.migu_orca_web.schemas import (
 )
 from apps.migu_orca_web.serializers import (
     _sanitize_ab_submit_result,
-    serialize_request_safe_info,
 )
 from apps.migu_orca_web.tracking_external_check import (
     attempt_timeout_seconds,
@@ -60,6 +59,7 @@ from apps.migu_orca_web.tracking_external_check import (
 )
 from apps.migu_orca_web.tracking_migration_service import run_tracking_migration
 from apps.migu_orca_web.tracking_serializers import (
+    safe_valid_resource_count,
     tracking_available_actions,
     tracking_summary_fields,
 )
@@ -1588,12 +1588,7 @@ def _submit_result_payload(
     failed/indeterminate outcome (issue #86): the client renders its fixed
     next-step copy from this code and never from an upstream response.
     """
-    valid_count = 0
-    if isinstance(request, dict):
-        resources = serialize_request_safe_info(request, storage_profile=None).get("resources")
-        if isinstance(resources, dict):
-            count = resources.get("valid_resource_count")
-            valid_count = count if isinstance(count, int) and count >= 0 else 0
+    valid_count = safe_valid_resource_count(request)
     return {
         "tracking_id": record.tracking_id,
         "outcome": outcome,

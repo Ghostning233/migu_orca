@@ -1251,7 +1251,8 @@ class TrackingResubmitResultDTO(_StrictBase):
     requires_risk_confirmation: bool = False
     #: Proven reason a resubmit is refused: the resubmit's own codes
     #: (``EXTERNAL_WRITE_IN_PROGRESS`` / ``PLAN_NOT_SUBMITTABLE`` /
-    #: ``CONFIG_ERROR`` / ``RESULT_UNPROVEN``) or the check's proven reason class
+    #: ``CONFIG_ERROR`` / ``RESULT_UNPROVEN`` / ``ONE_TIME_SUBMISSION``) or the
+    #: check's proven reason class
     #: (``CONNECTION_CHANGED``/``AUTHENTICATION``/``VERSION``/``CAPABILITY``/
     #: ``CONNECTION``). ``None`` when the phase proceeded.
     blocked_reason: str | None = None

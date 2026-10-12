@@ -516,7 +516,13 @@ def test_a_one_time_submission_confirmation_is_refused_before_any_collect(
     )
     one_time = _one_time_operation(config, verifying, str(saved.connection_ref))
     verifying = _point_record_at(config, verifying, one_time.operation_id)
-    collect_one = _SubmitSpy({"success": True})
+    # Wire the one-time collection seam itself: if the gate were ever removed, the
+    # refused confirmation would run this seam and the count below would move.
+    collect_calls: list[dict] = []
+    monkeypatch.setattr(
+        "apps.migu_orca_web.tracking_submission_service.compose_tracking_collect_one",
+        lambda: (lambda request, _config: (collect_calls.append(request), {"success": True})[1]),
+    )
 
     result = run_saved_tracking_resubmit(
         _check_payload(
@@ -533,7 +539,7 @@ def test_a_one_time_submission_confirmation_is_refused_before_any_collect(
 
     assert result["check_status"] == RESUBMIT_STATUS_BLOCKED
     assert result["blocked_reason"] == "ONE_TIME_SUBMISSION"
-    assert collect_one.calls == []
+    assert collect_calls == []
     assert load_tracking_record(config, verifying.tracking_id).current_operation_id == (
         one_time.operation_id
     )
