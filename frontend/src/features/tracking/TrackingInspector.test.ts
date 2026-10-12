@@ -1061,6 +1061,7 @@ describe('pending submission check (issue #183)', () => {
     const wrapper = await mountInspector()
 
     expect(wrapper.find('#tracking-recovery-heading').exists()).toBe(true)
+    expect(wrapper.find('#tracking-recovery-heading').text()).toBe('结果待确认恢复')
     expect(wrapper.find('#tracking-check').exists()).toBe(false)
   })
 

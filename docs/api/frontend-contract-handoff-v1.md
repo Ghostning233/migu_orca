@@ -31,7 +31,7 @@ F-F 是 handoff 的消费边界：Stage 38 已按本表交付正式追番管理�
 | 动作 | operationId | 需要 `confirm` | revision / 幂等 | 外部能力与恢复 |
 | --- | --- | --- | --- | --- |
 | 复核 | `revalidateTrackingItem` | 否 | `expected_revision` | 纯本地；409 刷新详情后重试 |
-| 提交 | `submitTrackingItem` | 必须为 `true` | `expected_revision` + `idempotency_key` | 重新验证后写外部；明确失败用 retry，未知结果只能 recover |
+| 提交 | `submitTrackingItem` | 必须为 `true` | `expected_revision` + `idempotency_key` | 重新验证后写外部；明确失败用 retry，结果待确认只能 recover |
 | 重试 | `retryTrackingItem` | 必须为 `true` | `expected_revision` + 新操作的 `idempotency_key` | 仅明确失败允许；不得绕过 recovery |
 | 恢复 | `recoverTrackingItem` | 人工标记时为 `true` | `expected_revision` | `AUTO` 纯本地；`VERIFY_EXTERNAL` 只读核验；`MARK_SUCCEEDED`/`MARK_FAILED` 是人工结论，不盲目重建 |
 | 修改 | `modifyTrackingItem` | 必须为 `true` | `target_scope` + `expected_revision` + `idempotency_key` | `SUBSCRIPTION` 时 patch 仅允许 `title`/`season`/`subtitle_group`/`filter_rule`/`offset`/`expected_folder_name`；`ASSOCIATED_RSS` 时仅允许 `name`/`aggregate`/`parser`；服务端 read-before-write + capability |

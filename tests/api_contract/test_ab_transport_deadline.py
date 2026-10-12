@@ -463,6 +463,8 @@ class TestSubmitReadbackDeadline:
                 load_storage_config(tmp_path / "storage"), record.tracking_id
             )
             assert stored.external_mapping is None
+            # Issue #169: the unreadable read-back is 结果待确认, verbatim.
+            assert stored.audit_events[-1]["safe_message"] == "Auto Bangumi 结果待确认，请先恢复核验"
             # Exactly one external write, never a resubmit after the timeout.
             assert server.count("POST /api/v1/rss/subscribe") == 1, server.requests
         finally:
