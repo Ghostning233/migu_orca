@@ -112,6 +112,11 @@ import {
   projectTrackingNotFound,
 } from '@/features/workbench/batchItemProjection'
 import { displayValue, type RequestSnapshot } from '@/features/requests/requestDetail'
+import {
+  BATCH_REVIEW_DISPLAY_ORDER,
+  evaluateReviewEligibility,
+  reviewBlockerMessages,
+} from '@/features/workbench/reviewEligibility'
 import { selectedCollectionSummary, type PreviewEditState, type SelectedCollectionSummary } from '@/features/workbench/candidateSearch'
 import { currentStorageDir, storageQuery } from '@/features/requests/requestStorage'
 import { isPublicRouteIdentifier, routeLocation } from '@/app/router/catalog'
@@ -449,33 +454,41 @@ interface BatchItemConfirmability {
   session: DraftSession | null
 }
 
+/**
+ * #167：判据、文案与展示序都来自共享的 reviewEligibility 模块；这里只装配批量这份事实，
+ * A local edit is never confirmed implicitly: it must reach the server first.
+ */
 /** The single qualification gate shared by cards, detail and save actions. */
 function itemConfirmability(itemId: string): BatchItemConfirmability {
   const item = items.value.find((candidate) => candidate.item_id === itemId)
   const journeyItem = batchReview.value.items[itemId]
-  const blockers: string[] = []
-  if (!item || !canExpandBatchCard(item) || !batchCardRequest(item)) blockers.push('需先生成可审核草案')
   // #162：判据只读模块快照回吐的客户端事实；句柄的创建/替换/销毁由模块决定。
   const facts = item ? draftClientFactsFor(item) : null
   const session = item ? draftSessionFor(item) : null
-  const draftId = facts?.draftId ?? item?.draft_id
-  const revision = facts?.draftRevision ?? item?.draft_revision
-  if (!draftId || !draftId.trim()) blockers.push('草案能力无效')
-  if (!Number.isInteger(revision) || (revision ?? 0) <= 0) blockers.push('草案版本无效')
-  if (!facts || facts.invalid) blockers.push('订阅草案已失效')
-  // A local edit is never confirmed implicitly: it must reach the server first.
-  if (facts?.waiting) blockers.push('有尚未应用的编辑，正在等待过滤规则自动更新')
-  else if (facts?.folderPending) blockers.push('有尚未应用的编辑，等待提交目录名')
-  else if (facts?.dirty || facts?.groupPending) blockers.push('有尚未应用的编辑')
-  if (facts?.applying) blockers.push('正在重新计算资源')
-  if (facts?.hasError || facts?.canRetry) blockers.push('修改失败，请重试或恢复最后一致值')
-  if (batchReview.value.savingItemIds.has(itemId) || item?.status === 'RESPONSE_UNKNOWN' || journeyItem?.phase === 'saving' || journeyItem?.phase === 'response_unknown') blockers.push('保存结果待核验')
   const request = item ? batchCardRequest(item) : null
-  const selectedGroup = request?.confirmable_config?.selected_subtitle_group
-  if (!selectedGroup || !String(selectedGroup).trim()) blockers.push('请选择有效字幕组')
-  const seeds = request?.confirmable_config?.effective_seed_names ?? []
-  if (!seeds.some((seed) => typeof seed === 'string' && seed.trim())) blockers.push('没有有效资源')
-  return { confirmable: blockers.length === 0, blockers, session }
+  const eligibility = evaluateReviewEligibility({
+    reviewableDraft: Boolean(item && canExpandBatchCard(item) && request),
+    draftId: facts?.draftId ?? item?.draft_id ?? null,
+    draftRevision: facts?.draftRevision ?? item?.draft_revision ?? null,
+    sessionPresent: Boolean(facts),
+    draftInvalid: Boolean(facts?.invalid),
+    saveUnverified: batchReview.value.savingItemIds.has(itemId)
+      || item?.status === 'RESPONSE_UNKNOWN'
+      || journeyItem?.phase === 'saving'
+      || journeyItem?.phase === 'response_unknown',
+    recalculating: Boolean(facts?.applying),
+    schedulerWaiting: Boolean(facts?.waiting),
+    schedulerFolderPending: Boolean(facts?.folderPending),
+    pendingEdit: Boolean(facts?.dirty || facts?.groupPending),
+    editFailed: Boolean(facts?.hasError || facts?.canRetry),
+    selectedSubtitleGroup: request?.confirmable_config?.selected_subtitle_group ?? null,
+    effectiveSeedNames: request?.confirmable_config?.effective_seed_names ?? [],
+  })
+  return {
+    confirmable: eligibility.confirmable,
+    blockers: reviewBlockerMessages(eligibility.blockers, BATCH_REVIEW_DISPLAY_ORDER),
+    session,
+  }
 }
 
 function hasUnsafeBatchWork(): boolean {

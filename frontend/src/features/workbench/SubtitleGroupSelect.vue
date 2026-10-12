@@ -23,6 +23,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'update:modelValue', value: string): void
 }>()
+import { REVIEW_BLOCKER_MESSAGES } from '@/features/workbench/reviewEligibility'
 </script>
 
 <template>
@@ -36,7 +37,7 @@ const emit = defineEmits<{
       :aria-describedby="props.error ? 'subtitle-group-error' : undefined"
       @update:model-value="emit('update:modelValue', $event)"
     />
-    <p v-if="props.applying" class="field-help" aria-live="polite">正在重新计算资源...</p>
+    <p v-if="props.applying" class="field-help" aria-live="polite">{{ REVIEW_BLOCKER_MESSAGES.recalculating }}...</p>
     <p v-if="props.error" id="subtitle-group-error" class="field-error" role="alert">{{ props.error }}</p>
   </div>
 </template>
