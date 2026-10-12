@@ -478,6 +478,9 @@ def _replay_confirmed_resubmit(
             _RESUBMIT_FAILED_STEP,
             {"field": "previous_operation_id"},
         )
+    # Defensive only: every operation this endpoint creates already passed the
+    # gate above, so this is reachable only for a hand-written/stale operation
+    # file that names a one-time submission under a resubmit key.
     if _is_one_time_submission(existing):
         return _resubmit_response(
             load_tracking_record(config, payload.tracking_id),
