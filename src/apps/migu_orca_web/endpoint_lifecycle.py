@@ -66,7 +66,7 @@ ENDPOINT_LIFECYCLE: Final[dict[tuple[str, str], EndpointLifecycle]] = {
         "结果待确认提交的风险确认单条主动重新提交（先只读检查，确认后才新建 operation）",
         "TrackingRecord + operation",
     ),
-    ("POST", "/api/v1/tracking/items/<path:tracking_id>/recover"): _entry(_RECOVERY, "未知结果保守恢复；不得盲目重放", "TrackingRecord + operation"),
+    ("POST", "/api/v1/tracking/items/<path:tracking_id>/recover"): _entry(_RECOVERY, "结果待确认保守恢复；不得盲目重放", "TrackingRecord + operation"),
     ("POST", "/api/v1/requests/<path:request_id>/accept"): _entry(_RECOVERY, "保存后确认失败的 Request 恢复入口", "Request + TrackingRecord"),
     ("POST", "/api/v1/requests/<path:request_id>/cancel"): _entry(_RECOVERY, "待确认 Request 的显式取消", "Request store"),
     ("POST", "/api/v1/requests/<path:request_id>/modify"): _entry(_RECOVERY, "已保存 Request 的兼容修改入口", "Request store"),

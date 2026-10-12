@@ -10,32 +10,25 @@ import { storageQuery } from '@/features/requests/requestStorage'
 import {
   canVerifyExternally,
   executableTrackingActions,
-  MANAGEMENT_NEEDS_MANUAL_NOTICE,
   formatSubmissionMode,
+  DELETE_EXTERNAL_HELP,
   isPendingSubmission,
-  managementSessionKeepsIntent,
-  projectTrackingActionScopes,
-  recoverySessionKeepsLock,
-  resubmitOfferState,
-  writeSessionKeepsIntent,
-  RECOVERY_NEEDS_MANUAL_NOTICE,
+  MANAGEMENT_ACTIONS_HELP,
   type CapabilityResult,
   type TrackingCheckSession,
-  type TrackingResubmitSession,
   type TrackingAction,
   type TrackingItem,
   type TrackingManagementScope,
-  type TrackingManagementSession,
-  type TrackingRecoveryActionCode,
-  type TrackingRecoverySession,
-  type TrackingWriteSession,
 } from './trackingProjection'
 import {
-  DELETE_EXTERNAL_HELP,
-  isSendableManagementActionCode,
-  MANAGEMENT_ACTIONS_HELP,
-  type SendableManagementActionCode,
-} from './trackingManagement'
+  isSendableManagementAction,
+  projectTrackingActionScopes,
+  type TrackingManagementActionCode,
+  type TrackingPlanDeleteSession,
+  type TrackingRecoveryActionCode,
+  type TrackingWriteSession,
+  type TrackingWriteSessionSet,
+} from './useTrackingWriteSession'
 import AnimeDraftEditor from '@/features/workbench/AnimeDraftEditor.vue'
 import { EPISODE_PLACEHOLDER, hasTrustedEpisodeCount } from '@/features/workbench/episodeCount'
 import {
@@ -44,7 +37,6 @@ import {
 } from '@/features/requests/useSavedPlanEditor'
 import type { RequestDetailResult } from '@/features/requests/requestDetail'
 import type { PreviewPatch } from '@/features/workbench/candidateSearch'
-import type { TrackingPlanDeleteSession } from './trackingProjection'
 import CheckboxRow from '@/components/forms/CheckboxRow.vue'
 import { buildReuseHandoff, publishReuseHandoff } from '@/features/requests/reuseHandoff'
 import TrackingExternalDelete from './TrackingExternalDelete.vue'
@@ -67,20 +59,17 @@ const props = defineProps<{
    * the connection, credentials, exact version and capability server-side.
    */
   connectionReady?: boolean
-  /** Page-level external write state for one item; the page owns the request. */
-  writeSession?: TrackingWriteSession | null
-  /** Page-level unknown-result recovery state for one item (US-312). */
-  recoverySession?: TrackingRecoverySession | null
-  /** Page-level bounded read-only check state for one item (issue #183). */
-  checkSession?: TrackingCheckSession | null
   /**
-   * Issue #184: page-level risk-confirmed resubmission state for one item. The
-   * component only offers the step and renders the page-level result; the page
-   * owns the read-only phase, the risk confirmation and the single write.
+   * The page's single write-session entry (issue #168): the latest session of
+   * each write family.  The page owns the request; this component only renders
+   * the result of the family whose panel it is.
    */
-  resubmitSession?: TrackingResubmitSession | null
-  /** True while the page's risk confirmation dialog is open for this item. */
-  resubmitPending?: boolean
+  sessions?: TrackingWriteSessionSet | null
+  /**
+   * Page-level bounded read-only check state for one item (issue #183).  It is
+   * its own slot: a read-only check never holds the page-level write intent.
+   */
+  checkSession?: TrackingCheckSession | null
   /**
    * Issue #183: true while the page still owes this item one automatic
    * read-only check (reopening/refreshing a 结果待确认 submission). The page
@@ -88,8 +77,6 @@ const props = defineProps<{
    * revision can never loop forever.
    */
   autoCheckArmed?: boolean
-  /** Page-level external management state for one item (US-313). */
-  managementSession?: TrackingManagementSession | null
   /** The single page intent is spent elsewhere (another item's write/recovery). */
   writeBusy?: boolean
   /** Page-owned plan-delete result for this item (issue #92). */
@@ -108,9 +95,6 @@ const emit = defineEmits<{
   (e: 'recovery-requested', payload: { action: TrackingRecoveryActionCode; item: TrackingItem }): void
   // Issue #183: the only action a pending submission offers. It reads only.
   (e: 'check-requested', payload: { item: TrackingItem; automatic: boolean }): void
-  // Issue #184: one single manual resubmission of a pending submission. The page
-  // runs the read-only phase first and only writes after an explicit confirmation.
-  (e: 'resubmit-requested', payload: { item: TrackingItem }): void
   // A management request carries the scope the user chose and the strict patch
   // its own form built; the page re-validates both before anything is sent.
   /** Issue #92: delete this plan, optionally with its controlled external object. */
@@ -139,11 +123,13 @@ let controller: AbortController | null = null
 // renders the fixed page-level write result.  No key, credential or request
 // state ever lives here.  SUBMIT and RETRY are mutually exclusive on the server
 // (different source statuses), so at most one of them is ever projected.
+/** The one session of each family, filtered to the record this panel shows. */
+function sessionFor(session: TrackingWriteSession | null | undefined): TrackingWriteSession | null {
+  return session && session.trackingId === props.trackingId ? session : null
+}
+const thisWrite = computed(() => sessionFor(props.sessions?.submit))
 const writeInFlight = computed(() => (
-  props.writeSession?.trackingId === props.trackingId && props.writeSession.state === 'IN_FLIGHT'
-))
-const thisWrite = computed(() => (
-  props.writeSession && props.writeSession.trackingId === props.trackingId ? props.writeSession : null
+  thisWrite.value?.state === 'IN_FLIGHT'
 ))
 /** The server-computed write actions, intersected only with known values. */
 const writeActions = computed(() => (
@@ -234,35 +220,6 @@ function requestCheck(automatic = false): void {
   emit('check-requested', { item: detail.value, automatic })
 }
 
-// -- risk-confirmed single resubmission (issue #184) --------------------------
-// 结果待确认 is never a safe retry (ADR-0001/ADR-0002). The page runs the same
-// bounded read-only check first; only a still-unresolved, server-offered binding
-// can lead to a second, explicit risk confirmation. This component offers the
-// entry and states the proven reason when the server has already refused it.
-const thisResubmit = computed(() => (
-  props.resubmitSession && props.resubmitSession.trackingId === props.trackingId
-    ? props.resubmitSession
-    : null
-))
-const resubmitInFlight = computed(() => thisResubmit.value?.state === 'IN_FLIGHT')
-const resubmitOffer = computed(() => resubmitOfferState(
-  detail.value?.status,
-  detail.value?.current_operation?.operation,
-  detail.value?.current_operation?.state,
-  detail.value?.submission_mode,
-))
-const resubmitOffered = computed(() => resubmitOffer.value.available)
-const resubmitHint = computed(() => resubmitOffer.value.hint)
-/** The resubmit needs no client credential: the server resolves the bound one. */
-const resubmitBusy = computed(() => (
-  checkBusy.value || props.resubmitPending === true || resubmitInFlight.value
-))
-
-function requestResubmit(): void {
-  if (!detail.value || resubmitBusy.value) return
-  emit('resubmit-requested', { item: detail.value })
-}
-
 // -- unknown-result recovery (US-312) ----------------------------------------
 // The three local actions are rendered exactly as the server offers them for a
 // recovery status, so no capability or credential is involved; the read-only
@@ -298,29 +255,22 @@ const verifyExternalOffered = computed(() => (
   recoveryActions.value.length > 0 && props.connectionReady === true && canVerifyExternally(props.capabilities)
 ))
 const recoveryInFlight = computed(() => (
-  props.recoverySession?.trackingId === props.trackingId && props.recoverySession.state === 'IN_FLIGHT'
+  thisRecovery.value?.state === 'IN_FLIGHT'
 ))
-const thisRecovery = computed(() => (
-  props.recoverySession && props.recoverySession.trackingId === props.trackingId ? props.recoverySession : null
-))
+const thisRecovery = computed(() => sessionFor(props.sessions?.recovery))
 const managementInFlight = computed(() => (
-  props.managementSession?.trackingId === props.trackingId
-  && props.managementSession.state === 'IN_FLIGHT'
+  thisManagement.value?.state === 'IN_FLIGHT'
 ))
-const thisManagement = computed(() => (
-  props.managementSession && props.managementSession.trackingId === props.trackingId
-    ? props.managementSession
-    : null
-))
+const thisManagement = computed(() => sessionFor(props.sessions?.management))
 /** The modify result is rendered next to the modify form; the rest next to the actions. */
-const thisModify = computed(() => (thisManagement.value?.action === 'MODIFY' ? thisManagement.value : null))
+const thisModify = computed(() => (thisManagement.value?.operation === 'MODIFY' ? thisManagement.value : null))
 /** The delete result belongs to the delete section only (US-315). */
 const thisDelete = computed(() => (
-  thisManagement.value?.action === 'DELETE_EXTERNAL' ? thisManagement.value : null
+  thisManagement.value?.operation === 'DELETE_EXTERNAL' ? thisManagement.value : null
 ))
 const thisManagementAction = computed(() => (
-  thisManagement.value && thisManagement.value.action !== 'MODIFY'
-    && thisManagement.value.action !== 'DELETE_EXTERNAL'
+  thisManagement.value && thisManagement.value.operation !== 'MODIFY'
+    && thisManagement.value.operation !== 'DELETE_EXTERNAL'
     ? thisManagement.value
     : null
 ))
@@ -348,16 +298,11 @@ const itemActionInFlight = computed(() => (
  * Management actions are server-computed, so a record in a recovery status
  * never offers any — this lock covers the actions the page can actually send.
  */
-const itemIntentUnresolved = computed(() => {
-  const trackingId = props.trackingId
-  const write = props.writeSession?.trackingId === trackingId
-    && writeSessionKeepsIntent(props.writeSession.state)
-  const recovery = props.recoverySession?.trackingId === trackingId
-    && recoverySessionKeepsLock(props.recoverySession.state)
-  const management = props.managementSession?.trackingId === trackingId
-    && managementSessionKeepsIntent(props.managementSession)
-  return Boolean(write || recovery || management)
-})
+const itemIntentUnresolved = computed(() => Boolean(
+  (thisWrite.value?.keepsIntent ?? false)
+  || (thisRecovery.value?.keepsIntent ?? false)
+  || (thisManagement.value?.keepsIntent ?? false),
+))
 /**
  * In-flight *or* unresolved: an external result whose outcome is not yet
  * confirmed keeps every conflicting action blocked until an explicit recovery
@@ -411,7 +356,7 @@ function requestRecovery(action: TrackingRecoveryActionCode): void {
 
 /** One management action together with the scopes this page may request for it. */
 interface ManagementOfferView {
-  code: SendableManagementActionCode
+  code: TrackingManagementActionCode
   action: TrackingAction
   scopes: TrackingManagementScope[]
 }
@@ -424,7 +369,7 @@ const managementOffers = computed<ManagementOfferView[]>(() => {
   if (!detail.value) return []
   const offers: ManagementOfferView[] = []
   for (const action of executableTrackingActions(detail.value)) {
-    if (!isSendableManagementActionCode(action.code)) continue
+    if (!isSendableManagementAction(action.code)) continue
     const code = action.code
     const scopes = (action.target_scopes ?? [])
       .filter((scope): scope is TrackingManagementScope =>
@@ -435,7 +380,7 @@ const managementOffers = computed<ManagementOfferView[]>(() => {
   return offers
 })
 
-function offerFor(code: SendableManagementActionCode): ManagementOfferView | null {
+function offerFor(code: TrackingManagementActionCode): ManagementOfferView | null {
   return managementOffers.value.find((offer) => offer.code === code) ?? null
 }
 
@@ -828,41 +773,19 @@ defineExpose({ reload: () => fetchDetail(true) })
 
       <section class="tracking-inspector-section tracking-submit" aria-labelledby="tracking-submit-heading">
         <h4 id="tracking-submit-heading">提交到 Auto Bangumi</h4>
-        <template v-if="pendingSubmission || thisCheck || thisResubmit">
+        <template v-if="pendingSubmission || thisCheck">
           <p v-if="pendingSubmission" class="field-help">
             持续追番提交结果尚未确认。重新检查只会使用原提交绑定的已保存连接只读核对
             Auto Bangumi 的当前状态，不会创建、修改、删除或重新提交订阅。
           </p>
-          <div class="tracking-submit-actions">
-            <BaseButton
-              v-if="pendingSubmission"
-              id="tracking-check"
-              variant="secondary"
-              :loading="checkInFlight"
-              :disabled="checkBusy"
-              @click="requestCheck(false)"
-            >重新检查</BaseButton>
-            <BaseButton
-              v-if="resubmitOffered"
-              id="tracking-resubmit"
-              variant="secondary"
-              :loading="resubmitInFlight"
-              :disabled="resubmitBusy"
-              @click="requestResubmit"
-            >重新提交</BaseButton>
-          </div>
-          <p v-if="resubmitHint" id="tracking-resubmit-hint" class="field-help" role="status">
-            {{ resubmitHint }}
-          </p>
-          <div
-            v-if="thisResubmit"
-            id="tracking-resubmit-result"
-            class="tracking-submit-result"
-            :class="`is-${thisResubmit.state.toLowerCase()}`"
-            role="status"
-          >
-            <p class="tracking-submit-verdict">{{ thisResubmit.message }}</p>
-          </div>
+          <BaseButton
+            v-if="pendingSubmission"
+            id="tracking-check"
+            variant="secondary"
+            :loading="checkInFlight"
+            :disabled="checkBusy"
+            @click="requestCheck(false)"
+          >重新检查</BaseButton>
           <div
             v-if="thisCheck"
             id="tracking-check-result"
@@ -919,7 +842,7 @@ defineExpose({ reload: () => fetchDetail(true) })
         class="tracking-inspector-section tracking-recovery"
         aria-labelledby="tracking-recovery-heading"
       >
-        <h4 id="tracking-recovery-heading">结果未知恢复</h4>
+        <h4 id="tracking-recovery-heading">结果待确认恢复</h4>
         <p class="field-help">恢复只用本地证据或只读外部核验，不会重新提交，也不会创建、修改或删除 Auto Bangumi 订阅。</p>
         <div class="tracking-recovery-actions">
           <BaseButton
@@ -949,8 +872,8 @@ defineExpose({ reload: () => fetchDetail(true) })
           role="status"
         >
           <p class="tracking-recovery-verdict">{{ thisRecovery.message }}</p>
-          <p v-if="thisRecovery.needsManual" id="tracking-recovery-manual-notice" class="tracking-recovery-manual">
-            {{ RECOVERY_NEEDS_MANUAL_NOTICE }}
+          <p v-if="thisRecovery.manualNotice" id="tracking-recovery-manual-notice" class="tracking-recovery-manual">
+            {{ thisRecovery.manualNotice }}
           </p>
         </div>
       </section>
@@ -986,8 +909,8 @@ defineExpose({ reload: () => fetchDetail(true) })
           role="status"
         >
           <p class="tracking-modify-verdict">{{ thisModify.message }}</p>
-          <p v-if="thisModify.needsManual" id="tracking-modify-manual-notice" class="tracking-modify-manual">
-            {{ MANAGEMENT_NEEDS_MANUAL_NOTICE }}
+          <p v-if="thisModify.manualNotice" id="tracking-modify-manual-notice" class="tracking-modify-manual">
+            {{ thisModify.manualNotice }}
           </p>
         </div>
       </section>
@@ -1136,12 +1059,10 @@ defineExpose({ reload: () => fetchDetail(true) })
 .tracking-inspector-loading { min-height: 8rem; }
 .tracking-intent-notice { padding: var(--space-3); border: 1px solid var(--color-border-subtle); border-left: 0.3rem solid var(--color-accent-emphasis); border-radius: var(--radius-sm); background: var(--color-surface-raised); font-weight: 600; }
 .tracking-submit { gap: .65rem; }
-.tracking-submit-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .tracking-submit-result { display: grid; gap: .4rem; padding: var(--space-3); border: 1px solid var(--color-border-subtle); border-left: 0.3rem solid var(--color-text-muted); border-radius: var(--radius-sm); background: var(--color-surface-raised); }
 .tracking-submit-result.is-active { border-left-color: var(--color-feedback-success-border); }
 .tracking-submit-result.is-submit_failed, .tracking-submit-result.is-conflict, .tracking-submit-result.is-rejected, .tracking-submit-result.is-unknown { border-left-color: var(--color-feedback-error-border); }
-.tracking-submit-result.is-needs_reconfirm, .tracking-submit-result.is-verifying_external, .tracking-submit-result.is-recovery_required, .tracking-submit-result.is-blocked, .tracking-submit-result.is-cancelled { border-left-color: var(--color-accent-emphasis); }
-.tracking-submit-result.is-confirmed { border-left-color: var(--color-feedback-success-border); }
+.tracking-submit-result.is-needs_reconfirm, .tracking-submit-result.is-verifying_external, .tracking-submit-result.is-recovery_required { border-left-color: var(--color-accent-emphasis); }
 .tracking-submit-verdict { font-weight: 600; }
 .tracking-submit-issues { padding-left: 1.2rem; }
 .tracking-recovery { gap: .65rem; }

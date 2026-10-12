@@ -365,7 +365,7 @@ def _management_result(config, *, tracking_id: str, action: str, result: dict[st
         if management_status == TRACKING_OPERATION_STATE_SUCCEEDED
         else "管理操作明确失败，外部系统未确认应用"
         if management_status == "FAILED" and result.get("needs_manual") is not True
-        else "外部管理结果未知，请人工恢复；不会自动重试"
+        else "外部管理结果待确认，请人工恢复；不会自动重试"
     )
     return {
         "action": action,

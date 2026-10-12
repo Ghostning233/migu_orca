@@ -146,7 +146,7 @@ ADDED_TO_DOWNLOAD_MESSAGE = "已加入下载"
 #: controlled subscription exists: the record is 追番中 with this fixed, safe
 #: note about the current resources (issue #97).
 SUBMIT_SUCCEEDED_RESOURCE_WARNING_MESSAGE = "订阅已建立，但 Auto Bangumi 的写响应未确认；已按精确回查确认为追番中，请留当前资源处理情况"
-SUBMIT_OUTCOME_UNKNOWN_MESSAGE = "Auto Bangumi 结果未知，请先恢复核验"
+SUBMIT_OUTCOME_UNKNOWN_MESSAGE = "Auto Bangumi 结果待确认，请先恢复核验"
 SUBMIT_PERSIST_FAILED_MESSAGE = "提交结果保存失败，请先恢复核验"
 
 
