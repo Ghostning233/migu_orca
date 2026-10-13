@@ -296,6 +296,15 @@ class BatchSaveConfirmPayload(_SaveConfirmStrictBase):
     storage_dir: str | None = None
 
 
+#: JSON Schema projection of the ``model_validator`` guards that reject any
+#: ``confirm`` other than the literal ``True`` (and of the fixed action/scope
+#: enums checked by field validators).  Pydantic cannot derive ``const``/``enum``
+#: from a validator, so issue #171 declares the projection next to the runtime
+#: rule that owns it.  ``json_schema_extra`` never affects validation.
+def _confirm_true_field() -> Any:
+    return Field(json_schema_extra={"const": True})
+
+
 class RequestAbConfigPayload(BaseModel):
     auth_mode: Literal["password", "api_token"] = "password"
     base_url: str | None = None
@@ -310,8 +319,13 @@ class AutoBangumiConfigPayload(BaseModel):
     auth_mode: Literal["password", "api_token"] = Field(repr=False)
     base_url: str = Field(repr=False)
     username: str | None = Field(default=None, repr=False)
-    password: str | None = Field(default=None, repr=False)
-    token: str | None = Field(default=None, repr=False)
+    #: Secrets are request-scoped and write-only in the published contract.
+    password: str | None = Field(
+        default=None, repr=False, json_schema_extra={"x-request-scoped": True, "writeOnly": True}
+    )
+    token: str | None = Field(
+        default=None, repr=False, json_schema_extra={"x-request-scoped": True, "writeOnly": True}
+    )
 
     @model_validator(mode="after")
     def validate_auth_union(self) -> AutoBangumiConfigPayload:
@@ -334,7 +348,7 @@ class AutoBangumiConnectionTestPayload(BaseModel):
 
 class AutoBangumiConfigSavePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    confirm: StrictBool
+    confirm: StrictBool = _confirm_true_field()
     expected_configuration_revision: StrictInt = Field(ge=0)
     config: AutoBangumiConfigPayload
 
@@ -347,7 +361,7 @@ class AutoBangumiConfigSavePayload(BaseModel):
 
 class AutoBangumiConfigDeletePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    confirm: StrictBool
+    confirm: StrictBool = _confirm_true_field()
     expected_configuration_revision: StrictInt = Field(ge=0)
 
     @model_validator(mode="after")
@@ -406,7 +420,7 @@ class SavedTrackingSubmitInput(BaseModel):
     tracking_id: StrictStr
     expected_revision: StrictInt = Field(ge=1)
     idempotency_key: StrictStr
-    confirm: StrictBool
+    confirm: StrictBool = _confirm_true_field()
     connection_ref: UUID
     configuration_revision: StrictInt = Field(ge=0)
     #: Issue #98: one operation-level submission mode; never a plan field.
@@ -488,7 +502,7 @@ class SavedTrackingBatchSubmitInput(BaseModel):
     items: list[SavedTrackingBatchSubmitItem] = Field(
         min_length=1, max_length=MAX_TRACKING_BATCH_SUBMIT_ITEMS
     )
-    confirm: StrictBool
+    confirm: StrictBool = _confirm_true_field()
     #: Issue #100: exactly one operation-level mode applies to the whole batch.
     #: Mixed or per-entry modes are impossible by construction: the item model
     #: forbids unknown fields, so a per-entry `submission_mode` is a 400.
@@ -818,7 +832,8 @@ class TrackingResubmitPayload(BaseModel):
 
 #: Fixed recovery-action enum accepted by
 #: ``POST /api/v1/tracking/items/{tracking_id}/recover`` (Stage 29 PRD §11.8).
-_RECOVERY_ACTIONS = frozenset({"AUTO", "MARK_SUCCEEDED", "MARK_FAILED", "VERIFY_EXTERNAL"})
+_RECOVERY_ACTION_VALUES = ("AUTO", "MARK_SUCCEEDED", "MARK_FAILED", "VERIFY_EXTERNAL")
+_RECOVERY_ACTIONS = frozenset(_RECOVERY_ACTION_VALUES)
 
 
 class TrackingRecoverPayload(BaseModel):
@@ -837,7 +852,7 @@ class TrackingRecoverPayload(BaseModel):
 
     tracking_id: str
     expected_revision: StrictInt = Field(ge=1)
-    action: str
+    action: str = Field(json_schema_extra={"enum": list(_RECOVERY_ACTION_VALUES)})
     confirm: bool = False
     storage_dir: str | None = None
     connection_ref: UUID | None = None
@@ -872,7 +887,8 @@ class TrackingRecoverPayload(BaseModel):
 # Tracking management writes (US-245)
 # ---------------------------------------------------------------------------
 
-_MANAGEMENT_SCOPES = frozenset({"SUBSCRIPTION", "ASSOCIATED_RSS"})
+_MANAGEMENT_SCOPE_VALUES = ("SUBSCRIPTION", "ASSOCIATED_RSS")
+_MANAGEMENT_SCOPES = frozenset(_MANAGEMENT_SCOPE_VALUES)
 _SUBSCRIPTION_MANAGEMENT_FIELDS = frozenset(
     {"title", "season", "subtitle_group", "filter_rule", "offset", "expected_folder_name"}
 )
@@ -935,7 +951,7 @@ class _TrackingManagementBasePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tracking_id: str
-    target_scope: str
+    target_scope: str = Field(json_schema_extra={"enum": list(_MANAGEMENT_SCOPE_VALUES)})
     expected_revision: StrictInt = Field(ge=1)
     idempotency_key: StrictStr
     confirm: Literal[True]
@@ -989,6 +1005,9 @@ class TrackingDeleteExternalPayload(_TrackingManagementBasePayload):
 
 
 class TrackingRefreshRssPayload(_TrackingManagementBasePayload):
+    #: Refresh only ever targets the mapped RSS; the projection pins the enum.
+    target_scope: str = Field(json_schema_extra={"enum": ["ASSOCIATED_RSS"]})
+
     @field_validator("target_scope")
     @classmethod
     def _rss_scope_only(cls, value: str) -> str:
@@ -1008,7 +1027,7 @@ class SavedTrackingPlanDeleteInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tracking_id: StrictStr
-    confirm: StrictBool
+    confirm: StrictBool = _confirm_true_field()
     delete_external: StrictBool = False
     idempotency_key: StrictStr
     # Only a requested external delete needs the saved connection (issue #96).

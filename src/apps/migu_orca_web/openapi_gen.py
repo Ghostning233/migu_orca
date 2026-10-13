@@ -29,6 +29,8 @@ Security rules applied here:
 
 import json
 import sys
+from copy import deepcopy
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +68,39 @@ from apps.migu_orca_web.api_contract import (
     TrackingSyncResultDTO,
 )
 from apps.migu_orca_web.endpoint_lifecycle import lifecycle_for
+from apps.migu_orca_web.schemas import (
+    AutoBangumiConfigDeletePayload,
+    AutoBangumiConfigPayload,
+    AutoBangumiConfigSavePayload,
+    AutoBangumiConnectionTestPayload,
+    BatchParsePayload,
+    BatchSaveConfirmPayload,
+    CorrectionSavePayload,
+    MikanCandidateSearchPayload,
+    PreferenceSavePayload,
+    RequestActionPayload,
+    RequestCancelPayload,
+    RequestCreatePayload,
+    RequestModifyPayload,
+    RequestPreviewModifyPayload,
+    RequestSaveConfirmPayload,
+    SavedAutoBangumiProbePayload,
+    SavedTrackingBatchSubmitInput,
+    SavedTrackingPlanDeleteInput,
+    SavedTrackingSubmitInput,
+    TrackingCheckPayload,
+    TrackingDeleteExternalPayload,
+    TrackingFilterRulePatch,
+    TrackingModifyPayload,
+    TrackingRecoverPayload,
+    TrackingRefreshRssPayload,
+    TrackingResubmitPayload,
+    TrackingRevalidatePayload,
+    TrackingRssPatch,
+    TrackingSetEnabledPayload,
+    TrackingSubscriptionPatch,
+    TrackingSyncPayload,
+)
 from shared.management_contract import (
     MANAGEMENT_ERROR_MESSAGES,
     management_error_names_for_status,
@@ -215,6 +250,9 @@ def _example_value(prop: dict[str, Any], *, required: bool) -> Any:
     if "default" in prop:
         return prop["default"]
     prop_type = prop.get("type")
+    if isinstance(prop_type, list):
+        # ``type: [T, "null"]`` (issue #171): exemplify the non-null branch.
+        prop_type = next((item for item in prop_type if item != "null"), None)
     if prop_type == "boolean":
         return bool(required)
     if prop_type == "number":
@@ -264,164 +302,383 @@ def _make_storage_dir_nullable(value: Any) -> None:
 # Endpoint schema registry
 # ---------------------------------------------------------------------------
 # Keys are ``<METHOD> <path>`` (path with ``<param>`` placeholders, matching
-# the url_map form). Each entry declares the request body schema (JSON
-# endpoints), the success result DTO, and explicit error responses.
+# the url_map form). Each entry declares the request body (issue #171: derived
+# from the ``schemas.py`` model that actually validates it), the success result
+# DTO, and explicit error responses.
+#
+# Request bodies are never restated here. A ``requestBody`` value is a
+# ``_RequestBodySpec`` carrying only:
+#
+# - the documentation overlay (Chinese ``description``/``example`` plus the
+#   ``x-request-scoped``/``x-legacy`` security markers) that reaches the
+#   generated client's JSDoc;
+# - the reviewed structural refinements in ``_REFINEMENT_ALLOWLIST`` — the few
+#   constraints a ``model_validator`` enforces but pydantic cannot project into
+#   JSON Schema.
+#
+# Property names, types, required lists, enums, defaults and
+# ``additionalProperties`` all come from the pydantic model.
 
-_MANAGEMENT_AB_CONFIG = {
-    "type": "object", "additionalProperties": False, "x-request-scoped": True,
+#: Documentation-only keys a request-body overlay may carry.
+_OVERLAY_KEYS = frozenset(
+    {
+        "description",
+        "example",
+        "deprecated",
+        "readOnly",
+        "writeOnly",
+        "x-request-scoped",
+        "x-legacy",
+    }
+)
+
+#: Pydantic JSON-Schema metadata that is not part of the published contract.
+#: ``description`` is dropped too: the pydantic model docstrings are developer
+#: notes, and the published documentation is the registry overlay's job.
+_DROPPED_SCHEMA_KEYS = frozenset({"title", "description"})
+
+#: ``type`` values whose ``T | None`` union is published as ``[T, "null"]``.
+_NULLABLE_UNION_TYPES = frozenset({"string", "integer", "number", "boolean", "array", "object"})
+_MISSING = object()
+
+
+@dataclass(frozen=True)
+class _RequestBodySpec:
+    """One request body derived from a pydantic model plus reviewed overlays."""
+
+    model: type[BaseModel]
+    overlay: dict[str, Any] = field(default_factory=dict)
+    #: ``path`` -> replacement node for constraints pydantic cannot project.
+    replace: dict[str, Any] = field(default_factory=dict)
+    #: Names the route enforces but the model leaves optional (loose ``Any``).
+    required_extra: tuple[str, ...] = ()
+
+
+def _rb(
+    model: type[BaseModel],
+    *,
+    overlay: dict[str, Any] | None = None,
+    replace: dict[str, Any] | None = None,
+    required_extra: tuple[str, ...] = (),
+) -> _RequestBodySpec:
+    """Declare a request body derived from ``model`` plus reviewed overlays."""
+    return _RequestBodySpec(
+        model=model,
+        overlay=dict(overlay or {}),
+        replace=dict(replace or {}),
+        required_extra=required_extra,
+    )
+
+
+def _normalize_derived(value: Any) -> Any:
+    """Normalize a pydantic JSON Schema into the published request-body shape.
+
+    - ``title`` (pydantic field metadata) is dropped;
+    - ``default: null`` is dropped — the ``null`` union branch already says it;
+    - ``additionalProperties: true`` is dropped (JSON Schema's own default);
+    - a ``T | None`` union is rendered as ``type: [T, "null"]``.
+
+    ``properties`` maps are walked as *maps*: their keys are user-visible field
+    names, so a field named ``title`` (or ``description``) must never be
+    mistaken for the pydantic metadata of the same name.
+    """
+    if isinstance(value, list):
+        return [_normalize_derived(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    normalized: dict[str, Any] = {}
+    for key, item in value.items():
+        if key == "properties" and isinstance(item, dict):
+            normalized[key] = {name: _normalize_derived(child) for name, child in item.items()}
+        elif key not in _DROPPED_SCHEMA_KEYS:
+            normalized[key] = _normalize_derived(item)
+    if normalized.get("additionalProperties") is True:
+        del normalized["additionalProperties"]
+    if normalized.get("default", _MISSING) is None:
+        del normalized["default"]
+    return _collapse_nullable_union(normalized)
+
+
+def _collapse_nullable_union(node: dict[str, Any]) -> dict[str, Any]:
+    """Render a ``T | None`` union as ``type: [T, "null"]``."""
+    variants = node.get("anyOf")
+    if not isinstance(variants, list) or len(variants) != 2:
+        return node
+    for index, variant in enumerate(variants):
+        other = variants[1 - index]
+        if variant != {"type": "null"} or not isinstance(other, dict):
+            continue
+        if other.get("type") not in _NULLABLE_UNION_TYPES:
+            continue
+        collapsed = {key: item for key, item in node.items() if key != "anyOf"}
+        collapsed.update(other)
+        collapsed["type"] = [other["type"], "null"]
+        return collapsed
+    return node
+
+
+def _drop_declared_properties(schema: dict[str, Any], names: set[str]) -> dict[str, Any]:
+    """Remove URL path parameters: they are never part of the request body."""
+    for name in names:
+        schema.get("properties", {}).pop(name, None)
+    if names and "required" in schema:
+        remaining = [name for name in schema["required"] if name not in names]
+        if remaining:
+            schema["required"] = remaining
+        else:
+            del schema["required"]
+    return schema
+
+
+def _request_body_node(
+    model: type[BaseModel], *, drop: frozenset[str] = frozenset()
+) -> dict[str, Any]:
+    """Derive one request-body object node from its validating pydantic model."""
+    return _drop_declared_properties(_normalize_derived(_schema(model)), set(drop))
+
+
+def _replace_node(root: dict[str, Any], path: str, node: dict[str, Any]) -> None:
+    """Replace the node at ``path`` (``""`` is the body root, ``a.b`` nested).
+
+    The refinement is copied in: the same fragment object serves every
+    generation, so merging an overlay into the document must not mutate it.
+    """
+    if not path:
+        root.clear()
+        root.update(deepcopy(node))
+        return
+    parts = path.split(".")
+    parent = root
+    for part in parts[:-1]:
+        parent = parent[part]
+    parent[parts[-1]] = deepcopy(node)
+
+
+#: Overlay keys that introduce a nested tree rather than a documentation value:
+#: ``properties`` maps field names, ``items`` carries an array element schema.
+_OVERLAY_CONTAINER_KEYS = frozenset({"properties", "items"})
+
+
+def _merge_overlay(
+    node: dict[str, Any], overlay: dict[str, Any], *, in_properties_map: bool = False
+) -> None:
+    """Merge documentation keys into the derived schema (structure untouched).
+
+    A non-documentation key would be the second structure source issue #171
+    removed, so the merge fails closed instead of quietly copying it. Inside a
+    ``properties`` map the keys are user-visible field names and are therefore
+    unrestricted; a field named ``title`` is not pydantic metadata.
+    """
+    for key, value in overlay.items():
+        if not in_properties_map and key not in _OVERLAY_KEYS and key not in _OVERLAY_CONTAINER_KEYS:
+            raise ValueError(
+                f"request-body overlay key {key!r} is not documentation; "
+                "derive the constraint from schemas.py (issue #171)."
+            )
+        current = node.get(key)
+        if isinstance(value, dict) and isinstance(current, dict):
+            _merge_overlay(
+                current, value, in_properties_map=key == "properties" and not in_properties_map
+            )
+        else:
+            node[key] = value
+
+
+def _request_body_schema(
+    spec: _RequestBodySpec, path_parameters: frozenset[str]
+) -> dict[str, Any]:
+    """Build one request body: model structure + reviewed refinements + overlay.
+
+    ``path_parameters`` are the URL rule's ``<param>`` names: the view merges
+    them into the JSON body before validation, so they are never body fields.
+    """
+    schema = _drop_declared_properties(_request_body_node(spec.model), set(path_parameters))
+    for path, node in spec.replace.items():
+        _replace_node(schema, path, node)
+    if spec.required_extra:
+        schema["required"] = [*schema.get("required", []), *spec.required_extra]
+    _merge_overlay(schema, spec.overlay)
+    return schema
+
+
+def _any_of_patch_node(
+    model: type[BaseModel], *, overrides: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Project a patch model's "provide at least one editable field" rule.
+
+    The rule lives in a ``model_validator``; pydantic cannot project it, so the
+    ``allOf``/``anyOf`` encoding is assembled here from ``model.model_fields``
+    (never from a hand-typed field list).
+    """
+    properties = dict(_request_body_node(model)["properties"])
+    properties.update(overrides or {})
+
+    def branch(name: str) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": properties,
+            "required": [name],
+        }
+
+    return {
+        "allOf": [
+            {"type": "object", "additionalProperties": False, "properties": properties},
+            {"anyOf": [branch(name) for name in model.model_fields]},
+        ]
+    }
+
+
+def _nullable_patch_node(model: type[BaseModel]) -> dict[str, Any]:
+    """A nullable patch node keeping the published ``null``-first union."""
+    return {"anyOf": [{"type": "null"}, _any_of_patch_node(model)]}
+
+
+def _auth_config_union() -> dict[str, Any]:
+    """Project the credential union enforced by ``AutoBangumiConfigPayload``.
+
+    The union lives in the model's ``model_validator``; the branch membership
+    is the only hand-declared fact here, and every branch property still comes
+    from the model's own field set.
+    """
+    properties = _request_body_node(AutoBangumiConfigPayload)["properties"]
+
+    def branch(mode: str, credentials: tuple[str, ...]) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["auth_mode", "base_url", *credentials],
+            "properties": {
+                "auth_mode": {"const": mode},
+                "base_url": properties["base_url"],
+                **{name: properties[name] for name in credentials},
+            },
+        }
+
+    return {
+        "oneOf": [
+            branch("password", ("username", "password")),
+            branch("api_token", ("token",)),
+        ]
+    }
+
+
+def _tracking_modify_body() -> dict[str, Any]:
+    """Project the scope-discriminated external-modify union (US-245).
+
+    ``TrackingModifyPayload`` binds ``target_scope`` to the patch family in a
+    ``model_validator``; the discriminated encoding is assembled from the
+    models here (the previous published shape and the generated client depend
+    on it).
+    """
+    common = _request_body_node(
+        TrackingDeleteExternalPayload, drop=frozenset({"tracking_id"})
+    )
+
+    def branch(scope: str, patch: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "additionalProperties": False,
+            "required": [*common.get("required", []), "patch"],
+            "properties": {
+                **common["properties"],
+                "target_scope": {"const": scope},
+                "patch": patch,
+            },
+        }
+
+    return {
+        "oneOf": [
+            branch(
+                "SUBSCRIPTION",
+                _any_of_patch_node(
+                    TrackingSubscriptionPatch,
+                    overrides={"filter_rule": _nullable_patch_node(TrackingFilterRulePatch)},
+                ),
+            ),
+            branch("ASSOCIATED_RSS", _any_of_patch_node(TrackingRssPatch)),
+        ]
+    }
+
+
+#: ``RequestPreviewModifyPayload.patch`` is typed ``dict[str, Any]`` on purpose:
+#: the service raises the Chinese ``invalid_modify_patch_field`` business
+#: envelope instead of pydantic's generic error, so the published editable
+#: subset is projected here (reviewed refinement).
+_PREVIEW_MODIFY_PATCH: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
     "properties": {
-        "auth_mode": {"type": "string", "enum": ["password", "api_token"]},
-        "base_url": {"type": "string", "x-request-scoped": True},
-        "username": {"type": "string", "x-request-scoped": True},
-        "password": {"type": "string", "x-request-scoped": True},
-        "token": {"type": "string", "x-request-scoped": True},
-        "fallback_enabled": {"type": "boolean"},
+        "selected_subtitle_group": {"type": ["string", "null"]},
+        "filter_rule": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "must_contain": {"type": "string"},
+                "must_not_contain": {"type": "string"},
+                "use_regex": {"type": "boolean"},
+                "case_sensitive": {"type": "boolean"},
+            },
+        },
+        "expected_folder_name": {"type": "string"},
     },
-    "required": ["auth_mode", "fallback_enabled"],
 }
-_MANAGEMENT_COMMON = {
-    "tracking_id": {"type": "string"},
-    "target_scope": {"type": "string", "enum": ["SUBSCRIPTION", "ASSOCIATED_RSS"]},
-    "expected_revision": {"type": "integer", "minimum": 1},
-    "idempotency_key": {"type": "string"},
-    "confirm": {"const": True},
-    "connection_ref": {"type": "string", "format": "uuid"},
-    "configuration_revision": {"type": "integer", "minimum": 0},
-    "storage_dir": {"type": "string"},
-}
+
+#: Reviewed structural refinements, as ``"<endpoint>|<path>"`` where ``""`` is
+#: the body root and ``required+=<name>`` marks an extra required name. Every
+#: entry is a constraint a ``model_validator`` enforces but pydantic cannot
+#: project; adding one turns the request-body source test red until reviewed.
+_REFINEMENT_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        "PUT /api/v1/settings/autobangumi|properties.config",
+        "POST /api/v1/settings/autobangumi/test|properties.config",
+        "POST /api/v1/tracking/items/<path:tracking_id>/modify|",
+        "POST /api/v1/requests/preview-modify|properties.patch",
+        "POST /api/v1/preferences|properties.preferences",
+        "POST /api/v1/preferences|required+=preferences",
+        "POST /api/v1/corrections|properties.correction",
+        "POST /api/v1/corrections|required+=correction",
+    }
+)
+
+
+def refinement_keys(key: str, spec: _RequestBodySpec) -> frozenset[str]:
+    """The ``"<endpoint>|<path>"`` keys of one spec's structural refinements."""
+    return frozenset(
+        [f"{key}|{path}" for path in spec.replace]
+        + [f"{key}|required+={name}" for name in spec.required_extra]
+    )
+
+
+def _assert_reviewed_refinements(key: str, spec: _RequestBodySpec) -> None:
+    """Fail closed when a request body handwrites structure off the allowlist."""
+    unreviewed = sorted(refinement_keys(key, spec) - _REFINEMENT_ALLOWLIST)
+    if unreviewed:
+        raise ValueError(
+            f"{key} declares unreviewed request-body refinement(s): "
+            f"{', '.join(unreviewed)}. Derive the constraint from schemas.py, or "
+            "review it and add it to _REFINEMENT_ALLOWLIST (issue #171)."
+        )
+
 _MANAGEMENT_ERRORS = {
     "400": {"data_validation_errors": "请求参数校验失败", "invalid_storage_dir": "storage_dir 必须为允许的相对目录", **{name: MANAGEMENT_ERROR_MESSAGES[name] for name in management_error_names_for_status(400)}},
     "404": {"tracking_not_found": "未找到该追番记录"},
     "409": {**{name: MANAGEMENT_ERROR_MESSAGES[name] for name in management_error_names_for_status(409)}},
 }
 
-_AUTOBANGUMI_CONNECTION_CONFIG = {
-    "oneOf": [
-        {
-            "type": "object", "additionalProperties": False,
-            "required": ["auth_mode", "base_url", "username", "password"],
-            "properties": {
-                "auth_mode": {"const": "password"},
-                "base_url": {"type": "string"},
-                "username": {"type": "string"},
-                "password": {"type": "string", "x-request-scoped": True, "writeOnly": True},
-            },
-        },
-        {
-            "type": "object", "additionalProperties": False,
-            "required": ["auth_mode", "base_url", "token"],
-            "properties": {
-                "auth_mode": {"const": "api_token"},
-                "base_url": {"type": "string"},
-                "token": {"type": "string", "x-request-scoped": True, "writeOnly": True},
-            },
-        },
-    ]
-}
 
-
-def _management_endpoint(operation_id: str, summary: str, *, extra: dict[str, Any] | None = None, required_extra: list[str] | None = None, scope: list[str] | None = None) -> dict[str, Any]:
-    properties = {**_MANAGEMENT_COMMON, **(extra or {})}
-    if scope is not None:
-        properties["target_scope"] = {"type": "string", "enum": scope}
-    properties = {key: value for key, value in properties.items() if key != "tracking_id"}
-    required = ["target_scope", "expected_revision", "idempotency_key", "confirm", "connection_ref", "configuration_revision"] + (required_extra or [])
+def _management_endpoint(operation_id: str, summary: str, model: type[BaseModel]) -> dict[str, Any]:
+    """One saved-connection management write; the body comes from ``model``."""
     return {
         "operationId": operation_id,
         "summary": summary,
         "parameters": [{"name": "tracking_id", "in": "path", "required": True, "schema": {"type": "string"}}],
-        "requestBody": {"type": "object", "additionalProperties": False, "required": required, "properties": properties},
+        "requestBody": _rb(model),
         "success": TrackingManagementResultDTO,
         "errors": _MANAGEMENT_ERRORS,
     }
 
 
-def _modify_request_body() -> dict[str, Any]:
-    """Strict scope-discriminated request union for external modify."""
-    common = {key: value for key, value in _MANAGEMENT_COMMON.items() if key != "tracking_id"}
-    filter_properties = {
-        "must_contain": {"type": ["string", "null"]},
-        "must_not_contain": {"type": ["string", "null"]},
-        "use_regex": {"type": ["boolean", "null"]},
-        "case_sensitive": {"type": ["boolean", "null"]},
-    }
-    subscription_properties = {
-            "title": {"type": ["string", "null"]},
-            "season": {"type": ["integer", "null"], "minimum": 0, "maximum": 100},
-            "subtitle_group": {"type": ["string", "null"]},
-            "filter_rule": {
-                "anyOf": [
-                    {"type": "null"},
-                    {
-                        "allOf": [
-                            {"type": "object", "additionalProperties": False, "properties": filter_properties},
-                            {"anyOf": [
-                                {"type": "object", "additionalProperties": False, "properties": filter_properties, "required": [field]}
-                                for field in filter_properties
-                            ]},
-                        ],
-                    },
-                ],
-            },
-            "offset": {"type": ["integer", "null"], "minimum": 0},
-            "expected_folder_name": {"type": ["string", "null"]},
-    }
-    local_plan = {
-        "type": ["object", "null"],
-        "additionalProperties": False,
-        "description": "issue #91：外部修改确认成功后同时提升的本地方案字段（身份字段不可编辑）。与 patch 独立，缺省表示只改外部对象。",
-        "properties": {
-            "filter_rule": {
-                "type": ["object", "null"],
-                "additionalProperties": False,
-                "properties": filter_properties,
-                "minProperties": 1,
-            },
-            "expected_folder_name": {"type": ["string", "null"], "maxLength": 255},
-        },
-        "minProperties": 1,
-    }
-    subscription_patch = {
-        "allOf": [
-            {"type": "object", "additionalProperties": False, "properties": subscription_properties},
-            {"anyOf": [
-                {"type": "object", "additionalProperties": False, "properties": subscription_properties, "required": [field]}
-                for field in subscription_properties
-            ]},
-        ],
-    }
-    rss_properties = {
-        "name": {"type": ["string", "null"]},
-        "aggregate": {"type": ["boolean", "null"]},
-        "parser": {"type": ["string", "null"]},
-    }
-    rss_patch = {
-        "allOf": [
-            {"type": "object", "additionalProperties": False, "properties": rss_properties},
-            {"anyOf": [
-                {"type": "object", "additionalProperties": False, "properties": rss_properties, "required": [field]}
-                for field in rss_properties
-            ]},
-        ],
-    }
-
-    def branch(scope: str, patch: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["target_scope", "expected_revision", "idempotency_key", "confirm", "connection_ref", "configuration_revision", "patch"],
-            "properties": {
-                **common,
-                "target_scope": {"const": scope},
-                "patch": patch,
-                # Only a subscription modify has a local plan to raise.
-                **({"local_plan": local_plan} if scope == "SUBSCRIPTION" else {}),
-            },
-        }
-
-    return {
-        "oneOf": [branch("SUBSCRIPTION", subscription_patch), branch("ASSOCIATED_RSS", rss_patch)],
-    }
 _ENDPOINTS: dict[str, dict[str, Any]] = {
     "GET /api/v1/settings/autobangumi": {
         "operationId": "getAutoBangumiConnection",
@@ -432,21 +689,17 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     "PUT /api/v1/settings/autobangumi": {
         "operationId": "saveAutoBangumiConnection",
         "summary": "保存 Auto Bangumi 部署连接",
-        "requestBody": {"type": "object", "additionalProperties": False, "required": ["confirm", "expected_configuration_revision", "config"], "properties": {
-            "confirm": {"const": True},
-            "expected_configuration_revision": {"type": "integer", "minimum": 0},
-            "config": _AUTOBANGUMI_CONNECTION_CONFIG,
-        }},
+        "requestBody": _rb(
+            AutoBangumiConfigSavePayload,
+            replace={"properties.config": _auth_config_union()},
+        ),
         "success": AutoBangumiConnectionSummaryDTO,
         "errors": {"400": {"validation_error": "请求参数校验失败", "config_error": "Auto Bangumi 配置无效"}, "409": {"configuration_revision_conflict": "Auto Bangumi 配置已变化，请重新读取后重试", "connection_in_use": "Auto Bangumi 连接正在使用中"}, "500": {"storage_error": "Auto Bangumi 配置存储不可用"}},
     },
     "DELETE /api/v1/settings/autobangumi": {
         "operationId": "deleteAutoBangumiConnection",
         "summary": "清除 Auto Bangumi 部署连接",
-        "requestBody": {"type": "object", "additionalProperties": False, "required": ["confirm", "expected_configuration_revision"], "properties": {
-            "confirm": {"const": True},
-            "expected_configuration_revision": {"type": "integer", "minimum": 0},
-        }},
+        "requestBody": _rb(AutoBangumiConfigDeletePayload),
         "success": AutoBangumiConnectionSummaryDTO,
         "errors": {"400": {"validation_error": "请求参数校验失败"}, "409": {"configuration_revision_conflict": "Auto Bangumi 配置已变化，请重新读取后重试", "connection_in_use": "Auto Bangumi 连接正在使用中"}, "500": {"storage_error": "Auto Bangumi 配置存储不可用"}},
     },
@@ -454,15 +707,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "operationId": "probeSavedAutoBangumiCapabilities",
         "summary": "探测已保存 Auto Bangumi 连接能力",
         "description": "显式只读探测当前保存配置；请求仅携带 opaque connection_ref 与 configuration_revision，服务端以不可变快照和 lease 执行，结果不持久化原始响应。",
-        "requestBody": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["connection_ref", "configuration_revision"],
-            "properties": {
-                "connection_ref": {"type": "string", "format": "uuid"},
-                "configuration_revision": {"type": "integer", "minimum": 0},
-            },
-        },
+        "requestBody": _rb(SavedAutoBangumiProbePayload),
         "success": AutoBangumiCapabilitiesDTO,
         "errors": {
             "400": {"data_validation_errors": "请求参数校验失败", "config_error": "Auto Bangumi 配置未配置或引用无效"},
@@ -474,10 +719,10 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "operationId": "testAutoBangumiConnection",
         "summary": "瞬时测试 Auto Bangumi 连接",
         "description": "仅使用当前连接草稿执行只读探测，不保存配置或原始响应。",
-        "requestBody": {
-            "type": "object", "additionalProperties": False,
-            "required": ["config"], "properties": {"config": _AUTOBANGUMI_CONNECTION_CONFIG},
-        },
+        "requestBody": _rb(
+            AutoBangumiConnectionTestPayload,
+            replace={"properties.config": _auth_config_union()},
+        ),
         "success": AutoBangumiConnectionTestResultDTO,
         "errors": {"400": {"validation_error": "请求参数校验失败", "config_error": "Auto Bangumi 配置无效"}},
     },
@@ -485,23 +730,25 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "operationId": "deleteTrackingPlan",
         "summary": "删除追番方案（可选同时删除受控外部订阅）",
         "description": "issue #92：删除本地追番方案与追番记录。存在受控外部订阅时可显式勾选同时删除该外部对象，默认不勾选；未勾选时外部订阅继续运行且 MiGuOrca 放弃管理。勾选时先以可靠管理序列删除精确映射的外部对象，只有明确成功才继续删除本地；明确失败或结果待确认时保留本地方案、追番记录、映射与恢复依据。外部删除固定不删除已下载媒体。",
-        "requestBody": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["confirm", "idempotency_key", "connection_ref", "configuration_revision"],
-            "properties": {
-                "delete_external": {
-                    "type": "boolean",
-                    "default": False,
-                    "description": "仅当用户显式勾选“同时删除 Auto Bangumi 中的受控外部订阅”时为 true。",
+        "requestBody": _rb(
+            SavedTrackingPlanDeleteInput,
+            overlay={
+                'properties': {
+                    'delete_external': {
+                        'description': '仅当用户显式勾选“同时删除 Auto Bangumi 中的受控外部订阅”时为 true。',
+                    },
+                    'confirm': {
+                        'description': '必须为 true：用户显式确认删除追番方案。',
+                    },
+                    'idempotency_key': {
+                        'description': 'opaque 幂等键；同键重放复用同一次外部删除。',
+                    },
+                    'storage_dir': {
+                        'description': '服务端允许根目录下的相对目录 profile。',
+                    },
                 },
-                "confirm": {"type": "boolean", "enum": [True], "description": "必须为 true：用户显式确认删除追番方案。"},
-                "idempotency_key": {"type": "string", "description": "opaque 幂等键；同键重放复用同一次外部删除。"},
-                "connection_ref": {"type": "string", "format": "uuid"},
-                "configuration_revision": {"type": "integer", "minimum": 0},
-                "storage_dir": {"type": "string", "description": "服务端允许根目录下的相对目录 profile。"},
             },
-        },
+        ),
         "success": TrackingPlanDeleteResultDTO,
         "errors": {
             "400": {
@@ -518,19 +765,15 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         },
     },
     "POST /api/v1/tracking/items/<path:tracking_id>/modify": {
-        **_management_endpoint("modifyTrackingItem", "修改外部追番方案", required_extra=["patch"]),
-        "requestBody": _modify_request_body(),
+        **_management_endpoint("modifyTrackingItem", "修改外部追番方案", TrackingModifyPayload),
+        "requestBody": _rb(
+            TrackingModifyPayload,
+            replace={"": _tracking_modify_body()},
+        ),
     },
-    "POST /api/v1/tracking/items/<path:tracking_id>/set-enabled": _management_endpoint(
-        "setTrackingItemEnabled", "启用或停用外部追番方案",
-        extra={"enabled": {"type": "boolean"}}, required_extra=["enabled"]
-    ),
-    "POST /api/v1/tracking/items/<path:tracking_id>/delete-external": _management_endpoint(
-        "deleteExternalTrackingItem", "删除外部追番方案（保留本地数据）"
-    ),
-    "POST /api/v1/tracking/items/<path:tracking_id>/refresh": _management_endpoint(
-        "refreshTrackingRss", "立即刷新资源", scope=["ASSOCIATED_RSS"]
-    ),
+    "POST /api/v1/tracking/items/<path:tracking_id>/set-enabled": _management_endpoint("setTrackingItemEnabled", "启用或停用外部追番方案", TrackingSetEnabledPayload),
+    "POST /api/v1/tracking/items/<path:tracking_id>/delete-external": _management_endpoint("deleteExternalTrackingItem", "删除外部追番方案（保留本地数据）", TrackingDeleteExternalPayload),
+    "POST /api/v1/tracking/items/<path:tracking_id>/refresh": _management_endpoint("refreshTrackingRss", "立即刷新资源", TrackingRefreshRssPayload),
     "GET /api/v1/requests": {
         "operationId": "listRequests",
         "summary": "列出所有已保存订阅方案摘要",
@@ -593,27 +836,27 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "operationId": "createRequest",
         "summary": "生成订阅草案",
         "description": "按标题生成订阅草案。Web 统一使用服务端 MiKan 配置；服务端签发权威 draft_id 与 draft_revision，持久化仅由 save-confirm 完成。",
-        "requestBody": {
-            "type": "object",
-            "properties": {
-                "title": {"type": "string", "description": "番剧名称（必填）。"},
-                "season_confirmation": {
-                    "type": "integer",
-                    "description": "用户确认的季数（1-99）。",
-                },
-                "candidate_context": {
-                    "type": "string",
-                    "description": "候选搜索签发的一次性 opaque token（request-scoped）。",
-                    "x-legacy": True,
-                },
-                "mikan_bangumi": {
-                    "type": "string",
-                    "description": "MiKan 详情页 URL（request-scoped）。",
-                    "x-legacy": True,
+        "requestBody": _rb(
+            RequestCreatePayload,
+            overlay={
+                'properties': {
+                    'title': {
+                        'description': '番剧名称（必填）。',
+                    },
+                    'season_confirmation': {
+                        'description': '用户确认的季数（1-99）。',
+                    },
+                    'candidate_context': {
+                        'description': '候选搜索签发的一次性 opaque token（request-scoped）。',
+                        'x-legacy': True,
+                    },
+                    'mikan_bangumi': {
+                        'description': 'MiKan 详情页 URL（request-scoped）。',
+                        'x-legacy': True,
+                    },
                 },
             },
-            "required": ["title"],
-        },
+        ),
         "success": RequestCreateResultDTO,
         "errors": {
             "400": {
@@ -641,43 +884,33 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "operationId": "previewModifyRequest",
         "summary": "内存中修改未保存草案",
         "description": "US-194/211：只接受服务端签发的 draft_id、base_revision 与允许 patch，返回更新后的内存草案、同一 draft_id 与新 draft_revision（不落盘）。base_revision 不匹配时返回 409 draft_revision_conflict（error_data 只含 field=base_revision 与 current_revision）。客户端不得提交完整 Request 作为权威快照。",
-        "requestBody": {
-            "type": "object",
-            "required": ["draft_id", "base_revision", "patch"],
-            "properties": {
-                "draft_id": {
-                    "type": "string",
-                    "description": "生成/上次修改时服务端签发的 opaque draft_id（request-scoped，不落盘）。",
-                    "x-legacy": True,
-                },
-                "base_revision": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "客户端最后观察到的草案 revision（US-211，compare-and-swap）。",
-                },
-                "patch": {
-                    "type": "object",
-                    "description": "允许的修改补丁：selected_subtitle_group/filter_rule/expected_folder_name。",
-                    "additionalProperties": False,
-                    "example": {"filter_rule": {"use_regex": False, "case_sensitive": False}},
-                    "properties": {
-                        "selected_subtitle_group": {"type": ["string", "null"]},
-                        "filter_rule": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "properties": {
-                                "must_contain": {"type": "string"},
-                                "must_not_contain": {"type": "string"},
-                                "use_regex": {"type": "boolean"},
-                                "case_sensitive": {"type": "boolean"},
+        "requestBody": _rb(
+            RequestPreviewModifyPayload,
+            overlay={
+                'properties': {
+                    'draft_id': {
+                        'description': '生成/上次修改时服务端签发的 opaque draft_id（request-scoped，不落盘）。',
+                        'x-legacy': True,
+                    },
+                    'base_revision': {
+                        'description': '客户端最后观察到的草案 revision（US-211，compare-and-swap）。',
+                    },
+                    'patch': {
+                        'description': '允许的修改补丁：selected_subtitle_group/filter_rule/expected_folder_name。',
+                        'example': {
+                            'filter_rule': {
+                                'use_regex': False,
+                                'case_sensitive': False,
                             },
                         },
-                        "expected_folder_name": {"type": "string"},
+                    },
+                    'storage_dir': {
+                        'description': '存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。',
                     },
                 },
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
             },
-        },
+            replace={"properties.patch": _PREVIEW_MODIFY_PATCH},
+        ),
         "success": RequestPreviewModifyResultDTO,
         "errors": {
             "400": {
@@ -729,29 +962,27 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "operationId": "confirmRequestSave",
         "summary": "保存并确认单个订阅方案草案",
         "description": "US-214/US-222：一次请求完成 revision 校验、草案预留、持久化、确认与幂等结果提交。请求只接受服务端签发的 draft_id、base_revision 与 opaque idempotency_key，不接受完整 Request。成功返回 CONFIRMED、已保存的 ACCEPTED Request 与扩展 handoff（US-222 起 handoff 额外携带 tracking_id/tracking_status/tracking_ready/safe_message，确认的 Request 同步进入统一追番列表；tracking 写失败不回滚已确认 Request，tracking_ready=false + 固定 safe_message 后续访问补偿）。同一 idempotency_key 重试返回同一最终结果（终态重放不触碰草案且再次 ensure 收敛同一 tracking_id）；不同键重放已保存草案返回 409 draft_replayed；持久化成功但确认失败返回 409 save_confirm_failed，error_data.details 只含 outcome=SAVED_CONFIRM_FAILED、request_id 与 retry_action=ACCEPT_SAVED_REQUEST。idempotency_key 是 request-scoped opaque 值，只进请求体与页面内存，绝不进入 storage/URL/浏览器 storage/日志/trace。",
-        "requestBody": {
-            "type": "object",
-            "required": ["draft_id", "base_revision", "idempotency_key"],
-            "additionalProperties": False,
-            "properties": {
-                "draft_id": {
-                    "type": "string",
-                    "description": "生成/修改时服务端签发的 opaque draft_id（一次性，成功后失效）。",
-                    "x-request-scoped": True,
+        "requestBody": _rb(
+            RequestSaveConfirmPayload,
+            overlay={
+                'properties': {
+                    'draft_id': {
+                        'description': '生成/修改时服务端签发的 opaque draft_id（一次性，成功后失效）。',
+                        'x-request-scoped': True,
+                    },
+                    'base_revision': {
+                        'description': '客户端最后观察到的草案 revision（US-214，预留校验；不匹配返回 409 draft_revision_conflict）。',
+                    },
+                    'idempotency_key': {
+                        'description': '一次明确客户端操作生成的 opaque 幂等键（US-213/214，request-scoped；重试必须复用，键只绑定一个 operation/fingerprint）。',
+                        'x-request-scoped': True,
+                    },
+                    'storage_dir': {
+                        'description': '存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。',
+                    },
                 },
-                "base_revision": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "客户端最后观察到的草案 revision（US-214，预留校验；不匹配返回 409 draft_revision_conflict）。",
-                },
-                "idempotency_key": {
-                    "type": "string",
-                    "description": "一次明确客户端操作生成的 opaque 幂等键（US-213/214，request-scoped；重试必须复用，键只绑定一个 operation/fingerprint）。",
-                    "x-request-scoped": True,
-                },
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
             },
-        },
+        ),
         "success": RequestSaveConfirmResultDTO,
         "errors": {
             "400": {"invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录"},
@@ -770,12 +1001,16 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     "POST /api/v1/requests/<path:request_id>/accept": {
         "operationId": "acceptRequest",
         "summary": "确认订阅方案",
-        "requestBody": {
-            "type": "object",
-            "properties": {
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"}
+        "requestBody": _rb(
+            RequestActionPayload,
+            overlay={
+                'properties': {
+                    'storage_dir': {
+                        'description': '存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。',
+                    },
+                },
             },
-        },
+        ),
         "success": RequestActionResultDTO,
         "errors": {
             "400": {"invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录"},
@@ -786,13 +1021,16 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     "POST /api/v1/requests/<path:request_id>/cancel": {
         "operationId": "cancelRequest",
         "summary": "取消订阅方案",
-        "requestBody": {
-            "type": "object",
-            "properties": {
-                "cancel_reason": {"type": "string"},
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
+        "requestBody": _rb(
+            RequestCancelPayload,
+            overlay={
+                'properties': {
+                    'storage_dir': {
+                        'description': '存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。',
+                    },
+                },
             },
-        },
+        ),
         "success": RequestActionResultDTO,
         "errors": {
             "400": {"invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录"},
@@ -803,17 +1041,19 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     "POST /api/v1/requests/<path:request_id>/modify": {
         "operationId": "modifyRequest",
         "summary": "修改已保存订阅方案",
-        "requestBody": {
-            "type": "object",
-            "required": ["patch"],
-            "properties": {
-                "patch": {
-                    "type": "object",
-                    "description": "允许的修改补丁：selected_subtitle_group/filter_rule/expected_folder_name。",
+        "requestBody": _rb(
+            RequestModifyPayload,
+            overlay={
+                'properties': {
+                    'patch': {
+                        'description': '允许的修改补丁：selected_subtitle_group/filter_rule/expected_folder_name。',
+                    },
+                    'storage_dir': {
+                        'description': '存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。',
+                    },
                 },
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
             },
-        },
+        ),
         "success": RequestActionResultDTO,
         "errors": {
             "400": {
@@ -826,12 +1066,16 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     "POST /api/v1/requests/<path:request_id>/delete": {
         "operationId": "deleteRequest",
         "summary": "删除订阅方案",
-        "requestBody": {
-            "type": "object",
-            "properties": {
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"}
+        "requestBody": _rb(
+            RequestActionPayload,
+            overlay={
+                'properties': {
+                    'storage_dir': {
+                        'description': '存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。',
+                    },
+                },
             },
-        },
+        ),
         "success": RequestDeleteResultDTO,
         "errors": {
             "400": {"invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录"},
@@ -900,17 +1144,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "operationId": "syncTrackingItems",
         "summary": "同步外部追番安全投影",
         "description": "US-233：使用已保存连接 generation 执行一次只读同步。confirm 必须为 true；响应只返回能力、安全计数与 TrackingItemDTO，不返回上游对象、外部 ID、URL 或凭据。",
-        "requestBody": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["connection_ref", "configuration_revision", "confirm"],
-            "properties": {
-                "connection_ref": {"type": "string", "format": "uuid"},
-                "configuration_revision": {"type": "integer", "minimum": 0},
-                "storage_dir": {"type": "string"},
-                "confirm": {"const": True},
-            },
-        },
+        "requestBody": _rb(TrackingSyncPayload),
         "success": TrackingSyncResultDTO,
         "errors": {
             "400": {
@@ -960,21 +1194,19 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "operationId": "revalidateTrackingItem",
         "summary": "复核统一追番方案（纯本地）",
         "description": "US-224：对单条统一追番记录执行 revision-aware 纯本地复核。请求只接受 expected_revision 与可选 storage profile，绝不接收 ab_config/连接/capability 配置。服务端重新读取最新本地 Request 并复核（存在且 ACCEPTED、fingerprint、标题/季度、MiKan 合集、字幕组、有效资源、外部映射、未完成 operation 与当前 tracking 状态），业务复核失败仍返回 HTTP 200：ready=false、next_status=NEEDS_RECONFIRM 与固定 §11.5 issue code 列表；通过时 ready=true。expected_revision 过期 → 409 tracking_revision_conflict；非可复核状态 → 409 tracking_state_conflict。",
-        "requestBody": {
-            "type": "object",
-            "required": ["expected_revision"],
-            "properties": {
-                "expected_revision": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "客户端最后观察到的追番记录 revision（revision-aware 复核）。",
-                },
-                "storage_dir": {
-                    "type": "string",
-                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
+        "requestBody": _rb(
+            TrackingRevalidatePayload,
+            overlay={
+                'properties': {
+                    'expected_revision': {
+                        'description': '客户端最后观察到的追番记录 revision（revision-aware 复核）。',
+                    },
+                    'storage_dir': {
+                        'description': '存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。',
+                    },
                 },
             },
-        },
+        ),
         "success": TrackingRevalidateResultDTO,
         "errors": {
             "400": {
@@ -999,41 +1231,29 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "operationId": "submitTrackingBatch",
         "summary": "批量提交显式选择的追番方案（逐条独立结果）",
         "description": "issue #87：一次显式批量提交 1～36 条互不相同的追番记录。每条携带自己的 expected_revision 与 opaque idempotency_key，并由服务端逐条走单条可靠提交序列；批量不是整批事务，单条失败不回滚已成功条目。逐条返回业务结果（或外部边界前的稳定 error_type），请求被接受时整体为 HTTP 200。同键重放复用原 operation，不会创建第二个外部订阅。",
-        "requestBody": {
-            "type": "object",
-            "required": ["items", "confirm", "connection_ref", "configuration_revision"],
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "minItems": 1,
-                    "maxItems": 36,
-                    "description": "显式选择的追番记录；每条独立提交，不重复指向同一记录。",
-                    "items": {
-                        "type": "object",
-                        "required": ["tracking_id", "expected_revision", "idempotency_key"],
-                        "properties": {
-                            "tracking_id": {"type": "string"},
-                            "expected_revision": {"type": "integer", "minimum": 1},
-                            "idempotency_key": {
-                                "type": "string",
-                                "description": "opaque 客户端操作 id；同键网络重放收敛到同一次外部调用。",
+        "requestBody": _rb(
+            SavedTrackingBatchSubmitInput,
+            overlay={
+                'properties': {
+                    'items': {
+                        'description': '显式选择的追番记录；每条独立提交，不重复指向同一记录。',
+                        'items': {
+                            'properties': {
+                                'idempotency_key': {
+                                    'description': 'opaque 客户端操作 id；同键网络重放收敛到同一次外部调用。',
+                                },
                             },
                         },
                     },
-                },
-                "confirm": {
-                    "type": "boolean",
-                    "enum": [True],
-                    "description": "必须为 true：用户显式确认这一批外部提交。",
-                },
-                "connection_ref": {"type": "string", "format": "uuid"},
-                "configuration_revision": {"type": "integer", "minimum": 0},
-                "storage_dir": {
-                    "type": "string",
-                    "description": "存储目录（服务端允许根目录下的相对目录 profile）。",
+                    'confirm': {
+                        'description': '必须为 true：用户显式确认这一批外部提交。',
+                    },
+                    'storage_dir': {
+                        'description': '存储目录（服务端允许根目录下的相对目录 profile）。',
+                    },
                 },
             },
-        },
+        ),
         "success": TrackingBatchSubmitResultDTO,
         "errors": {
             "400": {
@@ -1053,38 +1273,28 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "operationId": "submitTrackingItem",
         "summary": "提交统一追番方案到 Auto Bangumi（可靠顺序）",
         "description": "US-225：对单条统一追番记录执行可靠提交流程。confirm 必须严格为 true，连接通过已保存 generation 引用。服务端重新读取最新本地 Request 并执行完整本地复核；复核不通过时不访问 Auto Bangumi，已落盘业务结果仍返回 HTTP 200。外部调用前先持久化 TrackingRecord 与 operation；同 idempotency_key 重放复用原 operation。expected_revision 过期或绑定冲突时返回 409；confirm=false 返回 400。",
-        "requestBody": {
-            "type": "object",
-            "required": ["expected_revision", "idempotency_key", "confirm", "connection_ref", "configuration_revision"],
-            "properties": {
-                "submission_mode": {
-                    "type": "string",
-                    "enum": ["CONTINUE_TRACKING", "DOWNLOAD_EXISTING"],
-                    "default": "CONTINUE_TRACKING",
-                    "description": "issue #98：本次操作的提交方式。持续追番建立受控外部订阅；下载现有资源只把当前资源交给 Auto Bangumi 加入下载。只作用于本次操作，不写入本地方案。",
-                },
-                "expected_revision": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "客户端最后观察到的追番记录 revision（revision-aware 提交）。",
-                },
-                "idempotency_key": {
-                    "type": "string",
-                    "description": "opaque 客户端提交操作 id；同键网络重放收敛到同一次外部调用。只进请求体与页面内存。",
-                },
-                "confirm": {
-                    "type": "boolean",
-                    "enum": [True],
-                    "description": "必须为 true：用户显式确认提交最新方案。",
-                },
-                "connection_ref": {"type": "string", "format": "uuid"},
-                "configuration_revision": {"type": "integer", "minimum": 0},
-                "storage_dir": {
-                    "type": "string",
-                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
+        "requestBody": _rb(
+            SavedTrackingSubmitInput,
+            overlay={
+                'properties': {
+                    'submission_mode': {
+                        'description': 'issue #98：本次操作的提交方式。持续追番建立受控外部订阅；下载现有资源只把当前资源交给 Auto Bangumi 加入下载。只作用于本次操作，不写入本地方案。',
+                    },
+                    'expected_revision': {
+                        'description': '客户端最后观察到的追番记录 revision（revision-aware 提交）。',
+                    },
+                    'idempotency_key': {
+                        'description': 'opaque 客户端提交操作 id；同键网络重放收敛到同一次外部调用。只进请求体与页面内存。',
+                    },
+                    'confirm': {
+                        'description': '必须为 true：用户显式确认提交最新方案。',
+                    },
+                    'storage_dir': {
+                        'description': '存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。',
+                    },
                 },
             },
-        },
+        ),
         "success": TrackingSubmitResultDTO,
         "errors": {
             "400": {
@@ -1112,36 +1322,28 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "operationId": "retryTrackingItem",
         "summary": "重试明确失败的统一追番提交（可靠顺序）",
         "description": "US-226：只允许从 SUBMIT_FAILED 重试；VERIFYING_EXTERNAL/RECOVERY_REQUIRED 必须先 recover 再 retry。请求使用已保存连接 generation 与 opaque idempotency_key。服务复用统一提交序列并在外部边界前持久化 operation；同键网络重放复用原 operation。expected_revision 过期、状态冲突或绑定冲突返回 409；confirm=false 返回 400。",
-        "requestBody": {
-            "type": "object",
-            "required": ["expected_revision", "idempotency_key", "confirm", "connection_ref", "configuration_revision"],
-            "properties": {
-                "submission_mode": {
-                    "type": "string",
-                    "enum": ["CONTINUE_TRACKING", "DOWNLOAD_EXISTING"],
-                    "default": "CONTINUE_TRACKING",
-                    "description": "issue #98：本次操作的提交方式。持续追番建立受控外部订阅；下载现有资源只把当前资源交给 Auto Bangumi 加入下载。只作用于本次操作，不写入本地方案。",
-                },
-                "expected_revision": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "客户端最后观察到的追番记录 revision（revision-aware 重试）。",
-                },
-                "idempotency_key": {
-                    "type": "string",
-                    "description": "opaque 客户端重试操作 id；一次点击一个新 operation，同键网络重放复用原 operation。只进请求体与页面内存。",
-                },
-                "confirm": {
-                    "type": "boolean",
-                    "enum": [True],
-                    "description": "必须为 true：用户显式确认重试提交最新方案。",
-                },
-                "storage_dir": {
-                    "type": "string",
-                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
+        "requestBody": _rb(
+            SavedTrackingSubmitInput,
+            overlay={
+                'properties': {
+                    'submission_mode': {
+                        'description': 'issue #98：本次操作的提交方式。持续追番建立受控外部订阅；下载现有资源只把当前资源交给 Auto Bangumi 加入下载。只作用于本次操作，不写入本地方案。',
+                    },
+                    'expected_revision': {
+                        'description': '客户端最后观察到的追番记录 revision（revision-aware 重试）。',
+                    },
+                    'idempotency_key': {
+                        'description': 'opaque 客户端重试操作 id；一次点击一个新 operation，同键网络重放复用原 operation。只进请求体与页面内存。',
+                    },
+                    'confirm': {
+                        'description': '必须为 true：用户显式确认重试提交最新方案。',
+                    },
+                    'storage_dir': {
+                        'description': '存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。',
+                    },
                 },
             },
-        },
+        ),
         "success": TrackingSubmitResultDTO,
         "errors": {
             "400": {
@@ -1169,32 +1371,25 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "operationId": "recoverTrackingItem",
         "summary": "恢复统一追番记录（AUTO 纯本地或人工核验）",
         "description": "US-330：恢复追番记录；AUTO/人工动作纯本地，VERIFY_EXTERNAL 仅使用已保存连接的 connection_ref + configuration_revision 执行 3.1.18 只读核验。",
-        "requestBody": {
-            "type": "object",
-            "required": ["expected_revision", "action"],
-            "properties": {
-                "expected_revision": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "客户端最后观察到的追番记录 revision（revision-aware 恢复）。",
-                },
-                "action": {
-                    "type": "string",
-                    "enum": ["AUTO", "MARK_SUCCEEDED", "MARK_FAILED", "VERIFY_EXTERNAL"],
-                    "description": "恢复动作：AUTO=纯本地；VERIFY_EXTERNAL=只读外部核验（需 saved connection generation）；MARK_SUCCEEDED/MARK_FAILED=人工核验（需 confirm=true）。",
-                },
-                "confirm": {
-                    "type": "boolean",
-                    "description": "人工动作必须为 true；AUTO 忽略该字段。",
-                },
-                "connection_ref": {"type": ["string", "null"], "format": "uuid"},
-                "configuration_revision": {"type": ["integer", "null"], "minimum": 0},
-                "storage_dir": {
-                    "type": "string",
-                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
+        "requestBody": _rb(
+            TrackingRecoverPayload,
+            overlay={
+                'properties': {
+                    'expected_revision': {
+                        'description': '客户端最后观察到的追番记录 revision（revision-aware 恢复）。',
+                    },
+                    'action': {
+                        'description': '恢复动作：AUTO=纯本地；VERIFY_EXTERNAL=只读外部核验（需 saved connection generation）；MARK_SUCCEEDED/MARK_FAILED=人工核验（需 confirm=true）。',
+                    },
+                    'confirm': {
+                        'description': '人工动作必须为 true；AUTO 忽略该字段。',
+                    },
+                    'storage_dir': {
+                        'description': '存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。',
+                    },
                 },
             },
-        },
+        ),
         "success": TrackingRecoverResultDTO,
         "errors": {
             "400": {
@@ -1220,21 +1415,19 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "operationId": "checkTrackingItem",
         "summary": "有界只读确认待确认的持续追番提交",
         "description": "issue #183：对结果待确认的持续追番提交执行一次有界只读确认，使用原提交 operation 绑定的已保存连接（客户端不提供连接，也不改绑）。检查只读，不创建、修改、删除或重发订阅；瞬时读取失败在端点总预算与最大次数内重查。已确认外部订阅返回 ACTIVE/DISABLED；仍无法确认时返回原待确认状态与已证实的原因分类。",
-        "requestBody": {
-            "type": "object",
-            "required": ["expected_revision"],
-            "properties": {
-                "expected_revision": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "客户端最后观察到的追番记录 revision（revision-aware 检查）。",
-                },
-                "storage_dir": {
-                    "type": "string",
-                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
+        "requestBody": _rb(
+            TrackingCheckPayload,
+            overlay={
+                'properties': {
+                    'expected_revision': {
+                        'description': '客户端最后观察到的追番记录 revision（revision-aware 检查）。',
+                    },
+                    'storage_dir': {
+                        'description': '存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。',
+                    },
                 },
             },
-        },
+        ),
         "success": TrackingCheckResultDTO,
         "errors": {
             "400": {
@@ -1260,35 +1453,28 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "operationId": "resubmitTrackingItem",
         "summary": "风险确认后的单条主动重新提交",
         "description": "issue #184：对结果待确认的持续追番提交提供单条主动重新提交。confirm=false 先执行与原提交绑定连接的有界只读检查：已确认外部订阅存在时收敛为追番中且外部写入为零；仍待确认时返回已证实的原因分类与精确绑定（revision + 原 operation + 连接 generation），页面据此渲染固定的重复/资源风险文案。confirm=true 必须携带该绑定，过期或改绑返回 409；服务端复检一次，命中仍零写收敛，否则以新幂等键创建可追溯原 operation 的单个新 operation 并执行一次既有可靠提交序列。外部写可能仍在执行、连接/版本无效或方案不满足提交前提时禁止重发并返回已证实原因；不提供批量强制重发，原未决记录与审计保留。",
-        "requestBody": {
-            "type": "object",
-            "required": ["expected_revision"],
-            "properties": {
-                "expected_revision": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "客户端最后观察到的追番记录 revision；confirm=true 时必须等于确认发布时的 revision。",
-                },
-                "confirm": {
-                    "type": "boolean",
-                    "default": False,
-                    "description": "false=只做只读检查；true=用户已确认重复/资源风险，携带精确绑定后创建一次新提交。",
-                },
-                "previous_operation_id": {
-                    "type": "string",
-                    "description": "只读检查发布的原待确认 operation id；confirm=true 必填，省略表示只读阶段。不能改绑其他 operation。",
-                },
-                "connection_ref": {
-                    "type": "string",
-                    "format": "uuid",
-                    "description": "原 operation 绑定的已保存连接 generation；confirm=true 必填，省略表示只读阶段。客户端不能提供其他连接。",
-                },
-                "storage_dir": {
-                    "type": "string",
-                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
+        "requestBody": _rb(
+            TrackingResubmitPayload,
+            overlay={
+                'properties': {
+                    'expected_revision': {
+                        'description': '客户端最后观察到的追番记录 revision；confirm=true 时必须等于确认发布时的 revision。',
+                    },
+                    'confirm': {
+                        'description': 'false=只做只读检查；true=用户已确认重复/资源风险，携带精确绑定后创建一次新提交。',
+                    },
+                    'previous_operation_id': {
+                        'description': '只读检查发布的原待确认 operation id；confirm=true 必填，省略表示只读阶段。不能改绑其他 operation。',
+                    },
+                    'connection_ref': {
+                        'description': '原 operation 绑定的已保存连接 generation；confirm=true 必填，省略表示只读阶段。客户端不能提供其他连接。',
+                    },
+                    'storage_dir': {
+                        'description': '存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。',
+                    },
                 },
             },
-        },
+        ),
         "success": TrackingResubmitResultDTO,
         "errors": {
             "400": {
@@ -1318,13 +1504,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "operationId": "searchMikanCandidates",
         "summary": "搜索 MiKan 候选",
         "description": "按标题搜索 MiKan 候选，返回公开候选元数据。搜索配置由服务端提供。",
-        "requestBody": {
-            "type": "object",
-            "required": ["query"],
-            "properties": {
-                "query": {"type": "string"},
-            },
-        },
+        "requestBody": _rb(MikanCandidateSearchPayload),
         "success": MikanCandidateResultDTO,
         "errors": {
             "400": {"data_validation_errors": "query 为空或非法"},
@@ -1399,17 +1579,21 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     "POST /api/v1/preferences": {
         "operationId": "savePreferences",
         "summary": "保存用户偏好",
-        "requestBody": {
-            "type": "object",
-            "required": ["preferences"],
-            "properties": {
-                "preferences": {
-                    "type": "object",
-                    "description": "非敏感偏好对象（version/subtitle_groups/filter_defaults/naming/search）。",
+        "requestBody": _rb(
+            PreferenceSavePayload,
+            overlay={
+                'properties': {
+                    'preferences': {
+                        'description': '非敏感偏好对象（version/subtitle_groups/filter_defaults/naming/search）。',
+                    },
+                    'storage_dir': {
+                        'description': '存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。',
+                    },
                 },
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
             },
-        },
+            replace={"properties.preferences": {"type": "object"}},
+            required_extra=("preferences",),
+        ),
         "success": PreferenceResultDTO,
         "errors": {
             "400": {
@@ -1436,17 +1620,21 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     "POST /api/v1/corrections": {
         "operationId": "saveCorrection",
         "summary": "保存一条标题修正",
-        "requestBody": {
-            "type": "object",
-            "required": ["correction"],
-            "properties": {
-                "correction": {
-                    "type": "object",
-                    "description": "非敏感标题修正对象（raw_title/canonical_title/season_hint/bangumi_metadata/query_correction）。",
+        "requestBody": _rb(
+            CorrectionSavePayload,
+            overlay={
+                'properties': {
+                    'correction': {
+                        'description': '非敏感标题修正对象（raw_title/canonical_title/season_hint/bangumi_metadata/query_correction）。',
+                    },
+                    'storage_dir': {
+                        'description': '存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。',
+                    },
                 },
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
             },
-        },
+            replace={"properties.correction": {"type": "object"}},
+            required_extra=("correction",),
+        ),
         "success": CorrectionsResultDTO,
         "errors": {
             "400": {
@@ -1458,14 +1646,16 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     "POST /api/v1/batches/parse": {
         "operationId": "parseBatchTitles",
         "summary": "批量解析番剧名称",
-        "requestBody": {
-            "type": "object",
-            "required": ["raw_input"],
-            "properties": {
-                "raw_input": {"type": "string"},
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
+        "requestBody": _rb(
+            BatchParsePayload,
+            overlay={
+                'properties': {
+                    'storage_dir': {
+                        'description': '存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。',
+                    },
+                },
             },
-        },
+        ),
         "success": BatchParseResultDTO,
         "sse_progress": True,
         "description": (
@@ -1490,46 +1680,40 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "operationId": "saveConfirmBatchItems",
         "summary": "批量保存并确认选中草案（逐条部分成功）",
         "description": "US-216/US-222：按条执行与单番 POST /api/v1/requests/save-confirm 完全相同的用例（revision 校验、草案预留、持久化、确认与幂等结果提交）。请求每条只接受 item_id、draft_id、base_revision 与 opaque idempotency_key，不接受完整 Request。item_ids 可选：只处理选中项并保持输入顺序，省略时按 items 顺序处理全部。成功项不因其他条目失败回滚；可预期的单条业务失败（draft_expired/draft_revision_conflict/idempotency_conflict/save_confirm_failed 等）返回 HTTP 200 的逐条脱敏 failed 结果，请求级 shape/storage profile 错误仍走普通失败 envelope。同一 item + idempotency_key 幂等重试重放同一 CONFIRMED 结果，绝不创建第二个 Request。US-222 起每条 CONFIRMED 项同步进入统一追番列表并返回 tracking_id/tracking_ready，单条 tracking 写失败不回滚该已确认项或其他条目。",
-        "requestBody": {
-            "type": "object",
-            "required": ["items"],
-            "additionalProperties": False,
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "description": "批量卡片保存确认描述符（公开 item_id + 服务端签发 draft_id/base_revision + opaque 幂等键）。",
-                    "items": {
-                        "type": "object",
-                        "required": ["item_id", "draft_id", "base_revision", "idempotency_key"],
-                        "additionalProperties": False,
-                        "properties": {
-                            "item_id": {"type": "string", "description": "批量卡片的公开 item_id（保持输入顺序）。"},
-                            "draft_id": {
-                                "type": "string",
-                                "description": "服务端签发的 opaque draft_id（一次性，成功后失效；request-scoped，不落盘）。",
-                                "x-request-scoped": True,
-                            },
-                            "base_revision": {
-                                "type": "integer",
-                                "minimum": 1,
-                                "description": "客户端最后观察到的草案 revision（US-216，预留校验；不匹配返回逐条 failed draft_revision_conflict）。",
-                            },
-                            "idempotency_key": {
-                                "type": "string",
-                                "description": "一次明确客户端操作生成的 opaque 幂等键（request-scoped；重试必须复用，键只绑定一个 operation/fingerprint）。",
-                                "x-request-scoped": True,
+        "requestBody": _rb(
+            BatchSaveConfirmPayload,
+            overlay={
+                'properties': {
+                    'items': {
+                        'description': '批量卡片保存确认描述符（公开 item_id + 服务端签发 draft_id/base_revision + opaque 幂等键）。',
+                        'items': {
+                            'properties': {
+                                'item_id': {
+                                    'description': '批量卡片的公开 item_id（保持输入顺序）。',
+                                },
+                                'draft_id': {
+                                    'description': '服务端签发的 opaque draft_id（一次性，成功后失效；request-scoped，不落盘）。',
+                                    'x-request-scoped': True,
+                                },
+                                'base_revision': {
+                                    'description': '客户端最后观察到的草案 revision（US-216，预留校验；不匹配返回逐条 failed draft_revision_conflict）。',
+                                },
+                                'idempotency_key': {
+                                    'description': '一次明确客户端操作生成的 opaque 幂等键（request-scoped；重试必须复用，键只绑定一个 operation/fingerprint）。',
+                                    'x-request-scoped': True,
+                                },
                             },
                         },
                     },
+                    'item_ids': {
+                        'description': '可选：只处理选中 item_id（保持输入顺序）；缺省处理全部 items。',
+                    },
+                    'storage_dir': {
+                        'description': '存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。',
+                    },
                 },
-                "item_ids": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "可选：只处理选中 item_id（保持输入顺序）；缺省处理全部 items。",
-                },
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
             },
-        },
+        ),
         "success": BatchSaveConfirmResultDTO,
         "errors": {
             "400": {
@@ -1545,6 +1729,13 @@ def _normalized_path(path: str) -> str:
     import re
 
     return re.sub(r"<(?:path:)?([^>]+)>", r"{\1}", path)
+
+
+def _path_parameters(path: str) -> frozenset[str]:
+    """The URL rule's ``{param}`` names for a normalized OpenAPI path."""
+    import re
+
+    return frozenset(re.findall(r"\{([^}]+)\}", path))
 
 
 def _build_openapi() -> dict[str, Any]:
@@ -1563,6 +1754,9 @@ def _build_openapi() -> dict[str, Any]:
                     f"Endpoint {method} {rule.rule} has no schema registry entry; "
                     "add one to _ENDPOINTS (or extend the drift test whitelist)."
                 )
+            spec = entry.get("requestBody")
+            if isinstance(spec, _RequestBodySpec):
+                _assert_reviewed_refinements(key, spec)
             operation = _operation(entry, method, path)
             paths.setdefault(path, {})[method.lower()] = operation
 
@@ -1729,7 +1923,15 @@ def _operation(entry: dict[str, Any], method: str, path: str) -> dict[str, Any]:
         op["parameters"] = parameters
     request_body = entry.get("requestBody")
     if request_body is not None:
-        op["requestBody"] = _request_body(request_body, description=entry.get("summary", ""))
+        if not isinstance(request_body, _RequestBodySpec):
+            raise TypeError(
+                f"Endpoint {method} {path} declares a handwritten request body; "
+                "declare it with _rb(<schemas.py model>) instead (issue #171)."
+            )
+        op["requestBody"] = _request_body(
+            _request_body_schema(request_body, _path_parameters(path)),
+            description=entry.get("summary", ""),
+        )
     errors = entry.get("errors", {})
     if errors:
         op["responses"].update(_error_responses(errors))
