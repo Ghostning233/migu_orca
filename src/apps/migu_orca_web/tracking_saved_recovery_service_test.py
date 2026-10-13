@@ -122,8 +122,14 @@ def test_auto_and_manual_do_not_load_saved_config_or_construct_client(monkeypatc
     assert load_tracking_record(_config(tmp_path), record.tracking_id).audit_events[-1]["action"] == TRACKING_AUDIT_RECOVERY_MANUAL_SUCCEEDED
 
 
-def _bound_submit_scenario(monkeypatch, tmp_path: Path, state: str):
-    """One SUBMIT operation bound to the saved generation, ready to verify."""
+def _bound_submit_scenario(monkeypatch, tmp_path: Path, state: str, *, plan_ready: bool = False):
+    """One SUBMIT operation bound to the saved generation, ready to verify.
+
+    ``plan_ready=True`` additionally makes the saved plan pass every pure-local
+    submit precondition (selected subtitle group + one valid seed); issue #184's
+    resubmit re-runs those checks, so its tests need a submittable plan.  The
+    operation and record fingerprints are computed from that exact content.
+    """
     request = _accepted_request(tmp_path)
     record = _seeded_tracking(tmp_path, request)
     config = _config(tmp_path)
@@ -131,6 +137,10 @@ def _bound_submit_scenario(monkeypatch, tmp_path: Path, state: str):
     # durable fingerprint is the exact handoff being recovered.
     req = __import__("storage_engine.controllers.request_repository", fromlist=["load_request_snapshot"]).load_request_snapshot(config, request["request_id"])
     req["confirmable_config"] = {"selected_rss_url": "https://rss.invalid/feed"}
+    if plan_ready:
+        req["confirmable_config"].update(
+            {"selected_subtitle_group": "Group", "effective_seed_names": ["ep-1"]}
+        )
     req["plan"] = {"title": "芙莉莲", "season": 1, "subtitle_group": "Group"}
     from storage_engine.controllers.request_repository import save_request_snapshot
     save_request_snapshot(config, req)

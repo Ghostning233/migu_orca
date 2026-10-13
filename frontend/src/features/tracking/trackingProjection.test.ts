@@ -2,6 +2,20 @@ import { describe, expect, it } from 'vitest'
 
 import {
   canVerifyExternally,
+  createResubmitConfirmationBody,
+  createResubmitSession,
+  projectResubmitOffer,
+  RESUBMIT_BLOCKED_FALLBACK_MESSAGE,
+  RESUBMIT_BLOCKED_REASONS,
+  RESUBMIT_CANCELLED_MESSAGE,
+  RESUBMIT_CONFLICT_FALLBACK_MESSAGE,
+  RESUBMIT_PENDING_UNKNOWN_RISK_MESSAGE,
+  resubmitBindingFrom,
+  resubmitConflictMessage,
+  resubmitOfferState,
+  resubmitRiskMessage,
+  TRACKING_RESUBMIT_ENDPOINT,
+  type TrackingResubmitResult,
   capabilityStateLabel,
   capabilityVersionLabel,
   DELETE_EXTERNAL_HELP,
@@ -311,5 +325,135 @@ describe('bounded read-only check projection (issue #183)', () => {
     expect(createCheckSession('tracking-1', 'IN_FLIGHT', null, 3).message).toContain('正在只读核验')
     expect(createCheckSession('tracking-1', 'UNKNOWN', null, 3).message).toContain('未确认前不会再次提交')
     expect(createCheckSession('tracking-1', 'CONFLICT', null, 3).message).toContain('最新详情')
+  })
+})
+
+
+/**
+ * Issue #184: the risk-confirmed resubmission's pure projections. The page never
+ * invents a cause: every sentence comes from the server's proven code.
+ */
+function resubmitResult(overrides: Partial<TrackingResubmitResult> = {}): TrackingResubmitResult {
+  return {
+    tracking_id: 'tracking-1', confirm: false, check_status: 'UNRESOLVED',
+    outcome: 'RECOVERY_REQUIRED', requires_risk_confirmation: true, blocked_reason: null,
+    verification_reason: 'NOT_FOUND',
+    binding: {
+      expected_revision: 4,
+      previous_operation_id: 'operation-1',
+      connection_ref: '11111111-1111-4111-8111-111111111111',
+    },
+    checked_revision: 3, next_revision: 4, checked_at: '2026-10-11T00:00:00Z',
+    operation_id: 'operation-1', previous_operation_id: null, failure_category: null,
+    diagnostics: { http_status: null, message_zh: null, message_en: null },
+    issues: [], tracking: item({ revision: 4 }), ...overrides,
+  } as TrackingResubmitResult
+}
+
+describe('risk-confirmed resubmission projection (issue #184)', () => {
+  it('binds one resubmit endpoint and fixed risk copy per proven reason', () => {
+    expect(TRACKING_RESUBMIT_ENDPOINT).toBe('/api/v1/tracking/items/{tracking_id}/resubmit')
+    expect(resubmitRiskMessage('NOT_FOUND')).toContain('重复订阅')
+    expect(resubmitRiskMessage('UNREADABLE')).toContain('重复')
+    expect(resubmitRiskMessage(null)).toBe(RESUBMIT_PENDING_UNKNOWN_RISK_MESSAGE)
+    // A reason that can only be a refusal is never presented as a risk dialog.
+    expect(resubmitRiskMessage('CONNECTION_CHANGED')).toBe(RESUBMIT_PENDING_UNKNOWN_RISK_MESSAGE)
+    expect(resubmitRiskMessage('AUTHENTICATION')).toBe(RESUBMIT_PENDING_UNKNOWN_RISK_MESSAGE)
+  })
+
+  it('only treats an unresolved, explicitly offered binding as an authorization', () => {
+    expect(resubmitBindingFrom(resubmitResult())).toEqual(resubmitResult().binding)
+    expect(resubmitBindingFrom(resubmitResult({ check_status: 'CONFIRMED' }))).toBeNull()
+    expect(resubmitBindingFrom(resubmitResult({ check_status: 'BLOCKED' }))).toBeNull()
+    expect(resubmitBindingFrom(resubmitResult({ requires_risk_confirmation: false }))).toBeNull()
+    expect(resubmitBindingFrom(resubmitResult({ binding: null }))).toBeNull()
+  })
+
+  it('builds the confirmation body from the server binding only', () => {
+    const binding = resubmitResult().binding!
+    expect(createResubmitConfirmationBody(binding, undefined)).toEqual({
+      expected_revision: 4, confirm: true,
+      previous_operation_id: 'operation-1',
+      connection_ref: '11111111-1111-4111-8111-111111111111',
+    })
+    expect(createResubmitConfirmationBody(binding, 'profile-a')).toMatchObject({
+      storage_dir: 'profile-a',
+    })
+  })
+
+  it('routes a confirmed and a blocked read-only phase without a write', () => {
+    const confirmed = projectResubmitOffer(
+      'tracking-1',
+      resubmitResult({ check_status: 'CONFIRMED', outcome: 'ACTIVE', verification_reason: null, requires_risk_confirmation: false }),
+      3,
+    )
+    expect(confirmed.state).toBe('CONFIRMED')
+    expect(confirmed.message).toContain('没有重新提交')
+
+    const blocked = projectResubmitOffer(
+      'tracking-1',
+      resubmitResult({ check_status: 'BLOCKED', blocked_reason: 'EXTERNAL_WRITE_IN_PROGRESS', requires_risk_confirmation: false }),
+      3,
+    )
+    expect(blocked.state).toBe('BLOCKED')
+    expect(blocked.blockedReason).toBe('EXTERNAL_WRITE_IN_PROGRESS')
+    expect(blocked.message).toContain('可能仍在执行')
+
+    const oneTime = projectResubmitOffer(
+      'tracking-1',
+      resubmitResult({ check_status: 'BLOCKED', blocked_reason: 'ONE_TIME_SUBMISSION', requires_risk_confirmation: false }),
+      3,
+    )
+    expect(oneTime.message).toContain('下载现有资源')
+  })
+
+  it('never publishes an unknown blocked reason as a specific cause', () => {
+    const blocked = projectResubmitOffer(
+      'tracking-1', resubmitResult({ check_status: 'BLOCKED', blocked_reason: 'something_new' }), 3,
+    )
+    expect(blocked.blockedReason).toBeNull()
+    expect(blocked.message).toBe(RESUBMIT_BLOCKED_FALLBACK_MESSAGE)
+  })
+
+  it('maps every documented 409 to its own proven next step', () => {
+    expect(resubmitConflictMessage('tracking_operation_in_progress'))
+      .toContain('存在尚未完成的提交操作')
+    expect(resubmitConflictMessage('tracking_state_conflict')).toContain('恢复核验')
+    expect(resubmitConflictMessage('tracking_resubmit_binding_conflict')).toContain('绑定的操作或连接已变化')
+    expect(resubmitConflictMessage('tracking_check_in_progress')).toContain('只读检查正在进行')
+    for (const value of ['something_new', null, undefined, 7]) {
+      expect(resubmitConflictMessage(value)).toBe(RESUBMIT_CONFLICT_FALLBACK_MESSAGE)
+    }
+  })
+
+  it('never publishes an unproven refusal as an offerable reason', () => {
+    expect(RESUBMIT_BLOCKED_REASONS).toContain('RESULT_UNPROVEN')
+    expect(RESUBMIT_BLOCKED_REASONS).not.toContain('UNREADABLE')
+    const blocked = projectResubmitOffer(
+      'tracking-1', resubmitResult({ check_status: 'BLOCKED', blocked_reason: 'RESULT_UNPROVEN' }), 3,
+    )
+    expect(blocked.message).toContain('无法用已证实的原因')
+  })
+
+  it('states cancellation without claiming any external effect', () => {
+    const cancelled = createResubmitSession('tracking-1', 'CANCELLED', 'NOT_FOUND', 3)
+    expect(cancelled.message).toBe(RESUBMIT_CANCELLED_MESSAGE)
+    expect(cancelled.message).toContain('没有向 Auto Bangumi 发起新的提交')
+  })
+
+  it('offers the resubmit only for a checkable pending submit', () => {
+    expect(resubmitOfferState('VERIFYING_EXTERNAL', 'SUBMIT', 'OUTCOME_UNKNOWN', 'CONTINUE_TRACKING'))
+      .toEqual({ available: true, hint: '' })
+    expect(resubmitOfferState('RECOVERY_REQUIRED', 'SUBMIT', 'RECOVERY_REQUIRED', 'CONTINUE_TRACKING'))
+      .toEqual({ available: true, hint: '' })
+    // The external write may still be running, the operation is not a pending
+    // submit, or the result is already decided: never offered, and the proven
+    // next step is stated instead.
+    expect(resubmitOfferState('VERIFYING_EXTERNAL', 'SUBMIT', 'IN_PROGRESS', 'CONTINUE_TRACKING'))
+      .toEqual({ available: false, hint: expect.stringContaining('可能仍在执行') })
+    expect(resubmitOfferState('VERIFYING_EXTERNAL', 'SUBMIT', 'PREPARED', 'CONTINUE_TRACKING').available).toBe(false)
+    expect(resubmitOfferState('VERIFYING_EXTERNAL', 'MODIFY', 'OUTCOME_UNKNOWN', 'CONTINUE_TRACKING').available).toBe(false)
+    expect(resubmitOfferState('ACTIVE', 'SUBMIT', 'SUCCEEDED', 'CONTINUE_TRACKING')).toEqual({ available: false, hint: '' })
+    expect(resubmitOfferState('VERIFYING_EXTERNAL', 'SUBMIT', 'OUTCOME_UNKNOWN', 'DOWNLOAD_EXISTING').available).toBe(false)
   })
 })

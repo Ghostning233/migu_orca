@@ -3,16 +3,16 @@
 - 关联 Issue：[#172 调查：响应 DTO 白名单能否在运行时生效（ok_result 的处置）](https://github.com/Ghostning233/migu_orca/issues/172)
 - 调查对象：`src/apps/migu_orca_web/api_contract.py` 的 `ok_result(result, dto)`（definition at `api_contract.py:1289`）
 - 性质：**只读调查**。本报告不改源码、契约、测试或生成产物；仓库内唯一新增物就是本文档。
-- 参照状态：`0fe6069`（#169 合并后）上的 `/api/v1` 现状。
+- 参照状态：`c54655d`（#169 + #184 合并后，含新增 `POST /…/resubmit`）上的 `/api/v1` 现状。
 
 ## 1. 结论摘要
 
 1. `ok_result(result, dto)` 全仓库**零调用者**（`grep -rn ok_result src tests tools` 只命中定义），
    响应 DTO 白名单目前只在测试里生效；其 docstring 宣称的「出现意外字段就大声失败」在运行时并不成立。
-2. 用现有夹具实测 **36/36** 个声明了 success DTO 的 JSON 端点（含专门补测的
-   `cancel` 与 `tracking/sync` 成功路径）：**31 个端点全绿**，5 个端点出现 FAIL——
+2. 用现有夹具实测 **37/37** 个声明了 success DTO 的 JSON 端点（含专门补测的
+   `cancel` 与 `tracking/sync` 成功路径）：**32 个端点全绿**，5 个端点出现 FAIL——
    其中 `POST /api/v1/batches/parse` 是 1 处真实漂移，4 个管理写端点在套件里的失败来自测试替身
-   （真实路径另证 1 处 `outcome` 漂移）（§4、§5）。
+   （真实路径另证 1 处 `outcome` 漂移）（§4、§5）。#184 新增的 `resubmit` 端点 12 次运行全绿。
 3. 两处真实漂移：
    - `POST /api/v1/batches/parse`：`items[*].preference_hits` 运行时按设计是 `null`，
      但 `BatchParseItemDTO.preference_hits` 声明为不可空 `list`；
@@ -56,7 +56,7 @@ TypeScript 类型，以及 `tests/api_contract/test_dto_contracts.py` 之类的�
 `ok_result(result, dto)` 今天没有做的那一步。全文见附录 A（约 80 行，可直接放进 `/tmp` 运行）。
 
 ```console
-# 1) 非浏览器全量套件 + 审计钩子（34 个端点被观测）
+# 1) 非浏览器全量套件 + 审计钩子（35 个端点被观测）
 mkdir -p ~/.cache/mo172 && cp <附录 A 的插件源码> ~/.cache/mo172/dto_audit.py
 DTO_AUDIT_OUT=~/.cache/mo172/audit_full.json \
   PYTHONPATH=src:$HOME/.cache/mo172 uv run pytest -q -m "not browser" -p dto_audit
@@ -72,7 +72,7 @@ DTO_AUDIT_OUT=~/.cache/mo172/audit_gap.json \
   Auto Bangumi 走 `tests/api_contract/test_tracking_confirmation_local_ab.py` 的
   `LocalAb318`（127.0.0.1 本地 stand-in）。没有隐式访问真实 MiKan / Auto Bangumi。
 - 审计钩子只读响应，不改变任何断言；钩子自身 0 次报错。
-- 覆盖：`_ENDPOINTS` 里 37 个 `/api/v1` operation 中，36 个声明了 success DTO（全部被观测），
+- 覆盖：`_ENDPOINTS` 里 38 个 `/api/v1` operation 中，37 个声明了 success DTO（全部被观测），
   1 个是二进制 poster 端点（`success=None`，不是 JSON envelope，不适用）。
 
 ## 4. 逐端点结果
@@ -85,12 +85,12 @@ DTO_AUDIT_OUT=~/.cache/mo172/audit_gap.json \
 | --- | --- | --- |
 | `DELETE /api/v1/settings/autobangumi` | `AutoBangumiConnectionSummaryDTO` | pass（2 次） |
 | `GET /api/v1/corrections` | `CorrectionsResultDTO` | pass（3 次） |
-| `GET /api/v1/preferences` | `PreferenceResultDTO` | pass（3 次） |
+| `GET /api/v1/preferences` | `PreferenceResultDTO` | pass（4 次） |
 | `GET /api/v1/requests` | `RequestListResultDTO` | pass（6 次） |
 | `GET /api/v1/requests/<path:request_id>` | `RequestDetailResultDTO` | pass（7 次） |
 | `GET /api/v1/requests/<path:request_id>/safe-info` | `RequestSafeInfoResultDTO` | pass（5 次） |
-| `GET /api/v1/settings/autobangumi` | `AutoBangumiConnectionSummaryDTO` | pass（19 次） |
-| `GET /api/v1/tracking/items` | `TrackingItemListResultDTO` | pass（18 次） |
+| `GET /api/v1/settings/autobangumi` | `AutoBangumiConnectionSummaryDTO` | pass（32 次） |
+| `GET /api/v1/tracking/items` | `TrackingItemListResultDTO` | pass（30 次） |
 | `GET /api/v1/tracking/items/<path:tracking_id>` | `TrackingDetailResultDTO` | pass（4 次） |
 | `POST /api/v1/batches/<batch_id>/save-confirm` | `BatchSaveConfirmResultDTO` | pass（24 次） |
 | `POST /api/v1/batches/parse` | `BatchParseResultDTO` | **FAIL**（1/37 次：`items.0.preference_hits`, `items.1.preference_hits` 见 §4） |
@@ -106,17 +106,18 @@ DTO_AUDIT_OUT=~/.cache/mo172/audit_gap.json \
 | `POST /api/v1/requests/save-confirm` | `RequestSaveConfirmResultDTO` | pass（12 次） |
 | `POST /api/v1/settings/autobangumi/probe` | `AutoBangumiCapabilitiesDTO` | pass（6 次） |
 | `POST /api/v1/settings/autobangumi/test` | `AutoBangumiConnectionTestResultDTO` | pass（1 次） |
-| `POST /api/v1/tracking/batch-submit` | `TrackingBatchSubmitResultDTO` | pass（14 次） |
+| `POST /api/v1/tracking/batch-submit` | `TrackingBatchSubmitResultDTO` | pass（15 次） |
 | `POST /api/v1/tracking/items/<path:tracking_id>/check` | `TrackingCheckResultDTO` | pass（3 次） |
 | `POST /api/v1/tracking/items/<path:tracking_id>/delete-external` | `TrackingManagementResultDTO` | **FAIL**（1/1 次：`safe_message`, `tracking` 见 §4） |
 | `POST /api/v1/tracking/items/<path:tracking_id>/delete-plan` | `TrackingPlanDeleteResultDTO` | pass（9 次） |
 | `POST /api/v1/tracking/items/<path:tracking_id>/modify` | `TrackingManagementResultDTO` | **FAIL**（1/1 次：`safe_message`, `tracking` 见 §4） |
 | `POST /api/v1/tracking/items/<path:tracking_id>/recover` | `TrackingRecoverResultDTO` | pass（4 次） |
 | `POST /api/v1/tracking/items/<path:tracking_id>/refresh` | `TrackingManagementResultDTO` | **FAIL**（1/1 次：`safe_message`, `tracking` 见 §4） |
+| `POST /api/v1/tracking/items/<path:tracking_id>/resubmit` | `TrackingResubmitResultDTO` | pass（12 次） |
 | `POST /api/v1/tracking/items/<path:tracking_id>/retry` | `TrackingSubmitResultDTO` | pass（1 次） |
 | `POST /api/v1/tracking/items/<path:tracking_id>/revalidate` | `TrackingRevalidateResultDTO` | pass（4 次） |
 | `POST /api/v1/tracking/items/<path:tracking_id>/set-enabled` | `TrackingManagementResultDTO` | **FAIL**（1/1 次：`safe_message`, `tracking` 见 §4） |
-| `POST /api/v1/tracking/items/<path:tracking_id>/submit` | `TrackingSubmitResultDTO` | pass（37 次） |
+| `POST /api/v1/tracking/items/<path:tracking_id>/submit` | `TrackingSubmitResultDTO` | pass（45 次） |
 | `POST /api/v1/tracking/sync` | `TrackingSyncResultDTO` | pass（1 次） |
 | `PUT /api/v1/settings/autobangumi` | `AutoBangumiConnectionSummaryDTO` | pass（11 次） |
 | `GET /api/v1/mikan/posters/<key>` | —（二进制，未声明 DTO） | 不适用（非 JSON envelope） |
@@ -220,7 +221,7 @@ BatchParseResultDTO -> 400
 `api_contract.py:110-122` 的 `_SnapshotBase` 明确 `extra="allow"`，注释写着
 「engine snapshot dicts may legitimately gain fields over time … the views return the engine
 dicts as-is」。当前有 **16 个**这样的宽松 DTO（如 `RequestSnapshotDTO`、`BatchParseItemDTO`、
-`AbResultRecordDTO`、`ConfirmableConfigDTO`、`MatchedBangumiDTO` 等），另有 **71 个**严格 DTO。
+`AbResultRecordDTO`、`ConfirmableConfigDTO`、`MatchedBangumiDTO` 等），另有 **73 个**严格 DTO。
 含义：
 
 - 对宽松 DTO，**运行时校验不可能承担「白名单防泄漏」职责**：意外字段被允许，只有声明字段的
@@ -290,6 +291,8 @@ dicts as-is」。当前有 **16 个**这样的宽松 DTO（如 `RequestSnapshotD
 - 端点的多次运行取并集：任一运行失败即记为 FAIL，并给出出错字段路径。
 - `cancel` 与 `tracking/sync` 的成功路径由 §3 的补测夹具覆盖（非浏览器套件不覆盖）；
   4 个管理写端点的真实成功路径由本地 AB stand-in 覆盖（`set-enabled`；另外 3 个共享同一 serializer）。
+- #184 合并后（`c54655d`）重跑过同一套审计：新增 `resubmit` 端点 12 次运行全绿，
+  两处漂移与四个管理端点测试替身的结论不变。
 
 ## 附录 A：审计插件源码（一次性，未入库）
 

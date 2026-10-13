@@ -52,7 +52,6 @@ from apps.migu_orca_web.schemas import (
 )
 from apps.migu_orca_web.serializers import (
     _sanitize_ab_submit_result,
-    serialize_request_safe_info,
 )
 from apps.migu_orca_web.tracking_external_check import (
     attempt_timeout_seconds,
@@ -60,6 +59,7 @@ from apps.migu_orca_web.tracking_external_check import (
 )
 from apps.migu_orca_web.tracking_migration_service import run_tracking_migration
 from apps.migu_orca_web.tracking_serializers import (
+    safe_valid_resource_count,
     tracking_available_actions,
     tracking_summary_fields,
 )
@@ -376,6 +376,120 @@ def run_tracking_retry(
     )
 
 
+def run_tracking_resubmit_after_risk_confirmation(
+    config: StorageConfig,
+    *,
+    tracking_id: str,
+    record: TrackingRecord,
+    request: dict[str, Any] | None,
+    fingerprint: str | None,
+    expected_revision: int,
+    idempotency_key: str,
+    previous_operation_id: str,
+    ab_config: Any,
+    connection_ref: str | UUID | None,
+    submission_mode: str | None = None,
+    submit_one: SubmitOne | None = None,
+    persist_ab_result: PersistAbResult | None = None,
+    readback_external: Callable[[], Any] | None = None,
+    now: str | None = None,
+) -> dict[str, Any]:
+    """Create the one new operation of an explicitly risk-confirmed resubmit (#184).
+
+    This is deliberately *not* ``run_tracking_submit``: a 结果待确认 record is not
+    a safe retry (ADR-0001), so the pending original operation is never resumed,
+    rewritten or deleted.  The caller has already re-run the read-only check and
+    the binding/plan guards; here the server
+
+    1. reuses the operation already bound to ``idempotency_key`` when it exists
+       (a same-confirmation replay or a concurrent loser), so one confirmation
+       creates at most one new operation and performs at most one external call;
+    2. otherwise binds a brand-new operation whose ``previous_operation_id``
+       points at the operation the user confirmed against, and runs the existing
+       ``_submit_through_external`` sequence exactly once.
+
+    ``idempotency_key`` is derived server-side from the confirmed binding, so a
+    client cannot mint a second operation for the same confirmation by changing
+    a key.
+    """
+    timestamp = now or utc_now()
+    existing = _find_operation(config, idempotency_key)
+    if existing is not None:
+        current = load_tracking_record(config, tracking_id)
+        if (
+            existing.tracking_id != tracking_id
+            or existing.operation != TRACKING_OPERATION_KIND_SUBMIT
+            or existing.previous_operation_id != previous_operation_id
+        ):
+            raise Stage1Error(
+                "tracking_idempotency_conflict",
+                "同一风险确认已绑定不同的提交内容，不能复用",
+                "tracking_resubmit",
+                {"field": "idempotency_key"},
+            )
+        _guard_replay_binding(
+            existing,
+            record=current,
+            expected_revision=existing.expected_revision,
+            fingerprint=fingerprint,
+            connection_ref=connection_ref,
+        )
+        if existing.state == TRACKING_OPERATION_STATE_PREPARED:
+            # Issue #184 review: the binder is durable but the external system was
+            # provably never called, and the crash may have happened before the
+            # record reached SUBMITTING.  Resuming that very operation is the same
+            # guarantee a same-key submit resume gives, so a crash in that window
+            # never turns the user's confirmation into a misleading 409.
+            return _submit_through_external(
+                config,
+                record=current,
+                request=request,
+                fingerprint=fingerprint,
+                expected_revision=existing.expected_revision,
+                idempotency_key=idempotency_key,
+                ab_config=ab_config,
+                connection_ref=connection_ref,
+                operation=existing,
+                submit_one=submit_one,
+                persist_ab_result=persist_ab_result,
+                readback_external=readback_external,
+                submission_mode=existing.submission_mode,
+                timestamp=timestamp,
+            )
+        return _resolve_existing_operation(
+            config,
+            record=current,
+            request=request,
+            operation=existing,
+            expected_revision=existing.expected_revision,
+            idempotency_key=idempotency_key,
+            fingerprint=fingerprint,
+            ab_config=ab_config,
+            connection_ref=connection_ref,
+            submit_one=submit_one,
+            persist_ab_result=persist_ab_result,
+            timestamp=timestamp,
+            readback_external=readback_external,
+        )
+    return _submit_through_external(
+        config,
+        record=record,
+        request=request,
+        fingerprint=fingerprint,
+        expected_revision=expected_revision,
+        idempotency_key=idempotency_key,
+        ab_config=ab_config,
+        connection_ref=connection_ref,
+        operation=None,
+        submit_one=submit_one,
+        persist_ab_result=persist_ab_result,
+        readback_external=readback_external,
+        submission_mode=submission_mode,
+        previous_operation_id=previous_operation_id,
+        timestamp=timestamp,
+    )
+
+
 def run_saved_tracking_submit(
     config: StorageConfig,
     *,
@@ -557,7 +671,12 @@ def _resolve_existing_operation(
     timestamp: str,
     readback_external: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
-    """Decide how a same-key request proceeds from the stored operation state."""
+    """Decide how a same-key request proceeds from the stored operation state.
+
+    ``readback_external`` is threaded to the PREPARED-resume branch so a resumed
+    attempt keeps the same exact read-back confirmation as a fresh one (issue
+    #184 review); callers that do not have one keep the historical behavior.
+    """
     if operation.state in TRACKING_OPERATION_TERMINAL_STATES:
         return _replay_terminal_outcome(
             config,
@@ -592,6 +711,7 @@ def _resolve_existing_operation(
             operation=operation,
             submit_one=submit_one,
             persist_ab_result=persist_ab_result,
+            readback_external=readback_external,
             timestamp=timestamp,
         )
     if record.status in SUBMIT_FROM_STATUSES:
@@ -609,6 +729,7 @@ def _resolve_existing_operation(
             operation=operation,
             submit_one=submit_one,
             persist_ab_result=persist_ab_result,
+            readback_external=readback_external,
             timestamp=timestamp,
         )
     # The record no longer allows submission; the prepared operation cannot
@@ -742,6 +863,7 @@ def _submit_through_external(
     readback_external: Callable[[], Any] | None = None,
     submission_mode: str | None = None,
     collect_one: Callable[..., Any] | None = None,
+    previous_operation_id: str | None = None,
 ) -> dict[str, Any]:
     """Persist the SUBMITTING boundary, gate the external call and finalize."""
     if operation is None:
@@ -754,6 +876,9 @@ def _submit_through_external(
             request_fingerprint=fingerprint or "",
             connection_ref=connection_ref,
             submission_mode=submission_mode,
+            # Issue #184: a resubmit operation records the pending operation it
+            # replaces; an ordinary submit leaves the link null.
+            previous_operation_id=previous_operation_id,
             now=timestamp,
         )
         if not created:
@@ -771,6 +896,7 @@ def _submit_through_external(
                 submit_one=submit_one,
                 persist_ab_result=persist_ab_result,
                 timestamp=timestamp,
+                readback_external=readback_external,
             )
 
     if record.status != TRACKING_STATUS_SUBMITTING:
@@ -1462,12 +1588,7 @@ def _submit_result_payload(
     failed/indeterminate outcome (issue #86): the client renders its fixed
     next-step copy from this code and never from an upstream response.
     """
-    valid_count = 0
-    if isinstance(request, dict):
-        resources = serialize_request_safe_info(request, storage_profile=None).get("resources")
-        if isinstance(resources, dict):
-            count = resources.get("valid_resource_count")
-            valid_count = count if isinstance(count, int) and count >= 0 else 0
+    valid_count = safe_valid_resource_count(request)
     return {
         "tracking_id": record.tracking_id,
         "outcome": outcome,
@@ -1527,6 +1648,7 @@ def _submit_external_mapping(
 __all__ = [
     "PersistAbResult",
     "SubmitOne",
+    "run_tracking_resubmit_after_risk_confirmation",
     "run_saved_tracking_retry",
     "run_saved_tracking_submit",
     "run_tracking_retry",
