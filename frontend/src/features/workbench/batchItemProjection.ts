@@ -4,13 +4,16 @@
  * 「服务端快照」与「客户端生命周期」是两个概念：条目行的 `status` 既有服务端
  * 词汇（FOUND / EMPTY / FAILED），也有生命周期词汇（CONFIRMED /
  * SAVED_PENDING_* / RESPONSE_UNKNOWN）。视图只装配事实与执行副作用，**这一层
- * 是唯一决定生命周期词汇的地方**，因此同一条结局不会在组件里再写一遍。
+ * 是批量路径内唯一决定生命周期词汇的地方**，因此同一条结局不会在组件里再写一遍。
  *
- * #195：本模块是 `items[].status` 的**唯一写点**；客户端相位
+ * #195：本模块是**批量路径内** `items[].status` 的**唯一写点**；客户端相位
  * （`useBatchReviewJourney` 的 `BatchItemPhase`）是生命周期权威，两者消费同一份
  * 错误类型判定（`batchSaveErrorIsReplayed` / `batchSaveErrorInvalidatesDraft`）。
  * 映射表（错误类型 × 相位前提 → 展示状态 / 恢复动作）钉在
  * `batchDisplayStateMapping.test.ts`。
+ *
+ * 范围限定：以上「唯一」均指**批量路径内**；单番路径
+ * （`SingleAnimeReviewPanel.vue`、`useSingleAnimeJourney.ts`）未收口。
  *
  * 这些函数是纯数据变换：不发请求、不读响应式状态、不决定焦点与文案。
  */

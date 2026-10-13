@@ -2535,7 +2535,7 @@ def _save_confirm_rows(item_ids: list[str], *, failed_id: str | None = None) -> 
                 "outcome": "FAILED" if failed else "CONFIRMED",
                 "request_id": None if failed else f"req-{item_id}",
                 "status": None if failed else "CONFIRMED",
-                "error_type": "mikan_unavailable" if failed else None,
+                "error_type": "draft_reserved" if failed else None,
                 "error_message": None,
                 "tracking_id": None if failed else f"tracking-{item_id}",
                 "tracking_ready": None if failed else True,
@@ -2572,9 +2572,11 @@ def _list_scroll_geometry(page: Page) -> dict[str, float]:
 
 
 class TestAppBatchSessionObservables:
-    """#196：会话 effect 声明、视图执行的可观察结果。
+    """#196：会话/视图声明的效果在页面上的可观察结果。
 
-    断言只锚定会话声明的效果（滚动按筛选键恢复、焦点交给声明的目标），
+    焦点目标由会话 effect 声明（`useBatchReviewJourney`），视图执行；列表滚动记忆是
+    **视图本地**的按筛选键 Map（`BatchWorkbenchView.vue:534`）及其恢复，不是会话声明。
+    两条断言都只锚定 DOM 可观察结果（scrollTop / activeElement / 可视区几何），
     不复述视图内部实现。
     """
 
@@ -2748,7 +2750,17 @@ class TestAppBatchLeaveGuardCancel:
         expect(page.locator("#batch-preview-must-contain")).to_have_value("未保存的编辑")
         expect(page.locator("#batch-accept-submit")).to_contain_text("保存并确认")
 
+        # 守卫没有被消费：再次尝试离开仍然重新询问且同样可取消，证明取消分支没有
+        # 执行任何清理，也没有把守卫置为非活动。
+        page.click("#shell-nav-2")
+        expect(page.locator(".confirm-dialog")).to_be_visible()
+        page.locator(".confirm-dialog").get_by_role("button", name="留在此页").click()
+        expect(page.locator(".confirm-dialog")).to_have_count(0)
+        assert page.url == url_before
+
         # canary：DOM / URL / history.state / storage / console / 落盘 JSON 都不泄漏。
+        # 说明：本用例不做服务端写（parse 与 preview-modify 都被 route 拦下），落盘清单
+        # 可能为空——空清单上的负向断言自动成立，不把它当作「服务端确实落盘且未泄漏」的证据。
         browser_state = page.evaluate(
             """() => ({
                 url: window.location.href,
@@ -2771,3 +2783,8 @@ class TestAppBatchLeaveGuardCancel:
             assert value not in browser_state["bodyText"]
             assert value not in persisted_json
             assert all(value not in message for message in console_messages)
+
+        # frontend/AGENTS：held route 先存后用。取消分支不依赖该响应，断言完成后释放
+        # 仍挂在途的请求，避免留下未收尾的路由。
+        for held in held_modify:
+            held.abort()

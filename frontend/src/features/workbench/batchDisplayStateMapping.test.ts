@@ -1,14 +1,21 @@
 /**
  * #195：批量审核「显示状态」映射表的 characterization 断言。
  *
- * 单一权威（冻结结论，选项 b）：
+ * 冻结结论：**机制取自选项 a 的相位扩展，权威口径取自选项 b**。
  *
- * - **生命周期相位**：`useBatchReviewJourney` 的 `BatchItemPhase`，由错误类型判定一次
+ * - **生命周期相位**（选项 a 的机制）：`useBatchReviewJourney` 的 `BatchItemPhase`
+ *   **新增 `saved_pending_locate`**，由错误类型判定一次
  *   （`batchSaveErrorIsReplayed` / `batchSaveErrorInvalidatesDraft`）。
- * - **展示状态**：`batchItemProjection` 是 `items[].status` 的唯一写点；展示词汇
- *   （token / 中文文案 / 语气 / 下一步 / 恢复动作）在 `batchWorkbench` 只定义一次。
+ * - **展示状态**（选项 b 的口径）：`batchItemProjection` 是**批量路径内**
+ *   `items[].status` 的唯一写点；展示词汇（token / 中文文案 / 语气 / 下一步 /
+ *   恢复动作）在 `batchWorkbench` 的批量路径内只定义一次。
  * - 相位只保留生命周期，不再并行表达展示状态：`draft_replayed` 不再伪装成
  *   `candidates` / `blocked`（与「已保存，待定位」互相矛盾的旧行为）。
+ * - **范围限定**：以上「唯一」均限定在**批量路径内**。单番路径
+ *   （`SingleAnimeReviewPanel.vue`、`useSingleAnimeJourney.ts`、`useDraftSession.ts`）
+ *   仍各自内联同一份错误类型分类，且 `SingleAnimeReviewPanel.vue` 把
+ *   `draft_replayed` 判为「草案失效→重新选合集」，与批量路径的「已保存，待定位」
+ *   相反；单番收口不在 #195 范围内。
  *
  * 映射表（错误类型 × 前提 → 展示状态 / 相位 / 恢复动作 / 芯片 / 语气 / 需处理）：
  *
@@ -35,6 +42,8 @@ import {
   reduceBatchReview,
   type BatchItemPhase,
   type BatchParseItem,
+  type BatchReviewState,
+  type BatchSaveResultItem,
   type ParseBatchTitlesResult,
 } from '@/app/composables/useBatchReviewJourney'
 import {
@@ -80,25 +89,61 @@ function parsedItem(withCandidates: boolean): BatchParseItem {
   } as unknown as BatchParseItem
 }
 
+/** 解析 → 开始保存 的公共前缀。 */
+function stateAfterBeginSave(withCandidates: boolean): BatchReviewState {
+  const result = {
+    batch_id: 'batch-1',
+    raw_input: '萌王S4',
+    items: [parsedItem(withCandidates)],
+  } as ParseBatchTitlesResult
+  const state = reduceBatchReview(createBatchReviewState(), { type: 'parse_succeeded', result })
+  return reduceBatchReview(state, { type: 'begin_save', itemIds: ['item-1'] })
+}
+
+/** 成功路径的状态：解析 → 开始保存 → 收到 CONFIRMED 结果。 */
+function stateAfterSaveSucceeded(withCandidates: boolean): BatchReviewState {
+  return reduceBatchReview(stateAfterBeginSave(withCandidates), {
+    type: 'save_succeeded',
+    itemId: 'item-1',
+    result: {
+      item_id: 'item-1',
+      outcome: 'CONFIRMED',
+      request_id: 'req-1',
+      status: 'CONFIRMED',
+      error_type: null,
+      error_message: null,
+      tracking_id: 'tracking-1',
+      tracking_ready: true,
+    } as unknown as BatchSaveResultItem,
+  })
+}
+
+/** 成功路径的相位：真实 reducer 驱动，而不是与本表字面量自比。 */
+function phaseAfterSaveSucceeded(withCandidates: boolean): BatchItemPhase {
+  return stateAfterSaveSucceeded(withCandidates).items['item-1']!.phase
+}
+
+/** 保存失败后的完整状态，供相位之外的断言（例如勾选意图）复用。 */
+function stateAfterSaveFailed(
+  withCandidates: boolean,
+  error: Record<string, unknown>,
+  options: { frozenBefore?: boolean } = {},
+): BatchReviewState {
+  let state = stateAfterBeginSave(withCandidates)
+  // 冻结前提：上一次保存响应未知（条目已被保存过或状态未知），本次是同键重放。
+  if (options.frozenBefore) {
+    state = reduceBatchReview(state, { type: 'save_response_unknown', itemIds: ['item-1'] })
+  }
+  return reduceBatchReview(state, { type: 'save_failed', itemId: 'item-1', error })
+}
+
 /** 同一相位判定入口：解析 → 开始保存 →（可选）先落入冻结态 → 收到这条保存失败。 */
 function phaseAfterSaveFailed(
   withCandidates: boolean,
   error: Record<string, unknown>,
   options: { frozenBefore?: boolean } = {},
 ): BatchItemPhase {
-  const result = {
-    batch_id: 'batch-1',
-    raw_input: '萌王S4',
-    items: [parsedItem(withCandidates)],
-  } as ParseBatchTitlesResult
-  let state = reduceBatchReview(createBatchReviewState(), { type: 'parse_succeeded', result })
-  state = reduceBatchReview(state, { type: 'begin_save', itemIds: ['item-1'] })
-  // 冻结前提：上一次保存响应未知（条目已被保存过或状态未知），本次是同键重放。
-  if (options.frozenBefore) {
-    state = reduceBatchReview(state, { type: 'save_response_unknown', itemIds: ['item-1'] })
-  }
-  state = reduceBatchReview(state, { type: 'save_failed', itemId: 'item-1', error })
-  return state.items['item-1']!.phase
+  return stateAfterSaveFailed(withCandidates, error, options).items['item-1']!.phase
 }
 
 interface MappingRow {
@@ -290,8 +335,8 @@ describe('#195 展示状态映射表', () => {
 
     // 生命周期相位：同一错误类型的唯一判定。
     if (row_.outcome === 'CONFIRMED') {
-      // 成功路径的相位由 save_succeeded 决定，这里只钉住展示状态。
-      expect(row_.phase).toBe('confirmed')
+      // 成功路径同样走真实 reducer（save_succeeded），不再与本表字面量自比。
+      expect(phaseAfterSaveSucceeded(row_.withCandidates)).toBe(row_.phase)
       return
     }
     expect(phaseAfterSaveFailed(row_.withCandidates, {
@@ -388,6 +433,29 @@ describe('#195 展示状态映射表', () => {
     // 明确禁止重新生成（而不是给出「重新生成草案」入口）。
     expect(step).toContain('不要重新生成草案')
     expect(step).toContain('请勿重新添加同一部')
+  })
+
+  it('终态相位拒绝新的勾选意图：saved_pending_locate 拒绝、candidates 仍允许', () => {
+    // #195 在 set_selected 里把 saved_pending_locate 加入终态清单：它必须与
+    // saved_pending_confirm / blocked / confirmed 一样拒绝新的勾选意图；
+    // 同时用 candidates 作对照，证明终态清单没有扩大到正常可确认的条目。
+    const locate = stateAfterSaveFailed(true, {
+      error_type: 'draft_replayed',
+      outcome: 'FAILED',
+      request_id: null,
+    })
+    expect(locate.items['item-1']!.phase).toBe('saved_pending_locate')
+    expect(reduceBatchReview(locate, { type: 'set_selected', itemId: 'item-1', selected: true })
+      .items['item-1']!.selected).toBe(false)
+
+    const candidates = stateAfterSaveFailed(true, {
+      error_type: 'draft_expired',
+      outcome: 'FAILED',
+      request_id: null,
+    })
+    expect(candidates.items['item-1']!.phase).toBe('candidates')
+    expect(reduceBatchReview(candidates, { type: 'set_selected', itemId: 'item-1', selected: true })
+      .items['item-1']!.selected).toBe(true)
   })
 })
 
