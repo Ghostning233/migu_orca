@@ -1896,3 +1896,190 @@ describe('one session model for every write family', () => {
     expect(writes.busyFor('tracking-2')).toBe(true)
   })
 })
+
+
+/**
+ * Issue #184: the risk-confirmed resubmission is one more family on the same
+ * session module — the module owns the two-phase decision, the exact
+ * confirmation body and its lock, and the page only sends what it returns.
+ */
+function pendingItem(overrides: Partial<TrackingItem> = {}): TrackingItem {
+  return item({
+    status: 'VERIFYING_EXTERNAL', status_label: '核验外部结果中', status_group: 'PROCESSING',
+    submission_mode: 'CONTINUE_TRACKING', revision: 4,
+    ...overrides,
+  })
+}
+
+const RESUBMIT_BINDING = {
+  expected_revision: 5,
+  previous_operation_id: 'operation-1',
+  connection_ref: '11111111-1111-4111-8111-111111111111',
+}
+
+function offerResult(overrides: Record<string, unknown> = {}) {
+  return {
+    tracking_id: 'tracking-1', confirm: false, check_status: 'UNRESOLVED',
+    outcome: 'RECOVERY_REQUIRED', requires_risk_confirmation: true, blocked_reason: null,
+    verification_reason: 'NOT_FOUND', binding: { ...RESUBMIT_BINDING },
+    checked_revision: 4, next_revision: 5, checked_at: '2026-10-11T00:00:00Z',
+    operation_id: 'operation-1', previous_operation_id: null, failure_category: null,
+    diagnostics: {}, issues: [], tracking: pendingItem(),
+    ...overrides,
+  } as never
+}
+
+function resubmitWriteResult(overrides: Record<string, unknown> = {}) {
+  return {
+    tracking_id: 'tracking-1', confirm: true, check_status: 'UNRESOLVED', outcome: 'ACTIVE',
+    requires_risk_confirmation: false, blocked_reason: null, verification_reason: null,
+    binding: null, checked_revision: 5, next_revision: 6, checked_at: '2026-10-11T00:00:01Z',
+    operation_id: 'operation-2', previous_operation_id: 'operation-1', failure_category: null,
+    diagnostics: {}, issues: [], tracking: pendingItem({ revision: 6 }),
+    ...overrides,
+  } as never
+}
+
+describe('risk-confirmed resubmission (issue #184)', () => {
+  it('starts with a revision-only read-only request and then asks for the risk', () => {
+    const writes = useTrackingWriteSession()
+    const started = writes.beginResubmit({ item: pendingItem() }, { storageDir: STORAGE })
+
+    expect(started.accepted).toBe(true)
+    expect(started.resubmitPhase).toBe('OFFER')
+    expect(started.request?.endpoint).toBe('/api/v1/tracking/items/{tracking_id}/resubmit')
+    expect(started.request?.path).toEqual({ tracking_id: 'tracking-1' })
+    // The read-only phase carries the revision and the profile, nothing else.
+    expect(bodyOf(started)).toEqual({ expected_revision: 4, confirm: false, storage_dir: STORAGE })
+    expect(writes.resubmit.value?.state).toBe('IN_FLIGHT')
+
+    const effects = writes.finishResubmitOffer(offerResult())
+    writes.finishAttempt()
+
+    expect(writes.resubmit.value?.state).toBe('UNKNOWN')
+    expect(writes.resubmit.value?.binding).toEqual(RESUBMIT_BINDING)
+    expect(writes.resubmitLoading.value).toBe(false)
+    const kinds = effects.map((effect) => effect.kind)
+    expect(kinds).toContain('recheck')
+    const ask = effects.find((effect) => effect.kind === 'confirmResubmitRisk')
+    expect(ask).toMatchObject({ kind: 'confirmResubmitRisk', trackingId: 'tracking-1' })
+    // Nothing is written and no intent is held by the offer alone.
+    expect(writes.sessions.value.submit).toBeNull()
+    expect(writes.hasUnresolvedLock.value).toBe(false)
+  })
+
+  it('sends a check failure as a refusal instead of asking for the risk', () => {
+    const writes = useTrackingWriteSession()
+    writes.beginResubmit({ item: pendingItem() }, { storageDir: STORAGE })
+    const effects = writes.finishResubmitOffer(
+      offerResult({
+        check_status: 'BLOCKED', requires_risk_confirmation: false, binding: null,
+        blocked_reason: 'ONE_TIME_SUBMISSION',
+      }),
+    )
+    writes.finishAttempt()
+
+    expect(writes.resubmit.value?.state).toBe('BLOCKED')
+    expect(writes.resubmit.value?.message).toContain('下载现有资源')
+    expect(effects.some((effect) => effect.kind === 'confirmResubmitRisk')).toBe(false)
+    expect(writes.hasUnresolvedLock.value).toBe(false)
+  })
+
+  it('cancelling the risk confirmation sends nothing and keeps no lock', () => {
+    const writes = useTrackingWriteSession()
+    writes.beginResubmit({ item: pendingItem() }, { storageDir: STORAGE })
+    writes.finishResubmitOffer(offerResult())
+    writes.finishAttempt()
+
+    writes.cancelResubmit('tracking-1')
+
+    expect(writes.resubmit.value?.state).toBe('CANCELLED')
+    expect(writes.resubmit.value?.message).toContain('没有向 Auto Bangumi 发起新的提交')
+    expect(writes.sessions.value.submit).toBeNull()
+    expect(writes.hasUnresolvedLock.value).toBe(false)
+  })
+
+  it('confirms with the exact published binding and reports through the submit slot', () => {
+    const writes = useTrackingWriteSession()
+    writes.beginResubmit({ item: pendingItem() }, { storageDir: STORAGE })
+    writes.finishResubmitOffer(offerResult())
+    writes.finishAttempt()
+
+    const started = writes.beginResubmitConfirmation(RESUBMIT_BINDING, { storageDir: STORAGE })
+
+    expect(started.resubmitPhase).toBe('CONFIRMATION')
+    expect(bodyOf(started)).toEqual({
+      expected_revision: 5,
+      confirm: true,
+      previous_operation_id: 'operation-1',
+      connection_ref: RESUBMIT_BINDING.connection_ref,
+      storage_dir: STORAGE,
+    })
+    // A confirmation is a submit-family write: it owns the same lock and panel.
+    expect(writes.sessions.value.submit?.state).toBe('IN_FLIGHT')
+    expect(writes.loading.value).toBe(true)
+
+    writes.finishSubmit(resubmitWriteResult())
+    writes.finishAttempt()
+
+    expect(writes.sessions.value.submit?.state).toBe('ACTIVE')
+    expect(writes.sessions.value.submit?.keepsIntent).toBe(false)
+    expect(writes.hasUnresolvedLock.value).toBe(false)
+  })
+
+  it('replays the identical confirmation while its result is unproven', () => {
+    const writes = useTrackingWriteSession()
+    writes.beginResubmit({ item: pendingItem() }, { storageDir: STORAGE })
+    writes.finishResubmitOffer(offerResult())
+    writes.finishAttempt()
+    const first = writes.beginResubmitConfirmation(RESUBMIT_BINDING, { storageDir: STORAGE })
+    writes.finishSubmit(resubmitWriteResult({ outcome: 'UNKNOWN' }))
+    writes.finishAttempt()
+    expect(writes.sessions.value.submit?.keepsIntent).toBe(true)
+
+    // The next entry point replays that very body instead of re-checking or
+    // minting a second operation.
+    const replay = writes.beginResubmit({ item: pendingItem() }, { storageDir: STORAGE })
+
+    expect(replay.resubmitPhase).toBe('CONFIRMATION')
+    expect(bodyOf(replay)).toEqual(bodyOf(first))
+    expect(writes.resubmit.value).toBeNull()
+  })
+
+  it('keeps an unresolved confirmation as a non-replayable tombstone after a clear', () => {
+    const writes = useTrackingWriteSession()
+    writes.beginResubmit({ item: pendingItem() }, { storageDir: STORAGE })
+    writes.finishResubmitOffer(offerResult())
+    writes.finishAttempt()
+    writes.beginResubmitConfirmation(RESUBMIT_BINDING, { storageDir: STORAGE })
+    writes.finishSubmit(resubmitWriteResult({ outcome: 'UNKNOWN' }))
+    writes.finishAttempt()
+
+    writes.preserveAfterClear()
+
+    expect(writes.sessions.value.submit?.state).toBe('UNKNOWN')
+    expect(writes.sessions.value.submit?.keepsIntent).toBe(true)
+    const replay = writes.beginResubmit({ item: pendingItem() }, { storageDir: STORAGE })
+    expect(replay.accepted).toBe(false)
+    expect(replay.refusal?.reason).toBe('REPLAY')
+    expect(writes.noticeFor('tracking-1')).toContain('连接已被清除或更换')
+  })
+
+  it('releases the confirmation when its outcome is definite', () => {
+    const writes = useTrackingWriteSession()
+    writes.beginResubmit({ item: pendingItem() }, { storageDir: STORAGE })
+    writes.finishResubmitOffer(offerResult())
+    writes.finishAttempt()
+    writes.beginResubmitConfirmation(RESUBMIT_BINDING, { storageDir: STORAGE })
+    writes.failSubmit({ status: 409, httpError: true, type: 'tracking_revision_conflict' })
+    writes.finishAttempt()
+
+    expect(writes.sessions.value.submit?.state).toBe('CONFLICT')
+    expect(writes.sessions.value.submit?.message).toContain('追番记录已变化')
+    expect(writes.hasUnresolvedLock.value).toBe(false)
+
+    // A spent confirmation means the next entry point is a fresh read-only phase.
+    const next = writes.beginResubmit({ item: pendingItem() }, { storageDir: STORAGE })
+    expect(next.resubmitPhase).toBe('OFFER')
+  })
+})

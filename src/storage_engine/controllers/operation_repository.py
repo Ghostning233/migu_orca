@@ -94,6 +94,7 @@ _IMMUTABLE_FIELDS = (
     "previous_tracking_status",
     "expected_external_fingerprint",
     "connection_ref",
+    "previous_operation_id",
 )
 
 
@@ -111,6 +112,7 @@ def bind_tracking_operation(
     connection_ref: str | UUID | None = None,
     attempt: int = 1,
     submission_mode: str | None = None,
+    previous_operation_id: str | None = None,
     now: str | None = None,
 ) -> tuple[TrackingOperation, bool]:
     """Create a ``PREPARED`` operation for a key, or replay the bound one.
@@ -148,6 +150,7 @@ def bind_tracking_operation(
                 previous_tracking_status=previous_tracking_status,
                 expected_external_fingerprint=expected_external_fingerprint,
                 connection_ref=clean_connection_ref,
+                previous_operation_id=previous_operation_id,
             )
             return existing, False
         try:
@@ -163,6 +166,7 @@ def bind_tracking_operation(
                 expected_external_fingerprint=expected_external_fingerprint,
                 connection_ref=clean_connection_ref,
                 attempt=attempt,
+                previous_operation_id=previous_operation_id,
                 now=now,
             )
         except ValueError as exc:
@@ -318,6 +322,7 @@ def _check_binding(
     previous_tracking_status: str | None = None,
     expected_external_fingerprint: str | None = None,
     connection_ref: str | None = None,
+    previous_operation_id: str | None = None,
 ) -> None:
     """Raise ``tracking_idempotency_conflict`` when the binding differs."""
     binding = (
@@ -329,6 +334,7 @@ def _check_binding(
         existing.previous_tracking_status,
         existing.expected_external_fingerprint,
         existing.connection_ref,
+        existing.previous_operation_id,
     )
     incoming = (
         tracking_id,
@@ -339,6 +345,7 @@ def _check_binding(
         previous_tracking_status,
         expected_external_fingerprint,
         connection_ref,
+        previous_operation_id,
     )
     if binding != incoming:
         raise Stage1Error(

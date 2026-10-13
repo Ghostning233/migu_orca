@@ -52,6 +52,12 @@ from shared.timestamps import utc_now
 
 TRACKING_OPERATION_CONNECTION_SCHEMA_VERSION = 3
 #: Issue #98: operations record which submission mode the user chose.
+#: Issue #184 keeps this same writer version: an optional nullable
+#: ``previous_operation_id`` is added to the v4 whitelist exactly like
+#: ``submission_mode`` (written only when present, missing reads back as null).
+#: A version bump would make every existing operation un-writable, because
+#: ``operation_repository`` refuses CAS/recovery for a non-current version, and
+#: that would strand in-flight 结果待确认 operations.
 TRACKING_OPERATION_SCHEMA_VERSION = 4
 TRACKING_OPERATION_LEGACY_SCHEMA_VERSION = 1
 TRACKING_OPERATION_MANAGEMENT_SCHEMA_VERSION = 2
@@ -179,7 +185,9 @@ _OPERATION_FIELDS = frozenset(
         "connection_ref",
     }
 )
-_OPERATION_SUBMISSION_FIELDS = frozenset(_OPERATION_FIELDS | {"submission_mode"})
+_OPERATION_SUBMISSION_FIELDS = frozenset(
+    _OPERATION_FIELDS | {"submission_mode", "previous_operation_id"}
+)
 _OPERATION_BASE_FIELDS = frozenset(
     _OPERATION_FIELDS - {
         "target_scope",
@@ -197,6 +205,10 @@ _OPERATION_MANAGEMENT_FIELDS = frozenset(
 #: operation id is a hash of it) but the whitelist keeps the persisted field a
 #: single printable token that cannot carry a URL/magnet/absolute path.
 _IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-:=]{0,199}$")
+
+#: Issue #184: the only shape a traceability link may take.  It is a sibling
+#: ``operation_id`` (``op_<32 hex>``), never a URL, path or credential.
+_PREVIOUS_OPERATION_ID_RE = re.compile(r"^op_[A-Za-z0-9_-]{1,96}$")
 
 
 def tracking_operation_id_for_idempotency_key(idempotency_key: str) -> str:
@@ -251,6 +263,10 @@ class TrackingOperation:
     #: Issue #98: the operation-level submission mode.  A v1-v3 operation reads
     #: back as the continue-tracking default.
     submission_mode: str = TRACKING_SUBMISSION_MODE_CONTINUE
+    #: Issue #184: the operation this one was created to replace after an
+    #: explicit risk confirmation.  ``None`` for an ordinary first submit; the
+    #: previous operation file and its audit are never rewritten or deleted.
+    previous_operation_id: str | None = None
 
 
 def create_tracking_operation(
@@ -266,6 +282,7 @@ def create_tracking_operation(
     connection_ref: str | UUID | None = None,
     attempt: int = 1,
     submission_mode: str = TRACKING_SUBMISSION_MODE_CONTINUE,
+    previous_operation_id: str | None = None,
     now: str | None = None,
 ) -> TrackingOperation:
     """Build a fresh ``PREPARED`` operation bound to ``idempotency_key``.
@@ -313,6 +330,7 @@ def create_tracking_operation(
         expected_external_fingerprint=expected_external_fingerprint,
         connection_ref=clean_connection_ref,
         submission_mode=_validated_submission_mode(submission_mode),
+        previous_operation_id=_optional_previous_operation_id(previous_operation_id),
     )
 
 
@@ -395,6 +413,12 @@ def operation_to_storage_dict(operation: TrackingOperation) -> dict[str, Any]:
         payload["connection_ref"] = _optional_connection_ref(operation.connection_ref)
     if operation.submission_mode != TRACKING_SUBMISSION_MODE_CONTINUE:
         payload["submission_mode"] = operation.submission_mode
+    # Issue #184: only a resubmit carries the link, so an ordinary SUBMIT file
+    # stays byte-compatible with the pre-#184 v4 shape.
+    if operation.previous_operation_id is not None:
+        payload["previous_operation_id"] = _optional_previous_operation_id(
+            operation.previous_operation_id
+        )
     return payload
 
 
@@ -478,6 +502,11 @@ def operation_from_storage_dict(data: Any) -> TrackingOperation:
 
     return TrackingOperation(
         submission_mode=_validated_submission_mode(data.get("submission_mode")),
+        previous_operation_id=(
+            _optional_previous_operation_id(data.get("previous_operation_id"))
+            if schema_version == TRACKING_OPERATION_SCHEMA_VERSION
+            else None
+        ),
         schema_version=schema_version,
         operation_id=operation_id,
         tracking_id=tracking_id,
@@ -536,6 +565,15 @@ def _optional_clean_str(value: Any, name: str) -> str | None:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{name} must be a non-empty string or null")
     return value.strip()
+
+
+def _optional_previous_operation_id(value: Any) -> str | None:
+    """Normalize the traceability link to a sibling operation id, or null."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or not _PREVIOUS_OPERATION_ID_RE.fullmatch(value):
+        raise ValueError("previous_operation_id must be an operation id or null")
+    return value
 
 
 def _optional_connection_ref(value: Any) -> str | None:

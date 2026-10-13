@@ -753,6 +753,82 @@ class TrackingCheckPayload(BaseModel):
 #: model's printable-token contract so a bad key fails at the boundary).
 _IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-:=]{0,199}$")
 
+#: Issue #184: the traceability link of a risk-confirmed resubmit is a sibling
+#: operation id, never a URL/path/credential.
+_PREVIOUS_OPERATION_ID_RE = re.compile(r"^op_[A-Za-z0-9_-]{1,96}$")
+
+
+class TrackingResubmitPayload(BaseModel):
+    """Body for ``POST /api/v1/tracking/items/{tracking_id}/resubmit`` (#184).
+
+    The endpoint has exactly two phases and they are distinguished by
+    ``confirm``:
+
+    * ``confirm=false`` (default) performs one bounded **read-only** check of the
+      pending submission through the Auto Bangumi instance the original
+      operation was bound to.  It never creates anything and never asks the
+      browser for a connection.
+    * ``confirm=true`` is the user's explicit acceptance of the duplicate/
+      resource risk.  It must carry the exact binding the check published —
+      ``expected_revision``, ``previous_operation_id`` and ``connection_ref`` —
+      so a changed record, a different pending operation or a replaced saved
+      connection refuses the stale confirmation instead of rebinding it.  It has
+      no client idempotency key: the server derives one from that binding, so one
+      confirmation can never create two operations.
+
+    ``extra="forbid"`` rejects every leaked field; ``tracking_id`` comes from the
+    URL path.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tracking_id: str
+    expected_revision: StrictInt = Field(ge=1)
+    confirm: bool = False
+    previous_operation_id: str | None = None
+    connection_ref: UUID | None = None
+    storage_dir: str | None = None
+
+    @model_validator(mode="after")
+    def _require_binding_only_when_confirming(self) -> TrackingResubmitPayload:
+        binding = (self.previous_operation_id, self.connection_ref)
+        if self.confirm:
+            if any(value is None for value in binding):
+                raise ValueError("重新提交必须携带已确认的绑定信息")
+        elif any(value is not None for value in binding):
+            raise ValueError("只读检查阶段不接受提交绑定信息")
+        return self
+
+    @field_validator("tracking_id")
+    @classmethod
+    def _clean_resubmit_tracking_id(cls, value: str) -> str:
+        tracking_id = value.strip()
+        if not tracking_id:
+            raise ValueError("tracking_id cannot be empty")
+        return tracking_id
+
+    @field_validator("previous_operation_id")
+    @classmethod
+    def _clean_previous_operation_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not _PREVIOUS_OPERATION_ID_RE.fullmatch(value):
+            raise ValueError("previous_operation_id 必须是提交操作 id")
+        return value
+
+    @field_validator("connection_ref", mode="before")
+    @classmethod
+    def _require_canonical_resubmit_ref(cls, value: Any) -> Any:
+        if value is None or not isinstance(value, str):
+            raise ValueError("connection_ref 必须是规范 UUID")
+        try:
+            parsed = UUID(value)
+        except (ValueError, AttributeError, TypeError) as exc:
+            raise ValueError("connection_ref 必须是规范 UUID") from exc
+        if str(parsed) != value:
+            raise ValueError("connection_ref 必须是规范 UUID")
+        return value
+
 
 #: Fixed recovery-action enum accepted by
 #: ``POST /api/v1/tracking/items/{tracking_id}/recover`` (Stage 29 PRD §11.8).

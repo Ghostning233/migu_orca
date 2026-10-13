@@ -39,11 +39,16 @@ import type { operations, paths } from '@/api/generated/api'
 import {
   canVerifyExternally,
   createCheckSession,
+  createResubmitConfirmationBody,
+  createResubmitSession,
   executableTrackingActions,
   isTrackingManagementScope,
   projectCheckResult,
+  projectResubmitOffer,
   projectRevalidateIssues,
+  resubmitConflictMessage,
   TRACKING_CHECK_ENDPOINT,
+  TRACKING_RESUBMIT_ENDPOINT,
   type CapabilityResult,
   type TrackingAction,
   type TrackingActionCode,
@@ -52,6 +57,10 @@ import {
   type TrackingCheckSession,
   type TrackingItem,
   type TrackingManagementScope,
+  type TrackingResubmitBinding,
+  type TrackingResubmitBody,
+  type TrackingResubmitResult,
+  type TrackingResubmitSession,
   type TrackingRevalidateIssueView,
   type TrackingScope,
 } from './trackingProjection'
@@ -258,6 +267,12 @@ type TrackingWriteAsk = 'IMPACT' | 'SUBMISSION_MODE'
 
 interface TrackingWriteStart {
   readonly accepted: boolean
+  /**
+   * Issue #184: which resubmission transport the returned request belongs to.
+   * ``OFFER`` settles through ``finishResubmitOffer``; ``CONFIRMATION`` is the
+   * one new-operation write and settles through ``finishSubmit``.
+   */
+  readonly resubmitPhase?: 'OFFER' | 'CONFIRMATION' | null
   readonly refusal: TrackingWriteRefusal | null
   readonly ask: TrackingWriteAsk | null
   readonly confirmation: TrackingWriteConfirmation | null
@@ -275,6 +290,17 @@ interface TrackingWriteStart {
 export type TrackingWriteEffect =
   /** Re-read the server: optionally the list, and the open detail when it moved. */
   | { readonly kind: 'recheck'; readonly trackingId: string | null; readonly refreshList: boolean }
+  /**
+   * Issue #184: the read-only phase offered a resubmit and the page must get the
+   * user's explicit acceptance of the duplicate/resource risk before the one new
+   * operation may be created.  The page answers with ``cancelResubmit`` or
+   * ``beginResubmitConfirmation``.
+   */
+  | {
+      readonly kind: 'confirmResubmitRisk'
+      readonly trackingId: string
+      readonly binding: TrackingResubmitBinding
+    }
   /** A fixed verdict the page must surface (success notice or blocking dialog). */
   | { readonly kind: 'notify'; readonly feedback: TrackingWriteFeedback }
 
@@ -305,6 +331,17 @@ interface TrackingBatchStart extends TrackingWriteStart {
   readonly skippedTitle: string
 }
 
+/**
+ * The exact binding one risk-confirmed resubmission was issued under (issue
+ * #184).  It is the confirmation's identity: while the external result is
+ * unproven the page replays this very body instead of re-checking or minting a
+ * second operation.
+ */
+interface TrackingResubmitIntent {
+  readonly trackingId: string
+  readonly binding: TrackingResubmitBinding
+}
+
 export interface TrackingWriteTarget {
   readonly item: TrackingItem
   readonly action: TrackingAction
@@ -330,6 +367,10 @@ function ignoredStart(): TrackingWriteStart {
 
 function refusedStart(trackingId: string, reason: TrackingWriteRefusal['reason']): TrackingWriteStart {
   return { ...EMPTY_START, refusal: { trackingId, reason } }
+}
+
+function acceptedStart(request: TrackingWriteRequest): TrackingWriteStart {
+  return { ...EMPTY_START, accepted: true, request }
 }
 
 
@@ -1395,7 +1436,7 @@ function createManagementSession(
 function projectSubmitOutcome(
   trackingId: string,
   action: TrackingWriteActionCode,
-  result: TrackingWriteResult,
+  result: TrackingWriteResult | TrackingResubmitResult,
   submissionMode: TrackingSubmissionMode | null,
 ): TrackingWriteSession {
   const outcome: SubmitWriteState = isSubmitOutcome(result.outcome) ? result.outcome : 'UNKNOWN'
@@ -1753,6 +1794,16 @@ const TRACKING_BATCH_SUBMIT_ENDPOINT = '/api/v1/tracking/batch-submit' as const 
 /** The transport that is currently in flight; one write runs at a time. */
 type ActiveTransport =
   | { readonly family: 'SUBMIT'; readonly trackingId: string; readonly action: TrackingWriteActionCode; readonly mode: TrackingSubmissionMode | null }
+  /**
+   * One risk-confirmed resubmission: a submit-family outcome, one new operation.
+   * It repeats a persistent submission, so its mode is always 持续追番.
+   */
+  | {
+      readonly family: 'RESUBMIT'
+      readonly trackingId: string
+      readonly action: 'SUBMIT'
+      readonly mode: TrackingSubmissionMode
+    }
   | { readonly family: 'RECOVERY'; readonly trackingId: string; readonly action: TrackingRecoveryActionCode }
   | { readonly family: 'MANAGEMENT'; readonly trackingId: string; readonly action: TrackingManagementActionCode; readonly targetScope: TrackingManagementScope }
 
@@ -1770,6 +1821,14 @@ export interface TrackingWriteSessionApi {
   readonly checkLoading: Ref<boolean>
   /** True while the page still owes this item one automatic check (issue #183). */
   readonly autoCheckArmed: Ref<boolean>
+  /**
+   * Issue #184: the read-only phase of one risk-confirmed resubmission — the
+   * proven reason, its refusal, or the exact binding a confirmation must echo.
+   * It is its own slot like the check's; the confirmation itself then reports
+   * through the ordinary submit session.
+   */
+  readonly resubmit: Ref<TrackingResubmitSession | null>
+  readonly resubmitLoading: Ref<boolean>
   readonly batchSelection: Ref<TrackingBatchSelection>
   readonly batchOutcome: Ref<TrackingBatchOutcome | null>
   readonly batchLoading: Ref<boolean>
@@ -1803,7 +1862,8 @@ export interface TrackingWriteSessionApi {
 
   // -- submit family --------------------------------------------------------
   beginSubmit: (payload: TrackingWriteTarget, options?: TrackingWriteBeginOptions) => TrackingWriteStart
-  finishSubmit: (result: TrackingWriteResult) => readonly TrackingWriteEffect[]
+  /** Settles an ordinary submit/retry or the write phase of a resubmission (#184). */
+  finishSubmit: (result: TrackingWriteResult | TrackingResubmitResult) => readonly TrackingWriteEffect[]
   failSubmit: (error: TrackingWriteError) => readonly TrackingWriteEffect[]
   /** The transport ended (successfully, with a failure, or dropped). */
   finishAttempt: () => void
@@ -1853,6 +1913,25 @@ export interface TrackingWriteSessionApi {
   finishCheck: (result: TrackingCheckResult) => readonly TrackingWriteEffect[]
   failCheck: (error: TrackingWriteError) => readonly TrackingWriteEffect[]
 
+  // -- risk-confirmed resubmission (issue #184) -----------------------------
+  /**
+   * Start the read-only phase, or replay the exact body of an unresolved earlier
+   * confirmation of the same item (never a second operation for the same one).
+   */
+  beginResubmit: (
+    payload: { readonly item: TrackingItem },
+    options?: TrackingWriteBeginOptions,
+  ) => TrackingWriteStart
+  finishResubmitOffer: (result: TrackingResubmitResult) => readonly TrackingWriteEffect[]
+  failResubmitOffer: (error: TrackingWriteError) => readonly TrackingWriteEffect[]
+  /** The user cancelled the risk confirmation: no request and no new operation. */
+  cancelResubmit: (trackingId: string) => void
+  /** Send the one confirmation of the binding the read-only phase published. */
+  beginResubmitConfirmation: (
+    binding: TrackingResubmitBinding,
+    options?: TrackingWriteBeginOptions,
+  ) => TrackingWriteStart
+
 
   // -- batch submit ---------------------------------------------------------
   isBatchSelected: (trackingId: string) => boolean
@@ -1880,6 +1959,10 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
   const check = ref<TrackingCheckSession | null>(null)
   const checkLoading = ref(false)
   const autoCheckArmed = ref(false)
+  /** Issue #184: the read-only phase of a risk-confirmed resubmission. */
+  const resubmit = ref<TrackingResubmitSession | null>(null)
+  const resubmitLoading = ref(false)
+  let resubmitAttempt: { trackingId: string; revision: number } | null = null
   const batchSelection = ref<TrackingBatchSelection>(EMPTY_BATCH_SELECTION)
   const batchOutcome = ref<TrackingBatchOutcome | null>(null)
   const batchLoading = ref(false)
@@ -1890,6 +1973,8 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
   // families each keep their own tombstone so a clear can never rebind one
   // family's pending operation to another's connection.
   let submitIntent: TrackingWriteIntent | null = null
+  /** Issue #184: the one confirmation a risk-confirmed resubmit is replaying. */
+  let resubmitIntent: TrackingResubmitIntent | null = null
   let managementIntent: TrackingManagementIntent | null = null
   let submitReplayBlocked = false
   let managementReplayBlocked = false
@@ -1965,13 +2050,30 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
     if (refusalNotice.value && !hasUnresolvedLock.value) refusalNotice.value = null
   })
 
+  /**
+   * Spend the one submit-family intent.  A risk-confirmed resubmission keeps its
+   * confirmation in the same slot, so a definite outcome releases both.
+   */
+  function releaseSubmitIntent(): void {
+    submitIntent = null
+    resubmitIntent = null
+  }
+
+  function resetResubmit(): void {
+    resubmitAttempt = null
+    resubmitLoading.value = false
+    resubmit.value = null
+  }
+
   function reset(): void {
     submitSession.value = null
     recoverySession.value = null
     managementSession.value = null
     planDelete.value = null
     resetCheck()
+    resetResubmit()
     submitIntent = null
+    resubmitIntent = null
     managementIntent = null
     submitReplayBlocked = false
     managementReplayBlocked = false
@@ -2004,7 +2106,10 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
     active = null
 
     const submit = submitSession.value
-    if (submit && (submit.state === 'IN_FLIGHT' || submit.keepsIntent) && submitIntent) {
+    if (submit && (submit.state === 'IN_FLIGHT' || submit.keepsIntent) && (submitIntent || resubmitIntent)) {
+      // A cleared connection never rebinds a locked intent to the new one: the
+      // unresolved submit keeps its body as a non-replayable tombstone (issue
+      // #184 keeps the resubmit confirmation under exactly the same rule).
       submitReplayBlocked = true
       submitConfigSnapshot = null
       submitSession.value = createSubmitSession(
@@ -2012,10 +2117,11 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
       )
     } else {
       submitSession.value = null
-      submitIntent = null
+      releaseSubmitIntent()
       submitReplayBlocked = false
       submitConfigSnapshot = null
     }
+    resetResubmit()
 
     const recovery = recoverySession.value
     if (recovery && (recovery.state === 'IN_FLIGHT' || recovery.keepsIntent)) {
@@ -2053,7 +2159,7 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
     const submit = submitSession.value
     if (submit?.trackingId === trackingId && submit.keepsIntent) {
       submitSession.value = null
-      submitIntent = null
+      releaseSubmitIntent()
       submitReplayBlocked = false
       submitConfigSnapshot = null
     }
@@ -2173,14 +2279,18 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
     }
   }
 
-  function finishSubmit(result: TrackingWriteResult): readonly TrackingWriteEffect[] {
+  function finishSubmit(
+    result: TrackingWriteResult | TrackingResubmitResult,
+  ): readonly TrackingWriteEffect[] {
     const transport = active
-    if (!transport || transport.family !== 'SUBMIT') return []
+    if (!transport || (transport.family !== 'SUBMIT' && transport.family !== 'RESUBMIT')) return []
     active = null
-    const session = projectSubmitOutcome(transport.trackingId, transport.action, result, transport.mode)
+    const session = projectSubmitOutcome(
+      transport.trackingId, transport.action, result, transport.mode,
+    )
     submitSession.value = session
     if (!session.keepsIntent) {
-      submitIntent = null
+      releaseSubmitIntent()
     } else {
       // Issue #183: a submit whose result is still unproven owes one automatic
       // bounded read-only check, which is exactly what the submit area shows.
@@ -2191,7 +2301,7 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
 
   function failSubmit(error: TrackingWriteError): readonly TrackingWriteEffect[] {
     const transport = active
-    if (!transport || transport.family !== 'SUBMIT') return []
+    if (!transport || (transport.family !== 'SUBMIT' && transport.family !== 'RESUBMIT')) return []
     // A cancellation that cannot have crossed the external boundary is not a
     // result: the session and its intent stay exactly as they were.
     if (error.cancelled === true && error.httpError !== true) return []
@@ -2201,15 +2311,19 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
       // Every documented 409 is raised before the external boundary, so nothing
       // was submitted. The locked intent is spent and the error body carries no
       // authoritative tracking, so re-read both and require a new confirmation.
-      submitIntent = null
-      submitSession.value = createSubmitConflictSession(trackingId, action, error.type)
+      releaseSubmitIntent()
+      submitSession.value = transport.family === 'RESUBMIT'
+        ? createSubmitSession(trackingId, action, 'CONFLICT', {
+            message: resubmitConflictMessage(error.type),
+          })
+        : createSubmitConflictSession(trackingId, action, error.type)
       return [recheck(trackingId, true)]
     }
     if (isDefiniteWriteRejection(error)) {
       // D38-08.5: a documented JSON 400/404 is a definite refusal raised before
       // the external boundary — Auto Bangumi was never written. This is *not*
       // "结果待确认": the intent is released and the page only reads back.
-      submitIntent = null
+      releaseSubmitIntent()
       submitSession.value = createSubmitSession(trackingId, action, 'REJECTED')
       return [recheck(trackingId, true)]
     }
@@ -2535,7 +2649,7 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
     const submit = submitSession.value
     if (submit?.trackingId !== trackingId || !submit.keepsIntent) return
     submitSession.value = null
-    submitIntent = null
+    releaseSubmitIntent()
     submitReplayBlocked = false
     submitConfigSnapshot = null
   }
@@ -2621,6 +2735,158 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
       ? createCheckSession(attempt.trackingId, 'CONFLICT', null, attempt.revision)
       : createCheckSession(attempt.trackingId, 'UNKNOWN', null, attempt.revision)
     return [recheck(attempt.trackingId, true)]
+  }
+
+  // -- risk-confirmed resubmission (issue #184) -----------------------------
+
+  /** The one confirmation body of a resubmit, rebuilt from its exact binding. */
+  function resubmitRequest(
+    trackingId: string,
+    binding: TrackingResubmitBinding,
+    storageDir: string | undefined,
+  ): TrackingWriteRequest {
+    return {
+      endpoint: TRACKING_RESUBMIT_ENDPOINT,
+      path: { tracking_id: trackingId },
+      body: createResubmitConfirmationBody(binding, storageDir),
+    }
+  }
+
+  /**
+   * Start (or replay) the one manual resubmission of a pending submission.
+   *
+   * The first call is the read-only phase: it carries the revision and nothing
+   * else, so a proven subscription converges with zero external writes.  While a
+   * previous confirmation of the same item is still unproven, this call instead
+   * replays that exact body — re-checking or re-minting could create a second
+   * subscription.
+   */
+  function beginResubmit(
+    payload: { readonly item: TrackingItem },
+    options: TrackingWriteBeginOptions = {},
+  ): TrackingWriteStart {
+    const trackingId = payload.item.tracking_id
+    if (pending.value || loading.value || resubmitLoading.value) return ignoredStart()
+    const locked = resubmitIntent?.trackingId === trackingId ? resubmitIntent : null
+    if (locked) {
+      if (submitReplayBlocked) return refuseAndStart(trackingId, 'REPLAY')
+      refusalNotice.value = null
+      active = {
+        family: 'RESUBMIT', trackingId, action: 'SUBMIT', mode: 'CONTINUE_TRACKING',
+      }
+      loading.value = true
+      submitSession.value = createSubmitSession(trackingId, 'SUBMIT', 'IN_FLIGHT')
+      return {
+        ...acceptedStart(resubmitRequest(trackingId, locked.binding, options.storageDir)),
+        resubmitPhase: 'CONFIRMATION',
+      }
+    }
+    if (unresolvedOwner(trackingId)) return refuseAndStart(trackingId, 'INTENT')
+    const revision = payload.item.revision
+    if (typeof revision !== 'number') return ignoredStart()
+    refusalNotice.value = null
+    const body: TrackingResubmitBody = {
+      expected_revision: revision,
+      confirm: false,
+      ...(options.storageDir ? { storage_dir: options.storageDir } : {}),
+    }
+    resubmitAttempt = { trackingId, revision }
+    resubmitLoading.value = true
+    resubmit.value = createResubmitSession(trackingId, 'IN_FLIGHT', null, revision)
+    return {
+      ...acceptedStart({
+        endpoint: TRACKING_RESUBMIT_ENDPOINT,
+        path: { tracking_id: trackingId },
+        body,
+      }),
+      resubmitPhase: 'OFFER',
+    }
+  }
+
+  /**
+   * Settle the read-only phase.  A proven subscription releases the pending
+   * submission intent; a refusal is stated as its own reason; only an offered,
+   * still-unresolved result asks the page for the explicit risk confirmation.
+   */
+  function finishResubmitOffer(result: TrackingResubmitResult): readonly TrackingWriteEffect[] {
+    const attempt = resubmitAttempt
+    if (!attempt) return []
+    resubmitAttempt = null
+    resubmitLoading.value = false
+    const session = projectResubmitOffer(attempt.trackingId, result, attempt.revision)
+    resubmit.value = session
+    if (session.state === 'CONFIRMED') releaseSettledSubmission(attempt.trackingId)
+    if (session.state !== 'UNKNOWN' || !session.binding) {
+      return [recheck(attempt.trackingId, true)]
+    }
+    return [
+      recheck(attempt.trackingId, true),
+      { kind: 'confirmResubmitRisk', trackingId: attempt.trackingId, binding: session.binding },
+    ]
+  }
+
+  function failResubmitOffer(error: TrackingWriteError): readonly TrackingWriteEffect[] {
+    const attempt = resubmitAttempt
+    if (!attempt) return []
+    resubmitAttempt = null
+    resubmitLoading.value = false
+    if (error.cancelled === true && error.httpError !== true) return []
+    // Every documented 409 is raised before the external boundary, so the proven
+    // reason is stated and the page re-reads instead of guessing a cause.
+    resubmit.value = error.status === 409
+      ? createResubmitSession(
+          attempt.trackingId, 'CONFLICT', null, attempt.revision, resubmitConflictMessage(error.type),
+        )
+      : createResubmitSession(attempt.trackingId, 'UNKNOWN', null, attempt.revision)
+    return [recheck(attempt.trackingId, true)]
+  }
+
+  /** The user cancelled the risk confirmation: no request, no new operation. */
+  function cancelResubmit(trackingId: string): void {
+    const session = resubmit.value
+    if (!session || session.trackingId !== trackingId || !session.binding) return
+    resubmit.value = createResubmitSession(
+      trackingId, 'CANCELLED', session.reason, session.revision,
+    )
+  }
+
+  /**
+   * Send the one confirmation of a risk-confirmed resubmission.
+   *
+   * The body is the exact binding the server published; while its result is
+   * unproven the page replays that very body (``beginResubmit``) instead of
+   * starting a new read-only phase.
+   */
+  function beginResubmitConfirmation(
+    binding: TrackingResubmitBinding,
+    options: TrackingWriteBeginOptions = {},
+  ): TrackingWriteStart {
+    if (pending.value || loading.value) return ignoredStart()
+    const offer = resubmit.value
+    if (
+      !offer
+      || !offer.binding
+      || offer.binding.previous_operation_id !== binding.previous_operation_id
+      || offer.binding.expected_revision !== binding.expected_revision
+      || offer.binding.connection_ref !== binding.connection_ref
+    ) {
+      return ignoredStart()
+    }
+    const trackingId = offer.trackingId
+    if (unresolvedOwner(trackingId)) return refuseAndStart(trackingId, 'INTENT')
+    refusalNotice.value = null
+    resubmitIntent = { trackingId, binding: offer.binding }
+    resubmit.value = null
+    // The confirmation is a submit-family external write: one new operation and
+    // the ordinary submit result panel.
+    submitConfigSnapshot = null
+    active = { family: 'RESUBMIT', trackingId, action: 'SUBMIT', mode: 'CONTINUE_TRACKING' }
+    loading.value = true
+    submitSession.value = createSubmitSession(trackingId, 'SUBMIT', 'IN_FLIGHT')
+    return {
+      ...acceptedStart(resubmitRequest(trackingId, offer.binding, options.storageDir)),
+      resubmitPhase: 'CONFIRMATION',
+    }
   }
 
   function beginBatchSubmit(
@@ -2731,6 +2997,13 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
     beginCheck,
     finishCheck,
     failCheck,
+    resubmit,
+    resubmitLoading,
+    beginResubmit,
+    finishResubmitOffer,
+    failResubmitOffer,
+    cancelResubmit,
+    beginResubmitConfirmation,
     isBatchSelected: (trackingId: string) => isBatchSelected(batchSelection.value, trackingId),
     toggleBatchRow(trackingId: string) {
       batchSelection.value = toggleBatchSelection(batchSelection.value, trackingId)

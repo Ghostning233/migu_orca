@@ -1,11 +1,13 @@
 # Issue #171 等价性报告：requestBody 从 `schemas.py` 派生
 
 - 关联 Issue：[#171 OpenAPI 请求体从 schemas.py 派生并保留手写描述](https://github.com/Ghostning233/migu_orca/issues/171)
-- 参照产物：`docs/api/openapi.json` @ `0fe6069`（#169 合并后、#171 之前）
-- 迁移范围：`_ENDPOINTS` 中全部 **28** 个带 JSON requestBody 的端点（28/28，无遗漏、无静默跳过）
+- 参照产物：`docs/api/openapi.json` @ `c54655d`（#169 + #184 合并后、#171 之前）
+- 迁移范围：`_ENDPOINTS` 中全部 **29** 个带 JSON requestBody 的端点（29/29，无遗漏、无静默跳过）
+- 并入 `origin/main` 时新增的 `POST /…/resubmit`（#184）也仍是手写 requestBody：CI 上的生成期守卫
+  直接把它拦下（22 个用例红），本次一并迁移到派生管道（模型 `TrackingResubmitPayload` 已存在）。
 - 结论：
   - 手写中文 `description` / `example` / `x-request-scoped` / `x-legacy` **零丢失**（文档差异仅由字段本身变化引起，见 §3）；
-  - **46** 处结构差异、**5** 处示例差异，全部在 §3 逐类解释，无未解释差异；
+  - **49** 处结构差异、**5** 处示例差异，全部在 §3 逐类解释，无未解释差异；
   - 无法由 pydantic 投影的结构约束收敛为 **7** 条已评审细化（§4），并由生成器与契约测试双重 fail closed。
 
 ## 1. 变更前的双源问题
@@ -44,14 +46,14 @@ schemas.py 模型
 `_build_openapi()` 对每个端点调用 `_assert_reviewed_refinements(key, spec)`：出现未登记的结构细化
 直接抛错，生成器不会静默产出第二源。
 
-## 3. 差异分类（46 结构 + 5 示例）
+## 3. 差异分类（49 结构 + 5 示例）
 
 | 类别 | 行数 / 端点数 | 差异 | 判定 |
 | --- | --- | --- | --- |
-| **A** 收紧额外字段 | 10 / 9 | `additionalProperties: <absent> → false` | 模型是 `extra="forbid"`，运行时确实拒绝未知字段；旧文档漏写。**该收紧** |
+| **A** 收紧额外字段 | 11 / 10 | `additionalProperties: <absent> → false` | 模型是 `extra="forbid"`，运行时确实拒绝未知字段；旧文档漏写。**该收紧** |
 | **B** `const` 补 `type` | 8 / 7 | `properties.confirm.type: <absent> → "boolean"` | 旧文档只写 `const: true`；派生同时给出 `type`。语义不变，更完整 |
 | **C** `enum` 改 `const` | 8 / 4 | `confirm.enum: [true] → <absent>` + `confirm.const: <absent> → true` | 旧文档 4 个端点用 `enum`、其余用 `const`，不一致；`json_schema_extra` 统一为 `const`。语义等价 |
-| **D** 可空性变准确 | 13 / 6 | 见下表 | 模型是 `T | None`；旧文档写成不可空。**该保持模型口径** |
+| **D** 可空性变准确 | 15 / 7 | 见下表 | 模型是 `T | None`；旧文档写成不可空。**该保持模型口径** |
 | **E** 补文档化已存在的字段 | 2 / 2 | `POST /requests` 的 `storage_dir`；batch-submit 的 `submission_mode` | 运行时接受但旧文档未列出 |
 | **F** 补「必需但未定义」字段 | 2 / 1 | retry 的 `connection_ref` / `configuration_revision`（旧文档在 `required` 里列出、`properties` 里没有） | 修正无效契约 |
 | **G** 条件必需回落为可选 | 1 / 1 | delete-plan 的 `required` 去掉 `connection_ref`/`configuration_revision` | 见 §6.3：条件约束 JSON Schema 未表达 |
@@ -70,6 +72,8 @@ POST /api/v1/requests/{request_id}/cancel         properties.cancel_reason.type 
 POST /api/v1/settings/autobangumi[/test]          config.oneOf[*].properties.{username,password,token}.type   "string" → ["string", "null"]
 POST /api/v1/tracking/items/{tracking_id}/delete-plan  properties.connection_ref.type   "string"  → ["string", "null"]
 POST /api/v1/tracking/items/{tracking_id}/delete-plan  properties.configuration_revision.type "integer" → ["integer", "null"]
+POST /api/v1/tracking/items/{tracking_id}/resubmit        properties.previous_operation_id.type "string"  → ["string", "null"]
+POST /api/v1/tracking/items/{tracking_id}/resubmit        properties.connection_ref.type         "string"  → ["string", "null"]
 ```
 
 `AutoBangumiConfigPayload` 的 `username`/`password`/`token` 在模型里是 `str | None`；`model_validator`
@@ -159,8 +163,8 @@ JSON Schema 可用 `if/then` 表达一部分，但 pydantic 无法派生；本�
 ## 7. 复现命令
 
 ```console
-# 参照产物（#169 合并后、#171 之前）
-git show 0fe6069:docs/api/openapi.json > /tmp/openapi-before-171.json
+# 参照产物（#169 + #184 合并后、#171 之前）
+git show c54655d:docs/api/openapi.json > /tmp/openapi-before-171.json
 
 # 当前产物
 uv run migu-orca-openapi
@@ -179,7 +183,7 @@ cd frontend && npm run api:check
 reference: `/tmp/openapi-before-171.json`
 current:   `docs/api/openapi.json`
 
-- endpoints with a request body: 28 (reference) / 28 (current)
+- endpoints with a request body: 29 (reference) / 29 (current)
 - only in reference: none
 - only in current:   none
 
@@ -356,6 +360,16 @@ No differences.
 
 - `properties.confirm.type`: `<absent>` -> `"boolean"`
 
+### POST /api/v1/tracking/items/{tracking_id}/resubmit
+
+3 structural / 0 documentation / 0 metadata difference(s).
+
+#### structure (3)
+
+- `additionalProperties`: `<absent>` -> `false`
+- `properties.connection_ref.type`: `"string"` -> `["string", "null"]`
+- `properties.previous_operation_id.type`: `"string"` -> `["string", "null"]`
+
 ### POST /api/v1/tracking/items/{tracking_id}/retry
 
 5 structural / 2 documentation / 0 metadata difference(s).
@@ -420,5 +434,5 @@ No differences.
 
 ### Summary
 
-- structural differences: 46
+- structural differences: 49
 - documentation differences: 5

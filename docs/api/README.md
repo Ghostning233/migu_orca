@@ -48,6 +48,9 @@ OpenAPI/生成 client/endpoint inventory。Stage 29 在同一基线上新增统�
 operationId 为 `listTrackingItems`/`getTrackingItemDetail`/`revalidateTrackingItem`/
 `submitTrackingItem`/`retryTrackingItem`/`recoverTrackingItem`，全部严格 DTO
 （`extra="forbid"`）与可读 operationId 同步 OpenAPI、endpoint inventory 和生成 client。
+issue #183/#184 在同一基线上追加结果待确认的两条端点：`checkTrackingItem`（有界只读确认）与
+`resubmitTrackingItem`（风险确认后的单条主动重新提交，`confirm=false/true` 两阶段），两者都只使用
+原 operation 绑定的已保存连接，客户端不提供连接。
 
 ```bash
 cd frontend

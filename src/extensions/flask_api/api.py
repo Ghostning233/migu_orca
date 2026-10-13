@@ -110,6 +110,9 @@ _HTTP_CONFLICT_ERROR_TYPES = {
     "tracking_operation_in_progress",
     # Issue #183: one effective read-only confirmation per tracking record.
     "tracking_check_in_progress",
+    # Issue #184: a risk confirmation whose record revision, pending operation
+    # or bound connection generation changed since it was published.
+    "tracking_resubmit_binding_conflict",
     # US-245: a management operation already owns the record or key.
     "tracking_management_state_conflict",
     "configuration_revision_conflict",

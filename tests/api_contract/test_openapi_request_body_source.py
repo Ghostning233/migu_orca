@@ -75,7 +75,7 @@ def test_every_request_body_declares_the_model_its_route_validates() -> None:
             f"with {getattr(declared, '__name__', None) or 'an unreferenced model'}"
         )
         checked += 1
-    assert checked == 28, f"expected 28 documented request bodies, found {checked}"
+    assert checked == 29, f"expected 29 documented request bodies, found {checked}"
 
 
 def test_request_body_overlay_rejects_structural_keys() -> None:
