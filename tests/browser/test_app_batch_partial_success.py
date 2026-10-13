@@ -345,3 +345,47 @@ def test_replayed_draft_is_marked_already_saved_and_never_offers_regeneration(
     # 冻结条目与成功项都不再参与保存：待保存范围只剩那条可重试的失败项。
     expect(page.locator("#batch-accept-submit")).to_contain_text("保存并确认 1 部")
     assert CANARY not in page.locator("body").inner_text()
+
+
+def test_replayed_draft_is_visible_under_its_own_status_filter(
+    page: Page, live_server_url: str, storage_dir
+) -> None:
+    """#195：会话相位收口（saved_pending_locate）后，真实 Chromium 里
+    状态芯片、状态筛选与恢复动作逐项不变：冻结条目仍按「已保存，待定位」筛选出来，
+    不提供删除、重新生成或重复保存入口。"""
+    items = _draft_items()
+    _route_parse(page, items)
+    page.route(
+        "**/api/v1/batches/*/save-confirm",
+        lambda route: route.fulfill(
+            status=200, content_type="application/json", body=_replayed_body()
+        ),
+    )
+    set_storage_preferences(page, storage_dir)
+    _goto_batch(page, live_server_url)
+    page.set_viewport_size({"width": 1440, "height": 900})
+    page.fill("#batch-raw-input", "甲S1\n乙S1\n丙S1")
+    page.click("#batch-parse-submit")
+    expect(page.locator(".batch-draft-card")).to_have_count(3)
+    for item_id in ("item-1", "item-2", "item-3"):
+        page.locator(
+            f'.batch-draft-card[data-item-id="{item_id}"] input[type="checkbox"]'
+        ).set_checked(True)
+    page.click("#batch-accept-submit")
+    page.locator(".confirm-dialog .primary-button").click()
+    expect(page.locator("#batch-save-summary")).to_be_visible()
+
+    # 状态筛选选项仍在，并且正好筛出那条冻结条目。
+    page.select_option("#batch-review-status", "SAVED_PENDING_LOCATE")
+    expect(page.locator(".batch-draft-card")).to_have_count(1)
+    replayed = page.locator('.batch-draft-card[data-item-id="item-2"]')
+    expect(replayed).to_have_count(1)
+    expect(replayed.locator(".batch-card-status")).to_have_text("已保存，待定位")
+    expect(replayed).to_be_visible()
+    # 终态卡没有删除入口，也没有任何重复保存/重新生成/重试确认入口。
+    expect(replayed.locator(".batch-card-delete")).to_have_count(0)
+    for entry in ("#batch-regenerate-draft-item-2", "#batch-retry-save-item-2", "#batch-retry-accept-item-2"):
+        expect(replayed.locator(entry)).to_have_count(0)
+    # 下一步文案说明待定位且明确禁止重新生成。
+    expect(replayed.locator(".batch-card-next-step")).to_contain_text("确认状态尚未定位")
+    assert CANARY not in page.locator("body").inner_text()

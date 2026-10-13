@@ -59,6 +59,14 @@ export type BatchItemPhase =
   | 'saving'
   | 'confirmed'
   | 'saved_pending_confirm'
+  /**
+   * #195：草案已被服务端保存、只能等待定位（``draft_replayed``）。
+   *
+   * 它不是「候选／草案已失效」：不要重新选合集、不要重新生成草案、不要换幂等键
+   * 重发。此前这个结局被并进 ``candidates``/``blocked``，与展示状态
+   * 「已保存，待定位」互相矛盾。
+   */
+  | 'saved_pending_locate'
   | 'response_unknown'
 
 export type BatchBusyPhase = 'parsing' | 'saving' | null
@@ -151,10 +159,34 @@ const BATCH_PHASE_TRANSITIONS: Record<BatchItemPhase, readonly BatchItemPhase[]>
   draft: ['applying', 'saving', 'blocked'],
   applying: ['draft', 'apply_failed', 'candidates', 'blocked'],
   apply_failed: ['applying', 'draft', 'candidates', 'blocked'],
-  saving: ['confirmed', 'saved_pending_confirm', 'draft', 'candidates', 'blocked', 'response_unknown'],
+  saving: ['confirmed', 'saved_pending_confirm', 'saved_pending_locate', 'draft', 'candidates', 'blocked', 'response_unknown'],
   confirmed: [],
   saved_pending_confirm: ['confirmed', 'response_unknown'],
-  response_unknown: ['confirmed', 'saved_pending_confirm', 'draft', 'candidates', 'blocked', 'response_unknown'],
+  saved_pending_locate: ['confirmed', 'response_unknown'],
+  response_unknown: ['confirmed', 'saved_pending_confirm', 'saved_pending_locate', 'draft', 'candidates', 'blocked', 'response_unknown'],
+}
+
+/**
+ * #195：一次保存失败是否表示「草案已经被服务端保存」（而不是失效）。
+ *
+ * 这是 ``draft_replayed`` 的**唯一判定点**：批量相位（本模块）与展示投影
+ * （``features/workbench/batchItemProjection``）都消费它，不再各自内联错误类型
+ * 数组。语义与 #130 一致：已保存是确定事实，待核验的只是确认与定位状态。
+ */
+export function batchSaveErrorIsReplayed(errorType: string | null | undefined): boolean {
+  return String(errorType ?? '') === 'draft_replayed'
+}
+
+/** 草案彻底失效、必须回到真实合集重新生成的失败类型。 */
+const DRAFT_INVALID_ERROR_TYPES = [
+  'draft_expired',
+  'draft_evicted',
+  'draft_revision_conflict',
+] as const
+
+/** True when the failure type means the draft can never be replayed as-is. */
+export function batchSaveErrorInvalidatesDraft(errorType: string | null | undefined): boolean {
+  return (DRAFT_INVALID_ERROR_TYPES as readonly string[]).includes(String(errorType ?? ''))
 }
 
 export function canTransitionBatchItem(from: BatchItemPhase, to: BatchItemPhase): boolean {
@@ -257,7 +289,9 @@ export function reduceBatchReview(state: BatchReviewState, action: BatchReviewAc
     case 'set_current': return state.items[action.itemId] ? { ...state, currentItemId: action.itemId } : state
     case 'set_selected': {
       const item = state.items[action.itemId]
-      return !item || item.phase === 'blocked' || item.phase === 'confirmed' || item.phase === 'saved_pending_confirm' ? state : updateItem(state, action.itemId, { selected: action.selected })
+      // 终态条目不得再取得勾选意图：blocked 不可确认、confirmed 已提交、
+      // saved_pending_confirm / saved_pending_locate 都在等待外部结果的收敛。
+      return !item || ['blocked', 'confirmed', 'saved_pending_confirm', 'saved_pending_locate'].includes(item.phase) ? state : updateItem(state, action.itemId, { selected: action.selected })
     }
     case 'set_draft': return updateItem(state, action.itemId, { phase: 'draft', draftId: action.draftId, draftRevision: action.revision, dirty: false, error: null, idempotencyKey: null })
     case 'set_dirty': return updateItem(state, action.itemId, { dirty: action.dirty, ...(action.dirty ? { idempotencyKey: null } : {}) })
@@ -291,11 +325,23 @@ export function reduceBatchReview(state: BatchReviewState, action: BatchReviewAc
         ? toSafeBatchResultError(action.error as BatchSaveResultItem)
         : toSafeBatchError(action.error)
       const saved = error.type === 'save_confirm_failed' && Boolean(error.requestId)
-      const expired = ['draft_expired', 'draft_evicted', 'draft_replayed', 'draft_revision_conflict'].includes(error.type)
+      // #195：错误类型只在这里判定一次（与展示投影共用同一对谓词）。
+      const replayed = batchSaveErrorIsReplayed(error.type)
+      const invalidated = batchSaveErrorInvalidatesDraft(error.type)
+      const released = saved || replayed || invalidated
       const item = state.items[action.itemId]
+      // 已保存 → 待确认；草案已被保存（重放）→ 待定位；草案失效 → 回到真实合集；
+      // 其余可重试失败 → 留在草案步。draft_replayed 不再伪装成 candidates/blocked。
+      const phase: BatchItemPhase = saved
+        ? 'saved_pending_confirm'
+        : replayed
+          ? 'saved_pending_locate'
+          : invalidated
+            ? (item?.source?.candidates?.length ? 'candidates' : 'blocked')
+            : 'draft'
       const next = updateItem(state, action.itemId, {
-        phase: saved ? 'saved_pending_confirm' : expired ? (item?.source?.candidates?.length ? 'candidates' : 'blocked') : 'draft',
-        ...(saved || expired ? { selected: false, draftId: null, draftRevision: null, dirty: false, idempotencyKey: null } : { idempotencyKey: null }),
+        phase,
+        ...(released ? { selected: false, draftId: null, draftRevision: null, dirty: false, idempotencyKey: null } : { idempotencyKey: null }),
         ...(saved ? { requestId: error.requestId } : {}),
         error,
       })
