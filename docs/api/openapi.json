@@ -2781,10 +2781,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": [
-                  "raw_input"
-                ],
+                "additionalProperties": false,
                 "properties": {
                   "raw_input": {
                     "type": "string"
@@ -2796,7 +2793,11 @@
                     ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
-                }
+                },
+                "required": [
+                  "raw_input"
+                ],
+                "type": "object"
               },
               "example": {
                 "raw_input": "示例"
@@ -3047,23 +3048,23 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": [
-                  "correction"
-                ],
                 "properties": {
-                  "correction": {
-                    "type": "object",
-                    "description": "非敏感标题修正对象（raw_title/canonical_title/season_hint/bangumi_metadata/query_correction）。"
-                  },
                   "storage_dir": {
                     "type": [
                       "string",
                       "null"
                     ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
+                  },
+                  "correction": {
+                    "type": "object",
+                    "description": "非敏感标题修正对象（raw_title/canonical_title/season_hint/bangumi_metadata/query_correction）。"
                   }
-                }
+                },
+                "type": "object",
+                "required": [
+                  "correction"
+                ]
               },
               "example": {
                 "correction": {}
@@ -3489,15 +3490,16 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": [
-                  "query"
-                ],
+                "additionalProperties": false,
                 "properties": {
                   "query": {
                     "type": "string"
                   }
-                }
+                },
+                "required": [
+                  "query"
+                ],
+                "type": "object"
               },
               "example": {
                 "query": "示例"
@@ -4026,23 +4028,23 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": [
-                  "preferences"
-                ],
                 "properties": {
-                  "preferences": {
-                    "type": "object",
-                    "description": "非敏感偏好对象（version/subtitle_groups/filter_defaults/naming/search）。"
-                  },
                   "storage_dir": {
                     "type": [
                       "string",
                       "null"
                     ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
+                  },
+                  "preferences": {
+                    "type": "object",
+                    "description": "非敏感偏好对象（version/subtitle_groups/filter_defaults/naming/search）。"
                   }
-                }
+                },
+                "type": "object",
+                "required": [
+                  "preferences"
+                ]
               },
               "example": {
                 "preferences": {}
@@ -5837,36 +5839,52 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
+                "additionalProperties": false,
                 "properties": {
                   "title": {
                     "type": "string",
                     "description": "番剧名称（必填）。"
                   },
+                  "mikan_bangumi": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "MiKan 详情页 URL（request-scoped）。",
+                    "x-legacy": true
+                  },
+                  "storage_dir": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "season_confirmation": {
-                    "type": "integer",
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
                     "description": "用户确认的季数（1-99）。"
                   },
                   "candidate_context": {
-                    "type": "string",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
                     "description": "候选搜索签发的一次性 opaque token（request-scoped）。",
-                    "x-legacy": true
-                  },
-                  "mikan_bangumi": {
-                    "type": "string",
-                    "description": "MiKan 详情页 URL（request-scoped）。",
                     "x-legacy": true
                   }
                 },
                 "required": [
                   "title"
-                ]
+                ],
+                "type": "object"
               },
               "example": {
                 "title": "示例",
+                "mikan_bangumi": null,
                 "season_confirmation": 1,
-                "candidate_context": null,
-                "mikan_bangumi": null
+                "candidate_context": null
               }
             }
           },
@@ -6720,12 +6738,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": [
-                  "draft_id",
-                  "base_revision",
-                  "patch"
-                ],
                 "properties": {
                   "draft_id": {
                     "type": "string",
@@ -6733,20 +6745,13 @@
                     "x-legacy": true
                   },
                   "base_revision": {
-                    "type": "integer",
                     "minimum": 1,
+                    "type": "integer",
                     "description": "客户端最后观察到的草案 revision（US-211，compare-and-swap）。"
                   },
                   "patch": {
                     "type": "object",
-                    "description": "允许的修改补丁：selected_subtitle_group/filter_rule/expected_folder_name。",
                     "additionalProperties": false,
-                    "example": {
-                      "filter_rule": {
-                        "use_regex": false,
-                        "case_sensitive": false
-                      }
-                    },
                     "properties": {
                       "selected_subtitle_group": {
                         "type": [
@@ -6775,6 +6780,13 @@
                       "expected_folder_name": {
                         "type": "string"
                       }
+                    },
+                    "description": "允许的修改补丁：selected_subtitle_group/filter_rule/expected_folder_name。",
+                    "example": {
+                      "filter_rule": {
+                        "use_regex": false,
+                        "case_sensitive": false
+                      }
                     }
                   },
                   "storage_dir": {
@@ -6784,7 +6796,13 @@
                     ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
-                }
+                },
+                "required": [
+                  "draft_id",
+                  "base_revision",
+                  "patch"
+                ],
+                "type": "object"
               },
               "example": {
                 "draft_id": "示例",
@@ -7698,12 +7716,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": [
-                  "draft_id",
-                  "base_revision",
-                  "idempotency_key"
-                ],
                 "additionalProperties": false,
                 "properties": {
                   "draft_id": {
@@ -7712,8 +7724,8 @@
                     "x-request-scoped": true
                   },
                   "base_revision": {
-                    "type": "integer",
                     "minimum": 1,
+                    "type": "integer",
                     "description": "客户端最后观察到的草案 revision（US-214，预留校验；不匹配返回 409 draft_revision_conflict）。"
                   },
                   "idempotency_key": {
@@ -7728,7 +7740,13 @@
                     ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
-                }
+                },
+                "required": [
+                  "draft_id",
+                  "base_revision",
+                  "idempotency_key"
+                ],
+                "type": "object"
               },
               "example": {
                 "base_revision": 1
@@ -8642,20 +8660,15 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
                 "additionalProperties": false,
-                "required": [
-                  "confirm",
-                  "expected_configuration_revision",
-                  "config"
-                ],
                 "properties": {
                   "confirm": {
-                    "const": true
+                    "const": true,
+                    "type": "boolean"
                   },
                   "expected_configuration_revision": {
-                    "type": "integer",
-                    "minimum": 0
+                    "minimum": 0,
+                    "type": "integer"
                   },
                   "config": {
                     "oneOf": [
@@ -8676,12 +8689,18 @@
                             "type": "string"
                           },
                           "username": {
-                            "type": "string"
+                            "type": [
+                              "string",
+                              "null"
+                            ]
                           },
                           "password": {
-                            "type": "string",
+                            "writeOnly": true,
                             "x-request-scoped": true,
-                            "writeOnly": true
+                            "type": [
+                              "string",
+                              "null"
+                            ]
                           }
                         }
                       },
@@ -8701,15 +8720,24 @@
                             "type": "string"
                           },
                           "token": {
-                            "type": "string",
+                            "writeOnly": true,
                             "x-request-scoped": true,
-                            "writeOnly": true
+                            "type": [
+                              "string",
+                              "null"
+                            ]
                           }
                         }
                       }
                     ]
                   }
-                }
+                },
+                "required": [
+                  "confirm",
+                  "expected_configuration_revision",
+                  "config"
+                ],
+                "type": "object"
               },
               "example": {
                 "confirm": true,
@@ -9228,21 +9256,22 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
                 "additionalProperties": false,
+                "properties": {
+                  "confirm": {
+                    "const": true,
+                    "type": "boolean"
+                  },
+                  "expected_configuration_revision": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
                 "required": [
                   "confirm",
                   "expected_configuration_revision"
                 ],
-                "properties": {
-                  "confirm": {
-                    "const": true
-                  },
-                  "expected_configuration_revision": {
-                    "type": "integer",
-                    "minimum": 0
-                  }
-                }
+                "type": "object"
               },
               "example": {
                 "confirm": true,
@@ -9688,22 +9717,22 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
                 "additionalProperties": false,
+                "properties": {
+                  "connection_ref": {
+                    "format": "uuid",
+                    "type": "string"
+                  },
+                  "configuration_revision": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
                 "required": [
                   "connection_ref",
                   "configuration_revision"
                 ],
-                "properties": {
-                  "connection_ref": {
-                    "type": "string",
-                    "format": "uuid"
-                  },
-                  "configuration_revision": {
-                    "type": "integer",
-                    "minimum": 0
-                  }
-                }
+                "type": "object"
               },
               "example": {
                 "connection_ref": "示例",
@@ -9854,11 +9883,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
                 "additionalProperties": false,
-                "required": [
-                  "config"
-                ],
                 "properties": {
                   "config": {
                     "oneOf": [
@@ -9879,12 +9904,18 @@
                             "type": "string"
                           },
                           "username": {
-                            "type": "string"
+                            "type": [
+                              "string",
+                              "null"
+                            ]
                           },
                           "password": {
-                            "type": "string",
+                            "writeOnly": true,
                             "x-request-scoped": true,
-                            "writeOnly": true
+                            "type": [
+                              "string",
+                              "null"
+                            ]
                           }
                         }
                       },
@@ -9904,15 +9935,22 @@
                             "type": "string"
                           },
                           "token": {
-                            "type": "string",
+                            "writeOnly": true,
                             "x-request-scoped": true,
-                            "writeOnly": true
+                            "type": [
+                              "string",
+                              "null"
+                            ]
                           }
                         }
                       }
                     ]
                   }
-                }
+                },
+                "required": [
+                  "config"
+                ],
+                "type": "object"
               },
               "example": {
                 "config": "示例"
@@ -10605,55 +10643,56 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": [
-                  "items",
-                  "confirm",
-                  "connection_ref",
-                  "configuration_revision"
-                ],
+                "additionalProperties": false,
                 "properties": {
                   "items": {
-                    "type": "array",
-                    "minItems": 1,
-                    "maxItems": 36,
-                    "description": "显式选择的追番记录；每条独立提交，不重复指向同一记录。",
                     "items": {
-                      "type": "object",
-                      "required": [
-                        "tracking_id",
-                        "expected_revision",
-                        "idempotency_key"
-                      ],
+                      "additionalProperties": false,
                       "properties": {
                         "tracking_id": {
                           "type": "string"
                         },
                         "expected_revision": {
-                          "type": "integer",
-                          "minimum": 1
+                          "minimum": 1,
+                          "type": "integer"
                         },
                         "idempotency_key": {
                           "type": "string",
                           "description": "opaque 客户端操作 id；同键网络重放收敛到同一次外部调用。"
                         }
-                      }
-                    }
+                      },
+                      "required": [
+                        "tracking_id",
+                        "expected_revision",
+                        "idempotency_key"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 36,
+                    "minItems": 1,
+                    "type": "array",
+                    "description": "显式选择的追番记录；每条独立提交，不重复指向同一记录。"
                   },
                   "confirm": {
+                    "const": true,
                     "type": "boolean",
-                    "enum": [
-                      true
-                    ],
                     "description": "必须为 true：用户显式确认这一批外部提交。"
                   },
+                  "submission_mode": {
+                    "default": "CONTINUE_TRACKING",
+                    "enum": [
+                      "CONTINUE_TRACKING",
+                      "DOWNLOAD_EXISTING"
+                    ],
+                    "type": "string"
+                  },
                   "connection_ref": {
-                    "type": "string",
-                    "format": "uuid"
+                    "format": "uuid",
+                    "type": "string"
                   },
                   "configuration_revision": {
-                    "type": "integer",
-                    "minimum": 0
+                    "minimum": 0,
+                    "type": "integer"
                   },
                   "storage_dir": {
                     "type": [
@@ -10662,7 +10701,14 @@
                     ],
                     "description": "存储目录（服务端允许根目录下的相对目录 profile）。"
                   }
-                }
+                },
+                "required": [
+                  "items",
+                  "confirm",
+                  "connection_ref",
+                  "configuration_revision"
+                ],
+                "type": "object"
               },
               "example": {
                 "items": [
@@ -10673,6 +10719,7 @@
                   }
                 ],
                 "confirm": true,
+                "submission_mode": "CONTINUE_TRACKING",
                 "connection_ref": "示例",
                 "configuration_revision": 1
               }
@@ -12183,21 +12230,15 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
                 "additionalProperties": false,
-                "required": [
-                  "connection_ref",
-                  "configuration_revision",
-                  "confirm"
-                ],
                 "properties": {
                   "connection_ref": {
-                    "type": "string",
-                    "format": "uuid"
+                    "format": "uuid",
+                    "type": "string"
                   },
                   "configuration_revision": {
-                    "type": "integer",
-                    "minimum": 0
+                    "minimum": 0,
+                    "type": "integer"
                   },
                   "storage_dir": {
                     "type": [
@@ -12206,9 +12247,16 @@
                     ]
                   },
                   "confirm": {
-                    "const": true
+                    "const": true,
+                    "type": "boolean"
                   }
-                }
+                },
+                "required": [
+                  "connection_ref",
+                  "configuration_revision",
+                  "confirm"
+                ],
+                "type": "object"
               },
               "example": {
                 "connection_ref": "示例",
@@ -12451,23 +12499,10 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": [
-                  "items"
-                ],
                 "additionalProperties": false,
                 "properties": {
                   "items": {
-                    "type": "array",
-                    "description": "批量卡片保存确认描述符（公开 item_id + 服务端签发 draft_id/base_revision + opaque 幂等键）。",
                     "items": {
-                      "type": "object",
-                      "required": [
-                        "item_id",
-                        "draft_id",
-                        "base_revision",
-                        "idempotency_key"
-                      ],
                       "additionalProperties": false,
                       "properties": {
                         "item_id": {
@@ -12480,8 +12515,8 @@
                           "x-request-scoped": true
                         },
                         "base_revision": {
-                          "type": "integer",
                           "minimum": 1,
+                          "type": "integer",
                           "description": "客户端最后观察到的草案 revision（US-216，预留校验；不匹配返回逐条 failed draft_revision_conflict）。"
                         },
                         "idempotency_key": {
@@ -12489,14 +12524,26 @@
                           "description": "一次明确客户端操作生成的 opaque 幂等键（request-scoped；重试必须复用，键只绑定一个 operation/fingerprint）。",
                           "x-request-scoped": true
                         }
-                      }
-                    }
+                      },
+                      "required": [
+                        "item_id",
+                        "draft_id",
+                        "base_revision",
+                        "idempotency_key"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array",
+                    "description": "批量卡片保存确认描述符（公开 item_id + 服务端签发 draft_id/base_revision + opaque 幂等键）。"
                   },
                   "item_ids": {
-                    "type": "array",
                     "items": {
                       "type": "string"
                     },
+                    "type": [
+                      "array",
+                      "null"
+                    ],
                     "description": "可选：只处理选中 item_id（保持输入顺序）；缺省处理全部 items。"
                   },
                   "storage_dir": {
@@ -12506,7 +12553,11 @@
                     ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
-                }
+                },
+                "required": [
+                  "items"
+                ],
+                "type": "object"
               },
               "example": {
                 "items": [
@@ -15088,7 +15139,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
                 "properties": {
                   "storage_dir": {
                     "type": [
@@ -15097,7 +15147,8 @@
                     ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
-                }
+                },
+                "type": "object"
               },
               "example": {}
             }
@@ -16496,19 +16547,22 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
                 "properties": {
-                  "cancel_reason": {
-                    "type": "string"
-                  },
                   "storage_dir": {
                     "type": [
                       "string",
                       "null"
                     ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
+                  },
+                  "cancel_reason": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   }
-                }
+                },
+                "type": "object"
               },
               "example": {
                 "cancel_reason": null
@@ -16708,7 +16762,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
                 "properties": {
                   "storage_dir": {
                     "type": [
@@ -16717,7 +16770,8 @@
                     ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
-                }
+                },
+                "type": "object"
               },
               "example": {}
             }
@@ -18062,23 +18116,23 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": [
-                  "patch"
-                ],
                 "properties": {
-                  "patch": {
-                    "type": "object",
-                    "description": "允许的修改补丁：selected_subtitle_group/filter_rule/expected_folder_name。"
-                  },
                   "storage_dir": {
                     "type": [
                       "string",
                       "null"
                     ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
+                  },
+                  "patch": {
+                    "type": "object",
+                    "description": "允许的修改补丁：selected_subtitle_group/filter_rule/expected_folder_name。"
                   }
-                }
+                },
+                "required": [
+                  "patch"
+                ],
+                "type": "object"
               },
               "example": {
                 "patch": {}
@@ -20787,14 +20841,11 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": [
-                  "expected_revision"
-                ],
+                "additionalProperties": false,
                 "properties": {
                   "expected_revision": {
-                    "type": "integer",
                     "minimum": 1,
+                    "type": "integer",
                     "description": "客户端最后观察到的追番记录 revision（revision-aware 检查）。"
                   },
                   "storage_dir": {
@@ -20804,7 +20855,11 @@
                     ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
-                }
+                },
+                "required": [
+                  "expected_revision"
+                ],
+                "type": "object"
               },
               "example": {
                 "expected_revision": 1
@@ -21453,8 +21508,41 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
                 "additionalProperties": false,
+                "properties": {
+                  "target_scope": {
+                    "enum": [
+                      "SUBSCRIPTION",
+                      "ASSOCIATED_RSS"
+                    ],
+                    "type": "string"
+                  },
+                  "expected_revision": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "idempotency_key": {
+                    "type": "string"
+                  },
+                  "confirm": {
+                    "const": true,
+                    "type": "boolean"
+                  },
+                  "connection_ref": {
+                    "format": "uuid",
+                    "type": "string"
+                  },
+                  "configuration_revision": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "storage_dir": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
                 "required": [
                   "target_scope",
                   "expected_revision",
@@ -21463,39 +21551,7 @@
                   "connection_ref",
                   "configuration_revision"
                 ],
-                "properties": {
-                  "target_scope": {
-                    "type": "string",
-                    "enum": [
-                      "SUBSCRIPTION",
-                      "ASSOCIATED_RSS"
-                    ]
-                  },
-                  "expected_revision": {
-                    "type": "integer",
-                    "minimum": 1
-                  },
-                  "idempotency_key": {
-                    "type": "string"
-                  },
-                  "confirm": {
-                    "const": true
-                  },
-                  "connection_ref": {
-                    "type": "string",
-                    "format": "uuid"
-                  },
-                  "configuration_revision": {
-                    "type": "integer",
-                    "minimum": 0
-                  },
-                  "storage_dir": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  }
-                }
+                "type": "object"
               },
               "example": {
                 "target_scope": "示例",
@@ -21802,38 +21858,35 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
                 "additionalProperties": false,
-                "required": [
-                  "confirm",
-                  "idempotency_key",
-                  "connection_ref",
-                  "configuration_revision"
-                ],
                 "properties": {
-                  "delete_external": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "仅当用户显式勾选“同时删除 Auto Bangumi 中的受控外部订阅”时为 true。"
-                  },
                   "confirm": {
+                    "const": true,
                     "type": "boolean",
-                    "enum": [
-                      true
-                    ],
                     "description": "必须为 true：用户显式确认删除追番方案。"
+                  },
+                  "delete_external": {
+                    "default": false,
+                    "type": "boolean",
+                    "description": "仅当用户显式勾选“同时删除 Auto Bangumi 中的受控外部订阅”时为 true。"
                   },
                   "idempotency_key": {
                     "type": "string",
                     "description": "opaque 幂等键；同键重放复用同一次外部删除。"
                   },
                   "connection_ref": {
-                    "type": "string",
-                    "format": "uuid"
+                    "format": "uuid",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "configuration_revision": {
-                    "type": "integer",
-                    "minimum": 0
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
                   },
                   "storage_dir": {
                     "type": [
@@ -21842,13 +21895,18 @@
                     ],
                     "description": "服务端允许根目录下的相对目录 profile。"
                   }
-                }
+                },
+                "required": [
+                  "confirm",
+                  "idempotency_key"
+                ],
+                "type": "object"
               },
               "example": {
-                "delete_external": false,
                 "confirm": true,
+                "delete_external": false,
                 "idempotency_key": "示例",
-                "connection_ref": "示例",
+                "connection_ref": null,
                 "configuration_revision": 1
               }
             }
@@ -22513,22 +22571,23 @@
                         "const": "SUBSCRIPTION"
                       },
                       "expected_revision": {
-                        "type": "integer",
-                        "minimum": 1
+                        "minimum": 1,
+                        "type": "integer"
                       },
                       "idempotency_key": {
                         "type": "string"
                       },
                       "confirm": {
-                        "const": true
+                        "const": true,
+                        "type": "boolean"
                       },
                       "connection_ref": {
-                        "type": "string",
-                        "format": "uuid"
+                        "format": "uuid",
+                        "type": "string"
                       },
                       "configuration_revision": {
-                        "type": "integer",
-                        "minimum": 0
+                        "minimum": 0,
+                        "type": "integer"
                       },
                       "storage_dir": {
                         "type": [
@@ -22549,12 +22608,12 @@
                                 ]
                               },
                               "season": {
+                                "maximum": 100,
+                                "minimum": 0,
                                 "type": [
                                   "integer",
                                   "null"
-                                ],
-                                "minimum": 0,
-                                "maximum": 100
+                                ]
                               },
                               "subtitle_group": {
                                 "type": [
@@ -22740,11 +22799,11 @@
                                 ]
                               },
                               "offset": {
+                                "minimum": 0,
                                 "type": [
                                   "integer",
                                   "null"
-                                ],
-                                "minimum": 0
+                                ]
                               },
                               "expected_folder_name": {
                                 "type": [
@@ -22767,12 +22826,12 @@
                                     ]
                                   },
                                   "season": {
+                                    "maximum": 100,
+                                    "minimum": 0,
                                     "type": [
                                       "integer",
                                       "null"
-                                    ],
-                                    "minimum": 0,
-                                    "maximum": 100
+                                    ]
                                   },
                                   "subtitle_group": {
                                     "type": [
@@ -22958,11 +23017,11 @@
                                     ]
                                   },
                                   "offset": {
+                                    "minimum": 0,
                                     "type": [
                                       "integer",
                                       "null"
-                                    ],
-                                    "minimum": 0
+                                    ]
                                   },
                                   "expected_folder_name": {
                                     "type": [
@@ -22986,12 +23045,12 @@
                                     ]
                                   },
                                   "season": {
+                                    "maximum": 100,
+                                    "minimum": 0,
                                     "type": [
                                       "integer",
                                       "null"
-                                    ],
-                                    "minimum": 0,
-                                    "maximum": 100
+                                    ]
                                   },
                                   "subtitle_group": {
                                     "type": [
@@ -23177,11 +23236,11 @@
                                     ]
                                   },
                                   "offset": {
+                                    "minimum": 0,
                                     "type": [
                                       "integer",
                                       "null"
-                                    ],
-                                    "minimum": 0
+                                    ]
                                   },
                                   "expected_folder_name": {
                                     "type": [
@@ -23205,12 +23264,12 @@
                                     ]
                                   },
                                   "season": {
+                                    "maximum": 100,
+                                    "minimum": 0,
                                     "type": [
                                       "integer",
                                       "null"
-                                    ],
-                                    "minimum": 0,
-                                    "maximum": 100
+                                    ]
                                   },
                                   "subtitle_group": {
                                     "type": [
@@ -23396,11 +23455,11 @@
                                     ]
                                   },
                                   "offset": {
+                                    "minimum": 0,
                                     "type": [
                                       "integer",
                                       "null"
-                                    ],
-                                    "minimum": 0
+                                    ]
                                   },
                                   "expected_folder_name": {
                                     "type": [
@@ -23424,12 +23483,12 @@
                                     ]
                                   },
                                   "season": {
+                                    "maximum": 100,
+                                    "minimum": 0,
                                     "type": [
                                       "integer",
                                       "null"
-                                    ],
-                                    "minimum": 0,
-                                    "maximum": 100
+                                    ]
                                   },
                                   "subtitle_group": {
                                     "type": [
@@ -23615,11 +23674,11 @@
                                     ]
                                   },
                                   "offset": {
+                                    "minimum": 0,
                                     "type": [
                                       "integer",
                                       "null"
-                                    ],
-                                    "minimum": 0
+                                    ]
                                   },
                                   "expected_folder_name": {
                                     "type": [
@@ -23643,12 +23702,12 @@
                                     ]
                                   },
                                   "season": {
+                                    "maximum": 100,
+                                    "minimum": 0,
                                     "type": [
                                       "integer",
                                       "null"
-                                    ],
-                                    "minimum": 0,
-                                    "maximum": 100
+                                    ]
                                   },
                                   "subtitle_group": {
                                     "type": [
@@ -23834,11 +23893,11 @@
                                     ]
                                   },
                                   "offset": {
+                                    "minimum": 0,
                                     "type": [
                                       "integer",
                                       "null"
-                                    ],
-                                    "minimum": 0
+                                    ]
                                   },
                                   "expected_folder_name": {
                                     "type": [
@@ -23862,12 +23921,12 @@
                                     ]
                                   },
                                   "season": {
+                                    "maximum": 100,
+                                    "minimum": 0,
                                     "type": [
                                       "integer",
                                       "null"
-                                    ],
-                                    "minimum": 0,
-                                    "maximum": 100
+                                    ]
                                   },
                                   "subtitle_group": {
                                     "type": [
@@ -24053,11 +24112,11 @@
                                     ]
                                   },
                                   "offset": {
+                                    "minimum": 0,
                                     "type": [
                                       "integer",
                                       "null"
-                                    ],
-                                    "minimum": 0
+                                    ]
                                   },
                                   "expected_folder_name": {
                                     "type": [
@@ -24073,58 +24132,6 @@
                             ]
                           }
                         ]
-                      },
-                      "local_plan": {
-                        "type": [
-                          "object",
-                          "null"
-                        ],
-                        "additionalProperties": false,
-                        "description": "issue #91：外部修改确认成功后同时提升的本地方案字段（身份字段不可编辑）。与 patch 独立，缺省表示只改外部对象。",
-                        "properties": {
-                          "filter_rule": {
-                            "type": [
-                              "object",
-                              "null"
-                            ],
-                            "additionalProperties": false,
-                            "properties": {
-                              "must_contain": {
-                                "type": [
-                                  "string",
-                                  "null"
-                                ]
-                              },
-                              "must_not_contain": {
-                                "type": [
-                                  "string",
-                                  "null"
-                                ]
-                              },
-                              "use_regex": {
-                                "type": [
-                                  "boolean",
-                                  "null"
-                                ]
-                              },
-                              "case_sensitive": {
-                                "type": [
-                                  "boolean",
-                                  "null"
-                                ]
-                              }
-                            },
-                            "minProperties": 1
-                          },
-                          "expected_folder_name": {
-                            "type": [
-                              "string",
-                              "null"
-                            ],
-                            "maxLength": 255
-                          }
-                        },
-                        "minProperties": 1
                       }
                     }
                   },
@@ -24145,22 +24152,23 @@
                         "const": "ASSOCIATED_RSS"
                       },
                       "expected_revision": {
-                        "type": "integer",
-                        "minimum": 1
+                        "minimum": 1,
+                        "type": "integer"
                       },
                       "idempotency_key": {
                         "type": "string"
                       },
                       "confirm": {
-                        "const": true
+                        "const": true,
+                        "type": "boolean"
                       },
                       "connection_ref": {
-                        "type": "string",
-                        "format": "uuid"
+                        "format": "uuid",
+                        "type": "string"
                       },
                       "configuration_revision": {
-                        "type": "integer",
-                        "minimum": 0
+                        "minimum": 0,
+                        "type": "integer"
                       },
                       "storage_dir": {
                         "type": [
@@ -24902,44 +24910,27 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": [
-                  "expected_revision",
-                  "action"
-                ],
+                "additionalProperties": false,
                 "properties": {
                   "expected_revision": {
-                    "type": "integer",
                     "minimum": 1,
+                    "type": "integer",
                     "description": "客户端最后观察到的追番记录 revision（revision-aware 恢复）。"
                   },
                   "action": {
-                    "type": "string",
                     "enum": [
                       "AUTO",
                       "MARK_SUCCEEDED",
                       "MARK_FAILED",
                       "VERIFY_EXTERNAL"
                     ],
+                    "type": "string",
                     "description": "恢复动作：AUTO=纯本地；VERIFY_EXTERNAL=只读外部核验（需 saved connection generation）；MARK_SUCCEEDED/MARK_FAILED=人工核验（需 confirm=true）。"
                   },
                   "confirm": {
+                    "default": false,
                     "type": "boolean",
                     "description": "人工动作必须为 true；AUTO 忽略该字段。"
-                  },
-                  "connection_ref": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
-                    "format": "uuid"
-                  },
-                  "configuration_revision": {
-                    "type": [
-                      "integer",
-                      "null"
-                    ],
-                    "minimum": 0
                   },
                   "storage_dir": {
                     "type": [
@@ -24947,15 +24938,34 @@
                       "null"
                     ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
+                  },
+                  "connection_ref": {
+                    "format": "uuid",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "configuration_revision": {
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
                   }
-                }
+                },
+                "required": [
+                  "expected_revision",
+                  "action"
+                ],
+                "type": "object"
               },
               "example": {
                 "expected_revision": 1,
                 "action": "示例",
                 "confirm": false,
                 "connection_ref": null,
-                "configuration_revision": null
+                "configuration_revision": 1
               }
             }
           },
@@ -25601,8 +25611,40 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
                 "additionalProperties": false,
+                "properties": {
+                  "target_scope": {
+                    "enum": [
+                      "ASSOCIATED_RSS"
+                    ],
+                    "type": "string"
+                  },
+                  "expected_revision": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "idempotency_key": {
+                    "type": "string"
+                  },
+                  "confirm": {
+                    "const": true,
+                    "type": "boolean"
+                  },
+                  "connection_ref": {
+                    "format": "uuid",
+                    "type": "string"
+                  },
+                  "configuration_revision": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "storage_dir": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
                 "required": [
                   "target_scope",
                   "expected_revision",
@@ -25611,38 +25653,7 @@
                   "connection_ref",
                   "configuration_revision"
                 ],
-                "properties": {
-                  "target_scope": {
-                    "type": "string",
-                    "enum": [
-                      "ASSOCIATED_RSS"
-                    ]
-                  },
-                  "expected_revision": {
-                    "type": "integer",
-                    "minimum": 1
-                  },
-                  "idempotency_key": {
-                    "type": "string"
-                  },
-                  "confirm": {
-                    "const": true
-                  },
-                  "connection_ref": {
-                    "type": "string",
-                    "format": "uuid"
-                  },
-                  "configuration_revision": {
-                    "type": "integer",
-                    "minimum": 0
-                  },
-                  "storage_dir": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  }
-                }
+                "type": "object"
               },
               "example": {
                 "target_scope": "示例",
@@ -26390,27 +26401,11 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": [
-                  "expected_revision",
-                  "idempotency_key",
-                  "confirm",
-                  "connection_ref",
-                  "configuration_revision"
-                ],
+                "additionalProperties": false,
                 "properties": {
-                  "submission_mode": {
-                    "type": "string",
-                    "enum": [
-                      "CONTINUE_TRACKING",
-                      "DOWNLOAD_EXISTING"
-                    ],
-                    "default": "CONTINUE_TRACKING",
-                    "description": "issue #98：本次操作的提交方式。持续追番建立受控外部订阅；下载现有资源只把当前资源交给 Auto Bangumi 加入下载。只作用于本次操作，不写入本地方案。"
-                  },
                   "expected_revision": {
-                    "type": "integer",
                     "minimum": 1,
+                    "type": "integer",
                     "description": "客户端最后观察到的追番记录 revision（revision-aware 重试）。"
                   },
                   "idempotency_key": {
@@ -26418,11 +26413,26 @@
                     "description": "opaque 客户端重试操作 id；一次点击一个新 operation，同键网络重放复用原 operation。只进请求体与页面内存。"
                   },
                   "confirm": {
+                    "const": true,
                     "type": "boolean",
-                    "enum": [
-                      true
-                    ],
                     "description": "必须为 true：用户显式确认重试提交最新方案。"
+                  },
+                  "connection_ref": {
+                    "format": "uuid",
+                    "type": "string"
+                  },
+                  "configuration_revision": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "submission_mode": {
+                    "default": "CONTINUE_TRACKING",
+                    "enum": [
+                      "CONTINUE_TRACKING",
+                      "DOWNLOAD_EXISTING"
+                    ],
+                    "type": "string",
+                    "description": "issue #98：本次操作的提交方式。持续追番建立受控外部订阅；下载现有资源只把当前资源交给 Auto Bangumi 加入下载。只作用于本次操作，不写入本地方案。"
                   },
                   "storage_dir": {
                     "type": [
@@ -26431,13 +26441,23 @@
                     ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
-                }
+                },
+                "required": [
+                  "expected_revision",
+                  "idempotency_key",
+                  "confirm",
+                  "connection_ref",
+                  "configuration_revision"
+                ],
+                "type": "object"
               },
               "example": {
-                "submission_mode": "CONTINUE_TRACKING",
                 "expected_revision": 1,
                 "idempotency_key": "示例",
-                "confirm": true
+                "confirm": true,
+                "connection_ref": "示例",
+                "configuration_revision": 1,
+                "submission_mode": "CONTINUE_TRACKING"
               }
             }
           },
@@ -27092,14 +27112,11 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": [
-                  "expected_revision"
-                ],
+                "additionalProperties": false,
                 "properties": {
                   "expected_revision": {
-                    "type": "integer",
                     "minimum": 1,
+                    "type": "integer",
                     "description": "客户端最后观察到的追番记录 revision（revision-aware 复核）。"
                   },
                   "storage_dir": {
@@ -27109,7 +27126,11 @@
                     ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
-                }
+                },
+                "required": [
+                  "expected_revision"
+                ],
+                "type": "object"
               },
               "example": {
                 "expected_revision": 1
@@ -27758,42 +27779,33 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
                 "additionalProperties": false,
-                "required": [
-                  "target_scope",
-                  "expected_revision",
-                  "idempotency_key",
-                  "confirm",
-                  "connection_ref",
-                  "configuration_revision",
-                  "enabled"
-                ],
                 "properties": {
                   "target_scope": {
-                    "type": "string",
                     "enum": [
                       "SUBSCRIPTION",
                       "ASSOCIATED_RSS"
-                    ]
+                    ],
+                    "type": "string"
                   },
                   "expected_revision": {
-                    "type": "integer",
-                    "minimum": 1
+                    "minimum": 1,
+                    "type": "integer"
                   },
                   "idempotency_key": {
                     "type": "string"
                   },
                   "confirm": {
-                    "const": true
+                    "const": true,
+                    "type": "boolean"
                   },
                   "connection_ref": {
-                    "type": "string",
-                    "format": "uuid"
+                    "format": "uuid",
+                    "type": "string"
                   },
                   "configuration_revision": {
-                    "type": "integer",
-                    "minimum": 0
+                    "minimum": 0,
+                    "type": "integer"
                   },
                   "storage_dir": {
                     "type": [
@@ -27804,7 +27816,17 @@
                   "enabled": {
                     "type": "boolean"
                   }
-                }
+                },
+                "required": [
+                  "target_scope",
+                  "expected_revision",
+                  "idempotency_key",
+                  "confirm",
+                  "connection_ref",
+                  "configuration_revision",
+                  "enabled"
+                ],
+                "type": "object"
               },
               "example": {
                 "target_scope": "示例",
@@ -28553,27 +28575,11 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": [
-                  "expected_revision",
-                  "idempotency_key",
-                  "confirm",
-                  "connection_ref",
-                  "configuration_revision"
-                ],
+                "additionalProperties": false,
                 "properties": {
-                  "submission_mode": {
-                    "type": "string",
-                    "enum": [
-                      "CONTINUE_TRACKING",
-                      "DOWNLOAD_EXISTING"
-                    ],
-                    "default": "CONTINUE_TRACKING",
-                    "description": "issue #98：本次操作的提交方式。持续追番建立受控外部订阅；下载现有资源只把当前资源交给 Auto Bangumi 加入下载。只作用于本次操作，不写入本地方案。"
-                  },
                   "expected_revision": {
-                    "type": "integer",
                     "minimum": 1,
+                    "type": "integer",
                     "description": "客户端最后观察到的追番记录 revision（revision-aware 提交）。"
                   },
                   "idempotency_key": {
@@ -28581,19 +28587,26 @@
                     "description": "opaque 客户端提交操作 id；同键网络重放收敛到同一次外部调用。只进请求体与页面内存。"
                   },
                   "confirm": {
+                    "const": true,
                     "type": "boolean",
-                    "enum": [
-                      true
-                    ],
                     "description": "必须为 true：用户显式确认提交最新方案。"
                   },
                   "connection_ref": {
-                    "type": "string",
-                    "format": "uuid"
+                    "format": "uuid",
+                    "type": "string"
                   },
                   "configuration_revision": {
-                    "type": "integer",
-                    "minimum": 0
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "submission_mode": {
+                    "default": "CONTINUE_TRACKING",
+                    "enum": [
+                      "CONTINUE_TRACKING",
+                      "DOWNLOAD_EXISTING"
+                    ],
+                    "type": "string",
+                    "description": "issue #98：本次操作的提交方式。持续追番建立受控外部订阅；下载现有资源只把当前资源交给 Auto Bangumi 加入下载。只作用于本次操作，不写入本地方案。"
                   },
                   "storage_dir": {
                     "type": [
@@ -28602,15 +28615,23 @@
                     ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
-                }
+                },
+                "required": [
+                  "expected_revision",
+                  "idempotency_key",
+                  "confirm",
+                  "connection_ref",
+                  "configuration_revision"
+                ],
+                "type": "object"
               },
               "example": {
-                "submission_mode": "CONTINUE_TRACKING",
                 "expected_revision": 1,
                 "idempotency_key": "示例",
                 "confirm": true,
                 "connection_ref": "示例",
-                "configuration_revision": 1
+                "configuration_revision": 1,
+                "submission_mode": "CONTINUE_TRACKING"
               }
             }
           },

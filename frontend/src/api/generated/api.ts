@@ -1262,10 +1262,10 @@ export interface operations {
                  *     }
                  */
                 "application/json": {
-                    /** @description 非敏感标题修正对象（raw_title/canonical_title/season_hint/bangumi_metadata/query_correction）。 */
-                    correction: Record<string, never>;
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
                     storage_dir?: string | null;
+                    /** @description 非敏感标题修正对象（raw_title/canonical_title/season_hint/bangumi_metadata/query_correction）。 */
+                    correction: Record<string, never>;
                 };
             };
         };
@@ -1779,10 +1779,10 @@ export interface operations {
                  *     }
                  */
                 "application/json": {
-                    /** @description 非敏感偏好对象（version/subtitle_groups/filter_defaults/naming/search）。 */
-                    preferences: Record<string, never>;
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
                     storage_dir?: string | null;
+                    /** @description 非敏感偏好对象（version/subtitle_groups/filter_defaults/naming/search）。 */
+                    preferences: Record<string, never>;
                 };
             };
         };
@@ -2097,20 +2097,21 @@ export interface operations {
                 /**
                  * @example {
                  *       "title": "示例",
+                 *       "mikan_bangumi": null,
                  *       "season_confirmation": 1,
-                 *       "candidate_context": null,
-                 *       "mikan_bangumi": null
+                 *       "candidate_context": null
                  *     }
                  */
                 "application/json": {
                     /** @description 番剧名称（必填）。 */
                     title: string;
-                    /** @description 用户确认的季数（1-99）。 */
-                    season_confirmation?: number;
-                    /** @description 候选搜索签发的一次性 opaque token（request-scoped）。 */
-                    candidate_context?: string;
                     /** @description MiKan 详情页 URL（request-scoped）。 */
-                    mikan_bangumi?: string;
+                    mikan_bangumi?: string | null;
+                    storage_dir?: string | null;
+                    /** @description 用户确认的季数（1-99）。 */
+                    season_confirmation?: number | null;
+                    /** @description 候选搜索签发的一次性 opaque token（request-scoped）。 */
+                    candidate_context?: string | null;
                 };
             };
         };
@@ -3904,13 +3905,13 @@ export interface operations {
                         /** @constant */
                         auth_mode: "password";
                         base_url: string;
-                        username: string;
-                        password: string;
+                        username: string | null;
+                        password: string | null;
                     } | {
                         /** @constant */
                         auth_mode: "api_token";
                         base_url: string;
-                        token: string;
+                        token: string | null;
                     };
                 };
             };
@@ -4710,13 +4711,13 @@ export interface operations {
                         /** @constant */
                         auth_mode: "password";
                         base_url: string;
-                        username: string;
-                        password: string;
+                        username: string | null;
+                        password: string | null;
                     } | {
                         /** @constant */
                         auth_mode: "api_token";
                         base_url: string;
-                        token: string;
+                        token: string | null;
                     };
                 };
             };
@@ -4815,6 +4816,7 @@ export interface operations {
                  *         }
                  *       ],
                  *       "confirm": true,
+                 *       "submission_mode": "CONTINUE_TRACKING",
                  *       "connection_ref": "示例",
                  *       "configuration_revision": 1
                  *     }
@@ -4829,9 +4831,14 @@ export interface operations {
                     }[];
                     /**
                      * @description 必须为 true：用户显式确认这一批外部提交。
-                     * @enum {boolean}
+                     * @constant
                      */
                     confirm: true;
+                    /**
+                     * @default CONTINUE_TRACKING
+                     * @enum {string}
+                     */
+                    submission_mode?: "CONTINUE_TRACKING" | "DOWNLOAD_EXISTING";
                     /** Format: uuid */
                     connection_ref: string;
                     configuration_revision: number;
@@ -6015,7 +6022,7 @@ export interface operations {
                         idempotency_key: string;
                     }[];
                     /** @description 可选：只处理选中 item_id（保持输入顺序）；缺省处理全部 items。 */
-                    item_ids?: string[];
+                    item_ids?: string[] | null;
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
                     storage_dir?: string | null;
                 };
@@ -7423,9 +7430,9 @@ export interface operations {
                  *     }
                  */
                 "application/json": {
-                    cancel_reason?: string;
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
                     storage_dir?: string | null;
+                    cancel_reason?: string | null;
                 };
             };
         };
@@ -8220,10 +8227,10 @@ export interface operations {
                  *     }
                  */
                 "application/json": {
-                    /** @description 允许的修改补丁：selected_subtitle_group/filter_rule/expected_folder_name。 */
-                    patch: Record<string, never>;
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
                     storage_dir?: string | null;
+                    /** @description 允许的修改补丁：selected_subtitle_group/filter_rule/expected_folder_name。 */
+                    patch: Record<string, never>;
                 };
             };
         };
@@ -10687,29 +10694,29 @@ export interface operations {
             content: {
                 /**
                  * @example {
-                 *       "delete_external": false,
                  *       "confirm": true,
+                 *       "delete_external": false,
                  *       "idempotency_key": "示例",
-                 *       "connection_ref": "示例",
+                 *       "connection_ref": null,
                  *       "configuration_revision": 1
                  *     }
                  */
                 "application/json": {
                     /**
+                     * @description 必须为 true：用户显式确认删除追番方案。
+                     * @constant
+                     */
+                    confirm: true;
+                    /**
                      * @description 仅当用户显式勾选“同时删除 Auto Bangumi 中的受控外部订阅”时为 true。
                      * @default false
                      */
                     delete_external?: boolean;
-                    /**
-                     * @description 必须为 true：用户显式确认删除追番方案。
-                     * @enum {boolean}
-                     */
-                    confirm: true;
                     /** @description opaque 幂等键；同键重放复用同一次外部删除。 */
                     idempotency_key: string;
                     /** Format: uuid */
-                    connection_ref: string;
-                    configuration_revision: number;
+                    connection_ref?: string | null;
+                    configuration_revision?: number | null;
                     /** @description 服务端允许根目录下的相对目录 profile。 */
                     storage_dir?: string | null;
                 };
@@ -11156,16 +11163,6 @@ export interface operations {
                         offset?: number | null;
                         expected_folder_name: string | null;
                     });
-                    /** @description issue #91：外部修改确认成功后同时提升的本地方案字段（身份字段不可编辑）。与 patch 独立，缺省表示只改外部对象。 */
-                    local_plan?: {
-                        filter_rule?: {
-                            must_contain?: string | null;
-                            must_not_contain?: string | null;
-                            use_regex?: boolean | null;
-                            case_sensitive?: boolean | null;
-                        } | null;
-                        expected_folder_name?: string | null;
-                    } | null;
                 } | {
                     /** @constant */
                     target_scope: "ASSOCIATED_RSS";
@@ -11538,7 +11535,7 @@ export interface operations {
                  *       "action": "示例",
                  *       "confirm": false,
                  *       "connection_ref": null,
-                 *       "configuration_revision": null
+                 *       "configuration_revision": 1
                  *     }
                  */
                 "application/json": {
@@ -11549,13 +11546,16 @@ export interface operations {
                      * @enum {string}
                      */
                     action: "AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "VERIFY_EXTERNAL";
-                    /** @description 人工动作必须为 true；AUTO 忽略该字段。 */
+                    /**
+                     * @description 人工动作必须为 true；AUTO 忽略该字段。
+                     * @default false
+                     */
                     confirm?: boolean;
+                    /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
+                    storage_dir?: string | null;
                     /** Format: uuid */
                     connection_ref?: string | null;
                     configuration_revision?: number | null;
-                    /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                    storage_dir?: string | null;
                 };
             };
         };
@@ -12286,28 +12286,33 @@ export interface operations {
             content: {
                 /**
                  * @example {
-                 *       "submission_mode": "CONTINUE_TRACKING",
                  *       "expected_revision": 1,
                  *       "idempotency_key": "示例",
-                 *       "confirm": true
+                 *       "confirm": true,
+                 *       "connection_ref": "示例",
+                 *       "configuration_revision": 1,
+                 *       "submission_mode": "CONTINUE_TRACKING"
                  *     }
                  */
                 "application/json": {
-                    /**
-                     * @description issue #98：本次操作的提交方式。持续追番建立受控外部订阅；下载现有资源只把当前资源交给 Auto Bangumi 加入下载。只作用于本次操作，不写入本地方案。
-                     * @default CONTINUE_TRACKING
-                     * @enum {string}
-                     */
-                    submission_mode?: "CONTINUE_TRACKING" | "DOWNLOAD_EXISTING";
                     /** @description 客户端最后观察到的追番记录 revision（revision-aware 重试）。 */
                     expected_revision: number;
                     /** @description opaque 客户端重试操作 id；一次点击一个新 operation，同键网络重放复用原 operation。只进请求体与页面内存。 */
                     idempotency_key: string;
                     /**
                      * @description 必须为 true：用户显式确认重试提交最新方案。
-                     * @enum {boolean}
+                     * @constant
                      */
                     confirm: true;
+                    /** Format: uuid */
+                    connection_ref: string;
+                    configuration_revision: number;
+                    /**
+                     * @description issue #98：本次操作的提交方式。持续追番建立受控外部订阅；下载现有资源只把当前资源交给 Auto Bangumi 加入下载。只作用于本次操作，不写入本地方案。
+                     * @default CONTINUE_TRACKING
+                     * @enum {string}
+                     */
+                    submission_mode?: "CONTINUE_TRACKING" | "DOWNLOAD_EXISTING";
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
                     storage_dir?: string | null;
                 };
@@ -13475,33 +13480,33 @@ export interface operations {
             content: {
                 /**
                  * @example {
-                 *       "submission_mode": "CONTINUE_TRACKING",
                  *       "expected_revision": 1,
                  *       "idempotency_key": "示例",
                  *       "confirm": true,
                  *       "connection_ref": "示例",
-                 *       "configuration_revision": 1
+                 *       "configuration_revision": 1,
+                 *       "submission_mode": "CONTINUE_TRACKING"
                  *     }
                  */
                 "application/json": {
-                    /**
-                     * @description issue #98：本次操作的提交方式。持续追番建立受控外部订阅；下载现有资源只把当前资源交给 Auto Bangumi 加入下载。只作用于本次操作，不写入本地方案。
-                     * @default CONTINUE_TRACKING
-                     * @enum {string}
-                     */
-                    submission_mode?: "CONTINUE_TRACKING" | "DOWNLOAD_EXISTING";
                     /** @description 客户端最后观察到的追番记录 revision（revision-aware 提交）。 */
                     expected_revision: number;
                     /** @description opaque 客户端提交操作 id；同键网络重放收敛到同一次外部调用。只进请求体与页面内存。 */
                     idempotency_key: string;
                     /**
                      * @description 必须为 true：用户显式确认提交最新方案。
-                     * @enum {boolean}
+                     * @constant
                      */
                     confirm: true;
                     /** Format: uuid */
                     connection_ref: string;
                     configuration_revision: number;
+                    /**
+                     * @description issue #98：本次操作的提交方式。持续追番建立受控外部订阅；下载现有资源只把当前资源交给 Auto Bangumi 加入下载。只作用于本次操作，不写入本地方案。
+                     * @default CONTINUE_TRACKING
+                     * @enum {string}
+                     */
+                    submission_mode?: "CONTINUE_TRACKING" | "DOWNLOAD_EXISTING";
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
                     storage_dir?: string | null;
                 };
