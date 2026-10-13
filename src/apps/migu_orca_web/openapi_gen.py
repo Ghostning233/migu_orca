@@ -452,12 +452,32 @@ def _replace_node(root: dict[str, Any], path: str, node: dict[str, Any]) -> None
     parent[parts[-1]] = deepcopy(node)
 
 
-def _merge_overlay(node: dict[str, Any], overlay: dict[str, Any]) -> None:
-    """Merge documentation keys into the derived schema (structure untouched)."""
+#: Overlay keys that introduce a nested tree rather than a documentation value:
+#: ``properties`` maps field names, ``items`` carries an array element schema.
+_OVERLAY_CONTAINER_KEYS = frozenset({"properties", "items"})
+
+
+def _merge_overlay(
+    node: dict[str, Any], overlay: dict[str, Any], *, in_properties_map: bool = False
+) -> None:
+    """Merge documentation keys into the derived schema (structure untouched).
+
+    A non-documentation key would be the second structure source issue #171
+    removed, so the merge fails closed instead of quietly copying it. Inside a
+    ``properties`` map the keys are user-visible field names and are therefore
+    unrestricted; a field named ``title`` is not pydantic metadata.
+    """
     for key, value in overlay.items():
+        if not in_properties_map and key not in _OVERLAY_KEYS and key not in _OVERLAY_CONTAINER_KEYS:
+            raise ValueError(
+                f"request-body overlay key {key!r} is not documentation; "
+                "derive the constraint from schemas.py (issue #171)."
+            )
         current = node.get(key)
         if isinstance(value, dict) and isinstance(current, dict):
-            _merge_overlay(current, value)
+            _merge_overlay(
+                current, value, in_properties_map=key == "properties" and not in_properties_map
+            )
         else:
             node[key] = value
 

@@ -22,7 +22,6 @@ from apps.base import create_app
 from apps.migu_orca_web import openapi_gen
 from apps.migu_orca_web.openapi_gen import (
     _ENDPOINTS,
-    _OVERLAY_KEYS,
     _REFINEMENT_ALLOWLIST,
     _normalized_path,
     _path_parameters,
@@ -30,9 +29,6 @@ from apps.migu_orca_web.openapi_gen import (
     _RequestBodySpec,
     refinement_keys,
 )
-
-#: Overlay keys that introduce a nested tree rather than a documentation value.
-_CONTAINER_KEYS = frozenset({"properties", "items"})
 
 
 def _request_body_endpoints() -> list[tuple[str, dict[str, Any]]]:
@@ -82,26 +78,24 @@ def test_every_request_body_declares_the_model_its_route_validates() -> None:
     assert checked == 28, f"expected 28 documented request bodies, found {checked}"
 
 
-def test_request_body_overlays_carry_documentation_only() -> None:
-    """A structural key in the overlay would be a second source: fail closed."""
-    def walk(node: dict[str, Any], path: str, *, in_properties_map: bool) -> None:
-        for name, value in node.items():
-            here = f"{path}.{name}" if path else name
-            if in_properties_map:
-                # Keys of a ``properties`` map are user-visible field names.
-                assert isinstance(value, dict), f"{here} must map to a schema node"
-                walk(value, here, in_properties_map=False)
-                continue
-            if name in _OVERLAY_KEYS:
-                continue
-            assert name in _CONTAINER_KEYS, (
-                f"{here} is a structural key; request bodies must derive it from schemas.py"
-            )
-            assert isinstance(value, dict), f"{here} must map to a nested overlay"
-            walk(value, here, in_properties_map=name == "properties")
+def test_request_body_overlay_rejects_structural_keys() -> None:
+    """A structural key in the overlay would be a second source: fail closed.
 
-    for key, entry in _request_body_endpoints():
-        walk(entry["requestBody"].overlay, key, in_properties_map=False)
+    The real overlays are exercised by every test that generates the document
+    (``test_openapi_generation.py``); this pins the guard's behaviour, including
+    the field-name exception inside a ``properties`` map.
+    """
+    target = {"properties": {"title": {"type": "string"}}}
+    with pytest.raises(ValueError, match="is not documentation"):
+        openapi_gen._merge_overlay(target, {"properties": {"title": {"type": "object"}}})
+    with pytest.raises(ValueError, match="is not documentation"):
+        openapi_gen._merge_overlay(target, {"required": ["title"]})
+    # Documentation keys and field names merge without complaint.
+    openapi_gen._merge_overlay(
+        target, {"properties": {"title": {"description": "番剧名称（必填）。"}}}
+    )
+    assert target["properties"]["title"]["description"] == "番剧名称（必填）。"
+    assert target["properties"]["title"]["type"] == "string"
 
 
 def test_request_body_overlay_never_invents_a_field() -> None:
