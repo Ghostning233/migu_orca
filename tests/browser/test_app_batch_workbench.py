@@ -2516,3 +2516,258 @@ class TestAppBatchOutcomeRecovery:
         page.locator(".confirm-dialog .primary-button").click()
         page.wait_for_url(re.compile(r"/app/tracking\?tracking_id=tracking-public-a$"), timeout=5000)
         assert "tracking-public-a" in page.url
+
+
+# ---------------------------------------------------------------------------
+# Issue 196: 会话 effect 的可观察结果（列表滚动按筛选键恢复、焦点落到会话声明的目标）
+# 与离开守卫取消分支的真实 Chromium 证据。只补断言，不改产品行为。
+# ---------------------------------------------------------------------------
+
+
+def _save_confirm_rows(item_ids: list[str], *, failed_id: str | None = None) -> str:
+    """#196：逐条保存结果——除 ``failed_id`` 外全部 CONFIRMED。"""
+    results: list[dict[str, Any]] = []
+    for item_id in item_ids:
+        failed = item_id == failed_id
+        results.append(
+            {
+                "item_id": item_id,
+                "outcome": "FAILED" if failed else "CONFIRMED",
+                "request_id": None if failed else f"req-{item_id}",
+                "status": None if failed else "CONFIRMED",
+                "error_type": "mikan_unavailable" if failed else None,
+                "error_message": None,
+                "tracking_id": None if failed else f"tracking-{item_id}",
+                "tracking_ready": None if failed else True,
+            }
+        )
+    confirmed = sum(1 for result in results if result["outcome"] == "CONFIRMED")
+    return json.dumps(
+        {
+            "ok": True,
+            "result": {
+                "batch_id": "batch-spa",
+                "results": results,
+                "summary": {
+                    "requested": len(results),
+                    "confirmed": confirmed,
+                    "failed": len(results) - confirmed,
+                },
+            },
+        },
+        ensure_ascii=False,
+    )
+
+
+def _list_scroll_geometry(page: Page) -> dict[str, float]:
+    return page.evaluate(
+        """() => {
+            const wrapper = document.querySelector('.batch-card-grid-wrapper')
+            return {
+                scrollTop: wrapper.scrollTop,
+                max: wrapper.scrollHeight - wrapper.clientHeight,
+            }
+        }"""
+    )
+
+
+class TestAppBatchSessionObservables:
+    """#196：会话 effect 声明、视图执行的可观察结果。
+
+    断言只锚定会话声明的效果（滚动按筛选键恢复、焦点交给声明的目标），
+    不复述视图内部实现。
+    """
+
+    def test_review_list_scroll_is_remembered_per_filter_key(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        items = _compact_items(12)
+        _open_compact_list(page, live_server_url, items)
+        expect(page.locator(".batch-draft-card")).to_have_count(12)
+
+        geometry = _list_scroll_geometry(page)
+        assert geometry["max"] > 200, geometry
+        all_pos = int(geometry["max"] * 0.3)
+        draft_pos = int(geometry["max"] * 0.75)
+
+        page.evaluate(
+            "(value) => { document.querySelector('.batch-card-grid-wrapper').scrollTop = value }",
+            all_pos,
+        )
+        assert _list_scroll_geometry(page)["scrollTop"] == all_pos
+
+        # 「全部状态」→「草案」：条目集合不变（12 部都是 DRAFT），但这是另一个筛选键，
+        # 切过去恢复的是该键自己的位置（尚未记录 → 0）。
+        page.select_option("#batch-review-status", "DRAFT")
+        expect(page.locator(".batch-draft-card")).to_have_count(12)
+        page.wait_for_function(
+            "() => document.querySelector('.batch-card-grid-wrapper').scrollTop === 0"
+        )
+        page.evaluate(
+            "(value) => { document.querySelector('.batch-card-grid-wrapper').scrollTop = value }",
+            draft_pos,
+        )
+        assert _list_scroll_geometry(page)["scrollTop"] == draft_pos
+
+        # 切回「全部状态」：恢复该键记住的位置，而不是沿用上一个键的位置。
+        page.select_option("#batch-review-status", "")
+        page.wait_for_function(
+            "(expected) => Math.abs(document.querySelector('.batch-card-grid-wrapper').scrollTop - expected) <= 1",
+            arg=all_pos,
+        )
+        assert abs(_list_scroll_geometry(page)["scrollTop"] - all_pos) <= 1
+
+        # 再切回「草案」：它记住的是自己的位置（draft_pos），两次往返互不覆盖。
+        page.select_option("#batch-review-status", "DRAFT")
+        page.wait_for_function(
+            "(expected) => Math.abs(document.querySelector('.batch-card-grid-wrapper').scrollTop - expected) <= 1",
+            arg=draft_pos,
+        )
+        assert abs(_list_scroll_geometry(page)["scrollTop"] - draft_pos) <= 1
+
+    def test_save_result_focus_lands_on_the_session_declared_card_and_is_visible(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        items = _compact_items(12)
+        item_ids = [str(item["item_id"]) for item in items]
+        page.route(
+            "**/api/v1/batches/batch-spa/save-confirm*",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_save_confirm_rows(item_ids, failed_id="item-07"),
+            ),
+        )
+        _open_compact_list(page, live_server_url, items)
+
+        # 勾选全部 12 部，再用标题搜索把稍后失败的目标筛出可见列表：
+        # 焦点目标仍然由会话声明，视图按揭示规则把它临时显示出来。
+        page.check("#batch-select-all-checkbox")
+        expect(page.locator("#batch-accept-submit")).to_contain_text("保存并确认 12 部")
+        _fill_title_search(page, "番剧03")
+        expect(page.locator(".batch-draft-card")).to_have_count(1)
+        expect(page.locator('.batch-draft-card[data-item-id="item-07"]')).to_have_count(0)
+
+        page.click("#batch-accept-submit")
+        page.locator(".confirm-dialog .primary-button").click()
+
+        expect(page.locator(".batch-review-navigation")).to_contain_text("首个失败条目")
+        card = page.locator('.batch-draft-card[data-item-id="item-07"]')
+        expect(card).to_have_count(1)
+        page.wait_for_function(
+            "() => document.activeElement && document.activeElement.dataset"
+            " && document.activeElement.dataset.itemId === 'item-07'",
+            timeout=5000,
+        )
+        expect(card).to_be_in_viewport()
+        geometry = page.evaluate(
+            """() => {
+                const card = document.querySelector('.batch-draft-card[data-item-id="item-07"]')
+                const wrapper = document.querySelector('.batch-card-grid-wrapper').getBoundingClientRect()
+                const rect = card.getBoundingClientRect()
+                return { top: rect.top, bottom: rect.bottom, listTop: wrapper.top, listBottom: wrapper.bottom }
+            }"""
+        )
+        assert geometry["top"] >= geometry["listTop"] - 0.5, geometry
+        assert geometry["bottom"] <= geometry["listBottom"] + 0.5, geometry
+        assert _active_item_id(page) == "item-07"
+
+
+class TestAppBatchLeaveGuardCancel:
+    """#196：离开守卫取消分支的真实 Chromium 证据（取消必须完全无副作用）。"""
+
+    def test_cancelling_the_leave_dialog_keeps_scene_url_and_unsaved_edit(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        canary = "https://private.invalid/leave-guard-canary?token=leave-guard-token"
+        console_messages: list[str] = []
+        page.on("console", lambda message: console_messages.append(message.text))
+        page.on("pageerror", lambda error: console_messages.append(str(error)))
+        held_modify: list[Any] = []
+
+        def _hold_modify(route: Any, request: Any) -> None:
+            # held route：未保存编辑的防抖请求保持在途，确保取消分支不依赖它的响应。
+            if request.method != "POST":
+                route.continue_()
+                return
+            held_modify.append(route)
+
+        page.route("**/api/v1/requests/preview-modify", _hold_modify)
+        items = [
+            _batch_item(
+                "item-a",
+                "甲S1",
+                status="DRAFT",
+                canonical_title="甲 第一季",
+                preview_request=_preview_request("甲", "req-leave-a"),
+                error={"error_type": "mikan_unavailable", "error_message": canary},
+            ),
+            _batch_item(
+                "item-b",
+                "乙S1",
+                status="DRAFT",
+                canonical_title="乙 第一季",
+                preview_request=_preview_request("乙", "req-leave-b"),
+            ),
+        ]
+        _route_parse(page, items)
+        set_storage_preferences(page, storage_dir)
+        _goto_batch(page, live_server_url)
+        page.set_viewport_size({"width": 1440, "height": 900})
+        page.fill("#batch-raw-input", "甲S1\n乙S1")
+        page.click("#batch-parse-submit")
+        expect(page.locator(".batch-draft-card")).to_have_count(2)
+
+        # 制造 shouldGuard 为真的现场：勾选 + 右栏未保存编辑。
+        page.locator('.batch-draft-card[data-item-id="item-a"] .batch-card-checkbox-row').check()
+        page.locator('.batch-draft-card[data-item-id="item-a"]').click()
+        page.fill("#batch-preview-must-contain", "未保存的编辑")
+
+        url_before = page.url
+        history_before = page.evaluate("() => window.history.length")
+
+        # 通过主导航离开：审计中取消「留在此页」。
+        page.click("#shell-nav-2")
+        dialog = page.locator(".confirm-dialog")
+        expect(dialog).to_be_visible()
+        expect(dialog).to_contain_text("离开批量审核")
+        dialog.get_by_role("button", name="留在此页").click()
+        expect(page.locator(".confirm-dialog")).to_have_count(0)
+
+        # URL 不变、没有导航，也没有清理批量现场。
+        assert page.url == url_before
+        assert page.evaluate("() => window.history.length") == history_before
+        expect(page.locator("#batch-parse-form")).to_be_visible()
+        expect(page.locator(".batch-draft-card")).to_have_count(2)
+        expect(
+            page.locator('.batch-draft-card[data-item-id="item-a"] .batch-card-checkbox-row')
+        ).to_be_checked()
+        expect(
+            page.locator('.batch-draft-card[data-item-id="item-a"]')
+        ).to_have_class(re.compile(r"\bis-current\b"))
+        expect(page.locator("#batch-preview-must-contain")).to_have_value("未保存的编辑")
+        expect(page.locator("#batch-accept-submit")).to_contain_text("保存并确认")
+
+        # canary：DOM / URL / history.state / storage / console / 落盘 JSON 都不泄漏。
+        browser_state = page.evaluate(
+            """() => ({
+                url: window.location.href,
+                historyState: JSON.stringify(window.history.state),
+                localStorage: JSON.stringify(window.localStorage),
+                sessionStorage: JSON.stringify(window.sessionStorage),
+                bodyText: document.body.innerText,
+            })"""
+        )
+        persisted_json = (
+            "\n".join(path.read_text(encoding="utf-8") for path in storage_dir.rglob("*.json"))
+            if storage_dir.exists()
+            else ""
+        )
+        for value in (canary, "leave-guard-token"):
+            assert value not in browser_state["url"]
+            assert value not in browser_state["historyState"]
+            assert value not in browser_state["localStorage"]
+            assert value not in browser_state["sessionStorage"]
+            assert value not in browser_state["bodyText"]
+            assert value not in persisted_json
+            assert all(value not in message for message in console_messages)
