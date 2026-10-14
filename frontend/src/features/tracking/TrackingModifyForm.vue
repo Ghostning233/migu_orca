@@ -34,8 +34,11 @@ import {
   MODIFY_FORM_HELP,
   type TrackingAction,
   type TrackingItem,
-  type TrackingManagementScope,
 } from './trackingProjection'
+import {
+  isTrackingManagementScope,
+  type TrackingManagementScope,
+} from './useTrackingWriteSession'
 
 const props = defineProps<{
   item: TrackingItem
@@ -83,12 +86,15 @@ const BOOLEAN_OPTIONS = [
   { value: 'true', label: '是' },
 ]
 
-/** Server-offered scopes, in server order, intersected with the known set. */
+/**
+ * Server-offered scopes, in server order, intersected with the known set.
+ *
+ * The one sendable judgment (issue #193): the form never re-states the scope
+ * literal, so a scope this page can request and a scope this form offers cannot
+ * drift apart.
+ */
 const scopes = computed<TrackingManagementScope[]>(() => (
-  (props.action.target_scopes ?? []).filter(
-    (scope): scope is TrackingManagementScope =>
-      scope === 'SUBSCRIPTION' || scope === 'ASSOCIATED_RSS',
-  )
+  (props.action.target_scopes ?? []).filter(isTrackingManagementScope)
 ))
 const subscriptionOffered = computed(() => scopes.value.includes('SUBSCRIPTION'))
 const rssOffered = computed(() => scopes.value.includes('ASSOCIATED_RSS'))

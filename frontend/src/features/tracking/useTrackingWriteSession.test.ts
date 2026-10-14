@@ -9,20 +9,21 @@
  */
 import { describe, expect, it } from 'vitest'
 
+import type { paths } from '@/api/generated/api'
+
 import {
   isSendableManagementAction,
+  isTrackingManagementScope,
   projectTrackingActionScopes,
   useTrackingWriteSession,
   type TrackingSubmissionMode,
   type TrackingWriteSession,
 } from './useTrackingWriteSession'
-import {
-  isTrackingManagementScope,
-  type CapabilityResult,
-  type TrackingItem,
-} from './trackingProjection'
+import type { CapabilityResult, TrackingItem } from './trackingProjection'
 
 type ItemAction = NonNullable<TrackingItem['available_actions']>[number]
+/** The generated route union, so an endpoint literal in this file is contract-checked. */
+type ApiPath = Extract<keyof paths, string>
 type Body = Record<string, unknown>
 
 function item(overrides: Partial<TrackingItem> = {}): TrackingItem {
@@ -1068,8 +1069,21 @@ describe('tracking management write session (US-313, US-314, US-315)', () => {
     const disabled = managementItem({
       status: 'DISABLED', status_label: '已停用', available_actions: [ENABLE_ACTION],
     })
-    expect(bodyOf(beginManagementWrite({ action: ENABLE_ACTION, item: disabled }).started))
-      .toMatchObject({ target_scope: 'SUBSCRIPTION', enabled: true, expected_revision: 3, confirm: true })
+    const enabledBody = bodyOf(beginManagementWrite({ action: ENABLE_ACTION, item: disabled }).started)
+    // Issue #193: the exact body and its exact key set, not a superset match —
+    // the enable request can carry nothing but these seven fields.
+    expect(enabledBody).toEqual({
+      target_scope: 'SUBSCRIPTION',
+      enabled: true,
+      expected_revision: 3,
+      idempotency_key: enabledBody.idempotency_key,
+      confirm: true,
+      connection_ref: CONNECTION.connection_ref,
+      configuration_revision: CONNECTION.configuration_revision,
+    })
+    expect(Object.keys(enabledBody).sort()).toEqual(
+      ['target_scope', 'enabled', 'expected_revision', 'idempotency_key', 'confirm', 'connection_ref', 'configuration_revision'].sort(),
+    )
 
     for (const status of ['ACTIVE', 'EXTERNAL_ONLY'] as const) {
       const body = bodyOf(beginManagementWrite({
@@ -1183,6 +1197,9 @@ describe('tracking management write session (US-313, US-314, US-315)', () => {
       message: expect.stringContaining('不修改 MiGuOrca 本地方案'),
       confirmLabel: '确认修改订阅',
     })
+    // Issue #193: the impact sentence that says a subscription modify may change
+    // future downloads is pinned, not merely present in the source.
+    expect(modify.started.confirmation!.message).toContain('并可能改变后续下载')
     const rssModify = beginManagementWrite({ targetScope: 'ASSOCIATED_RSS', patch: { name: 'x' } }, { confirmed: false })
     expect(rssModify.started.confirmation!.message).toContain('关联 RSS')
     expect(rssModify.started.confirmation!.title).not.toContain('ASSOCIATED_RSS')
@@ -1658,6 +1675,201 @@ describe('single page-level intent (D38-09.4)', () => {
 })
 
 // ---------------------------------------------------------------------------
+// One treatment for an unbuildable page session (issue #193).
+// ---------------------------------------------------------------------------
+
+const REPLAY_BLOCKED_COPY =
+  '该外部操作绑定的连接已被清除或更换，结果确认前不能使用新连接重试写入；请继续使用只读回查或恢复。'
+
+describe('unbuildable page session (issue #193)', () => {
+  it('refuses, states the fixed reason and converges on the one reachable unbuildable arm', () => {
+    // Only the recovery arm is reachable through the module's own surface *and*
+    // owes a converging re-read: the page proved the read-only external-verify
+    // capability but no longer holds the generation the action spends.
+    // ``TrackingView.runTrackingRecovery`` always reads both from the same
+    // ``savedState``, so the UI cannot reach this either — the module must still
+    // answer it with fixed feedback instead of silently ignoring the click.
+    //
+    // The other two families answer the same precondition with the baseline
+    // refusal and *no* effect, and one of those arms is genuinely reachable
+    // through the resubmission flow — see "refuses a locked submit whose
+    // generation the resubmission flow dropped" below, added after the
+    // independent re-audit (N-1) falsified the earlier claim that no public-surface
+    // sequence could execute it.
+    const writes = session()
+    const started = writes.beginRecovery(
+      { action: 'VERIFY_EXTERNAL', item: recoverableItem() },
+      { confirmed: true, capabilities: capabilities(), connection: null },
+    )
+    expect(started.accepted).toBe(false)
+    expect(started.request).toBeNull()
+    // Refused with a stated reason, not silently ignored.
+    expect(started.refusal).toEqual({ trackingId: 'tracking-1', reason: 'REPLAY' })
+    expect(writes.noticeFor('tracking-1')).toBe(REPLAY_BLOCKED_COPY)
+    // And with the converging re-read the page already runs for a refusal, so
+    // the panel can never be left waiting on a request that was never sent.
+    expect(started.effects).toEqual([{ kind: 'recheck', trackingId: 'tracking-1', refreshList: true }])
+    expect(writes.sessions.value.recovery).toBeNull()
+    expect(writes.loading.value).toBe(false)
+    expect(writes.hasUnresolvedLock.value).toBe(false)
+
+    // The two halves of the unreachable premise, pinned: with the connection the
+    // request *is* built, and without the capability the action is refused
+    // before any body is considered (a local refusal with no statement, which is
+    // the documented "not executable" contract, not this precondition).
+    expect(writes.beginRecovery(
+      { action: 'VERIFY_EXTERNAL', item: recoverableItem() },
+      { confirmed: true, capabilities: capabilities(), connection: CONNECTION },
+    ).accepted).toBe(true)
+    const noCapability = session().beginRecovery(
+      { action: 'VERIFY_EXTERNAL', item: recoverableItem() },
+      { confirmed: true, capabilities: null, connection: CONNECTION },
+    )
+    expect(noCapability.accepted).toBe(false)
+    expect(noCapability.refusal).toBeNull()
+    expect(noCapability.effects).toEqual([])
+  })
+
+  it('keeps the not-connected guard silent, because the page owns that statement', () => {
+    // The *other* "no connection" precondition is a different one: the page has
+    // no saved connection at all.  It is unreachable from the UI — the inspector
+    // keeps every external-write entry visible but disabled and renders its own
+    // fixed hint ("先在设置中连接 Auto Bangumi") while `connectionReady` is false,
+    // pinned by "keeps external writes visible but disabled with an in-place hint
+    // without a saved connection" in TrackingInspector.test.ts — so this session
+    // must stay a silent no-op: a refusal notice here would put a second, and
+    // differently worded, statement on a control the user cannot press.
+    const submit = session().beginSubmit({ item: item(), action: action() }, {
+      mode: 'CONTINUE_TRACKING', confirmed: true, connection: null,
+    })
+    const management = beginManagementWrite({}, { connection: null }).started
+    for (const started of [submit, management]) {
+      expect(started.accepted).toBe(false)
+      expect(started.request).toBeNull()
+      expect(started.refusal).toBeNull()
+      expect(started.effects).toEqual([])
+      expect(started.ask).toBeNull()
+    }
+    expect(session().noticeFor('tracking-1')).toBe('')
+    // A recovery is unaffected: ``RECOVER_AUTO`` is local and needs no
+    // credential at all (only ``VERIFY_EXTERNAL`` spends one).
+    expect(beginRecoveryWrite('RECOVER_AUTO', { connection: null }).started.accepted).toBe(true)
+  })
+
+  it('refuses a locked submit whose generation the resubmission flow dropped, sending nothing extra', () => {
+    // Reachable through the module's own surface (independent re-audit N-1): the
+    // risk-confirmed resubmission clears the ordinary submit generation while its
+    // one confirmation is in flight (``beginResubmitConfirmation``), so a later
+    // submit for the same record finds a locked intent with no generation — while
+    // the page still holds a working connection.  The answer is the fixed
+    // refusal, and (AC1) exactly the zero-request effects the module produced
+    // before this ticket: it must never acquire a converging re-read, because this
+    // command is reachable (the inspector only *disables* the entry while its
+    // intent is unresolved, so the page itself cannot press it).
+    const { writes } = inFlightSubmit()
+    writes.finishSubmit(submitResult({ outcome: 'UNKNOWN' }))
+    writes.beginResubmit({ item: pendingItem() }, { storageDir: STORAGE })
+    writes.finishResubmitOffer(offerResult())
+    expect(writes.beginResubmitConfirmation(RESUBMIT_BINDING, { storageDir: STORAGE }).accepted).toBe(true)
+    writes.finishSubmit(resubmitWriteResult({ outcome: 'UNKNOWN' }))
+    expect(writes.sessions.value.submit!.keepsIntent).toBe(true)
+
+    const again = writes.beginSubmit({
+      item: item({ available_actions: [action()] }), action: action(),
+    }, {
+      mode: 'CONTINUE_TRACKING', confirmed: true, connection: CONNECTION,
+    })
+    expect(again.accepted).toBe(false)
+    expect(again.request).toBeNull()
+    expect(again.refusal).toEqual({ trackingId: 'tracking-1', reason: 'REPLAY' })
+    expect(again.effects).toEqual([])
+    expect(writes.noticeFor('tracking-1')).toBe(REPLAY_BLOCKED_COPY)
+  })
+
+  it('keeps the cleared-connection refusal at its gate, so the page never re-reads for it', () => {
+    // The submit and management families reach "the generation is gone" at the
+    // replay gate *before* the snapshot is read, and this test pins that gate's
+    // contract (issue #193): the fixed reason and zero requests — in particular
+    // zero converging effects, because the module's own surface reaches this
+    // command and adding one would send a request the page never made.
+    //
+    //   - a locked intent whose live page session still holds its generation
+    //     replays and is accepted (half one below);
+    //   - a locked intent whose session was cleared is refused *here*;
+    //   - a settle releases the tombstone and the replay block together, so the
+    //     record becomes submittable again rather than staying refused (half two).
+    //
+    // A locked intent *can* outlive its generation through one other route — the
+    // risk-confirmed resubmission clears it (independent re-audit N-1) — and that
+    // reachable arm is pinned separately by "refuses a locked submit whose
+    // generation the resubmission flow dropped".
+    const { writes } = inFlightSubmit()
+    writes.finishSubmit(submitResult({ outcome: 'UNKNOWN' }))
+    // Half one: a locked intent whose page session still holds its generation
+    // *is* replayable, so "cannot build" needs a locked intent without its
+    // snapshot — which the release rules below do not create.
+    const stillHolds = writes.beginSubmit({ item: item(), action: action() }, {
+      mode: 'CONTINUE_TRACKING', confirmed: true, connection: CONNECTION,
+    })
+    expect(stillHolds.accepted).toBe(true)
+    writes.preserveAfterClear()
+    const replayed = writes.beginSubmit({ item: item(), action: action() }, {
+      mode: 'CONTINUE_TRACKING', confirmed: true, connection: CONNECTION,
+    })
+    expect(replayed.accepted).toBe(false)
+    expect(replayed.request).toBeNull()
+    expect(replayed.refusal).toEqual({ trackingId: 'tracking-1', reason: 'REPLAY' })
+    expect(replayed.effects).toEqual([])
+    expect(writes.noticeFor('tracking-1')).toBe(REPLAY_BLOCKED_COPY)
+
+    const management = beginManagementWrite({}, { confirmed: true, connection: CONNECTION })
+    expect(management.writes.finishManagement(modifyResult({ management_status: 'OUTCOME_UNKNOWN' })).length)
+      .toBeGreaterThan(0)
+    const replayableManagement = management.writes.beginManagement({
+      action: modifyAction, item: managementItem(),
+      targetScope: 'SUBSCRIPTION', patch: { title: '新标题' },
+    }, { confirmed: true, connection: CONNECTION })
+    expect(replayableManagement.accepted).toBe(true)
+    management.writes.preserveAfterClear()
+    const replayedManagement = management.writes.beginManagement({
+      action: modifyAction, item: managementItem(),
+      targetScope: 'SUBSCRIPTION', patch: { title: '新标题' },
+    }, { confirmed: true, connection: CONNECTION })
+    expect(replayedManagement.accepted).toBe(false)
+    expect(replayedManagement.request).toBeNull()
+    expect(replayedManagement.refusal).toEqual({ trackingId: 'tracking-1', reason: 'REPLAY' })
+    expect(replayedManagement.effects).toEqual([])
+    expect(management.writes.noticeFor('tracking-1')).toBe(REPLAY_BLOCKED_COPY)
+
+    // Half two: a settle releases the tombstone *and* the replay block together.
+    // The clear comes first, so the flag really is set and dropping it later is
+    // observable: with the live connection this record must be submittable again,
+    // where a surviving tombstone/flag would be refused as REPLAY (independent
+    // re-audit N-2).
+    const settled = inFlightSubmit()
+    settled.writes.finishSubmit(submitResult({ outcome: 'UNKNOWN' }))
+    settled.writes.preserveAfterClear()
+    settled.writes.setAutoCheck(true)
+    const check = settled.writes.beginCheck({ item: item(), automatic: true })
+    expect(check.accepted).toBe(true)
+    settled.writes.finishCheck({
+      tracking_id: 'tracking-1', outcome: 'ACTIVE', verification_reason: null,
+      checked_revision: 3, next_revision: 4, checked_at: '2026-09-13T03:00:00Z',
+      operation_id: 'operation-1', tracking: item({ revision: 4 }),
+    } as never)
+    expect(settled.writes.sessions.value.submit).toBeNull()
+    const afterSettle = settled.writes.beginSubmit({
+      item: item({ available_actions: [action()] }), action: action(),
+    }, {
+      mode: 'CONTINUE_TRACKING', confirmed: true, connection: CONNECTION,
+    })
+    expect(afterSettle.accepted).toBe(true)
+    expect(afterSettle.request).not.toBeNull()
+    expect(afterSettle.refusal).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Explicit batch submit (issue #87, #100).
 // ---------------------------------------------------------------------------
 
@@ -1853,6 +2065,102 @@ describe('batch selection rules (issue #87)', () => {
 // ---------------------------------------------------------------------------
 // The unified session model (issue #168 acceptance).
 // ---------------------------------------------------------------------------
+
+describe('one declaration per operation (issue #193)', () => {
+  it('carries each operation listed here to its own family, route and body shape', () => {
+    // One operation, one declaration: the family slot, the guard that accepts it
+    // and the route it travels to all come from the same place, so this pins the
+    // equivalence the single-source refactor had to preserve — per action, the
+    // endpoint is the one the generated contract publishes and the operation is
+    // accepted by exactly its own family.
+    //
+    // The list below is maintained by hand next to the declaration table (which is
+    // deliberately not exported), so a *new* operation will not be flagged here
+    // for being missing.  What does flag it is the compiler: the declaration
+    // table's ``satisfies`` clause contract-checks the operation's endpoint, and
+    // the per-family action tables (``MANAGEMENT_ACTION_SPECS`` /
+    // ``RECOVERY_ACTION_SPECS``) and ``MANAGEMENT_CAPABILITY`` are total
+    // ``Record``s over the derived family unions, so a declared operation without
+    // its family wiring is a build error before these assertions can run.
+    //
+    // The endpoint literals below are typed against the generated ``paths`` union
+    // (issue #193, independent audit M-3), so a route that drifts from the
+    // contract fails `vue-tsc` here as well as in the declaration table.
+    const submissions: ReadonlyArray<[string, Partial<ItemAction>, ApiPath]> = [
+      ['SUBMIT', action(), '/api/v1/tracking/items/{tracking_id}/submit'],
+      ['RETRY', { code: 'RETRY', label: '重试提交', style: 'SECONDARY' },
+        '/api/v1/tracking/items/{tracking_id}/retry'],
+    ]
+    for (const [code, emitted, endpoint] of submissions) {
+      const started = beginSubmitWrite({ action: emitted }).started
+      expect(started.request?.endpoint).toBe(endpoint)
+      // Only the write body's own shape: revision/key/confirm, the chosen mode
+      // and one credential generation.
+      expect(Object.keys(bodyOf(started)).sort()).toEqual(
+        ['expected_revision', 'idempotency_key', 'confirm', 'submission_mode',
+          'connection_ref', 'configuration_revision'].sort(),
+      )
+      // The submit family's own guard accepts it, and the management guard does
+      // not: a family can never send an operation it does not declare.
+      expect(isSendableManagementAction(code)).toBe(false)
+    }
+
+    const recoveries: ReadonlyArray<[string, string, string[]]> = [
+      ['RECOVER_AUTO', 'AUTO', ['expected_revision', 'action']],
+      ['MARK_SUCCEEDED', 'MARK_SUCCEEDED', ['expected_revision', 'action', 'confirm']],
+      ['MARK_FAILED', 'MARK_FAILED', ['expected_revision', 'action', 'confirm']],
+      ['VERIFY_EXTERNAL', 'VERIFY_EXTERNAL',
+        ['expected_revision', 'action', 'connection_ref', 'configuration_revision']],
+    ]
+    for (const [code, bodyAction, bodyKeys] of recoveries) {
+      const started = beginRecoveryWrite(code as 'RECOVER_AUTO').started
+      expect(started.request?.endpoint).toBe('/api/v1/tracking/items/{tracking_id}/recover')
+      expect(bodyOf(started).action).toBe(bodyAction)
+      expect(Object.keys(bodyOf(started)).sort()).toEqual([...bodyKeys].sort())
+      expect(isSendableManagementAction(code)).toBe(false)
+    }
+
+    const managements: ReadonlyArray<[string, ItemAction, ApiPath, string[]]> = [
+      ['MODIFY', modifyAction, '/api/v1/tracking/items/{tracking_id}/modify',
+        ['target_scope', 'patch', 'expected_revision', 'idempotency_key', 'confirm',
+          'connection_ref', 'configuration_revision']],
+      ['SET_ENABLED', ENABLE_ACTION, '/api/v1/tracking/items/{tracking_id}/set-enabled',
+        ['target_scope', 'enabled', 'expected_revision', 'idempotency_key', 'confirm',
+          'connection_ref', 'configuration_revision']],
+      ['REFRESH_RSS', REFRESH_ACTION, '/api/v1/tracking/items/{tracking_id}/refresh',
+        ['target_scope', 'expected_revision', 'idempotency_key', 'confirm',
+          'connection_ref', 'configuration_revision']],
+      ['DELETE_EXTERNAL', DELETE_ACTION, '/api/v1/tracking/items/{tracking_id}/delete-external',
+        ['target_scope', 'expected_revision', 'idempotency_key', 'confirm',
+          'connection_ref', 'configuration_revision']],
+    ]
+    for (const [code, emitted, endpoint, bodyKeys] of managements) {
+      expect(isSendableManagementAction(code)).toBe(true)
+      const item0 = code === 'SET_ENABLED'
+        ? managementItem({ status: 'DISABLED', status_label: '已停用', available_actions: [emitted] })
+        : managementItem({ available_actions: [emitted] })
+      const started = beginManagementWrite({
+        action: emitted,
+        item: item0,
+        targetScope: code === 'REFRESH_RSS' ? 'ASSOCIATED_RSS' : 'SUBSCRIPTION',
+        patch: code === 'MODIFY' ? { title: '新标题' } : null,
+      }).started
+      expect(started.request?.endpoint).toBe(endpoint)
+      expect(Object.keys(bodyOf(started)).sort()).toEqual([...bodyKeys].sort())
+    }
+    // Nothing outside the declaration is sendable in any family.
+    for (const unknown of ['SUBMIT', 'RETRY', 'VERIFY_EXTERNAL', 'SOMETHING_NEW', '', 'toString']) {
+      expect(isSendableManagementAction(unknown)).toBe(false)
+    }
+    expect(session().beginSubmit({ item: item(), action: action({ code: 'MODIFY' }) }, {
+      mode: 'CONTINUE_TRACKING', confirmed: true, connection: CONNECTION,
+    }).accepted).toBe(false)
+    expect(session().beginRecovery(
+      { action: 'MODIFY' as never, item: recoverableItem() },
+      { confirmed: true, capabilities: capabilities(), connection: CONNECTION },
+    ).accepted).toBe(false)
+  })
+})
 
 describe('one session model for every write family', () => {
   it('builds every family snapshot from the same fields and one release rule', () => {

@@ -34,7 +34,6 @@ import {
   type TrackingCheckResult,
   type TrackingItem,
   type TrackingListSummary,
-  type TrackingManagementScope,
   type TrackingOverviewGroup,
   type TrackingResubmitBinding,
   type TrackingResubmitResult,
@@ -42,6 +41,7 @@ import {
 } from './trackingProjection'
 import {
   useTrackingWriteSession,
+  type TrackingManagementScope,
   type TrackingRecoveryActionCode,
   type TrackingWriteRequest,
   type TrackingSubmissionMode,
