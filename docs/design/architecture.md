@@ -53,7 +53,7 @@ CLI                     Vue SPA (frontend/, Flask 同源 /app/)
 5. 外部 HTTP、认证与存储细节留在对应 adapter/repository，不进入纯规则函数。
 6. 不在多个 engine 中复制标题季数、Request 状态或提交状态模型。
 
-当前存在的跨 engine 依赖包括 Request 使用订阅命名、RSS 使用 MiKan transport 数据、批量接受/提交使用 Request 与 AutoBangumi 能力、storage queue repository 使用批量队列模型、`plan_engine` 编排 catalog/MiKan/RSS/订阅命名并把方案写入 storage。这些是现有用例关系，不代表可以任意增加双向依赖。
+当前存在的跨 engine 依赖包括 Request 使用订阅命名、RSS 使用 MiKan transport 数据、批量接受/提交使用 Request 与 AutoBangumi 能力、storage queue repository 使用批量队列模型、`plan_engine` 编排 catalog/MiKan/RSS、调用 `request_engine` 组装快照并把方案写入 storage。这些是现有用例关系，不代表可以任意增加双向依赖。
 
 ## 5. Web 边界现状
 

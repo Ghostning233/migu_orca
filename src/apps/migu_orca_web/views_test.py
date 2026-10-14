@@ -3583,6 +3583,7 @@ def test_save_confirm_persists_confirms_and_returns_handoff(tmp_path: Path) -> N
     """US-214: one save-confirm call persists, accepts and hands off ACCEPTED."""
     storage_dir = tmp_path / "storage"
     client = _client()
+    _use_offline_plan_source()
     issued = client.post(
         "/api/v1/requests", json={"title": "芙莉莲"}
     ).get_json()["result"]
@@ -3641,6 +3642,7 @@ def test_save_confirm_confirm_failure_returns_saved_confirm_failed_envelope(
 
     storage_dir = tmp_path / "storage"
     client = _client()
+    _use_offline_plan_source()
     issued = client.post(
         "/api/v1/requests", json={"title": "芙莉莲"}
     ).get_json()["result"]
@@ -4957,6 +4959,7 @@ def test_save_confirm_tracking_write_failure_returns_not_ready_handoff(
 
     storage_dir = tmp_path / "storage"
     client = _client()
+    _use_offline_plan_source()
     issued = client.post(
         "/api/v1/requests", json={"title": "芙莉莲"}
     ).get_json()["result"]

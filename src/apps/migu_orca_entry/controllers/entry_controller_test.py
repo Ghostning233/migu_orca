@@ -727,6 +727,43 @@ def test_generate_request_real_mikan_mode_uses_injected_client_and_rss_transport
     )
 
 
+def test_generate_request_mikan_mode_resolves_fixture_rss_under_project_root(
+    tmp_path: Path,
+) -> None:
+    """Compat shell keeps forwarding project_root to the MiKan data source.
+
+    #174 review guard: the fixture path below only exists under the caller's
+    ``project_root``, so dropping that forwarding turns this into
+    ``rss_parse_failed`` instead of a successful plan.
+    """
+    fixture = tmp_path / "rss" / "frieren.xml"
+    fixture.parent.mkdir(parents=True)
+    fixture.write_text(
+        '<?xml version="1.0" encoding="utf-8"?>'
+        "<rss><channel><item>"
+        "<title>[Loli] 葬送的芙莉莲 - 01</title>"
+        "<link>https://mikan.example/download/frieren-01.torrent</link>"
+        "<guid>frieren-01</guid>"
+        "</item></channel></rss>",
+        encoding="utf-8",
+    )
+    client = _FixtureBackedMikanClient()
+
+    result = generate_request(
+        EntryRequest(raw_title="芙莉莲"),
+        source_mode="mikan_http",
+        mikan_client=client,
+        project_root=tmp_path,
+    )
+
+    assert result["success"] is True
+    request = result["request"]
+    assert request["confirmable_config"]["selected_subtitle_group"] == "Loli"
+    assert request["confirmable_config"]["effective_seed_names"] == [
+        "[Loli] 葬送的芙莉莲 - 01"
+    ]
+
+
 def test_generate_request_real_mikan_mode_requires_explicit_config_or_client() -> None:
     result = generate_request(
         EntryRequest(raw_title="芙莉莲"),
@@ -1342,6 +1379,21 @@ class _FakeMikanClient:
                 rss_url="https://mikan.example/rss/frieren.xml",
                 source_type="mikan_http",
                 fixture_path="",
+            )
+        ]
+
+
+class _FixtureBackedMikanClient(_FakeMikanClient):
+    """MiKan client whose RSS source is a fixture resolved under project_root."""
+
+    def list_rss_sources(self, matched_bangumi: MatchedBangumi) -> list[RssSource]:
+        self.rss_source_matches.append(matched_bangumi.title)
+        return [
+            RssSource(
+                subtitle_group="Loli",
+                rss_url="https://mikan.example/rss/frieren.xml",
+                source_type="static_fixture",
+                fixture_path="rss/frieren.xml",
             )
         ]
 
