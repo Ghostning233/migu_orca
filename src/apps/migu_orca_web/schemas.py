@@ -984,8 +984,44 @@ class _TrackingManagementBasePayload(BaseModel):
         return value
 
 
+class SavedTrackingLocalPlan(BaseModel):
+    """Local plan values raised together with a confirmed external modify.
+
+    Identity fields (title/season/subtitle_group) are deliberately absent: they
+    come from the real MiKan collection and are never edited here. Only the
+    editable plan fields travel, and the server merges them into the stored
+    snapshot instead of replacing it.
+    """
+
+    model_config = ConfigDict(extra="forbid", json_schema_extra={"minProperties": 1})
+
+    filter_rule: TrackingFilterRulePatch | None = None
+    expected_folder_name: str | None = None
+
+    @model_validator(mode="after")
+    def _require_local_field(self) -> SavedTrackingLocalPlan:
+        if not self.model_fields_set:
+            raise ValueError("local_plan 不能为空")
+        return self
+
+    @field_validator("expected_folder_name")
+    @classmethod
+    def _clean_local_folder(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        folder = value.strip()
+        if not folder:
+            raise ValueError("expected_folder_name 不能为空字符串")
+        if len(folder) > 255 or any(char in folder for char in "/\\"):
+            raise ValueError("expected_folder_name 含不合法字符")
+        return folder
+
+
 class TrackingModifyPayload(_TrackingManagementBasePayload):
     patch: TrackingSubscriptionPatch | TrackingRssPatch
+    #: Issue #91: local plan values the server raises once the external modify
+    #: was confirmed by read-back. Only a SUBSCRIPTION modify can carry one.
+    local_plan: SavedTrackingLocalPlan | None = None
 
     @model_validator(mode="after")
     def _validate_scope_fields(self) -> TrackingModifyPayload:
@@ -993,6 +1029,10 @@ class TrackingModifyPayload(_TrackingManagementBasePayload):
             raise ValueError("patch 字段与 target_scope 不匹配")
         if self.target_scope == "ASSOCIATED_RSS" and not isinstance(self.patch, TrackingRssPatch):
             raise ValueError("patch 字段与 target_scope 不匹配")
+        if self.target_scope == "ASSOCIATED_RSS" and self.local_plan is not None:
+            # Fail closed: the server only raises a local plan for a subscription
+            # modify, so accepting it here would report an unused input as 200.
+            raise ValueError("local_plan 只适用于 SUBSCRIPTION 的修改")
         return self
 
 
@@ -1075,39 +1115,6 @@ class SavedTrackingPlanDeleteInput(BaseModel):
                 "删除受控外部订阅需要已保存连接的 connection_ref 与 configuration_revision"
             )
         return self
-
-
-class SavedTrackingLocalPlan(BaseModel):
-    """Local plan values raised together with a confirmed external modify.
-
-    Identity fields (title/season/subtitle_group) are deliberately absent: they
-    come from the real MiKan collection and are never edited here. Only the
-    editable plan fields travel, and the server merges them into the stored
-    snapshot instead of replacing it.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    filter_rule: TrackingFilterRulePatch | None = None
-    expected_folder_name: str | None = None
-
-    @model_validator(mode="after")
-    def _require_local_field(self) -> SavedTrackingLocalPlan:
-        if not self.model_fields_set:
-            raise ValueError("local_plan 不能为空")
-        return self
-
-    @field_validator("expected_folder_name")
-    @classmethod
-    def _clean_local_folder(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        folder = value.strip()
-        if not folder:
-            raise ValueError("expected_folder_name 不能为空字符串")
-        if len(folder) > 255 or any(char in folder for char in "/\\"):
-            raise ValueError("expected_folder_name 含不合法字符")
-        return folder
 
 
 class SavedTrackingManagementInput(BaseModel):

@@ -166,6 +166,73 @@ def test_openapi_modify_patch_allows_multiple_fields_but_requires_one() -> None:
             TrackingModifyPayload.model_validate({**base, "target_scope": scope, "patch": patch})
 
 
+def test_modify_local_plan_is_subscription_only_and_never_empty() -> None:
+    """Issue #202: the restored field keeps #91's scope rule and strictness."""
+    base = {
+        "tracking_id": "trk_1", "expected_revision": 1, "idempotency_key": "key-1",
+        "confirm": True, "connection_ref": "11111111-1111-4111-1111-111111111111",
+        "configuration_revision": 1,
+    }
+    subscription = TrackingModifyPayload.model_validate({
+        **base, "target_scope": "SUBSCRIPTION", "patch": {"title": "show"},
+        "local_plan": {"expected_folder_name": "New"},
+    })
+    assert subscription.local_plan is not None
+    assert subscription.local_plan.model_dump(exclude_none=True) == {
+        "expected_folder_name": "New"
+    }
+    # ``local_plan`` is optional and independent from ``patch``.
+    assert TrackingModifyPayload.model_validate({
+        **base, "target_scope": "SUBSCRIPTION", "patch": {"title": "show"},
+    }).local_plan is None
+    # Only a subscription modify has a local plan to raise.
+    with pytest.raises(ValidationError, match="local_plan"):
+        TrackingModifyPayload.model_validate({
+            **base, "target_scope": "ASSOCIATED_RSS", "patch": {"name": "rss"},
+            "local_plan": {"expected_folder_name": "New"},
+        })
+    for empty in ({}, {"filter_rule": {}}, {"expected_folder_name": ""},
+                  {"expected_folder_name": "a/b"}):
+        with pytest.raises(ValidationError):
+            TrackingModifyPayload.model_validate({
+                **base, "target_scope": "SUBSCRIPTION", "patch": {"title": "show"},
+                "local_plan": empty,
+            })
+    # The unknown-field guard is untouched.
+    with pytest.raises(ValidationError):
+        TrackingModifyPayload.model_validate({
+            **base, "target_scope": "SUBSCRIPTION", "patch": {"title": "show"},
+            "local_plan": {"expected_folder_name": "New"}, "local_plan_v2": {},
+        })
+
+
+def test_openapi_modify_local_plan_is_subscription_only() -> None:
+    """Issue #202: the contract publishes ``local_plan`` on one branch only."""
+    schema = generate_openapi()["paths"]["/api/v1/tracking/items/{tracking_id}/modify"]["post"]
+    body = schema["requestBody"]["content"]["application/json"]["schema"]
+    subscription, rss = body["oneOf"]
+    assert subscription["properties"]["target_scope"] == {"const": "SUBSCRIPTION"}
+    assert rss["properties"]["target_scope"] == {"const": "ASSOCIATED_RSS"}
+
+    local_plan = subscription["properties"]["local_plan"]
+    assert local_plan["type"] == ["object", "null"]
+    assert local_plan["additionalProperties"] is False
+    # The "provide at least one field" rule comes from the model projection.
+    assert local_plan["minProperties"] == 1
+    assert set(local_plan["properties"]) == {"filter_rule", "expected_folder_name"}
+    assert local_plan["description"] == (
+        "issue #91：外部修改确认成功后同时提升的本地方案字段（身份字段不可编辑）。"
+        "与 patch 独立，缺省表示只改外部对象。"
+    )
+    # ``filter_rule`` mirrors the patch branch's reviewed anyOf encoding.
+    filter_rule = local_plan["properties"]["filter_rule"]
+    assert any(branch == {"type": "null"} for branch in filter_rule["anyOf"])
+    assert any("allOf" in branch for branch in filter_rule["anyOf"])
+    # The RSS branch stays strict: an unknown local_plan there is rejected.
+    assert "local_plan" not in rss["properties"]
+    assert rss["additionalProperties"] is False
+
+
 def test_management_action_scopes_are_server_computed_per_action_without_mapping_values() -> None:
     from apps.migu_orca_web.tracking_serializers import tracking_available_actions
 

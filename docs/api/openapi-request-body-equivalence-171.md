@@ -141,6 +141,11 @@ PY
 `**/api/v1/**`，只断言请求体里带 `local_plan`，因此真实服务端的 400 不被覆盖。
 #171 只能让文档说真话（派生后 `local_plan` 从契约移除）；**修复运行时要另开票据**。
 
+> **状态更新（本报告快照 `c54655d` 之后）**：该运行时缺陷已由 **#202** 修复——
+> `TrackingModifyPayload` 重新接受 `local_plan`，契约只在 modify 的 SUBSCRIPTION 分支
+> 暴露该字段（`ASSOCIATED_RSS` 携带它仍 400），并新增后端 HTTP 契约用例覆盖落盘提升、
+> 结果待确认不提升与绑定独立。上面这段仍是对当时快照的原有描述，保留以便追溯。
+
 ### 6.2 11 个端点在 OpenAPI 里没有声明 URL 路径参数
 
 `check` / `delete-plan` / `recover` / `retry` / `revalidate` / `submit` / `batch save-confirm`
