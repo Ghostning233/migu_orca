@@ -6,6 +6,7 @@
 | --- | --- |
 | `openapi.json` | OpenAPI 3.1 文档，覆盖全部 `/api/v1` 端点，由确定性脚本生成。 |
 | `endpoint_inventory.md` | US-189 冻结的端点清单、敏感值边界与前端依赖（人工可读基线；US-209 更新）。 |
+| `openapi-request-body-equivalence-171.md` | #171 的 requestBody 派生等价性报告：逐端点逐字段差异与判定（迁移证据，不参与生成）。 |
 
 ## 生成与漂移检查
 
@@ -23,6 +24,20 @@ uv run migu-orca-openapi --check    # 漂移检查（CI 使用，非零退出表
   `listRequests`、`submitBatchQueue`）；`tests/api_contract/test_openapi_runtime_consistency.py`
   核对 operationId 唯一、可读、跨重生成稳定，且 `_ENDPOINTS` 声明的每个
   error_type/status 与 `extensions/flask_api/api.py:_error_http_status` 的运行时分类一致。
+
+## 请求体派生（#171）
+
+请求体**只有 `schemas.py` 一个源**：`_ENDPOINTS` 的 `requestBody` 是
+`_rb(<schemas.py 模型>, overlay=…, replace=…, required_extra=…)`，
+结构从模型派生，注册表只贡献两类信息：
+
+- `overlay`：中文 `description`/`example` 与 `x-request-scoped`/`x-legacy` 标记（只许文档键）；
+- `replace`/`required_extra`：pydantic 无法投影的约束（`model_validator` 判别联合、
+  “至少一个字段”补丁、刻意 `Any` 的 payload），必须逐条登记在 `_REFINEMENT_ALLOWLIST`，
+  否则 `_build_openapi()` 直接抛错。规范与逐条判定见
+  `openapi-request-body-equivalence-171.md`；`tests/api_contract/test_openapi_request_body_source.py`
+  冻结覆盖层键、细化白名单，并核对注册表模型与路由实际校验的模型一致。
+  改请求体形状时改 `schemas.py`（或按流程评审后新增细化），不要在 `_ENDPOINTS` 里重写结构。
 
 ## Stage 27 类型化客户端（US-198）
 
