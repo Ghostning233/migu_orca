@@ -11,16 +11,13 @@ import { describe, expect, it } from 'vitest'
 
 import {
   isSendableManagementAction,
+  isTrackingManagementScope,
   projectTrackingActionScopes,
   useTrackingWriteSession,
   type TrackingSubmissionMode,
   type TrackingWriteSession,
 } from './useTrackingWriteSession'
-import {
-  isTrackingManagementScope,
-  type CapabilityResult,
-  type TrackingItem,
-} from './trackingProjection'
+import type { CapabilityResult, TrackingItem } from './trackingProjection'
 
 type ItemAction = NonNullable<TrackingItem['available_actions']>[number]
 type Body = Record<string, unknown>
@@ -1068,8 +1065,21 @@ describe('tracking management write session (US-313, US-314, US-315)', () => {
     const disabled = managementItem({
       status: 'DISABLED', status_label: '已停用', available_actions: [ENABLE_ACTION],
     })
-    expect(bodyOf(beginManagementWrite({ action: ENABLE_ACTION, item: disabled }).started))
-      .toMatchObject({ target_scope: 'SUBSCRIPTION', enabled: true, expected_revision: 3, confirm: true })
+    const enabledBody = bodyOf(beginManagementWrite({ action: ENABLE_ACTION, item: disabled }).started)
+    // Issue #193: the exact body and its exact key set, not a superset match —
+    // the enable request can carry nothing but these seven fields.
+    expect(enabledBody).toEqual({
+      target_scope: 'SUBSCRIPTION',
+      enabled: true,
+      expected_revision: 3,
+      idempotency_key: enabledBody.idempotency_key,
+      confirm: true,
+      connection_ref: CONNECTION.connection_ref,
+      configuration_revision: CONNECTION.configuration_revision,
+    })
+    expect(Object.keys(enabledBody).sort()).toEqual(
+      ['target_scope', 'enabled', 'expected_revision', 'idempotency_key', 'confirm', 'connection_ref', 'configuration_revision'].sort(),
+    )
 
     for (const status of ['ACTIVE', 'EXTERNAL_ONLY'] as const) {
       const body = bodyOf(beginManagementWrite({
@@ -1183,6 +1193,9 @@ describe('tracking management write session (US-313, US-314, US-315)', () => {
       message: expect.stringContaining('不修改 MiGuOrca 本地方案'),
       confirmLabel: '确认修改订阅',
     })
+    // Issue #193: the impact sentence that says a subscription modify may change
+    // future downloads is pinned, not merely present in the source.
+    expect(modify.started.confirmation!.message).toContain('并可能改变后续下载')
     const rssModify = beginManagementWrite({ targetScope: 'ASSOCIATED_RSS', patch: { name: 'x' } }, { confirmed: false })
     expect(rssModify.started.confirmation!.message).toContain('关联 RSS')
     expect(rssModify.started.confirmation!.title).not.toContain('ASSOCIATED_RSS')
@@ -1658,6 +1671,88 @@ describe('single page-level intent (D38-09.4)', () => {
 })
 
 // ---------------------------------------------------------------------------
+// One treatment for an unbuildable page session (issue #193).
+// ---------------------------------------------------------------------------
+
+const REPLAY_BLOCKED_COPY =
+  '该外部操作绑定的连接已被清除或更换，结果确认前不能使用新连接重试写入；请继续使用只读回查或恢复。'
+
+describe('unbuildable page session (issue #193)', () => {
+  it('refuses, states the fixed reason and converges for every family that cannot build a request', () => {
+    // The one reachable form of the precondition: the page proved the read-only
+    // external-verify capability but no longer holds the generation the action
+    // spends.  ``TrackingView.runTrackingRecovery`` always reads both from the
+    // same ``savedState``, so the UI cannot reach this — the module's own
+    // surface must still answer it like the other two families do.
+    const writes = session()
+    const started = writes.beginRecovery(
+      { action: 'VERIFY_EXTERNAL', item: recoverableItem() },
+      { confirmed: true, capabilities: capabilities(), connection: null },
+    )
+    expect(started.accepted).toBe(false)
+    expect(started.request).toBeNull()
+    // Refused with a stated reason, not silently ignored.
+    expect(started.refusal).toEqual({ trackingId: 'tracking-1', reason: 'REPLAY' })
+    expect(writes.noticeFor('tracking-1')).toBe(REPLAY_BLOCKED_COPY)
+    // And with the converging re-read the page already runs for a refusal, so
+    // the panel can never be left waiting on a request that was never sent.
+    expect(started.effects).toEqual([{ kind: 'recheck', trackingId: 'tracking-1', refreshList: true }])
+    expect(writes.sessions.value.recovery).toBeNull()
+    expect(writes.loading.value).toBe(false)
+    expect(writes.hasUnresolvedLock.value).toBe(false)
+
+    // The two halves of the unreachable premise, pinned: with the connection the
+    // request *is* built, and without the capability the action is refused
+    // before any body is considered (a local refusal with no statement, which is
+    // the documented "not executable" contract, not this precondition).
+    expect(writes.beginRecovery(
+      { action: 'VERIFY_EXTERNAL', item: recoverableItem() },
+      { confirmed: true, capabilities: capabilities(), connection: CONNECTION },
+    ).accepted).toBe(true)
+    const noCapability = session().beginRecovery(
+      { action: 'VERIFY_EXTERNAL', item: recoverableItem() },
+      { confirmed: true, capabilities: null, connection: CONNECTION },
+    )
+    expect(noCapability.accepted).toBe(false)
+    expect(noCapability.refusal).toBeNull()
+    expect(noCapability.effects).toEqual([])
+  })
+
+  it('keeps the cleared-connection refusal at its gate, so the page never re-reads for it', () => {
+    // The submit and management families reach "the generation is gone" at the
+    // replay gate *before* the snapshot is read.  That gate is a reachable UI
+    // path, and its contract is unchanged (issue #193): the fixed reason and
+    // zero requests, and in particular zero converging effects — adding one
+    // would add an HTTP request the page does not send today.
+    const { writes } = inFlightSubmit()
+    writes.finishSubmit(submitResult({ outcome: 'UNKNOWN' }))
+    writes.preserveAfterClear()
+    const replayed = writes.beginSubmit({ item: item(), action: action() }, {
+      mode: 'CONTINUE_TRACKING', confirmed: true, connection: CONNECTION,
+    })
+    expect(replayed.accepted).toBe(false)
+    expect(replayed.request).toBeNull()
+    expect(replayed.refusal).toEqual({ trackingId: 'tracking-1', reason: 'REPLAY' })
+    expect(replayed.effects).toEqual([])
+    expect(writes.noticeFor('tracking-1')).toBe(REPLAY_BLOCKED_COPY)
+
+    const management = beginManagementWrite({}, { confirmed: true, connection: CONNECTION })
+    expect(management.writes.finishManagement(modifyResult({ management_status: 'OUTCOME_UNKNOWN' })).length)
+      .toBeGreaterThan(0)
+    management.writes.preserveAfterClear()
+    const replayedManagement = management.writes.beginManagement({
+      action: modifyAction, item: managementItem(),
+      targetScope: 'SUBSCRIPTION', patch: { title: '新标题' },
+    }, { confirmed: true, connection: CONNECTION })
+    expect(replayedManagement.accepted).toBe(false)
+    expect(replayedManagement.request).toBeNull()
+    expect(replayedManagement.refusal).toEqual({ trackingId: 'tracking-1', reason: 'REPLAY' })
+    expect(replayedManagement.effects).toEqual([])
+    expect(management.writes.noticeFor('tracking-1')).toBe(REPLAY_BLOCKED_COPY)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Explicit batch submit (issue #87, #100).
 // ---------------------------------------------------------------------------
 
@@ -1853,6 +1948,72 @@ describe('batch selection rules (issue #87)', () => {
 // ---------------------------------------------------------------------------
 // The unified session model (issue #168 acceptance).
 // ---------------------------------------------------------------------------
+
+describe('one declaration per operation (issue #193)', () => {
+  it('carries every declared operation to its own family, route and confirmation', () => {
+    // One operation, one declaration: the family slot, the guard that accepts it
+    // and the route it travels to all come from the same place, so this pins the
+    // equivalence the single-source refactor had to preserve — per action, the
+    // endpoint is the one the generated contract publishes and the operation is
+    // accepted by exactly its own family.
+    const submissions: ReadonlyArray<[string, Partial<ItemAction>, string]> = [
+      ['SUBMIT', action(), '/api/v1/tracking/items/{tracking_id}/submit'],
+      ['RETRY', { code: 'RETRY', label: '重试提交', style: 'SECONDARY' },
+        '/api/v1/tracking/items/{tracking_id}/retry'],
+    ]
+    for (const [code, emitted, endpoint] of submissions) {
+      const started = beginSubmitWrite({ action: emitted }).started
+      expect(started.request?.endpoint).toBe(endpoint)
+      // The submit family's own guard accepts it, and the management guard does
+      // not: a family can never send an operation it does not declare.
+      expect(isSendableManagementAction(code)).toBe(false)
+    }
+
+    const recoveries: ReadonlyArray<[string, string]> = [
+      ['RECOVER_AUTO', 'AUTO'],
+      ['MARK_SUCCEEDED', 'MARK_SUCCEEDED'],
+      ['MARK_FAILED', 'MARK_FAILED'],
+      ['VERIFY_EXTERNAL', 'VERIFY_EXTERNAL'],
+    ]
+    for (const [code, bodyAction] of recoveries) {
+      const started = beginRecoveryWrite(code as 'RECOVER_AUTO').started
+      expect(started.request?.endpoint).toBe('/api/v1/tracking/items/{tracking_id}/recover')
+      expect(bodyOf(started).action).toBe(bodyAction)
+      expect(isSendableManagementAction(code)).toBe(false)
+    }
+
+    const managements: ReadonlyArray<[string, ItemAction, string]> = [
+      ['MODIFY', modifyAction, '/api/v1/tracking/items/{tracking_id}/modify'],
+      ['SET_ENABLED', ENABLE_ACTION, '/api/v1/tracking/items/{tracking_id}/set-enabled'],
+      ['REFRESH_RSS', REFRESH_ACTION, '/api/v1/tracking/items/{tracking_id}/refresh'],
+      ['DELETE_EXTERNAL', DELETE_ACTION, '/api/v1/tracking/items/{tracking_id}/delete-external'],
+    ]
+    for (const [code, emitted, endpoint] of managements) {
+      expect(isSendableManagementAction(code)).toBe(true)
+      const item0 = code === 'SET_ENABLED'
+        ? managementItem({ status: 'DISABLED', status_label: '已停用', available_actions: [emitted] })
+        : managementItem({ available_actions: [emitted] })
+      const started = beginManagementWrite({
+        action: emitted,
+        item: item0,
+        targetScope: code === 'REFRESH_RSS' ? 'ASSOCIATED_RSS' : 'SUBSCRIPTION',
+        patch: code === 'MODIFY' ? { title: '新标题' } : null,
+      }).started
+      expect(started.request?.endpoint).toBe(endpoint)
+    }
+    // Nothing outside the declaration is sendable in any family.
+    for (const unknown of ['SUBMIT', 'RETRY', 'VERIFY_EXTERNAL', 'SOMETHING_NEW', '', 'toString']) {
+      expect(isSendableManagementAction(unknown)).toBe(false)
+    }
+    expect(session().beginSubmit({ item: item(), action: action({ code: 'MODIFY' }) }, {
+      mode: 'CONTINUE_TRACKING', confirmed: true, connection: CONNECTION,
+    }).accepted).toBe(false)
+    expect(session().beginRecovery(
+      { action: 'MODIFY' as never, item: recoverableItem() },
+      { confirmed: true, capabilities: capabilities(), connection: CONNECTION },
+    ).accepted).toBe(false)
+  })
+})
 
 describe('one session model for every write family', () => {
   it('builds every family snapshot from the same fields and one release rule', () => {

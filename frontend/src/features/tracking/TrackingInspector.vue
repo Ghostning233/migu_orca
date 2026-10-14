@@ -20,12 +20,13 @@ import {
   type TrackingResubmitSession,
   type TrackingAction,
   type TrackingItem,
-  type TrackingManagementScope,
 } from './trackingProjection'
 import {
   isSendableManagementAction,
+  isTrackingManagementScope,
   projectTrackingActionScopes,
   type TrackingManagementActionCode,
+  type TrackingManagementScope,
   type TrackingPlanDeleteSession,
   type TrackingRecoveryActionCode,
   type TrackingWriteSession,
@@ -414,8 +415,7 @@ const managementOffers = computed<ManagementOfferView[]>(() => {
     if (!isSendableManagementAction(action.code)) continue
     const code = action.code
     const scopes = (action.target_scopes ?? [])
-      .filter((scope): scope is TrackingManagementScope =>
-        scope === 'SUBSCRIPTION' || scope === 'ASSOCIATED_RSS')
+      .filter(isTrackingManagementScope)
       .filter((scope) => projectTrackingActionScopes(detail.value!, code, scope).length > 0)
     if (scopes.length) offers.push({ code, action, scopes })
   }

@@ -9,6 +9,12 @@
  */
 import type { operations, paths } from '@/api/generated/api'
 
+// Issue #193 (A.2): the *request* scope vocabulary is owned by the write session,
+// which is the only module that turns a scope into a request.  This display
+// module borrows the type alone to keep its label map exhaustive — a type-only
+// import, so no runtime dependency (let alone a cycle) is introduced.
+import type { TrackingManagementScope } from './useTrackingWriteSession'
+
 type ApiPath = Extract<keyof paths, string>
 
 export type TrackingListResult = NonNullable<
@@ -85,24 +91,6 @@ export const MANAGEMENT_CAPABILITY: Partial<Record<TrackingActionCode, Partial<R
   SET_ENABLED: { SUBSCRIPTION: 'subscription_enable', ASSOCIATED_RSS: 'rss_enable' },
   REFRESH_RSS: { ASSOCIATED_RSS: 'rss_refresh' },
   DELETE_EXTERNAL: { SUBSCRIPTION: 'subscription_delete', ASSOCIATED_RSS: 'rss_delete' },
-}
-
-/**
- * The scope of a management action *as it is being requested* (US-313).
- *
- * ``TrackingScope`` is the generated public scope enum, but the requested scope
- * is only real if this page has a builder for it: a scope without a request body
- * shape can never be sent, so it fails closed here rather than at the boundary.
- * The vocabulary lives in this leaf module so the write session, the modify
- * form and this projection can all name it without importing each other.
- */
-const TRACKING_MANAGEMENT_SCOPES = ['SUBSCRIPTION', 'ASSOCIATED_RSS'] as const
-
-export type TrackingManagementScope = (typeof TRACKING_MANAGEMENT_SCOPES)[number]
-
-export function isTrackingManagementScope(value: unknown): value is TrackingManagementScope {
-  return typeof value === 'string'
-    && (TRACKING_MANAGEMENT_SCOPES as readonly string[]).includes(value)
 }
 
 /** Fixed Chinese labels for the two management scopes; the raw enum never renders. */
