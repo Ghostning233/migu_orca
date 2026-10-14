@@ -63,6 +63,7 @@ packages = [
     "src/ab_engine",
     "src/storage_engine",
     "src/request_engine",
+    "src/plan_engine",
     "src/tracking_engine",
     "src/shared",
 ]
