@@ -13,18 +13,23 @@ from ab_engine.controllers import ab_http_client
 from ab_engine.controllers.ab_client import AutoBangumiClient, submit_ab_subscription
 from ab_engine.controllers.ab_config import AutoBangumiConfig, load_ab_config
 from ab_engine.controllers.subscription_payload import build_ab_submit_payload
-from catalog_engine.controllers.catalog_controller import load_catalog, match_bangumi
-from mikan_engine.controllers import mikan_client as mikan_client_module
 from mikan_engine.controllers.mikan_client import MikanClient, MikanTransport
-from mikan_engine.controllers.mikan_config import MikanConfig, load_mikan_config
-from request_engine.controllers.request_controller import (
-    accept_request,
-    build_pending_request,
-    cancel_request,
-    modify_request,
-    summarize_request,
+from mikan_engine.controllers.mikan_config import MikanConfig
+from plan_engine.controllers.data_sources import (
+    DirectEntryResolution,
+    MikanDataSource,
+    PlanDataSource,
+    StaticFixtureDataSource,
 )
-from rss_engine.controllers.rss_controller import filter_seeds, parse_rss
+from plan_engine.controllers.plan_actions import (
+    apply_confirmation_action,
+    apply_modify_action,
+    apply_request_save_action,
+    build_history_event,
+    confirmation_history_details,
+)
+from plan_engine.controllers.plan_generation import build_plan
+from request_engine.controllers.request_controller import summarize_request
 from shared.config import (
     DEFAULT_CATALOG_PATH,
     DEFAULT_USER_CONFIG_PATH,
@@ -33,19 +38,16 @@ from shared.config import (
 )
 from shared.errors import Stage1Error
 from shared.logging import configure_logging
-from shared.models import EntryRequest, FilteredRss, MatchedBangumi
-from storage_engine.controllers.ab_result_repository import save_ab_submit_result
-from storage_engine.controllers.history_repository import append_status_history
-from storage_engine.controllers.request_repository import (
-    list_request_snapshots,
-    load_request_snapshot,
-    save_request_snapshot,
+from shared.models import (
+    BangumiCandidate,
+    EntryRequest,
+    MatchedBangumi,
+    ParsedRss,
+    RssSource,
+    UserPreference,
 )
+from storage_engine.controllers.request_repository import list_request_snapshots, load_request_snapshot
 from storage_engine.controllers.storage_config import load_storage_config
-from subscription_engine.controllers.subscription_controller import (
-    generate_folder_name,
-    select_subtitle_group,
-)
 
 LOGGER = logging.getLogger(__name__)
 SourceMode = Literal["static_fixture", "mikan_http"]
@@ -64,203 +66,100 @@ def generate_request(
     mikan_rss_transport: MikanTransport | None = None,
     mikan_bangumi: str | None = None,
 ) -> dict[str, Any]:
-    try:
-        direct_entry_provided = mikan_bangumi is not None
-        direct_entry = (mikan_bangumi or "").strip()
-        if direct_entry_provided and not direct_entry:
-            raise Stage1Error(
-                "invalid_input",
-                "MiKan bangumi 直连入口必须是数字 ID 或 Home/Bangumi URL",
-                "mikan_direct_entry",
-                {"field": "mikan_bangumi"},
-            )
-        if not entry.raw_title.strip() and not direct_entry:
-            raise Stage1Error("invalid_input", "番剧名称不能为空", "validate_input")
+    """Compatibility shell for the historical CLI-controller entry.
 
-        preference = load_user_preference(user_config_path)
-        real_mikan_client: MikanClient | None = None
-        rss_transport = mikan_rss_transport
-        rss_timeout = 10.0
-        if source_mode == "static_fixture":
-            if direct_entry:
-                raise Stage1Error(
-                    "invalid_input",
-                    "MiKan 直连入口仅支持真实 MiKan 数据源",
-                    "mikan_direct_entry",
-                    {"field": "mikan_bangumi"},
-                )
-            candidates = load_catalog(catalog_path)
-        elif source_mode == "mikan_http":
-            real_mikan_client = _resolve_mikan_client(
-                mikan_config_path=mikan_config_path,
-                mikan_config=mikan_config,
-                mikan_client=mikan_client,
-            )
-            candidates = (
-                []
-                if direct_entry
-                else real_mikan_client.list_bangumi_candidates(entry.raw_title)
-            )
-            rss_transport = rss_transport or real_mikan_client.transport
-            rss_timeout = real_mikan_client.config.timeout_seconds
-        else:
-            raise Stage1Error(
-                "invalid_input",
-                "不支持的数据源模式",
-                "generate_request",
-                {"source_mode": source_mode},
-            )
-        if direct_entry and real_mikan_client is not None:
-            detail = real_mikan_client.get_direct_bangumi_detail(direct_entry)
-            matched = MatchedBangumi(
-                title=detail.title,
-                aliases=[],
-                mikan_url=detail.mikan_url,
-                match_score=1.0,
-                poster_url=detail.poster_url,
-            )
-            rss_sources = real_mikan_client.list_rss_sources_from_detail(detail)
-        else:
-            matched, candidate = match_bangumi(entry.raw_title, candidates)
-            rss_sources = (
-                real_mikan_client.list_rss_sources(matched)
-                if real_mikan_client is not None
-                else candidate.rss_sources
-            )
-        rss_results: list[FilteredRss] = []
-        flow_warnings: list[str] = []
-        for source in rss_sources:
-            try:
-                parsed = parse_rss(
-                    source,
-                    project_root,
-                    transport=rss_transport,
-                    timeout=rss_timeout,
-                )
-            except Stage1Error as exc:
-                flow_warnings.append(
-                    f"字幕组 {source.subtitle_group} 的 RSS 解析失败：{exc.message}"
-                )
-                continue
-            rss_results.append(filter_seeds(parsed, preference.filter_rule))
+    Kept so existing callers/fixtures can migrate in batches; new callers use
+    `plan_engine.controllers.plan_generation.build_plan` with an injected
+    `PlanDataSource`. The CLI-semantics keywords are translated here, outside
+    the plan seam, and behaviour is unchanged.
+    """
 
-        if not rss_results:
-            raise Stage1Error(
-                "rss_parse_failed",
-                "所有候选 RSS 均解析失败",
-                "parse_rss",
-            )
-
-        selection = select_subtitle_group(
-            rss_results,
-            preference.subtitle_group_priority,
-        )
-        folder_name = generate_folder_name(matched.title)
-        request = build_pending_request(
-            entry,
-            matched,
-            rss_results,
-            selection,
-            preference.filter_rule,
-            folder_name,
-            flow_warnings,
-        )
-        LOGGER.info("Request 生成完成：%s", request["request_id"])
-        return {"success": True, "request": request, "error": None}
-    except Stage1Error as exc:
-        LOGGER.warning("Request 生成失败：%s", exc.message)
-        return {"success": False, "request": None, "error": exc.as_dict()}
-    except Exception as exc:  # pragma: no cover - safety boundary
-        LOGGER.error("订阅方案生成发生未预期错误")
-        error = Stage1Error(
-            "unexpected_error",
-            "订阅方案生成发生未预期错误",
-            "generate_request",
-            {"reason": str(exc)},
-        )
-        return {"success": False, "request": None, "error": error.as_dict()}
+    return build_plan(
+        entry,
+        data_source=_cli_data_source(
+            source_mode,
+            catalog_path=catalog_path,
+            user_config_path=user_config_path,
+            project_root=project_root,
+            mikan_config_path=mikan_config_path,
+            mikan_config=mikan_config,
+            mikan_client=mikan_client,
+            mikan_rss_transport=mikan_rss_transport,
+        ),
+        mikan_bangumi=mikan_bangumi,
+    )
 
 
-def _resolve_mikan_client(
+def _cli_data_source(
+    source_mode: str,
     *,
+    catalog_path: Path,
+    user_config_path: Path,
+    project_root: Path,
     mikan_config_path: Path | None,
     mikan_config: MikanConfig | None,
     mikan_client: MikanClient | None,
-) -> MikanClient:
-    if mikan_client is not None:
-        return mikan_client
-    if mikan_config is not None:
-        return mikan_client_module.create_mikan_client(mikan_config)
-    if mikan_config_path is None:
-        raise Stage1Error(
-            "config_error",
-            "真实 MiKan 数据源必须显式提供配置文件路径",
-            "load_mikan_config",
-            {"field": "mikan_config"},
+    mikan_rss_transport: MikanTransport | None,
+) -> PlanDataSource:
+    """Translate the historical CLI ``source_mode`` into a data-source adapter."""
+
+    if source_mode == "static_fixture":
+        return StaticFixtureDataSource(
+            catalog_path=catalog_path,
+            user_config_path=user_config_path,
+            project_root=project_root,
+            transport=mikan_rss_transport,
         )
-    config = load_mikan_config(mikan_config_path)
-    return mikan_client_module.create_mikan_client(config)
-
-
-def apply_confirmation_action(
-    result: dict[str, Any],
-    action: str | None,
-    *,
-    cancel_reason: str | None = None,
-) -> dict[str, Any]:
-    if action is None or not result["success"]:
-        return result
-
-    try:
-        request = result["request"]
-        if action == "accept":
-            updated_request = accept_request(request)
-        elif action == "cancel":
-            updated_request = cancel_request(request, cancel_reason or "")
-        else:
-            raise Stage1Error(
-                "invalid_confirmation_action",
-                "不支持的确认动作",
-                "confirm_request",
-                {"action": action},
-            )
-        return {"success": True, "request": updated_request, "error": None}
-    except Stage1Error as exc:
-        LOGGER.warning("Request 确认失败：%s", exc.message)
-        return {"success": False, "request": None, "error": exc.as_dict()}
-    except Exception as exc:  # pragma: no cover - safety boundary
-        LOGGER.error("订阅方案确认发生未预期错误")
-        error = Stage1Error(
-            "unexpected_error",
-            "订阅方案确认发生未预期错误",
-            "confirm_request",
-            {"reason": str(exc)},
+    if source_mode == "mikan_http":
+        return MikanDataSource(
+            user_config_path=user_config_path,
+            config_path=mikan_config_path,
+            config=mikan_config,
+            client=mikan_client,
+            transport=mikan_rss_transport,
         )
-        return {"success": False, "request": None, "error": error.as_dict()}
+    return _UnsupportedDataSource(source_mode, user_config_path=user_config_path)
 
 
-def apply_modify_action(
-    result: dict[str, Any],
-    patch: dict[str, Any] | None,
-) -> dict[str, Any]:
-    if patch is None or not result["success"]:
-        return result
+class _UnsupportedDataSource:
+    """Fail-closed stand-in for an unknown CLI ``source_mode``.
 
-    try:
-        updated_request = modify_request(result["request"], patch)
-        return {"success": True, "request": updated_request, "error": None}
-    except Stage1Error as exc:
-        LOGGER.warning("Request 修改失败：%s", exc.message)
-        return {"success": False, "request": None, "error": exc.as_dict()}
-    except Exception as exc:  # pragma: no cover - safety boundary
-        LOGGER.error("订阅方案修改发生未预期错误")
-        error = Stage1Error(
-            "unexpected_error",
-            "订阅方案修改发生未预期错误",
-            "modify_request",
-            {"reason": str(exc)},
+    The historical controller loaded the user preference *before* rejecting an
+    unknown mode, so this keeps that ordering (and the same stable error) intact
+    for the compatibility shell.
+    """
+
+    def __init__(self, source_mode: str, *, user_config_path: Path) -> None:
+        self._source_mode = source_mode
+        self._user_config_path = user_config_path
+
+    def load_preference(self) -> UserPreference:
+        load_user_preference(self._user_config_path)
+        raise self._error()
+
+    def list_candidates(self, raw_title: str) -> list[BangumiCandidate]:
+        raise self._error()
+
+    def resolve_direct_entry(self, direct_entry: str) -> DirectEntryResolution:
+        raise self._error()
+
+    def list_rss_sources(
+        self,
+        matched: MatchedBangumi,
+        candidate: BangumiCandidate,
+    ) -> list[RssSource]:
+        raise self._error()
+
+    def parse_rss(self, source: RssSource) -> ParsedRss:
+        raise self._error()
+
+    def _error(self) -> Stage1Error:
+        return Stage1Error(
+            "invalid_input",
+            "不支持的数据源模式",
+            "generate_request",
+            {"source_mode": self._source_mode},
         )
-        return {"success": False, "request": None, "error": error.as_dict()}
 
 
 def apply_ab_submit_action(
@@ -325,42 +224,6 @@ def apply_ab_submit_action(
             "ab_submit_result": None,
             "error": error.as_dict(),
         }
-
-
-def apply_request_save_action(
-    result: dict[str, Any],
-    save_request: bool,
-    *,
-    storage_dir: Path | None = None,
-    history_events: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    if not save_request or not result["success"]:
-        return result
-
-    try:
-        config = load_storage_config(storage_dir)
-        saved_request = save_request_snapshot(config, result["request"])
-        saved_history = [
-            append_status_history(config, event) for event in history_events or []
-        ]
-        saved = {**result, "saved_request": saved_request}
-        if saved_history:
-            saved["saved_history"] = saved_history
-        if isinstance(result["request"].get("ab_submit_result"), dict):
-            saved["saved_ab_result"] = save_ab_submit_result(config, result["request"])
-        return saved
-    except Stage1Error as exc:
-        LOGGER.warning("Request 保存失败：%s", exc.message)
-        return {"success": False, "request": None, "error": exc.as_dict()}
-    except Exception as exc:  # pragma: no cover - safety boundary
-        LOGGER.error("订阅方案保存发生未预期错误")
-        error = Stage1Error(
-            "unexpected_error",
-            "订阅方案保存发生未预期错误",
-            "save_request_snapshot",
-            {"reason": str(exc)},
-        )
-        return {"success": False, "request": None, "error": error.as_dict()}
 
 
 def list_saved_requests(
@@ -498,7 +361,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = apply_modify_action(result, modify_patch)
         if result["success"] and previous_request is not None:
             history_events.append(
-                _build_history_event(
+                build_history_event(
                     previous_request,
                     result["request"],
                     action="MODIFY",
@@ -513,11 +376,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     if result["success"] and previous_request is not None and args.action is not None:
         history_events.append(
-            _build_history_event(
+            build_history_event(
                 previous_request,
                 result["request"],
                 action=args.action.upper(),
-                details=_confirmation_history_details(args.action, args.cancel_reason),
+                details=confirmation_history_details(args.action, args.cancel_reason),
             )
         )
     result = apply_ab_submit_action(
@@ -573,32 +436,3 @@ def _parse_modify_patch_arg(value: str | None) -> dict[str, Any]:
         )
         return {"success": False, "request": None, "error": error.as_dict()}
     return {"success": True, "patch": patch, "error": None}
-
-
-def _build_history_event(
-    previous_request: dict[str, Any],
-    next_request: dict[str, Any],
-    *,
-    action: str,
-    details: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    timestamp = next_request.get("updated_at") or datetime.now(UTC).isoformat()
-    event = {
-        "request_id": next_request.get("request_id"),
-        "previous_status": previous_request.get("status"),
-        "next_status": next_request.get("status"),
-        "action": action,
-        "timestamp": timestamp,
-    }
-    if details:
-        event["details"] = details
-    return event
-
-
-def _confirmation_history_details(
-    action: str,
-    cancel_reason: str | None,
-) -> dict[str, Any] | None:
-    if action == "cancel":
-        return {"reason": cancel_reason or ""}
-    return None

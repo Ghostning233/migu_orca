@@ -15,7 +15,8 @@ import pytest
 from flask.testing import FlaskClient
 
 from apps.base import create_app
-from apps.migu_orca_entry.controllers.entry_controller import generate_request
+from plan_engine.controllers.data_sources import StaticFixtureDataSource
+from plan_engine.controllers.plan_generation import build_plan
 from shared.models import EntryRequest
 from storage_engine.controllers.request_repository import (
     save_request_snapshot,
@@ -70,26 +71,24 @@ def _reset_shared_state() -> None:
 def _offline_request_generation(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep request-contract tests offline while exercising the real Flask route.
 
-    Web production deliberately uses the server's real MiKan default.  Contract
-    tests use the entry controller's deterministic static fixture seam instead
-    of allowing a golden test to reach the network.
+    Web production deliberately uses the server's real MiKan default. Contract
+    tests swap the route's plan data source for the deterministic static fixture
+    adapter instead of allowing a golden test to reach the network (issue #174).
     """
     import apps.migu_orca_web.routes_requests as routes_requests
+    from plan_engine.controllers.data_sources import StaticFixtureDataSource
 
-    original = routes_requests.generate_request
-
-    def offline_generate(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        kwargs["source_mode"] = "static_fixture"
-        kwargs.pop("mikan_config", None)
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(routes_requests, "generate_request", offline_generate)
+    monkeypatch.setattr(
+        routes_requests,
+        "_plan_data_source",
+        lambda: StaticFixtureDataSource(),
+    )
 
 
 def saved_request(tmp_path: Path, title: str = "芙莉莲", request_id: str = "request-1") -> dict[str, Any]:
     """Generate and persist a static-fixture Request snapshot into tmp storage."""
     request = {
-        **generate_request(EntryRequest(raw_title=title))["request"],
+        **build_plan(EntryRequest(raw_title=title), data_source=StaticFixtureDataSource())["request"],
         "request_id": request_id,
     }
     save_request_snapshot(load_storage_config(tmp_path / "storage"), request)

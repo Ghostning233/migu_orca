@@ -21,7 +21,8 @@ from typing import Any
 
 from playwright.sync_api import Page, expect
 
-from apps.migu_orca_entry.controllers.entry_controller import generate_request
+from plan_engine.controllers.data_sources import StaticFixtureDataSource
+from plan_engine.controllers.plan_generation import build_plan
 from shared.models import EntryRequest
 from tests.browser.conftest import issue_draft_id, set_storage_preferences
 from tests.browser.visual_support import prepare_canvas, require_dist
@@ -81,9 +82,9 @@ TRACKING_ITEMS_BODY = json.dumps({"ok": True, "result": {"items": []}}, ensure_a
 
 
 def preview_request(title: str, request_id: str) -> dict[str, Any]:
-    generated = generate_request(EntryRequest(raw_title=title))
+    generated = build_plan(EntryRequest(raw_title=title), data_source=StaticFixtureDataSource())
     if generated["request"] is None:
-        generated = generate_request(EntryRequest(raw_title="葬送的芙莉莲"))
+        generated = build_plan(EntryRequest(raw_title="葬送的芙莉莲"), data_source=StaticFixtureDataSource())
     assert generated["request"] is not None
     return {**generated["request"], "request_id": request_id}
 

@@ -13,14 +13,6 @@ from typing import Any
 
 from flask import abort
 
-from apps.migu_orca_entry.controllers.entry_controller import (
-    _build_history_event,
-    _confirmation_history_details,
-    apply_confirmation_action,
-    apply_modify_action,
-    apply_request_save_action,
-    generate_request,
-)
 from apps.migu_orca_web.blueprints import api_blueprint
 from apps.migu_orca_web.contexts import candidate_selection_contexts
 from apps.migu_orca_web.drafts import (
@@ -68,6 +60,15 @@ from apps.migu_orca_web.tracking_handoff import ensure_confirmed_request_trackin
 from extensions.flask_api import class_route
 from extensions.flask_api.views import GetView, PostView
 from mikan_engine.controllers.mikan_config import default_mikan_config
+from plan_engine.controllers.data_sources import MikanDataSource, PlanDataSource
+from plan_engine.controllers.plan_actions import (
+    apply_confirmation_action,
+    apply_modify_action,
+    apply_request_save_action,
+    build_history_event,
+    confirmation_history_details,
+)
+from plan_engine.controllers.plan_generation import build_plan
 from request_engine.controllers.request_controller import (
     summarize_request,
 )
@@ -84,6 +85,16 @@ from tracking_engine.models.tracking import (
     TRACKING_ORIGIN_LEGACY_ACCEPT,
     TRACKING_ORIGIN_SAVE_CONFIRM,
 )
+
+
+def _plan_data_source() -> PlanDataSource:
+    """Build the Web production plan data source: the real MiKan site.
+
+    Kept as a module-level seam (issue #174) so contract tests can swap in the
+    offline static-fixture adapter instead of forcing CLI ``source_mode``
+    keywords through the request route.
+    """
+    return MikanDataSource(config=default_mikan_config())
 
 
 def _draft_store_error(reason: str, current_revision: int | None = None) -> Stage1Error:
@@ -224,10 +235,9 @@ class RequestCreateView(PostView):
     def save(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, RequestCreatePayload)
         payload = self.request_validator_model
-        result = generate_request(
+        result = build_plan(
             EntryRequest(raw_title=payload.title),
-            source_mode="mikan_http",
-            mikan_config=default_mikan_config(),
+            data_source=_plan_data_source(),
             mikan_bangumi=payload.mikan_bangumi,
         )
         if not result["success"]:
@@ -468,7 +478,7 @@ class RequestAcceptView(PostView):
         if not result["success"]:
             _raise_result_error(result)
 
-        history_event = _build_history_event(
+        history_event = build_history_event(
             request, result["request"], action="ACCEPT",
         )
         result = apply_request_save_action(
@@ -518,10 +528,10 @@ class RequestCancelView(PostView):
         if not result["success"]:
             _raise_result_error(result)
 
-        history_event = _build_history_event(
+        history_event = build_history_event(
             request, result["request"],
             action="CANCEL",
-            details=_confirmation_history_details("cancel", cancel_reason),
+            details=confirmation_history_details("cancel", cancel_reason),
         )
         result = apply_request_save_action(
             result,
@@ -559,7 +569,7 @@ class RequestModifyView(PostView):
         if not result["success"]:
             _raise_result_error(result)
 
-        history_event = _build_history_event(
+        history_event = build_history_event(
             request, result["request"],
             action="MODIFY",
             details={"patch": payload.patch},

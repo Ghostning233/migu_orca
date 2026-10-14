@@ -14,7 +14,8 @@ from typing import Any
 import pytest
 
 from apps.base import create_app
-from apps.migu_orca_entry.controllers.entry_controller import generate_request
+from plan_engine.controllers.data_sources import StaticFixtureDataSource
+from plan_engine.controllers.plan_generation import build_plan
 from shared.models import EntryRequest
 from storage_engine.controllers.request_repository import save_request_snapshot
 from storage_engine.controllers.storage_config import load_storage_config
@@ -243,7 +244,7 @@ def create_saved_request(storage_root: Path, title: str, request_id: str) -> dic
     Returns the full Request dict as stored on disk.
     """
     request = {
-        **generate_request(EntryRequest(raw_title=title))["request"],
+        **build_plan(EntryRequest(raw_title=title), data_source=StaticFixtureDataSource())["request"],
         "request_id": request_id,
     }
     save_request_snapshot(load_storage_config(storage_root), request)

@@ -29,7 +29,6 @@ from typing import Any
 
 import pytest
 
-from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from apps.migu_orca_web.tracking_handoff import ensure_confirmed_request_tracking
 from apps.migu_orca_web.tracking_migration_service import (
     MIGRATION_PARTIAL_WARNING,
@@ -44,6 +43,8 @@ from batch_engine.models import (
     BatchQueueItem,
     BatchSubmissionQueue,
 )
+from plan_engine.controllers.data_sources import StaticFixtureDataSource
+from plan_engine.controllers.plan_generation import build_plan
 from request_engine.controllers.request_controller import accept_request
 from shared.errors import Stage1Error
 from shared.models import EntryRequest
@@ -110,7 +111,7 @@ def _accepted_request(tmp_path: Path, request_id: str, *, root: str = "storage")
     config = _config(tmp_path, root)
     request = accept_request(
         {
-            **generate_request(EntryRequest(raw_title="芙莉莲"))["request"],
+            **build_plan(EntryRequest(raw_title="芙莉莲"), data_source=StaticFixtureDataSource())["request"],
             "request_id": request_id,
         }
     )

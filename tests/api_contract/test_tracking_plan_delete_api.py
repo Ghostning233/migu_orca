@@ -17,8 +17,9 @@ from typing import Any
 import pytest
 from flask.testing import FlaskClient
 
-from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from apps.migu_orca_web.tracking_handoff import ensure_confirmed_request_tracking
+from plan_engine.controllers.data_sources import StaticFixtureDataSource
+from plan_engine.controllers.plan_generation import build_plan
 from request_engine.controllers.request_controller import accept_request
 from shared.errors import Stage1Error
 from shared.models import EntryRequest
@@ -72,7 +73,7 @@ def _seed(tmp_path: Path, *, mapped: bool) -> tuple[TrackingRecord, dict[str, An
     )
     config = _config(tmp_path)
     request = accept_request({
-        **generate_request(EntryRequest(raw_title="芙莉莲"))["request"],
+        **build_plan(EntryRequest(raw_title="芙莉莲"), data_source=StaticFixtureDataSource())["request"],
         "request_id": "request-plan",
     })
     save_request_snapshot(config, request)

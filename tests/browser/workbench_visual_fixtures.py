@@ -22,7 +22,8 @@ from typing import Any
 
 from playwright.sync_api import Page, expect
 
-from apps.migu_orca_entry.controllers.entry_controller import generate_request
+from plan_engine.controllers.data_sources import StaticFixtureDataSource
+from plan_engine.controllers.plan_generation import build_plan
 from shared.models import EntryRequest
 from tests.browser.conftest import preview_result_json, set_storage_preferences
 from tests.browser.visual_support import prepare_canvas, require_dist
@@ -118,7 +119,7 @@ def candidate_search_envelope(query: str, candidates: list[dict[str, Any]]) -> s
 def preview_request(title: str, request_id: str) -> dict[str, Any]:
     """固定安全数据的未保存预览 Request（服务端静态 fixture 数据源）。"""
     return {
-        **generate_request(EntryRequest(raw_title=title))["request"],
+        **build_plan(EntryRequest(raw_title=title), data_source=StaticFixtureDataSource())["request"],
         "request_id": request_id,
     }
 

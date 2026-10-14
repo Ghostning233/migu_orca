@@ -14,13 +14,14 @@ from typing import Any
 import pytest
 from flask.testing import FlaskClient
 
-from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from batch_engine.models import (
     BATCH_ITEM_STATUS_EMPTY,
     BATCH_ITEM_STATUS_FAILED,
 )
 from mikan_engine.controllers.mikan_client import create_mikan_client
 from mikan_engine.controllers.mikan_config import MikanConfig
+from plan_engine.controllers.data_sources import StaticFixtureDataSource
+from plan_engine.controllers.plan_generation import build_plan
 from request_engine.controllers.request_controller import summarize_request
 from shared.errors import Stage1Error
 from shared.models import EntryRequest
@@ -39,7 +40,7 @@ from tracking_engine.models.tracking import (
 
 
 def _generated_request(title: str) -> dict[str, Any]:
-    return generate_request(EntryRequest(raw_title=title))["request"]
+    return build_plan(EntryRequest(raw_title=title), data_source=StaticFixtureDataSource())["request"]
 
 
 class _FakeMikanTransport:
@@ -725,7 +726,7 @@ def test_golden_save_confirm_persist_failure_releases_draft_for_retry(
     Exactly one Request is created after the retry; the failure envelope is a
     sanitized 500 storage_error that never leaks the tmp path.
     """
-    from apps.migu_orca_entry.controllers.entry_controller import (
+    from plan_engine.controllers.plan_actions import (
         apply_request_save_action as original_save,
     )
 
@@ -836,8 +837,9 @@ def test_golden_save_confirm_same_key_different_plan_conflicts(
     client: FlaskClient, tmp_path: Path
 ) -> None:
     """US-214: a key bound to one plan rejects a different plan (409)."""
-    from apps.migu_orca_entry.controllers.entry_controller import generate_request
     from apps.migu_orca_web.save_confirm_service import compute_request_fingerprint
+    from plan_engine.controllers.data_sources import StaticFixtureDataSource
+    from plan_engine.controllers.plan_generation import build_plan
     from shared.models import EntryRequest
     from storage_engine.controllers.idempotency_repository import (
         create_idempotency_record,
@@ -846,7 +848,7 @@ def test_golden_save_confirm_same_key_different_plan_conflicts(
     from storage_engine.controllers.storage_config import load_storage_config
 
     # Bind the key to a different plan (咒术回战) in an IN_PROGRESS record.
-    other = generate_request(EntryRequest(raw_title="咒术回战"))["request"]
+    other = build_plan(EntryRequest(raw_title="咒术回战"), data_source=StaticFixtureDataSource())["request"]
     config = load_storage_config(tmp_path / "storage")
     save_idempotency_record(
         config,

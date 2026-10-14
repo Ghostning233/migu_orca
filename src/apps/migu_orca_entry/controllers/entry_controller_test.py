@@ -6,9 +6,6 @@ from pathlib import Path
 from ab_engine.controllers.ab_client import FakeAutoBangumiClient
 from apps.migu_orca_entry.controllers.entry_controller import (
     apply_ab_submit_action,
-    apply_confirmation_action,
-    apply_modify_action,
-    apply_request_save_action,
     generate_request,
     list_saved_requests,
     load_saved_request,
@@ -20,6 +17,11 @@ from mikan_engine.controllers.mikan_client import (
     create_mikan_client,
 )
 from mikan_engine.controllers.mikan_config import MikanConfig
+from plan_engine.controllers.plan_actions import (
+    apply_confirmation_action,
+    apply_modify_action,
+    apply_request_save_action,
+)
 from request_engine.controllers.request_controller import summarize_request
 from shared.errors import Stage1Error
 from shared.models import BangumiCandidate, EntryRequest, MatchedBangumi, RssSource
@@ -614,7 +616,7 @@ def test_apply_request_save_action_returns_stable_error(
         )
 
     monkeypatch.setattr(
-        "apps.migu_orca_entry.controllers.entry_controller.save_request_snapshot",
+        "plan_engine.controllers.plan_actions.save_request_snapshot",
         fail_save,
     )
 
@@ -652,7 +654,7 @@ def test_apply_request_save_action_returns_stable_error_for_history_failure(
         )
 
     monkeypatch.setattr(
-        "apps.migu_orca_entry.controllers.entry_controller.append_status_history",
+        "plan_engine.controllers.plan_actions.append_status_history",
         fail_append_history,
     )
 
@@ -1168,7 +1170,7 @@ def test_apply_request_save_action_returns_stable_error_for_ab_result_failure(
         )
 
     monkeypatch.setattr(
-        "apps.migu_orca_entry.controllers.entry_controller.save_ab_submit_result",
+        "plan_engine.controllers.plan_actions.save_ab_submit_result",
         fail_save_ab_result,
     )
 

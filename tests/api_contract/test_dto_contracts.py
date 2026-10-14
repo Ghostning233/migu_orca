@@ -14,7 +14,6 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from apps.migu_orca_web.api_contract import (
     BatchParseResultDTO,
     BatchSaveConfirmResultDTO,
@@ -38,6 +37,8 @@ from apps.migu_orca_web.serializers import (
     serialize_request_safe_info,
 )
 from batch_engine.controllers.batch_draft_controller import create_batch_draft
+from plan_engine.controllers.data_sources import StaticFixtureDataSource
+from plan_engine.controllers.plan_generation import build_plan
 from request_engine.controllers.request_controller import (
     accept_request,
     summarize_request,
@@ -46,7 +47,7 @@ from shared.models import EntryRequest
 
 
 def _generated_request(title: str = "芙莉莲") -> dict[str, Any]:
-    return generate_request(EntryRequest(raw_title=title))["request"]
+    return build_plan(EntryRequest(raw_title=title), data_source=StaticFixtureDataSource())["request"]
 
 
 def _safe_detail_request(title: str = "芙莉莲") -> dict[str, Any]:
@@ -467,7 +468,7 @@ def test_request_delete_dto_shape() -> None:
 def _safe_info_payload() -> dict[str, Any]:
     """Build the real serializer output for a generated Request."""
     request = {
-        **generate_request(EntryRequest(raw_title="芙莉莲"))["request"],
+        **build_plan(EntryRequest(raw_title="芙莉莲"), data_source=StaticFixtureDataSource())["request"],
         "request_id": "request-1",
     }
     return serialize_request_safe_info(
