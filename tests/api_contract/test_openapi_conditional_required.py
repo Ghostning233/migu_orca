@@ -540,6 +540,90 @@ def test_registered_conditional_refinements_pass_the_tightened_guard() -> None:
         )
 
 
+# ---------------------------------------------------------------------------
+# Systematic shape sweep: every key the guard allows must have a shape check
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "fragment",
+    [
+        # JSON Schema 2020-12: ``enum`` must be a non-empty array.
+        {"if": {"properties": {"confirm": {"enum": "x"}}}},
+        {"if": {"properties": {"confirm": {"enum": []}}}},
+        {"then": {"enum": None}},
+        {"then": {"enum": {"a": 1}}},
+        {"else": {"not": {"anyOf": [{"enum": 1}]}}},
+    ],
+)
+def test_merge_refinement_rejects_malformed_enum(fragment: dict[str, Any]) -> None:
+    with pytest.raises(ValueError, match="'enum' must be a non-empty array"):
+        openapi_gen._validate_merge_fragment(fragment, allowed_names=_CONDITION_NAMES)
+
+
+@pytest.mark.parametrize(
+    "fragment",
+    [
+        # An explicit ``null`` must not slip past a "missing key" check.
+        {"then": {"required": None}},
+        {"then": {"required": []}},
+        {"then": {"required": ["confirm", "confirm"]}},
+        {"then": {"required": [""]}},
+        {"then": {"required": [1]}},
+        {"else": {"not": {"anyOf": [{"required": None}]}}},
+    ],
+)
+def test_merge_refinement_rejects_malformed_required(fragment: dict[str, Any]) -> None:
+    """``required`` must be a non-empty, duplicate-free array of property names."""
+    with pytest.raises(ValueError, match="'required'"):
+        openapi_gen._validate_merge_fragment(fragment, allowed_names=_CONDITION_NAMES)
+
+
+def test_merge_refinement_rejects_null_properties() -> None:
+    """``properties: null`` must not slip past a "missing key" check either."""
+    with pytest.raises(ValueError, match="'properties' must be a mapping"):
+        openapi_gen._validate_merge_fragment(
+            {"then": {"properties": None}}, allowed_names=_CONDITION_NAMES
+        )
+
+
+@pytest.mark.parametrize(
+    "fragment",
+    [
+        {"allOf": []},
+        {"anyOf": []},
+        {"oneOf": []},
+        {"allOf": ["x"]},
+        {"anyOf": [None]},
+        {"oneOf": [{"required": ["confirm"]}, "x"]},
+    ],
+)
+def test_merge_refinement_rejects_malformed_composition_arrays(
+    fragment: dict[str, Any],
+) -> None:
+    """Composition arrays must be non-empty and hold subschema mappings."""
+    with pytest.raises(ValueError, match=r"'allOf'|'anyOf'|'oneOf'"):
+        openapi_gen._validate_merge_fragment(fragment, allowed_names=_CONDITION_NAMES)
+
+
+def test_merge_refinement_accepts_documented_no_op_boundaries() -> None:
+    """Boundaries that are syntactically valid JSON Schema, frozen as accepted.
+
+    - ``properties: {}`` is a no-op (it constrains no field);
+    - ``not: {}`` is legal but unsatisfiable (``not`` of the always-true schema),
+      so it forbids every body: a semantic hazard the 400-comparison tests would
+      catch, not an invalid-schema hazard;
+    - ``const`` accepts any JSON value, including ``null``.
+    """
+    for fragment in (
+        {"then": {"properties": {}}},
+        {"not": {}},
+        {"if": {"properties": {"confirm": {"const": None}}}},
+        {"if": {"properties": {"confirm": {"enum": [True, False]}}}},
+    ):
+        openapi_gen._validate_merge_fragment(fragment, allowed_names=_CONDITION_NAMES)
+
+
 def test_reviewed_merge_refinements_are_registered() -> None:
     """Every published conditional refinement is on the reviewed allowlist."""
     declared = frozenset(

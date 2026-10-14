@@ -58,8 +58,15 @@
    被当作已覆盖。
 2. **`recover` 的 `MARK_* → confirm=true` 未在契约表达。** 运行时要求
    `action` 为 `MARK_SUCCEEDED`/`MARK_FAILED` 时 `confirm` 必须为 `true`（无 `confirm` 实测
-   400）。**分层原因**：该规则由 handoff 层模型 `SavedTrackingRecoveryInput._manual_confirmation`
-   与 `tracking_saved_recovery_service` 强制，而签约 requestBody 的来源模型是
-   `TrackingRecoverPayload`（#171 单一来源原则）；为 handoff 层规则在 `_ENDPOINTS`/细化里重述结构
-   会重新制造第二源，因此本票只登记不改。若产品要求客户端可见该约束，应作为独立票先确认
-   来源模型边界再评审加入。
+   400 `data_validation_errors`）。该规则实际有两个强制点，且都在签约模型之外：
+   - **handoff 模型（回答 HTTP 400 的那一处）**：`SavedTrackingRecoveryInput._manual_confirmation`
+     （`schemas.py:623` 起）在 `confirm is not True` 时抛 `confirm must be true`。路由
+     `routes_tracking.py:349` 会把已通过 `TrackingRecoverPayload` 的载荷重新
+     `SavedTrackingRecoveryInput.model_validate(...)`，所以真实请求在这里被拦下。
+   - **service 层防御**：`tracking_recovery_service.py:392-398` 的
+     `manual and confirm is not True` 抛 `Stage1Error("tracking_confirmation_required", …)`
+     （第 394 行是 error_type），覆盖直接调用 service 的路径；
+     `tracking_saved_recovery_service.run_saved_tracking_recovery` 只是入口并委派给它。
+   **分层原因**：签约 requestBody 的来源模型是 `TrackingRecoverPayload`（#171 单一来源原则），
+   上述两处都属于 handoff/service 层；为它们在 `_ENDPOINTS`/细化里重述结构会重新制造第二源，
+   因此本票只登记不改。若产品要求客户端可见该约束，应作为独立票先确认来源模型边界再评审加入。

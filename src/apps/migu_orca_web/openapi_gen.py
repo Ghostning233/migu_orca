@@ -541,19 +541,25 @@ def _validate_merge_conditions(node: Any, *, allowed_names: set[str]) -> None:
     """Reject any structure a merge refinement is not allowed to publish.
 
     Applies to every ``if``/``then``/``else``/``allOf``/... subtree, not just to
-    the top of the fragment:
+    the top of the fragment. Every allowed key has an explicit shape check, so
+    the guard cannot publish an invalid JSON Schema:
 
     - only the constraint keywords in ``_MERGE_CONDITION_KEYS`` may appear;
-    - ``properties`` must be a mapping whose entries are ``const``/``enum``
+    - ``required`` is a non-empty, duplicate-free array of existing field names;
+    - ``enum`` is a non-empty array;
+    - ``properties`` is a mapping whose entries are ``const``/``enum``
       predicates over property names the endpoint's model already declares;
-    - every ``required`` name must already exist in the model.
+    - ``allOf``/``anyOf``/``oneOf`` are non-empty arrays of subschema mappings;
+    - ``not``/``if``/``then``/``else`` are subschema mappings;
+    - ``const`` accepts any JSON value (nothing to check).
+
+    Key presence is tested with ``in``: an explicit ``null`` must fail the shape
+    check instead of slipping past a "missing key" test.
     """
-    if isinstance(node, list):
-        for item in node:
-            _validate_merge_conditions(item, allowed_names=allowed_names)
-        return
     if not isinstance(node, dict):
-        return
+        raise ValueError(
+            "merge refinement subschema must be a mapping of constraints (issue #203)."
+        )
     unknown = sorted(set(node) - _MERGE_CONDITION_KEYS)
     if unknown:
         raise ValueError(
@@ -561,60 +567,101 @@ def _validate_merge_conditions(node: Any, *, allowed_names: set[str]) -> None:
             f"{sorted(_MERGE_CONDITION_KEYS)} may appear inside an if/then/else subtree "
             "(issue #203)."
         )
-    required = node.get("required")
-    if required is not None:
-        if not isinstance(required, list) or not all(
-            isinstance(name, str) for name in required
-        ):
-            raise ValueError(
-                "merge refinement 'required' must be a list of property names (issue #203)."
-            )
-        invented = sorted(set(required) - allowed_names)
-        if invented:
-            raise ValueError(
-                f"merge refinement requires propert(ies) {invented} that are not a model "
-                f"field ({sorted(allowed_names)}); a merge may not invent property names "
-                "(issue #203)."
-            )
-    properties = node.get("properties")
-    if properties is not None:
-        if not isinstance(properties, dict):
-            raise ValueError(
-                "merge refinement 'properties' must be a mapping of field names (issue #203)."
-            )
-        invented = sorted(set(properties) - allowed_names)
-        if invented:
-            raise ValueError(
-                f"merge refinement names propert(ies) {invented} that are not a model "
-                f"field ({sorted(allowed_names)}); a merge may not invent property "
-                "names (issue #203)."
-            )
-        for name, predicate in properties.items():
-            if not isinstance(predicate, dict) or not predicate:
-                raise ValueError(
-                    f"merge refinement predicate for {name!r} must be a non-empty mapping"
-                )
-            structural = sorted(set(predicate) - _MERGE_PREDICATE_KEYS)
-            if structural:
-                raise ValueError(
-                    f"merge refinement predicate for {name!r} declares {structural}; only "
-                    f"{sorted(_MERGE_PREDICATE_KEYS)} may appear in a merge predicate "
-                    "(restating a type is a second structure source, issue #203)."
-                )
-            _validate_merge_conditions(predicate, allowed_names=allowed_names)
-    for key in _MERGE_CONSTRAINT_KEYS:
-        child = node.get(key)
-        if child is None:
+    if "required" in node:
+        _validate_merge_required(node["required"], allowed_names=allowed_names)
+    if "enum" in node:
+        _validate_merge_enum(node["enum"])
+    if "properties" in node:
+        _validate_merge_properties(node["properties"], allowed_names=allowed_names)
+    for key in _MERGE_SEQUENCE_KEYS:
+        if key in node:
+            _validate_merge_sequence(key, node[key], allowed_names=allowed_names)
+    for key in _MERGE_MAPPING_KEYS:
+        if key not in node:
             continue
-        if key in _MERGE_SEQUENCE_KEYS and not isinstance(child, list):
-            raise ValueError(
-                f"merge refinement {key!r} must be an array of subschemas (issue #203)."
-            )
-        if key in _MERGE_MAPPING_KEYS and not isinstance(child, dict):
+        child = node[key]
+        if not isinstance(child, dict):
             raise ValueError(
                 f"merge refinement {key!r} must be a mapping of constraints (issue #203)."
             )
         _validate_merge_conditions(child, allowed_names=allowed_names)
+
+
+def _validate_merge_required(value: Any, *, allowed_names: set[str]) -> None:
+    """``required`` is a non-empty, duplicate-free array of existing field names."""
+    if not isinstance(value, list) or not value:
+        raise ValueError(
+            "merge refinement 'required' must be a non-empty array of property names "
+            "(issue #203)."
+        )
+    for name in value:
+        if not isinstance(name, str) or not name:
+            raise ValueError(
+                "merge refinement 'required' entries must be non-empty property names "
+                "(issue #203)."
+            )
+    if len(set(value)) != len(value):
+        raise ValueError(
+            "merge refinement 'required' must not repeat a property name (issue #203)."
+        )
+    invented = sorted(set(value) - allowed_names)
+    if invented:
+        raise ValueError(
+            f"merge refinement requires propert(ies) {invented} that are not a model "
+            f"field ({sorted(allowed_names)}); a merge may not invent property names "
+            "(issue #203)."
+        )
+
+
+def _validate_merge_enum(value: Any) -> None:
+    """JSON Schema 2020-12: ``enum`` must be a non-empty array."""
+    if not isinstance(value, list) or not value:
+        raise ValueError(
+            "merge refinement 'enum' must be a non-empty array of allowed values "
+            "(issue #203)."
+        )
+
+
+def _validate_merge_properties(value: Any, *, allowed_names: set[str]) -> None:
+    """``properties`` maps existing field names to ``const``/``enum`` predicates."""
+    if not isinstance(value, dict):
+        raise ValueError(
+            "merge refinement 'properties' must be a mapping of field names (issue #203)."
+        )
+    invented = sorted(set(value) - allowed_names)
+    if invented:
+        raise ValueError(
+            f"merge refinement names propert(ies) {invented} that are not a model "
+            f"field ({sorted(allowed_names)}); a merge may not invent property "
+            "names (issue #203)."
+        )
+    for name, predicate in value.items():
+        if not isinstance(predicate, dict) or not predicate:
+            raise ValueError(
+                f"merge refinement predicate for {name!r} must be a non-empty mapping"
+            )
+        structural = sorted(set(predicate) - _MERGE_PREDICATE_KEYS)
+        if structural:
+            raise ValueError(
+                f"merge refinement predicate for {name!r} declares {structural}; only "
+                f"{sorted(_MERGE_PREDICATE_KEYS)} may appear in a merge predicate "
+                "(restating a type is a second structure source, issue #203)."
+            )
+        _validate_merge_conditions(predicate, allowed_names=allowed_names)
+
+
+def _validate_merge_sequence(key: str, value: Any, *, allowed_names: set[str]) -> None:
+    """``allOf``/``anyOf``/``oneOf`` are non-empty arrays of subschema mappings."""
+    if not isinstance(value, list) or not value:
+        raise ValueError(
+            f"merge refinement {key!r} must be a non-empty array of subschemas (issue #203)."
+        )
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError(
+                f"merge refinement {key!r} entries must be subschema mappings (issue #203)."
+            )
+        _validate_merge_conditions(item, allowed_names=allowed_names)
 
 
 def _merge_refinement(
