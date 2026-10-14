@@ -2736,9 +2736,7 @@ class TestAppBatchDetailPaneScrollPolicy:
                 input.dispatchEvent(new Event('input', { bubbles: true }))
             }"""
         )
-        page.wait_for_function(
-            "() => document.querySelector('#batch-preview-must-contain').value === '未应用修改'"
-        )
+        page.wait_for_function("() => document.querySelector('#batch-preview-must-contain').value === '未应用修改'")
         expect(page.locator("#batch-detail-pane")).to_contain_text("有尚未应用的编辑")
         assert _detail_pane_scroll_top(page) == 300
 
@@ -2750,6 +2748,37 @@ class TestAppBatchDetailPaneScrollPolicy:
         page.eval_on_selector("#batch-detail-pane", "el => el.scrollTop = 240")
         _switch_detail_item(page, "item-00")
         assert _detail_pane_scroll_top(page) == 0
+
+    def test_failed_save_for_the_current_item_keeps_the_pane_scroll(self, page: Page, live_server_url: str) -> None:
+        """同一条目保存完成后右栏滚动位置保持不变（口径的另一半）。
+
+        保存结果不改变 `currentItemId`（本条目确定性失败、就地给出重试入口），
+        因此不得把右栏滚回顶部。
+        """
+        page.route(
+            "**/api/v1/batches/batch-spa/save-confirm*",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_save_confirm_rows(["item-00"], failed_id="item-00"),
+            ),
+        )
+        _open_compact_list(page, live_server_url, _compact_items(1))
+        page.set_viewport_size({"width": 1280, "height": 600})
+        page.locator('.batch-draft-card[data-item-id="item-00"]').click()
+        page.wait_for_selector("#batch-detail-pane .batch-resource-box", timeout=10_000)
+
+        overflow = page.eval_on_selector("#batch-detail-pane", "el => el.scrollHeight - el.clientHeight")
+        assert overflow >= 300, overflow
+        page.eval_on_selector("#batch-detail-pane", "el => el.scrollTop = 300")
+
+        page.check('.batch-draft-card[data-item-id="item-00"] input[type="checkbox"]')
+        page.click("#batch-accept-submit")
+        page.locator(".confirm-dialog .primary-button").click()
+        # 保存结果落定：本条目的确定性失败就地给出重试入口。
+        expect(page.locator("#batch-retry-save-item-00")).to_be_visible()
+        assert page.locator(".batch-draft-card.is-current").get_attribute("data-item-id") == "item-00"
+        assert _detail_pane_scroll_top(page) == 300
 
 
 class TestAppBatchLeaveGuardCancel:
