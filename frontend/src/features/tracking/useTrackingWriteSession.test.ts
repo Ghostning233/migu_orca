@@ -1683,17 +1683,19 @@ const REPLAY_BLOCKED_COPY =
 
 describe('unbuildable page session (issue #193)', () => {
   it('refuses, states the fixed reason and converges on the one reachable unbuildable arm', () => {
-    // Only the recovery arm is reachable through the module's own surface: the
-    // page proved the read-only external-verify capability but no longer holds
-    // the generation the action spends.  ``TrackingView.runTrackingRecovery``
-    // always reads both from the same ``savedState``, so the UI cannot reach
-    // this either — the module must still answer it like the other two families
-    // do instead of silently ignoring the click.
+    // Only the recovery arm is reachable through the module's own surface *and*
+    // owes a converging re-read: the page proved the read-only external-verify
+    // capability but no longer holds the generation the action spends.
+    // ``TrackingView.runTrackingRecovery`` always reads both from the same
+    // ``savedState``, so the UI cannot reach this either — the module must still
+    // answer it with fixed feedback instead of silently ignoring the click.
     //
-    // The submit and management ``!requestConfig`` arms are deliberately
-    // *unreachable* defensive copies of this same answer, so no public-surface
-    // test can execute them; what is pinned for them is the invariant that makes
-    // them dead, in the next case below (independent audit I-1).
+    // The other two families answer the same precondition with the baseline
+    // refusal and *no* effect, and one of those arms is genuinely reachable
+    // through the resubmission flow — see "refuses a locked submit whose
+    // generation the resubmission flow dropped" below, added after the
+    // independent re-audit (N-1) falsified the earlier claim that no public-surface
+    // sequence could execute it.
     const writes = session()
     const started = writes.beginRecovery(
       { action: 'VERIFY_EXTERNAL', item: recoverableItem() },
@@ -1754,28 +1756,57 @@ describe('unbuildable page session (issue #193)', () => {
     expect(beginRecoveryWrite('RECOVER_AUTO', { connection: null }).started.accepted).toBe(true)
   })
 
-  it('keeps the cleared-connection refusal at its gate, so the page never re-reads for it', () => {
-    // The submit and management families reach "the generation is gone" at the
-    // replay gate *before* the snapshot is read, and this test pins the whole
-    // reachable partition that makes the other branch unreachable from the page
-    // (issue #193):
-    //   - a locked intent whose live page session still holds its generation
-    //     replays and is accepted (pinned by "creates one revision-bound opaque
-    //     intent and replays it for a transport retry");
-    //   - a locked intent whose session was cleared is refused *here*, with zero
-    //     requests and zero effects;
-    //   - a settle releases the intent and its generation together, so no locked
-    //     intent can outlive the snapshot it was confirmed with.
-    // `unbuildableStart` therefore never adds an HTTP request the page did not
-    // already send.  This gate is a reachable UI path and its contract is
-    // unchanged: the fixed reason and zero requests, in particular zero
-    // converging effects — adding one would add a request the page never makes.
+  it('refuses a locked submit whose generation the resubmission flow dropped, sending nothing extra', () => {
+    // Reachable through the module's own surface (independent re-audit N-1): the
+    // risk-confirmed resubmission clears the ordinary submit generation while its
+    // one confirmation is in flight (``beginResubmitConfirmation``), so a later
+    // submit for the same record finds a locked intent with no generation — while
+    // the page still holds a working connection.  The answer is the fixed
+    // refusal, and (AC1) exactly the zero-request effects the page produced before
+    // this ticket: this refusal must never acquire a converging re-read, because
+    // the page does reach this command.
     const { writes } = inFlightSubmit()
     writes.finishSubmit(submitResult({ outcome: 'UNKNOWN' }))
-    // Half one of the invariant: a locked intent whose page session still holds
-    // its generation *is* replayable, so the only way to reach "cannot build"
-    // would be a locked intent without its snapshot — which the release rules
-    // below make impossible.
+    writes.beginResubmit({ item: pendingItem() }, { storageDir: STORAGE })
+    writes.finishResubmitOffer(offerResult())
+    expect(writes.beginResubmitConfirmation(RESUBMIT_BINDING, { storageDir: STORAGE }).accepted).toBe(true)
+    writes.finishSubmit(resubmitWriteResult({ outcome: 'UNKNOWN' }))
+    expect(writes.sessions.value.submit!.keepsIntent).toBe(true)
+
+    const again = writes.beginSubmit({
+      item: item({ available_actions: [action()] }), action: action(),
+    }, {
+      mode: 'CONTINUE_TRACKING', confirmed: true, connection: CONNECTION,
+    })
+    expect(again.accepted).toBe(false)
+    expect(again.request).toBeNull()
+    expect(again.refusal).toEqual({ trackingId: 'tracking-1', reason: 'REPLAY' })
+    expect(again.effects).toEqual([])
+    expect(writes.noticeFor('tracking-1')).toBe(REPLAY_BLOCKED_COPY)
+  })
+
+  it('keeps the cleared-connection refusal at its gate, so the page never re-reads for it', () => {
+    // The submit and management families reach "the generation is gone" at the
+    // replay gate *before* the snapshot is read, and this test pins that gate's
+    // contract (issue #193): the fixed reason and zero requests — in particular
+    // zero converging effects, because the page does reach this command and
+    // adding one would send a request it never made.
+    //
+    //   - a locked intent whose live page session still holds its generation
+    //     replays and is accepted (half one below);
+    //   - a locked intent whose session was cleared is refused *here*;
+    //   - a settle releases the tombstone and the replay block together, so the
+    //     record becomes submittable again rather than staying refused (half two).
+    //
+    // A locked intent *can* outlive its generation through one other route — the
+    // risk-confirmed resubmission clears it (independent re-audit N-1) — and that
+    // reachable arm is pinned separately by "refuses a locked submit whose
+    // generation the resubmission flow dropped".
+    const { writes } = inFlightSubmit()
+    writes.finishSubmit(submitResult({ outcome: 'UNKNOWN' }))
+    // Half one: a locked intent whose page session still holds its generation
+    // *is* replayable, so "cannot build" needs a locked intent without its
+    // snapshot — which the release rules below do not create.
     const stillHolds = writes.beginSubmit({ item: item(), action: action() }, {
       mode: 'CONTINUE_TRACKING', confirmed: true, connection: CONNECTION,
     })
@@ -1809,13 +1840,14 @@ describe('unbuildable page session (issue #193)', () => {
     expect(replayedManagement.effects).toEqual([])
     expect(management.writes.noticeFor('tracking-1')).toBe(REPLAY_BLOCKED_COPY)
 
-    // Half two: a settle releases the tombstone *and* its generation together, so
-    // no locked intent can survive without the snapshot it was confirmed with.
-    // (``releaseSettledSubmission`` is reached by a read-only check that proved
-    // the external object; the check's own suite covers the verdict, this covers
-    // the resulting state.)
+    // Half two: a settle releases the tombstone *and* the replay block together.
+    // The clear comes first, so the flag really is set and dropping it later is
+    // observable: with the live connection this record must be submittable again,
+    // where a surviving tombstone/flag would be refused as REPLAY (independent
+    // re-audit N-2).
     const settled = inFlightSubmit()
     settled.writes.finishSubmit(submitResult({ outcome: 'UNKNOWN' }))
+    settled.writes.preserveAfterClear()
     settled.writes.setAutoCheck(true)
     const check = settled.writes.beginCheck({ item: item(), automatic: true })
     expect(check.accepted).toBe(true)
@@ -1825,13 +1857,14 @@ describe('unbuildable page session (issue #193)', () => {
       operation_id: 'operation-1', tracking: item({ revision: 4 }),
     } as never)
     expect(settled.writes.sessions.value.submit).toBeNull()
-    // Nothing is locked any more, so a connection-less submit is the ordinary
-    // "page is not connected" no-op, not a replay refusal.
-    const afterSettle = settled.writes.beginSubmit({ item: item(), action: action() }, {
-      mode: 'CONTINUE_TRACKING', confirmed: true, connection: null,
+    const afterSettle = settled.writes.beginSubmit({
+      item: item({ available_actions: [action()] }), action: action(),
+    }, {
+      mode: 'CONTINUE_TRACKING', confirmed: true, connection: CONNECTION,
     })
+    expect(afterSettle.accepted).toBe(true)
+    expect(afterSettle.request).not.toBeNull()
     expect(afterSettle.refusal).toBeNull()
-    expect(afterSettle.effects).toEqual([])
   })
 })
 

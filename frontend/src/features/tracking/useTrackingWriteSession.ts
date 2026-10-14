@@ -2379,24 +2379,35 @@ function createTrackingWriteCore(): TrackingWriteCore {
   }
 
   /**
-   * Refuse one command whose request the page session can no longer build.
+   * Refuse one command whose request the page session can no longer build, and
+   * converge on the server.
    *
-   * Issue #193: the three families reach the same precondition — an action whose
-   * declared credential (the locked intent's saved generation, or the generation
-   * a read-only ``VERIFY_EXTERNAL`` spends) is no longer on the page — and all
-   * three must answer it the same way: send nothing, state the one fixed reason
-   * on the record the user acted on, and hand back the converging re-read the
-   * page already runs for a refused command.  A silent no-op here is a dead
-   * button with no stated next step, which is exactly what ``beginRecovery``
-   * used to be.
+   * Issue #193: the three families reach the same *precondition* — an action
+   * whose declared credential (the locked intent's saved generation, or the
+   * generation a read-only ``VERIFY_EXTERNAL`` spends) is no longer on the page —
+   * and none of them may answer it with a silent no-op, which is exactly what
+   * ``beginRecovery`` used to do: a dead button with no stated next step.
+   *
+   * What differs per family is whether it may *also* converge, and that is not a
+   * style choice (independent re-audit N-1):
+   *
+   * - ``beginRecovery`` is the silent arm and the only user of this helper.  It is
+   *   unreachable from the UI (``TrackingView`` always reads the capability and the
+   *   connection from the same ``savedState``), so refusing *and* handing back the
+   *   converging re-read adds no request the page ever sent.
+   * - The submit and management arms keep their baseline refusal *without* the
+   *   extra effect, because the submit one is reachable: the risk-confirmed
+   *   resubmission clears the ordinary submit generation, so a later submit for
+   *   that record would otherwise acquire an HTTP request the page never made
+   *   (AC1).  Both are pinned by the session test.
    *
    * The reason is the replay reason because it is the one fixed sentence that
    * describes this precondition ("the connection this operation was bound to has
-   * been cleared or replaced"), and it is deliberately the same sentence the
-   * submit and management families already state for it.
+   * been cleared or replaced"), and it is deliberately the same sentence every
+   * family already states for it.
    *
-   * The reachable sibling — a generation that *exists* but cannot be turned into
-   * a safe body (``beginManagement``'s own unbuildable check) — keeps its own
+   * The reachable sibling — a generation that *exists* but cannot be turned into a
+   * safe body (``beginManagement``'s own unbuildable check) — keeps its own
    * definite-failure session instead: there the page owes the user a statement of
    * what it refused to send, and it already carries the same converging re-read.
    * Routing it through the refusal channel would be wrong in kind, not just in
@@ -2562,15 +2573,17 @@ function createSubmitFamily(core: SubmitFamilyCore) {
     const intent = locked ?? createTrackingActionIntent(payload.item, payload.action)
     if (!intent) return ignoredStart()
     const requestConfig = locked ? core.submitConfigSnapshot : options.connection
-    // Defensive, and unreachable from the page (issue #193, independent audit
-    // I-1): a locked intent is only ever released together with its generation
-    // (``releaseSubmitIntent``/``releaseSettledSubmission``/``releaseFor``), and a
-    // clear that drops the generation raises ``submitReplayBlocked`` first, so the
-    // gate above refuses before this line.  It stays as the same unification the
-    // recovery arm uses rather than a silent no-op, and the invariant that makes
-    // it dead is pinned by "keeps the cleared-connection refusal at its gate" in
-    // useTrackingWriteSession.test.ts.
-    if (!requestConfig) return core.unbuildableStart(trackingId)
+    // A locked intent can legitimately have no generation left (independent
+    // re-audit N-1): ``beginResubmitConfirmation`` clears this very snapshot for
+    // the one risk-confirmed resubmission without releasing the ordinary submit
+    // intent, so an ordinary submit for the same record reaches here afterwards.
+    // That is a *reachable* command, so it keeps exactly the baseline answer — the
+    // fixed refusal and zero requests.  The converging re-read the recovery arm
+    // owes would add an HTTP request on a path the page never sent one on (AC1);
+    // "keeps the cleared-connection refusal at its gate" and "refuses a locked
+    // submit whose generation the resubmission flow dropped" in the session test
+    // pin this arm and that reachability.
+    if (!requestConfig) return core.refuseAndStart(trackingId, 'REPLAY')
     core.submitIntent = intent
     if (!locked) core.submitConfigSnapshot = { ...requestConfig }
     const storageDir = options.storageDir
@@ -2864,13 +2877,16 @@ function createManagementFamily(core: ManagementFamilyCore) {
       return { ...ignoredStart(), ask: 'IMPACT', confirmation: managementConfirmation(intent) }
     }
     const requestConfig = locked ? core.managementConfigSnapshot : options.connection
-    // Defensive and unreachable from the page for exactly the same reason as the
-    // submit family's arm (issue #193, independent audit I-1): a locked
-    // management intent and its generation are released together, and a clear
-    // raises ``managementReplayBlocked`` first.  The reachable sibling just below
-    // — a generation that exists but cannot become a body — is the one that owes
-    // the user a statement, and it keeps its own definite-failure session.
-    if (!requestConfig) return core.unbuildableStart(trackingId)
+    // No public-surface sequence reaches this arm today (independent re-audit E3:
+    // mutating it to either alternative changes nothing any test or probe can
+    // observe), but it is kept at exactly the baseline zero-request refusal: the
+    // submit family's sibling *is* reachable through the resubmission flow (see
+    // there), so this arm must not become a way to add an HTTP request if a future
+    // change ever makes a management generation disappear the same way.  The
+    // reachable sibling just below — a generation that exists but cannot become a
+    // body — is the one that owes the user a statement, and it keeps its own
+    // definite-failure session.
+    if (!requestConfig) return core.refuseAndStart(trackingId, 'REPLAY')
     core.managementIntent = intent
     if (!locked) core.managementConfigSnapshot = { ...requestConfig }
     // A body the page cannot build safely (no server address, missing scope
@@ -3336,6 +3352,16 @@ function createResubmitFamily(core: ResubmitFamilyCore) {
     core.resubmit.value = null
     // The confirmation is a submit-family external write: one new operation and
     // the ordinary submit result panel.
+    //
+    // The ordinary submit's generation is dropped here on purpose (independent
+    // re-audit N-3): the one new operation carries its own server-published
+    // binding (previous operation + connection), so keeping the snapshot would
+    // invite a replay of the *old* key against the new operation.  ``submitIntent``
+    // is deliberately not released here — this confirmation is not a fresh
+    // ordinary submit, and its own result still has to settle the page's single
+    // intent.  The consequence is recorded and tested: until that result is
+    // decided, an ordinary submit for this record finds a locked intent with no
+    // generation and gets the fixed refusal with zero requests.
     core.submitConfigSnapshot = null
     core.active = { family: 'RESUBMIT', trackingId, action: 'SUBMIT', mode: 'CONTINUE_TRACKING' }
     core.loading.value = true
