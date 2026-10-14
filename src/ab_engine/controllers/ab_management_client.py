@@ -8,7 +8,7 @@ from typing import Any, Literal, Protocol
 from urllib.parse import quote, urlsplit
 
 from ab_engine.controllers.ab_config import AutoBangumiConfig
-from ab_engine.controllers.ab_http_client import AutoBangumiLegacyTransport, _api_endpoint
+from ab_engine.controllers.ab_http_client import AutoBangumiLegacyTransport, api_endpoint
 from ab_engine.models.management import (
     AutoBangumiCapabilities,
     ExternalRss,
@@ -255,7 +255,7 @@ class Legacy31ManagementClient:
                 )
             timeout = min(timeout, remaining)
         try:
-            return self._transport.request_json(method, _api_endpoint(self._config.base_url, path), headers, payload, timeout=timeout)
+            return self._transport.request_json(method, api_endpoint(self._config.base_url, path), headers, payload, timeout=timeout)
         except Stage1Error:
             raise
         except Exception as exc:
