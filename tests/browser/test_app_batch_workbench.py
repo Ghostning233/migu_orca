@@ -2676,6 +2676,112 @@ class TestAppBatchSessionObservables:
         assert _active_item_id(page) == "item-07"
 
 
+# ---------------------------------------------------------------------------
+# Issue 198: 右栏详情滚动策略——切换条目回顶（不做按条目记忆），
+# 同一条目内的编辑不打断栏内滚动。断言只锚定 DOM 可观察结果（scrollTop）。
+# ---------------------------------------------------------------------------
+
+
+def _detail_pane_scroll_top(page: Page) -> float:
+    return page.eval_on_selector("#batch-detail-pane", "el => el.scrollTop")
+
+
+def _switch_detail_item(page: Page, item_id: str) -> None:
+    """点击另一张条目卡，并等右栏详情编辑器真的按条目 key 重新挂载。
+
+    右栏 pane 本身没有 `:key`，只有内部 AnimeDraftEditor 换挂载，因此这里用
+    「旧表单被新表单替换」作为切换完成的同步点，而不是等一个固定时长。
+    """
+    page.eval_on_selector("#detail-preview-edit-form", "el => { el.dataset.probe = '1' }")
+    page.locator(f'.batch-draft-card[data-item-id="{item_id}"]').click()
+    page.wait_for_function(
+        """() => {
+            const form = document.querySelector('#detail-preview-edit-form')
+            return Boolean(form) && form.dataset.probe !== '1'
+        }""",
+        timeout=10_000,
+    )
+
+
+class TestAppBatchDetailPaneScrollPolicy:
+    """#198：切换条目时右栏回到顶部，且同一条目内的编辑不打断栏内滚动。
+
+    实测取证（#198 评论）：右栏滚动容器是外层 `#batch-detail-pane`，内部编辑器按条目
+    重挂载不会移动它——不重置就会把上一条目的偏移带到另一个条目上（300 → 300）。
+    """
+
+    def test_switching_item_resets_the_detail_pane_and_same_item_edit_keeps_scroll(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        _open_compact_list(page, live_server_url, _compact_items(12))
+        # 1440×900 下右栏内容恰好放得下（无法观察滚动）；1280×600 下右栏真实溢出。
+        page.set_viewport_size({"width": 1280, "height": 600})
+        page.locator('.batch-draft-card[data-item-id="item-00"]').click()
+        page.wait_for_selector("#batch-detail-pane .batch-resource-box", timeout=10_000)
+
+        overflow = page.eval_on_selector(
+            "#batch-detail-pane", "el => el.scrollHeight - el.clientHeight"
+        )
+        assert overflow >= 300, overflow
+
+        page.eval_on_selector("#batch-detail-pane", "el => el.scrollTop = 300")
+        assert _detail_pane_scroll_top(page) == 300
+
+        # 同一条目内的真实编辑（筛选输入 → v-model → 未应用编辑）不改变 currentItemId，
+        # 因此不得打断栏内滚动。这里用 input 事件而不是点击控件：点击会带上浏览器把
+        # 焦点元素滚进可见区的行为，那不属于本票的滚动策略。
+        page.evaluate(
+            """() => {
+                const input = document.querySelector('#batch-preview-must-contain')
+                input.value = '未应用修改'
+                input.dispatchEvent(new Event('input', { bubbles: true }))
+            }"""
+        )
+        page.wait_for_function("() => document.querySelector('#batch-preview-must-contain').value === '未应用修改'")
+        expect(page.locator("#batch-detail-pane")).to_contain_text("有尚未应用的编辑")
+        assert _detail_pane_scroll_top(page) == 300
+
+        # 切换到另一条目：右栏回顶。
+        _switch_detail_item(page, "item-01")
+        assert _detail_pane_scroll_top(page) == 0
+
+        # 不做按条目记忆：切回原条目同样回顶，而不是恢复离开时记住的偏移。
+        page.eval_on_selector("#batch-detail-pane", "el => el.scrollTop = 240")
+        _switch_detail_item(page, "item-00")
+        assert _detail_pane_scroll_top(page) == 0
+
+    def test_failed_save_for_the_current_item_keeps_the_pane_scroll(self, page: Page, live_server_url: str) -> None:
+        """同一条目保存完成后右栏滚动位置保持不变（口径的另一半）。
+
+        保存结果不改变 `currentItemId`（本条目确定性失败、就地给出重试入口），
+        因此不得把右栏滚回顶部。
+        """
+        page.route(
+            "**/api/v1/batches/batch-spa/save-confirm*",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_save_confirm_rows(["item-00"], failed_id="item-00"),
+            ),
+        )
+        _open_compact_list(page, live_server_url, _compact_items(1))
+        page.set_viewport_size({"width": 1280, "height": 600})
+        page.locator('.batch-draft-card[data-item-id="item-00"]').click()
+        page.wait_for_selector("#batch-detail-pane .batch-resource-box", timeout=10_000)
+
+        overflow = page.eval_on_selector("#batch-detail-pane", "el => el.scrollHeight - el.clientHeight")
+        assert overflow >= 300, overflow
+        page.eval_on_selector("#batch-detail-pane", "el => el.scrollTop = 300")
+
+        page.check('.batch-draft-card[data-item-id="item-00"] input[type="checkbox"]')
+        page.click("#batch-accept-submit")
+        page.locator(".confirm-dialog .primary-button").click()
+        # 保存结果落定：本条目的确定性失败就地给出重试入口。
+        expect(page.locator("#batch-retry-save-item-00")).to_be_visible()
+        assert page.locator(".batch-draft-card.is-current").get_attribute("data-item-id") == "item-00"
+        assert _detail_pane_scroll_top(page) == 300
+
+
 class TestAppBatchLeaveGuardCancel:
     """#196：离开守卫取消分支的真实 Chromium 证据（取消必须完全无副作用）。"""
 
