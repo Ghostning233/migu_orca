@@ -2396,10 +2396,12 @@ function createTrackingWriteCore(): TrackingWriteCore {
    *   connection from the same ``savedState``), so refusing *and* handing back the
    *   converging re-read adds no request the page ever sent.
    * - The submit and management arms keep their baseline refusal *without* the
-   *   extra effect, because the submit one is reachable: the risk-confirmed
-   *   resubmission clears the ordinary submit generation, so a later submit for
-   *   that record would otherwise acquire an HTTP request the page never made
-   *   (AC1).  Both are pinned by the session test.
+   *   extra effect, because the submit one is reachable through this module's own
+   *   surface (the inspector disables the entry while its intent is unresolved, so
+   *   the page cannot press it): the risk-confirmed resubmission clears the
+   *   ordinary submit generation, so a later submit for that record would
+   *   otherwise acquire an HTTP request the page never made (AC1).  Both are
+   *   pinned by the session test.
    *
    * The reason is the replay reason because it is the one fixed sentence that
    * describes this precondition ("the connection this operation was bound to has

@@ -1762,9 +1762,10 @@ describe('unbuildable page session (issue #193)', () => {
     // one confirmation is in flight (``beginResubmitConfirmation``), so a later
     // submit for the same record finds a locked intent with no generation — while
     // the page still holds a working connection.  The answer is the fixed
-    // refusal, and (AC1) exactly the zero-request effects the page produced before
-    // this ticket: this refusal must never acquire a converging re-read, because
-    // the page does reach this command.
+    // refusal, and (AC1) exactly the zero-request effects the module produced
+    // before this ticket: it must never acquire a converging re-read, because this
+    // command is reachable (the inspector only *disables* the entry while its
+    // intent is unresolved, so the page itself cannot press it).
     const { writes } = inFlightSubmit()
     writes.finishSubmit(submitResult({ outcome: 'UNKNOWN' }))
     writes.beginResubmit({ item: pendingItem() }, { storageDir: STORAGE })
@@ -1789,8 +1790,8 @@ describe('unbuildable page session (issue #193)', () => {
     // The submit and management families reach "the generation is gone" at the
     // replay gate *before* the snapshot is read, and this test pins that gate's
     // contract (issue #193): the fixed reason and zero requests — in particular
-    // zero converging effects, because the page does reach this command and
-    // adding one would send a request it never made.
+    // zero converging effects, because the module's own surface reaches this
+    // command and adding one would send a request the page never made.
     //
     //   - a locked intent whose live page session still holds its generation
     //     replays and is accepted (half one below);
@@ -2066,12 +2067,17 @@ describe('batch selection rules (issue #87)', () => {
 // ---------------------------------------------------------------------------
 
 describe('one declaration per operation (issue #193)', () => {
-  it('carries every declared operation to its own family, route and confirmation', () => {
+  it('carries each operation listed here to its own family, route and body shape', () => {
     // One operation, one declaration: the family slot, the guard that accepts it
     // and the route it travels to all come from the same place, so this pins the
     // equivalence the single-source refactor had to preserve — per action, the
     // endpoint is the one the generated contract publishes and the operation is
     // accepted by exactly its own family.
+    //
+    // The list below is maintained by hand next to the declaration table (which is
+    // deliberately not exported), so a *new* operation will not be flagged here
+    // for being missing; it is caught by the declaration table's own total
+    // ``Record`` types and by these same per-action assertions once it is added.
     //
     // The endpoint literals below are typed against the generated ``paths`` union
     // (issue #193, independent audit M-3), so a route that drifts from the
