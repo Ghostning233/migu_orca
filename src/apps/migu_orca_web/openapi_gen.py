@@ -86,6 +86,7 @@ from apps.migu_orca_web.schemas import (
     RequestSaveConfirmPayload,
     SavedAutoBangumiProbePayload,
     SavedTrackingBatchSubmitInput,
+    SavedTrackingLocalPlan,
     SavedTrackingPlanDeleteInput,
     SavedTrackingSubmitInput,
     TrackingCheckPayload,
@@ -563,19 +564,42 @@ def _auth_config_union() -> dict[str, Any]:
     }
 
 
+def _tracking_local_plan_node() -> dict[str, Any]:
+    """The local plan a confirmed SUBSCRIPTION modify raises (issue #91/#202).
+
+    The field set and the ``minProperties: 1`` rule come from
+    ``SavedTrackingLocalPlan``; only the nullability (the field is optional) and
+    the published Chinese description are added here. ``filter_rule`` reuses the
+    same reviewed ``anyOf`` encoding as ``patch.filter_rule``: the model's
+    "provide at least one filter field" rule cannot be projected by pydantic.
+    """
+    node = _request_body_node(SavedTrackingLocalPlan)
+    properties = dict(node["properties"])
+    properties["filter_rule"] = _nullable_patch_node(TrackingFilterRulePatch)
+    return {
+        **node,
+        "properties": properties,
+        "type": ["object", "null"],
+        "description": (
+            "issue #91：外部修改确认成功后同时提升的本地方案字段（身份字段不可编辑）。"
+            "与 patch 独立，缺省表示只改外部对象。"
+        ),
+    }
+
+
 def _tracking_modify_body() -> dict[str, Any]:
     """Project the scope-discriminated external-modify union (US-245).
 
-    ``TrackingModifyPayload`` binds ``target_scope`` to the patch family in a
-    ``model_validator``; the discriminated encoding is assembled from the
-    models here (the previous published shape and the generated client depend
-    on it).
+    ``TrackingModifyPayload`` binds ``target_scope`` to the patch family and to
+    whether a local plan may travel in a ``model_validator``; the discriminated
+    encoding is assembled from the models here (the previous published shape and
+    the generated client depend on it).
     """
     common = _request_body_node(
         TrackingDeleteExternalPayload, drop=frozenset({"tracking_id"})
     )
 
-    def branch(scope: str, patch: dict[str, Any]) -> dict[str, Any]:
+    def branch(scope: str, patch: dict[str, Any], local_plan: dict[str, Any] | None = None) -> dict[str, Any]:
         return {
             "type": "object",
             "additionalProperties": False,
@@ -584,6 +608,8 @@ def _tracking_modify_body() -> dict[str, Any]:
                 **common["properties"],
                 "target_scope": {"const": scope},
                 "patch": patch,
+                # Only a subscription modify has a local plan to raise.
+                **({"local_plan": local_plan} if local_plan is not None else {}),
             },
         }
 
@@ -595,6 +621,7 @@ def _tracking_modify_body() -> dict[str, Any]:
                     TrackingSubscriptionPatch,
                     overrides={"filter_rule": _nullable_patch_node(TrackingFilterRulePatch)},
                 ),
+                _tracking_local_plan_node(),
             ),
             branch("ASSOCIATED_RSS", _any_of_patch_node(TrackingRssPatch)),
         ]

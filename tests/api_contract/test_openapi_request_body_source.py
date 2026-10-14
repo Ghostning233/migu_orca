@@ -134,6 +134,9 @@ def test_structural_refinements_reuse_model_declared_field_names() -> None:
     known = (
         set(openapi_gen.RequestPreviewModifyPayload.model_fields)
         | set(openapi_gen.TrackingDeleteExternalPayload.model_fields)
+        # Issue #202: the modify branch re-encodes ``local_plan``, which is a
+        # declared field of the model the route validates with.
+        | set(openapi_gen.TrackingModifyPayload.model_fields)
         | set(openapi_gen.TrackingSubscriptionPatch.model_fields)
         | set(openapi_gen.TrackingRssPatch.model_fields)
         | set(openapi_gen.TrackingFilterRulePatch.model_fields)
