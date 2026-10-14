@@ -2076,8 +2076,12 @@ describe('one declaration per operation (issue #193)', () => {
     //
     // The list below is maintained by hand next to the declaration table (which is
     // deliberately not exported), so a *new* operation will not be flagged here
-    // for being missing; it is caught by the declaration table's own total
-    // ``Record`` types and by these same per-action assertions once it is added.
+    // for being missing.  What does flag it is the compiler: the declaration
+    // table's ``satisfies`` clause contract-checks the operation's endpoint, and
+    // the per-family action tables (``MANAGEMENT_ACTION_SPECS`` /
+    // ``RECOVERY_ACTION_SPECS``) and ``MANAGEMENT_CAPABILITY`` are total
+    // ``Record``s over the derived family unions, so a declared operation without
+    // its family wiring is a build error before these assertions can run.
     //
     // The endpoint literals below are typed against the generated ``paths`` union
     // (issue #193, independent audit M-3), so a route that drifts from the
