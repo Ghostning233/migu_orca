@@ -1718,12 +1718,48 @@ describe('unbuildable page session (issue #193)', () => {
     expect(noCapability.effects).toEqual([])
   })
 
+  it('keeps the not-connected guard silent, because the page owns that statement', () => {
+    // The *other* "no connection" precondition is a different one: the page has
+    // no saved connection at all.  It is unreachable from the UI — the inspector
+    // keeps every external-write entry visible but disabled and renders its own
+    // fixed hint ("先在设置中连接 Auto Bangumi") while `connectionReady` is false,
+    // pinned by "keeps external writes visible but disabled with an in-place hint
+    // without a saved connection" in TrackingInspector.test.ts — so this session
+    // must stay a silent no-op: a refusal notice here would put a second, and
+    // differently worded, statement on a control the user cannot press.
+    const submit = session().beginSubmit({ item: item(), action: action() }, {
+      mode: 'CONTINUE_TRACKING', confirmed: true, connection: null,
+    })
+    const management = beginManagementWrite({}, { connection: null }).started
+    for (const started of [submit, management]) {
+      expect(started.accepted).toBe(false)
+      expect(started.request).toBeNull()
+      expect(started.refusal).toBeNull()
+      expect(started.effects).toEqual([])
+      expect(started.ask).toBeNull()
+    }
+    expect(session().noticeFor('tracking-1')).toBe('')
+    // A recovery is unaffected: ``RECOVER_AUTO`` is local and needs no
+    // credential at all (only ``VERIFY_EXTERNAL`` spends one).
+    expect(beginRecoveryWrite('RECOVER_AUTO', { connection: null }).started.accepted).toBe(true)
+  })
+
   it('keeps the cleared-connection refusal at its gate, so the page never re-reads for it', () => {
     // The submit and management families reach "the generation is gone" at the
-    // replay gate *before* the snapshot is read.  That gate is a reachable UI
-    // path, and its contract is unchanged (issue #193): the fixed reason and
-    // zero requests, and in particular zero converging effects — adding one
-    // would add an HTTP request the page does not send today.
+    // replay gate *before* the snapshot is read, and this test pins the whole
+    // reachable partition that makes the other branch unreachable from the page
+    // (issue #193):
+    //   - a locked intent whose live page session still holds its generation
+    //     replays and is accepted (pinned by "creates one revision-bound opaque
+    //     intent and replays it for a transport retry");
+    //   - a locked intent whose session was cleared is refused *here*, with zero
+    //     requests and zero effects;
+    //   - a settle releases the intent and its generation together, so no locked
+    //     intent can outlive the snapshot it was confirmed with.
+    // `unbuildableStart` therefore never adds an HTTP request the page did not
+    // already send.  This gate is a reachable UI path and its contract is
+    // unchanged: the fixed reason and zero requests, in particular zero
+    // converging effects — adding one would add a request the page never makes.
     const { writes } = inFlightSubmit()
     writes.finishSubmit(submitResult({ outcome: 'UNKNOWN' }))
     writes.preserveAfterClear()

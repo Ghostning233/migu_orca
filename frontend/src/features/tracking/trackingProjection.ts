@@ -13,7 +13,7 @@ import type { operations, paths } from '@/api/generated/api'
 // which is the only module that turns a scope into a request.  This display
 // module borrows the type alone to keep its label map exhaustive — a type-only
 // import, so no runtime dependency (let alone a cycle) is introduced.
-import type { TrackingManagementScope } from './useTrackingWriteSession'
+import type { TrackingManagementActionCode, TrackingManagementScope } from './useTrackingWriteSession'
 
 type ApiPath = Extract<keyof paths, string>
 
@@ -85,8 +85,27 @@ const KNOWN_ACTIONS = new Set<TrackingActionCode>([
   'MARK_FAILED', 'MODIFY', 'SET_ENABLED', 'REFRESH_RSS', 'DELETE_EXTERNAL',
 ])
 const KNOWN_STYLES = new Set<TrackingActionStyle>(['PRIMARY', 'SECONDARY', 'DANGER'])
+/**
+ * The generated ``TrackingScope`` values this page is willing to *read*.
+ *
+ * It deliberately does not reuse the write session's sendable-scope guard
+ * (issue #193): this is input validation over the server-published enum, where
+ * the safe direction is to keep knowing a scope the page cannot request (so it
+ * can still be displayed and filtered) — collapsing the two would silently drop
+ * a future server scope from the projection instead of from the request.
+ */
 const KNOWN_SCOPES = new Set<TrackingScope>(['SUBSCRIPTION', 'ASSOCIATED_RSS'])
-export const MANAGEMENT_CAPABILITY: Partial<Record<TrackingActionCode, Partial<Record<TrackingScope, keyof CapabilityResult>>>> = {
+
+/**
+ * Which live capability each management action needs for a given scope.
+ *
+ * Issue #193: total over the management family, so a management action added to
+ * the write session's operation table fails the build here until its capability
+ * mapping is stated, instead of silently dropping out of the projection.
+ */
+export const MANAGEMENT_CAPABILITY: Partial<
+  Record<TrackingActionCode, Partial<Record<TrackingScope, keyof CapabilityResult>>>
+> & Record<TrackingManagementActionCode, Partial<Record<TrackingScope, keyof CapabilityResult>>> = {
   MODIFY: { SUBSCRIPTION: 'subscription_modify', ASSOCIATED_RSS: 'rss_modify' },
   SET_ENABLED: { SUBSCRIPTION: 'subscription_enable', ASSOCIATED_RSS: 'rss_enable' },
   REFRESH_RSS: { ASSOCIATED_RSS: 'rss_refresh' },

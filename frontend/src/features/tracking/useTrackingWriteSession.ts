@@ -93,14 +93,20 @@ type TrackingWriteFamily = 'SUBMIT' | 'RECOVERY' | 'MANAGEMENT'
  * Every external write operation this page can send, declared exactly once
  * (issue #193).
  *
- * Adding an operation is one entry here plus the wiring the family it names
- * already selects *by operation*: the operation vocabulary
- * (``TrackingWriteOperation``), the three family action unions and every family
- * guard are all derived from this table, and each family's own tables below are
- * keyed by these very operations.  An operation therefore cannot exist in one
+ * What is single-sourced here: the operation vocabulary
+ * (``TrackingWriteOperation``), which family owns the operation, the generated
+ * route it travels to, and — derived from those — the three family action unions
+ * plus every family guard.  An operation therefore cannot exist in one
  * vocabulary, be reachable in one family guard and be missing from another
- * table at the same time — the parallel tables issue #193 recorded in the #168
- * review are gone.
+ * vocabulary at the same time.  The type system continues the chain: the route
+ * is checked against the generated ``ApiPath`` union, and each family's
+ * per-action table is a total ``Record`` over its derived union, so a new
+ * operation is a compile error until its own family wiring exists.  What is
+ * *not* here, because it is genuinely per-action family behaviour, stays as that
+ * family's wiring: the impact confirmation and the fixed per-state copy (one
+ * entry in the family's own per-action table), the request body shape, and the
+ * intent builder — the last of which fails closed (no request) rather than being
+ * forced by the compiler.
  */
 const TRACKING_WRITE_ACTIONS = {
   SUBMIT: { family: 'SUBMIT', endpoint: '/api/v1/tracking/items/{tracking_id}/submit' },
@@ -286,10 +292,16 @@ type TrackingBatchResult = NonNullable<
   operations['submitTrackingBatch']['responses']['200']['content']['application/json']['result']
 >
 
-// The request-scoped Auto Bangumi generation every write carries *is* the saved
-// connection generation the settings page published (issue #193): one type, the
-// one ``trackingManagement`` already declares, instead of a second same-shaped
-// interface here that could silently drift from it.
+/**
+ * The request-scoped Auto Bangumi generation every write carries.
+ *
+ * Issue #193: it is *derived* from the saved connection generation
+ * ``trackingManagement`` already declares, instead of a second same-shaped
+ * interface here that could silently drift from it, minus the one legacy input
+ * field (``base_url``) the request builders deliberately ignore — so the write
+ * seam cannot even accept a value it would never send.
+ */
+type TrackingWriteConfig = Omit<SavedConnectionGeneration, 'base_url'>
 
 // ---------------------------------------------------------------------------
 // The page-visible intents and requests.
@@ -419,7 +431,7 @@ export interface TrackingWriteBeginOptions {
   readonly confirmed?: boolean
   readonly mode?: TrackingSubmissionMode | null
   /** The saved Auto Bangumi generation, read after the dialog. */
-  readonly connection?: SavedConnectionGeneration | null
+  readonly connection?: TrackingWriteConfig | null
   /** Server-root-relative storage profile for this request. */
   readonly storageDir?: string
 }
@@ -741,7 +753,7 @@ interface TrackingRecoveryIntent {
 function createTrackingRecoverBody(
   action: TrackingRecoveryActionCode,
   expectedRevision: number,
-  connection: SavedConnectionGeneration | null,
+  connection: TrackingWriteConfig | null,
   storageDir?: string,
 ): TrackingRecoverBody | null {
   const storage = storageDir ? { storage_dir: storageDir } : {}
@@ -2069,8 +2081,8 @@ interface TrackingWriteCore {
   managementIntent: TrackingManagementIntent | null
   submitReplayBlocked: boolean
   managementReplayBlocked: boolean
-  submitConfigSnapshot: SavedConnectionGeneration | null
-  managementConfigSnapshot: SavedConnectionGeneration | null
+  submitConfigSnapshot: TrackingWriteConfig | null
+  managementConfigSnapshot: TrackingWriteConfig | null
   active: ActiveTransport | null
   planDeleteExternal: boolean
   checkAttempt: { readonly trackingId: string; readonly revision: number } | null
@@ -2103,7 +2115,8 @@ interface TrackingWriteCore {
  * Issue #193: ``useTrackingWriteSession()`` is only the assembly point now.  It
  * used to be one ~1100-line function holding every family, which made "where
  * does a submit touch management state" a question you answered by reading the
- * whole thing; each family now states the shared state it uses in its signature.
+ * whole thing.  Each family now takes a ``Pick`` of this core naming exactly the
+ * state it may use, so the answer is its signature.
  */
 function createTrackingWriteCore(): TrackingWriteCore {
   const submitSession = ref<TrackingWriteSession | null>(null)
@@ -2378,10 +2391,13 @@ function createTrackingWriteCore(): TrackingWriteCore {
    * been cleared or replaced"), and it is deliberately the same sentence the
    * submit and management families already state for it.
    *
-   * The reachable sibling — a generation that exists but cannot be turned into a
-   * safe body (``beginManagement``'s own unbuildable check) — keeps its own
-   * definite-failure session: there the page owes the user a statement of what it
-   * refused to send, which is a different, already-covered contract.
+   * The reachable sibling — a generation that *exists* but cannot be turned into
+   * a safe body (``beginManagement``'s own unbuildable check) — keeps its own
+   * definite-failure session instead: there the page owes the user a statement of
+   * what it refused to send, and it already carries the same converging re-read.
+   * Routing it through the refusal channel would be wrong in kind, not just in
+   * wording: that channel means "a still-unresolved intent refused a *different*
+   * request", which is not what happened.
    */
   function unbuildableStart(trackingId: string): TrackingWriteStart {
     return {
@@ -2445,7 +2461,34 @@ function createTrackingWriteCore(): TrackingWriteCore {
  * The submit family (US-310, US-311): 提交 and 重试, plus the write phase of the
  * one risk-confirmed resubmission (issue #184), which reports through this slot.
  */
-function createSubmitFamily(core: TrackingWriteCore) {
+/**
+ * The shared state the submit family uses, and nothing else.
+ *
+ * Issue #193: narrowing the core per family is what makes the split a real
+ * boundary rather than a relocation — this family cannot read, let alone
+ * write, another family's locked intent or generation.
+ */
+type SubmitFamilyCore = Pick<
+  TrackingWriteCore,
+  | 'active'
+  | 'autoCheckArmed'
+  | 'loading'
+  | 'managementSession'
+  | 'pending'
+  | 'recheck'
+  | 'recoverySession'
+  | 'refusalNotice'
+  | 'refuseAndStart'
+  | 'releaseSubmitIntent'
+  | 'submitConfigSnapshot'
+  | 'submitIntent'
+  | 'submitReplayBlocked'
+  | 'submitSession'
+  | 'unbuildableStart'
+  | 'unresolvedOwner'
+>
+
+function createSubmitFamily(core: SubmitFamilyCore) {
   /**
    * The page's fixed presentation of one decided submit-family session: a
    * success notice, a blocking dialog with a settings deep link, or nothing the
@@ -2608,7 +2651,28 @@ function createSubmitFamily(core: TrackingWriteCore) {
  * The recovery family (US-312): the three local conclusions and the one
  * credential-bearing read-only ``VERIFY_EXTERNAL``.
  */
-function createRecoveryFamily(core: TrackingWriteCore) {
+/**
+ * The shared state the recovery family uses, and nothing else.
+ *
+ * Issue #193: narrowing the core per family is what makes the split a real
+ * boundary rather than a relocation — this family cannot read, let alone
+ * write, another family's locked intent or generation.
+ */
+type RecoveryFamilyCore = Pick<
+  TrackingWriteCore,
+  | 'active'
+  | 'loading'
+  | 'pending'
+  | 'recheck'
+  | 'recoverySession'
+  | 'refusalNotice'
+  | 'refuseAndStart'
+  | 'releaseFor'
+  | 'unbuildableStart'
+  | 'unresolvedOwner'
+>
+
+function createRecoveryFamily(core: RecoveryFamilyCore) {
   // -- recovery family ------------------------------------------------------
 
   function beginRecovery(
@@ -2703,7 +2767,32 @@ function createRecoveryFamily(core: TrackingWriteCore) {
  * The management family (US-313, US-314, US-315): 修改 / 启停 / 立即刷新 /
  * 删除外部对象, each routed by the validated intent's own declaration.
  */
-function createManagementFamily(core: TrackingWriteCore) {
+/**
+ * The shared state the management family uses, and nothing else.
+ *
+ * Issue #193: narrowing the core per family is what makes the split a real
+ * boundary rather than a relocation — this family cannot read, let alone
+ * write, another family's locked intent or generation.
+ */
+type ManagementFamilyCore = Pick<
+  TrackingWriteCore,
+  | 'active'
+  | 'loading'
+  | 'managementConfigSnapshot'
+  | 'managementIntent'
+  | 'managementReplayBlocked'
+  | 'managementSession'
+  | 'pending'
+  | 'recheck'
+  | 'recoverySession'
+  | 'refusalNotice'
+  | 'refuseAndStart'
+  | 'submitSession'
+  | 'unbuildableStart'
+  | 'unresolvedOwner'
+>
+
+function createManagementFamily(core: ManagementFamilyCore) {
   // -- management family ----------------------------------------------------
 
   function beginManagement(
@@ -2846,7 +2935,21 @@ function createManagementFamily(core: TrackingWriteCore) {
  * The unified plan delete (issue #92): a local delete that optionally asks Auto
  * Bangumi to drop the external object as well.
  */
-function createPlanDeleteFamily(core: TrackingWriteCore) {
+/**
+ * The shared state the plan delete family uses, and nothing else.
+ *
+ * Issue #193: narrowing the core per family is what makes the split a real
+ * boundary rather than a relocation — this family cannot read, let alone
+ * write, another family's locked intent or generation.
+ */
+type PlanDeleteFamilyCore = Pick<
+  TrackingWriteCore,
+  | 'planDelete'
+  | 'planDeleteExternal'
+  | 'recheck'
+>
+
+function createPlanDeleteFamily(core: PlanDeleteFamilyCore) {
   // -- unified plan delete (issue #92) --------------------------------------
 
   function beginPlanDelete(
@@ -2942,7 +3045,27 @@ function createPlanDeleteFamily(core: TrackingWriteCore) {
  * The bounded read-only check of a pending submission (issue #183): its own slot
  * and its own attempt, holding no page-level intent.
  */
-function createCheckFamily(core: TrackingWriteCore) {
+/**
+ * The shared state the read-only check uses, and nothing else.
+ *
+ * Issue #193: narrowing the core per family is what makes the split a real
+ * boundary rather than a relocation — this family cannot read, let alone
+ * write, another family's locked intent or generation.
+ */
+type CheckFamilyCore = Pick<
+  TrackingWriteCore,
+  | 'autoCheckArmed'
+  | 'check'
+  | 'checkAttempt'
+  | 'checkLoading'
+  | 'recheck'
+  | 'refusalNotice'
+  | 'refuseAndStart'
+  | 'releaseSettledSubmission'
+  | 'unresolvedOwner'
+>
+
+function createCheckFamily(core: CheckFamilyCore) {
   function setAutoCheck(armed: boolean): void {
     core.autoCheckArmed.value = armed
   }
@@ -3026,7 +3149,33 @@ function createCheckFamily(core: TrackingWriteCore) {
  * The risk-confirmed single manual resubmission (issue #184): its own read-only
  * offer slot, then one new operation reported through the submit family's slot.
  */
-function createResubmitFamily(core: TrackingWriteCore) {
+/**
+ * The shared state the resubmission family uses, and nothing else.
+ *
+ * Issue #193: narrowing the core per family is what makes the split a real
+ * boundary rather than a relocation — this family cannot read, let alone
+ * write, another family's locked intent or generation.
+ */
+type ResubmitFamilyCore = Pick<
+  TrackingWriteCore,
+  | 'active'
+  | 'loading'
+  | 'pending'
+  | 'recheck'
+  | 'refusalNotice'
+  | 'refuseAndStart'
+  | 'releaseSettledSubmission'
+  | 'resubmit'
+  | 'resubmitAttempt'
+  | 'resubmitIntent'
+  | 'resubmitLoading'
+  | 'submitConfigSnapshot'
+  | 'submitReplayBlocked'
+  | 'submitSession'
+  | 'unresolvedOwner'
+>
+
+function createResubmitFamily(core: ResubmitFamilyCore) {
   // -- risk-confirmed resubmission (issue #184) -----------------------------
 
   /** The one confirmation body of a resubmit, rebuilt from its exact binding. */
@@ -3191,8 +3340,41 @@ function createResubmitFamily(core: TrackingWriteCore) {
 /**
  * The explicit batch submit (issue #87, #100): one request for one confirmed
  * selection, projected into per-entry outcomes.
+ *
+ * Where the deleted ``batchSelection.ts`` (issue #168) went — every export of
+ * that module now lives in this file, and only the commands the page calls stay
+ * on the session's public surface:
+ *
+ * | old export | new home |
+ * | --- | --- |
+ * | ``TrackingBatchSelection`` / ``TrackingBatchEntry`` / ``TrackingBatchSubmitBody`` | internal interfaces here |
+ * | ``TrackingBatchSelectionSummary`` / ``SkippedBatchEntry`` | internal interfaces here |
+ * | ``TrackingBatchEntryOutcome`` / ``TrackingBatchOutcome`` | internal interfaces here (the ``batchOutcome`` ref's type) |
+ * | ``EMPTY_BATCH_SELECTION`` | internal constant here |
+ * | ``batchSkipReason`` | internal function, re-exposed unchanged by the page API |
+ * | ``isBatchSelected`` / ``toggleBatchSelection`` / ``selectAllBatch`` | internal functions; the API keeps ``isBatchSelected`` / ``toggleBatchRow`` / ``selectAllBatch`` |
+ * | ``clearBatchSelection`` | the API's ``clearBatchSelection`` writes the ref directly (the old pure function returned the empty selection) |
+ * | ``batchSelectionSummary`` | internal function, exposed as the API's ``batchSummary`` |
+ * | ``buildBatchSubmitBody`` / ``projectBatchOutcome`` / ``selectionAfterBatch`` | internal functions here, unchanged |
+ * | ``BATCH_ACTIONS`` (private) | internal constant here, unchanged |
  */
-function createBatchFamily(core: TrackingWriteCore) {
+/**
+ * The shared state the batch family uses, and nothing else.
+ *
+ * Issue #193: narrowing the core per family is what makes the split a real
+ * boundary rather than a relocation — this family cannot read, let alone
+ * write, another family's locked intent or generation.
+ */
+type BatchFamilyCore = Pick<
+  TrackingWriteCore,
+  | 'batchLoading'
+  | 'batchNotice'
+  | 'batchOutcome'
+  | 'batchSelection'
+  | 'recheck'
+>
+
+function createBatchFamily(core: BatchFamilyCore) {
   function resetBatch(): void {
     core.batchSelection.value = EMPTY_BATCH_SELECTION
     core.batchOutcome.value = null
