@@ -1,10 +1,19 @@
 /**
- * 保存确认结果 → 服务端条目行的展示投影（#160 AC1 / #164）。
+ * 保存确认结果 → 服务端条目行的展示投影（#160 AC1 / #164 / #195）。
  *
  * 「服务端快照」与「客户端生命周期」是两个概念：条目行的 `status` 既有服务端
  * 词汇（FOUND / EMPTY / FAILED），也有生命周期词汇（CONFIRMED /
  * SAVED_PENDING_* / RESPONSE_UNKNOWN）。视图只装配事实与执行副作用，**这一层
- * 是唯一决定生命周期词汇的地方**，因此同一条结局不会在组件里再写一遍。
+ * 是批量路径内唯一决定生命周期词汇的地方**，因此同一条结局不会在组件里再写一遍。
+ *
+ * #195：本模块是**批量路径内** `items[].status` 的**唯一写点**；客户端相位
+ * （`useBatchReviewJourney` 的 `BatchItemPhase`）是生命周期权威，两者消费同一份
+ * 错误类型判定（`batchSaveErrorIsReplayed` / `batchSaveErrorInvalidatesDraft`）。
+ * 映射表（错误类型 × 相位前提 → 展示状态 / 恢复动作）钉在
+ * `batchDisplayStateMapping.test.ts`。
+ *
+ * 范围限定：以上「唯一」均指**批量路径内**；单番路径
+ * （`SingleAnimeReviewPanel.vue`、`useSingleAnimeJourney.ts`）未收口。
  *
  * 这些函数是纯数据变换：不发请求、不读响应式状态、不决定焦点与文案。
  */
@@ -14,6 +23,7 @@ import {
   batchSaveConfirmSucceeded,
   batchSaveErrorInvalidatesDraft,
   batchSaveErrorIsReplayed,
+  BATCH_STATUS_LOCATE_PENDING,
   type BatchItem,
 } from '@/features/workbench/batchWorkbench'
 
@@ -44,7 +54,7 @@ export interface BatchOutcomeProjection {
 function locatePendingRow(row: BatchItem): BatchItem {
   return {
     ...row,
-    status: 'SAVED_PENDING_LOCATE',
+    status: BATCH_STATUS_LOCATE_PENDING,
     preview_request: null,
     draft_id: null,
     draft_revision: null,
@@ -52,8 +62,13 @@ function locatePendingRow(row: BatchItem): BatchItem {
   }
 }
 
-/** 草案已失效：回到真实合集选择（有候选 FOUND，否则 EMPTY）。 */
-function draftInvalidatedRow(row: BatchItem): BatchItem {
+/**
+ * 草案已失效：回到真实合集选择（有候选 FOUND，否则 EMPTY）。
+ *
+ * #195：保存结果里的 `draft_invalidated` 与视图的会话失效（`onDraftExpired`）
+ * 共用这一个投影，视图不再手写同一组字段。
+ */
+export function projectDraftInvalidated(row: BatchItem): BatchItem {
   return {
     ...row,
     status: (row.candidates?.length ?? 0) > 0 ? 'FOUND' : 'EMPTY',
@@ -108,7 +123,7 @@ export function projectSaveConfirmOutcome(
   if (batchSaveErrorInvalidatesDraft(resultItem.error_type)) {
     return {
       kind: 'draft_invalidated',
-      row: draftInvalidatedRow(row),
+      row: projectDraftInvalidated(row),
       invalidatesResources: true,
       clearsSelection: true,
     }
@@ -127,7 +142,7 @@ export function projectDeterministicSaveFailure(row: BatchItem, safeType: string
     // Issue 130：单条重试撞上已保存草案：同样冻结为待定位，不引导重复保存。
     return locatePendingRow(row)
   }
-  if (batchSaveErrorInvalidatesDraft(safeType)) return draftInvalidatedRow(row)
+  if (batchSaveErrorInvalidatesDraft(safeType)) return projectDraftInvalidated(row)
   return { ...row, status: 'DRAFT' }
 }
 

@@ -24,7 +24,29 @@ import {
   publicPosterPath,
   type SelectedCollectionSummary,
 } from '@/features/workbench/candidateSearch'
-import type { SaveConfirmBatchItemsBody, SaveConfirmBatchItemsResult, TrackingItemsResult } from '@/app/composables/useBatchReviewJourney'
+import {
+  batchSaveErrorInvalidatesDraft,
+  batchSaveErrorIsReplayed,
+  type SaveConfirmBatchItemsBody,
+  type SaveConfirmBatchItemsResult,
+  type TrackingItemsResult,
+} from '@/app/composables/useBatchReviewJourney'
+
+/**
+ * #195：批量路径内展示状态「已保存，待定位」的**唯一拼写点**——下面这行的字面量是
+ * 整个生产代码里对该展示状态码的唯一一次书写（注释与测试不计）。
+ *
+ * 相位是生命周期权威（`useBatchReviewJourney` 的 `saved_pending_locate`），展示状态
+ * 只是服务端词汇镜像；常量名按展示含义命名（待定位），值保持镜像词汇。其余批量生产点
+ * （投影、视图、筛选、模板）一律引用它，不再各自拼写或重新判定同一条结局。
+ * 单番路径尚未收口，不在 #195 范围内。
+ */
+export const BATCH_STATUS_LOCATE_PENDING = 'SAVED_PENDING_LOCATE'
+
+// #195：错误类型分类在**批量路径内**只有一个定义（生命周期层），展示层只消费。
+// 这里是故意的导入门面：转发导出以保留既有导入点，不是第二处判定。
+// 单番路径（`useSingleAnimeJourney` 等）仍各自内联，不在 #195 范围内。
+export { batchSaveErrorInvalidatesDraft, batchSaveErrorIsReplayed }
 
 /** Public batch parse result produced by `POST /api/v1/batches/parse`. */
 export type BatchParseResult = NonNullable<
@@ -92,7 +114,7 @@ export const BATCH_STATUS_LABELS: Record<string, string> = {
   ACCEPTED: '已接受',
   CONFIRMED: '已确认待提交',
   SAVED_PENDING_CONFIRM: '已保存待确认',
-  SAVED_PENDING_LOCATE: '已保存，待定位',
+  [BATCH_STATUS_LOCATE_PENDING]: '已保存，待定位',
   RESPONSE_UNKNOWN: '结果待核验',
 }
 
@@ -149,7 +171,7 @@ const BATCH_STATUS_TONES: Record<string, BatchStatusTone> = {
   ACCEPTED: 'success',
   CONFIRMED: 'success',
   SAVED_PENDING_CONFIRM: 'attention',
-  SAVED_PENDING_LOCATE: 'attention',
+  [BATCH_STATUS_LOCATE_PENDING]: 'attention',
   RESPONSE_UNKNOWN: 'danger',
 }
 
@@ -390,7 +412,7 @@ export function batchCardNextStep(guidance: BatchCardGuidance): string {
   if (guidance.resultUnknown || status === 'RESPONSE_UNKNOWN') {
     return '用「使用相同操作重试」或「重试定位」核验本条结果。'
   }
-  if (status === 'SAVED_PENDING_LOCATE') {
+  if (status === BATCH_STATUS_LOCATE_PENDING) {
     return '草案已保存，确认状态尚未定位；核验前请勿重新添加同一部，也不要重新生成草案。'
   }
   if (guidance.savedPendingConfirm || status === 'SAVED_PENDING_CONFIRM') {
@@ -695,17 +717,6 @@ export interface BatchSaveRecoveryInput {
   trackingLocated?: boolean
 }
 
-const DRAFT_INVALID_ERROR_TYPES = [
-  'draft_expired',
-  'draft_evicted',
-  'draft_revision_conflict',
-] as const
-
-/** Issue 130：草案已经被保存过（不是失效），只能标记待定位。 */
-export function batchSaveErrorIsReplayed(errorType: string | null | undefined): boolean {
-  return String(errorType ?? '') === 'draft_replayed'
-}
-
 /**
  * 把条目状态与最近一次失败原因投影成唯一恢复动作。
  *
@@ -725,7 +736,7 @@ export function batchSaveRecoveryAction(input: BatchSaveRecoveryInput): BatchSav
   if (status === 'RESPONSE_UNKNOWN') return 'VERIFY_RESULT'
   if (status === 'SAVED_PENDING_CONFIRM') return 'RETRY_CONFIRM'
   if (status === 'CONFIRMED') return input.trackingLocated ? 'NONE' : 'VERIFY_RESULT'
-  if ((DRAFT_INVALID_ERROR_TYPES as readonly string[]).includes(errorType)) return 'REGENERATE_DRAFT'
+  if (batchSaveErrorInvalidatesDraft(errorType)) return 'REGENERATE_DRAFT'
   if (status === 'DRAFT' && errorType) return 'RETRY_SAVE'
   return 'NONE'
 }
@@ -740,11 +751,6 @@ export function batchSaveRecoveryLabel(action: BatchSaveRecoveryAction): string 
     LOCATE_SAVED: '已保存，待定位',
     NONE: '',
   }[action]
-}
-
-/** True when the failure type means the draft can never be replayed as-is. */
-export function batchSaveErrorInvalidatesDraft(errorType: string | null | undefined): boolean {
-  return (DRAFT_INVALID_ERROR_TYPES as readonly string[]).includes(String(errorType ?? ''))
 }
 
 export function batchSaveConfirmErrorLabel(item: BatchSaveConfirmItem): string {

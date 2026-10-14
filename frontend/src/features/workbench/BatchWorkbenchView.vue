@@ -61,6 +61,7 @@ import {
   batchCardAuxiliaryFacts,
   batchCardNextStep,
   batchConfirmDisabledReason,
+  BATCH_STATUS_LOCATE_PENDING,
   batchSaveConfirmErrorLabel,
   batchSaveConfirmNextFocus,
   batchSaveConfirmOutcomeSummary,
@@ -105,6 +106,7 @@ import {
   projectAcceptSucceeded,
   projectDeterministicSaveFailure,
   projectDraftGenerated,
+  projectDraftInvalidated,
   projectResponseUnknown,
   projectSaveConfirmOutcome,
   projectSavedConfirmPending,
@@ -690,13 +692,30 @@ function itemBlockers(itemId: string): string[] {
 /**
  * #145：设计图的默认层只保留封面、标题与状态芯片。通用的「下一步」是进度提示，
  * 只在条目真的卡住或需要恢复时才就地显示；正常待选择/待审核的进度由状态芯片表达。
+ *
+ * #195：这里引用展示状态的唯一定义（`BATCH_STATUS_LOCATE_PENDING`），
+ * 不再各自拼写同一条展示词汇。
  */
 const CARD_STUCK_STATUSES = [
   'FAILED',
   'EMPTY',
-  'SAVED_PENDING_LOCATE',
+  BATCH_STATUS_LOCATE_PENDING,
   'SAVED_PENDING_CONFIRM',
   'RESPONSE_UNKNOWN',
+]
+
+/** #195：已保存/已提交的终态卡不再提供删除入口。 */
+const CARD_TERMINAL_STATUSES = ['CONFIRMED', BATCH_STATUS_LOCATE_PENDING, 'SAVED_PENDING_CONFIRM']
+
+/** 状态筛选的可选项；展示词汇同样只引用唯一定义。 */
+const REVIEW_STATUS_FILTER_OPTIONS = [
+  'FAILED',
+  'EMPTY',
+  'FOUND',
+  'DRAFT',
+  BATCH_STATUS_LOCATE_PENDING,
+  'SAVED_PENDING_CONFIRM',
+  'CONFIRMED',
 ]
 
 function cardNeedsNextStep(item: BatchItem): boolean {
@@ -704,6 +723,11 @@ function cardNeedsNextStep(item: BatchItem): boolean {
   if (generatingCandidateIdFor(item.item_id ?? '')) return true
   if (recoveryActionFor(item) !== 'NONE') return true
   return Boolean(draftClientFactsById(item.item_id ?? '')?.applying)
+}
+
+/** #195：草案已被服务端保存、等待定位的冻结卡（唯一定义的展示词汇）。 */
+function itemIsSavedPendingLocate(item: BatchItem): boolean {
+  return String(item.status ?? '') === BATCH_STATUS_LOCATE_PENDING
 }
 
 /**
@@ -1182,8 +1206,9 @@ async function retrySavedConfirmation(item: BatchItem): Promise<void> {
     }
     const located = await locateBatchTracking(item)
     if (located === 'found') return
+    // #195：展示状态由投影模块唯一决定；相位由 journey 命令同步收敛。
     items.value = items.value.map((row) => row.item_id === itemId
-      ? { ...row, status: located === 'failed' ? 'RESPONSE_UNKNOWN' : 'SAVED_PENDING_CONFIRM' }
+      ? (located === 'failed' ? projectResponseUnknown(row) : projectTrackingNotFound(row))
       : row)
     if (located === 'failed') failTrackingVerification(itemId)
     else markTrackingNotFound(itemId)
@@ -1483,17 +1508,8 @@ function onDraftExpired(itemId: string): void {
   nextSelected.delete(itemId)
   selectedItemIds.value = nextSelected
   clearAcceptFeedback(itemId)
-  items.value = items.value.map((current) => {
-    if (current.item_id !== itemId) return current
-    const hasCandidates = (current.candidates?.length ?? 0) > 0
-    return {
-      ...current,
-      status: hasCandidates ? 'FOUND' : 'EMPTY',
-      preview_request: null,
-      draft_id: null,
-      draft_revision: null,
-    }
-  })
+  // #195：展示状态的写点只有一个（投影模块）；这里只装配事实。
+  items.value = items.value.map((current) => current.item_id === itemId ? projectDraftInvalidated(current) : current)
   draftApplyErrors.value = { ...draftApplyErrors.value, [itemId]: '订阅草案已失效，请重新生成。' }
 }
 
@@ -1660,7 +1676,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                   <span class="visually-hidden">状态</span>
                   <select id="batch-review-status" v-model="reviewStatus">
                     <option value="">全部状态</option>
-                    <option v-for="status in ['FAILED', 'EMPTY', 'FOUND', 'DRAFT', 'SAVED_PENDING_LOCATE', 'SAVED_PENDING_CONFIRM', 'CONFIRMED']" :key="status" :value="status">
+                    <option v-for="status in REVIEW_STATUS_FILTER_OPTIONS" :key="status" :value="status">
                       {{ batchStatusLabel(status) }}
                     </option>
                   </select>
@@ -1852,7 +1868,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                 </p>
 
                 <p
-                  v-if="String(item.status ?? '') === 'SAVED_PENDING_LOCATE'"
+                  v-if="itemIsSavedPendingLocate(item)"
                   :id="`batch-replayed-${item.item_id}`"
                   class="batch-card-reason"
                   role="status"
@@ -1919,7 +1935,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                    顺带切换右栏或触发删除。 -->
               <div class="batch-card-controls" @click.stop>
                 <button
-                  v-if="!['CONFIRMED', 'SAVED_PENDING_LOCATE', 'SAVED_PENDING_CONFIRM'].includes(String(item.status ?? ''))"
+                  v-if="!CARD_TERMINAL_STATUSES.includes(String(item.status ?? ''))"
                   type="button"
                   class="icon-button batch-card-delete"
                   :aria-label="`删除 ${item.raw_title ?? '批量条目'}`"
