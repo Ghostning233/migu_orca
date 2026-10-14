@@ -2028,7 +2028,84 @@ interface TrackingWriteSessionApi {
   failBatchSubmit: (error: TrackingWriteError) => void
 }
 
-export function useTrackingWriteSession(): TrackingWriteSessionApi {
+/**
+ * The one mutable state of the page's single external write (issue #193).
+ *
+ * Everything the families below share lives here and nowhere else: the reactive
+ * snapshots the page renders, the locked intents with their opaque keys and
+ * connection generations, the one in-flight transport, and the queries/commands
+ * that more than one family answers (the page-level lock model, the refusal
+ * notice, the convergence effect, the hard reset).
+ *
+ * It is an implementation detail of this module: nothing outside the file names
+ * it, so a family can only reach shared state through this one declaration
+ * instead of closing over whatever happened to be in scope.
+ */
+interface TrackingWriteCore {
+  // -- page-visible reactive state -----------------------------------------
+  readonly sessions: ComputedRef<TrackingWriteSessionSet>
+  readonly hasUnresolvedLock: ComputedRef<boolean>
+  readonly batchSkippedNotice: ComputedRef<string>
+  readonly submitSession: Ref<TrackingWriteSession | null>
+  readonly recoverySession: Ref<TrackingWriteSession | null>
+  readonly managementSession: Ref<TrackingWriteSession | null>
+  readonly loading: Ref<boolean>
+  readonly pending: Ref<boolean>
+  readonly planDelete: Ref<TrackingPlanDeleteSession | null>
+  readonly check: Ref<TrackingCheckSession | null>
+  readonly checkLoading: Ref<boolean>
+  readonly autoCheckArmed: Ref<boolean>
+  readonly resubmit: Ref<TrackingResubmitSession | null>
+  readonly resubmitLoading: Ref<boolean>
+  readonly batchSelection: Ref<TrackingBatchSelection>
+  readonly batchOutcome: Ref<TrackingBatchOutcome | null>
+  readonly batchLoading: Ref<boolean>
+  readonly batchNotice: Ref<string>
+  readonly refusalNotice: Ref<{ readonly trackingId: string; readonly message: string } | null>
+
+  // -- the one locked intent per family ------------------------------------
+  submitIntent: TrackingWriteIntent | null
+  resubmitIntent: TrackingResubmitIntent | null
+  managementIntent: TrackingManagementIntent | null
+  submitReplayBlocked: boolean
+  managementReplayBlocked: boolean
+  submitConfigSnapshot: SavedConnectionGeneration | null
+  managementConfigSnapshot: SavedConnectionGeneration | null
+  active: ActiveTransport | null
+  planDeleteExternal: boolean
+  checkAttempt: { readonly trackingId: string; readonly revision: number } | null
+  resubmitAttempt: { readonly trackingId: string; readonly revision: number } | null
+
+  // -- shared queries and commands -----------------------------------------
+  readonly unresolvedOwner: (trackingId: string) => string
+  readonly busyFor: (trackingId: string) => boolean
+  readonly refuseAndStart: (
+    trackingId: string,
+    reason: TrackingWriteRefusal['reason'],
+  ) => TrackingWriteStart
+  readonly unbuildableStart: (trackingId: string) => TrackingWriteStart
+  readonly noticeFor: (trackingId: string) => string
+  readonly releaseSubmitIntent: () => void
+  readonly releaseFor: (trackingId: string) => void
+  readonly releaseSettledSubmission: (trackingId: string) => void
+  readonly resetCheck: () => void
+  readonly resetResubmit: () => void
+  readonly reset: () => void
+  readonly preserveAfterClear: () => void
+  readonly setPending: (pending: boolean) => void
+  readonly finishAttempt: () => void
+  readonly recheck: (trackingId: string | null, refreshList: boolean) => TrackingWriteEffect
+}
+
+/**
+ * Build the shared core, then hand it to one factory per family below.
+ *
+ * Issue #193: ``useTrackingWriteSession()`` is only the assembly point now.  It
+ * used to be one ~1100-line function holding every family, which made "where
+ * does a submit touch management state" a question you answered by reading the
+ * whole thing; each family now states the shared state it uses in its signature.
+ */
+function createTrackingWriteCore(): TrackingWriteCore {
   const submitSession = ref<TrackingWriteSession | null>(null)
   const recoverySession = ref<TrackingWriteSession | null>(null)
   const managementSession = ref<TrackingWriteSession | null>(null)
@@ -2041,28 +2118,10 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
   /** Issue #184: the read-only phase of a risk-confirmed resubmission. */
   const resubmit = ref<TrackingResubmitSession | null>(null)
   const resubmitLoading = ref(false)
-  let resubmitAttempt: { trackingId: string; revision: number } | null = null
   const batchSelection = ref<TrackingBatchSelection>(EMPTY_BATCH_SELECTION)
   const batchOutcome = ref<TrackingBatchOutcome | null>(null)
   const batchLoading = ref(false)
   const batchNotice = ref('')
-
-  // The locked intents and the connection generation each one was confirmed
-  // with.  Only one write runs at a time, but the submit and management
-  // families each keep their own tombstone so a clear can never rebind one
-  // family's pending operation to another's connection.
-  let submitIntent: TrackingWriteIntent | null = null
-  /** Issue #184: the one confirmation a risk-confirmed resubmit is replaying. */
-  let resubmitIntent: TrackingResubmitIntent | null = null
-  let managementIntent: TrackingManagementIntent | null = null
-  let submitReplayBlocked = false
-  let managementReplayBlocked = false
-  let submitConfigSnapshot: SavedConnectionGeneration | null = null
-  let managementConfigSnapshot: SavedConnectionGeneration | null = null
-  let active: ActiveTransport | null = null
-  let planDeleteExternal = false
-  /** The read-only check that is in flight; one runs at a time (issue #183). */
-  let checkAttempt: { readonly trackingId: string; readonly revision: number } | null = null
   /** The last fixed refusal reason, scoped to the record the user acted on. */
   const refusalNotice = ref<{ readonly trackingId: string; readonly message: string } | null>(null)
 
@@ -2090,6 +2149,59 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
     return `已跳过 ${reasons.length} 条不可提交记录：${detail}。`
   })
 
+
+  // The locked intents and the connection generation each one was confirmed
+  // with.  Only one write runs at a time, but the submit and management families
+  // each keep their own tombstone so a clear can never rebind one family's
+  // pending operation to another's connection.  They are the core's own fields
+  // (and not closure variables) so a family factory can only reach them here.
+  const core: TrackingWriteCore = {
+    submitSession,
+    recoverySession,
+    managementSession,
+    loading,
+    pending,
+    planDelete,
+    check,
+    checkLoading,
+    autoCheckArmed,
+    resubmit,
+    resubmitLoading,
+    batchSelection,
+    batchOutcome,
+    batchLoading,
+    batchNotice,
+    refusalNotice,
+    sessions,
+    hasUnresolvedLock,
+    batchSkippedNotice,
+    submitIntent: null,
+    resubmitIntent: null,
+    managementIntent: null,
+    submitReplayBlocked: false,
+    managementReplayBlocked: false,
+    submitConfigSnapshot: null,
+    managementConfigSnapshot: null,
+    active: null,
+    planDeleteExternal: false,
+    checkAttempt: null,
+    resubmitAttempt: null,
+    unresolvedOwner,
+    busyFor,
+    refuseAndStart,
+    unbuildableStart,
+    noticeFor,
+    releaseSubmitIntent,
+    releaseFor,
+    releaseSettledSubmission,
+    resetCheck,
+    resetResubmit,
+    reset,
+    preserveAfterClear,
+    setPending,
+    finishAttempt,
+    recheck,
+  }
   function unresolvedOwner(trackingId: string): string {
     for (const session of currentSessions()) {
       if (session.trackingId !== trackingId && session.keepsIntent) return session.trackingId
@@ -2134,12 +2246,12 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
    * confirmation in the same slot, so a definite outcome releases both.
    */
   function releaseSubmitIntent(): void {
-    submitIntent = null
-    resubmitIntent = null
+    core.submitIntent = null
+    core.resubmitIntent = null
   }
 
   function resetResubmit(): void {
-    resubmitAttempt = null
+    core.resubmitAttempt = null
     resubmitLoading.value = false
     resubmit.value = null
   }
@@ -2151,27 +2263,17 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
     planDelete.value = null
     resetCheck()
     resetResubmit()
-    submitIntent = null
-    resubmitIntent = null
-    managementIntent = null
-    submitReplayBlocked = false
-    managementReplayBlocked = false
-    submitConfigSnapshot = null
-    managementConfigSnapshot = null
-    active = null
+    core.submitIntent = null
+    core.resubmitIntent = null
+    core.managementIntent = null
+    core.submitReplayBlocked = false
+    core.managementReplayBlocked = false
+    core.submitConfigSnapshot = null
+    core.managementConfigSnapshot = null
+    core.active = null
     refusalNotice.value = null
     loading.value = false
     pending.value = false
-  }
-
-  function resetPlanDelete(): void {
-    planDelete.value = null
-  }
-
-  function resetBatch(): void {
-    batchSelection.value = EMPTY_BATCH_SELECTION
-    batchOutcome.value = null
-    batchNotice.value = ''
   }
 
   /**
@@ -2182,23 +2284,23 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
   function preserveAfterClear(): void {
     pending.value = false
     loading.value = false
-    active = null
+    core.active = null
 
     const submit = submitSession.value
-    if (submit && (submit.state === 'IN_FLIGHT' || submit.keepsIntent) && (submitIntent || resubmitIntent)) {
+    if (submit && (submit.state === 'IN_FLIGHT' || submit.keepsIntent) && (core.submitIntent || core.resubmitIntent)) {
       // A cleared connection never rebinds a locked intent to the new one: the
       // unresolved submit keeps its body as a non-replayable tombstone (issue
       // #184 keeps the resubmit confirmation under exactly the same rule).
-      submitReplayBlocked = true
-      submitConfigSnapshot = null
+      core.submitReplayBlocked = true
+      core.submitConfigSnapshot = null
       submitSession.value = createSubmitSession(
         submit.trackingId, submit.operation as TrackingWriteActionCode, 'UNKNOWN',
       )
     } else {
       submitSession.value = null
       releaseSubmitIntent()
-      submitReplayBlocked = false
-      submitConfigSnapshot = null
+      core.submitReplayBlocked = false
+      core.submitConfigSnapshot = null
     }
     resetResubmit()
 
@@ -2215,9 +2317,9 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
     }
 
     const management = managementSession.value
-    if (management && (management.state === 'IN_FLIGHT' || management.keepsIntent) && managementIntent) {
-      managementReplayBlocked = true
-      managementConfigSnapshot = null
+    if (management && (management.state === 'IN_FLIGHT' || management.keepsIntent) && core.managementIntent) {
+      core.managementReplayBlocked = true
+      core.managementConfigSnapshot = null
       managementSession.value = createManagementSession(
         management.trackingId,
         management.operation as TrackingManagementActionCode,
@@ -2227,9 +2329,9 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
       )
     } else {
       managementSession.value = null
-      managementIntent = null
-      managementReplayBlocked = false
-      managementConfigSnapshot = null
+      core.managementIntent = null
+      core.managementReplayBlocked = false
+      core.managementConfigSnapshot = null
     }
   }
 
@@ -2239,15 +2341,15 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
     if (submit?.trackingId === trackingId && submit.keepsIntent) {
       submitSession.value = null
       releaseSubmitIntent()
-      submitReplayBlocked = false
-      submitConfigSnapshot = null
+      core.submitReplayBlocked = false
+      core.submitConfigSnapshot = null
     }
     const management = managementSession.value
     if (management?.trackingId === trackingId && management.keepsIntent) {
       managementSession.value = null
-      managementIntent = null
-      managementReplayBlocked = false
-      managementConfigSnapshot = null
+      core.managementIntent = null
+      core.managementReplayBlocked = false
+      core.managementConfigSnapshot = null
     }
   }
 
@@ -2289,466 +2391,6 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
   }
 
   /**
-   * The page's fixed presentation of one decided submit-family session: a
-   * success notice, a blocking dialog with a settings deep link, or nothing the
-   * user must be interrupted with.
-   */
-  function submitFeedback(session: TrackingWriteSession): TrackingWriteEffect[] {
-    if (session.state === 'ACTIVE') {
-      return [{
-        kind: 'notify',
-        feedback: { channel: 'success', title: '提交成功', message: '已在 Auto Bangumi 创建外部订阅。' },
-      }]
-    }
-    const category = session.failureCategory
-    if (!category || !(WRITE_FAILURE_CATEGORIES as readonly string[]).includes(category)) return []
-    const presentation = WRITE_FAILURE_PRESENTATIONS[category as WriteFailureCategory]
-    if (presentation.channel !== 'dialog') return []
-    return [{
-      kind: 'notify',
-      feedback: { channel: 'dialog', title: presentation.title, message: presentation.message },
-    }]
-  }
-
-  // -- submit family --------------------------------------------------------
-
-  function beginSubmit(
-    payload: TrackingWriteTarget,
-    options: TrackingWriteBeginOptions = {},
-  ): TrackingWriteStart {
-    const trackingId = payload.item.tracking_id
-    // One page-level intent at a time: a confirmation is already open, or an
-    // external write/recovery is already running.
-    if (pending.value || loading.value) return ignoredStart()
-    if (submitReplayBlocked) return refuseAndStart(trackingId, 'REPLAY')
-    // Issue #86: a saved Auto Bangumi connection is all an external write needs.
-    // The server re-validates connection, credentials, exact version and write
-    // capability inside the same request and fails closed.
-    if (!options.connection) return ignoredStart()
-    const sameItemRecovery = recoverySession.value?.trackingId === trackingId
-      && recoverySession.value.keepsIntent
-    const sameItemManagement = managementSession.value?.trackingId === trackingId
-      && managementSession.value.keepsIntent
-    if (sameItemRecovery || sameItemManagement) return refuseAndStart(trackingId, 'INTENT')
-    // Any *other* record still holding the page's single unresolved intent
-    // refuses this request — with a stated next step instead of a silent no-op.
-    if (unresolvedOwner(trackingId)) return refuseAndStart(trackingId, 'INTENT')
-    const requested = payload.action.code
-    if (!isWriteActionCode(requested)) return ignoredStart()
-    // A locked intent still owns the single opaque key for this item. Replaying
-    // it under a different action would send something the user did not ask for.
-    const locked = submitIntent && submitSession.value?.trackingId === trackingId ? submitIntent : null
-    if (locked && locked.action !== requested) return refuseAndStart(trackingId, 'INTENT')
-    // Issue #98 AC 2: the entry only opens the mode choice for the submit family.
-    if (!options.mode) {
-      return { ...ignoredStart(), ask: 'SUBMISSION_MODE' }
-    }
-    // This item's own next step is legitimate: the earlier refusal notice has
-    // served its purpose.
-    refusalNotice.value = null
-    if (options.confirmed !== true) {
-      return {
-        ...ignoredStart(),
-        ask: 'IMPACT',
-        confirmation: WRITE_ACTION_CONFIRMATIONS[requested],
-      }
-    }
-
-    const intent = locked ?? createTrackingActionIntent(payload.item, payload.action)
-    if (!intent) return ignoredStart()
-    const requestConfig = locked ? submitConfigSnapshot : options.connection
-    if (!requestConfig) return unbuildableStart(trackingId)
-    submitIntent = intent
-    if (!locked) submitConfigSnapshot = { ...requestConfig }
-    const storageDir = options.storageDir
-    const body: TrackingWriteBody = {
-      expected_revision: intent.expectedRevision,
-      idempotency_key: intent.idempotencyKey,
-      confirm: true,
-      ...(options.mode ? { submission_mode: options.mode } : {}),
-      connection_ref: requestConfig.connection_ref!,
-      configuration_revision: requestConfig.configuration_revision!,
-      ...(storageDir ? { storage_dir: storageDir } : {}),
-    }
-    active = { family: 'SUBMIT', trackingId, action: requested, mode: options.mode ?? null }
-    loading.value = true
-    submitSession.value = createSubmitSession(trackingId, requested, 'IN_FLIGHT')
-    return {
-      accepted: true,
-      refusal: null,
-      ask: null,
-      confirmation: null,
-      request: {
-        endpoint: operationEndpoint(requested),
-        path: { tracking_id: trackingId },
-        body,
-      },
-      effects: [],
-    }
-  }
-
-  function finishSubmit(
-    result: TrackingWriteResult | TrackingResubmitResult,
-  ): readonly TrackingWriteEffect[] {
-    const transport = active
-    if (!transport || (transport.family !== 'SUBMIT' && transport.family !== 'RESUBMIT')) return []
-    active = null
-    const session = projectSubmitOutcome(
-      transport.trackingId, transport.action, result, transport.mode,
-    )
-    submitSession.value = session
-    if (!session.keepsIntent) {
-      releaseSubmitIntent()
-    } else {
-      // Issue #183: a submit whose result is still unproven owes one automatic
-      // bounded read-only check, which is exactly what the submit area shows.
-      autoCheckArmed.value = true
-    }
-    return [recheck(transport.trackingId, false), ...submitFeedback(session)]
-  }
-
-  function failSubmit(error: TrackingWriteError): readonly TrackingWriteEffect[] {
-    const transport = active
-    if (!transport || (transport.family !== 'SUBMIT' && transport.family !== 'RESUBMIT')) return []
-    // A cancellation that cannot have crossed the external boundary is not a
-    // result: the session and its intent stay exactly as they were.
-    if (error.cancelled === true && error.httpError !== true) return []
-    active = null
-    const { trackingId, action } = transport
-    if (error.status === 409) {
-      // Every documented 409 is raised before the external boundary, so nothing
-      // was submitted. The locked intent is spent and the error body carries no
-      // authoritative tracking, so re-read both and require a new confirmation.
-      releaseSubmitIntent()
-      submitSession.value = transport.family === 'RESUBMIT'
-        ? createSubmitSession(trackingId, action, 'CONFLICT', {
-            message: resubmitConflictMessage(error.type),
-          })
-        : createSubmitConflictSession(trackingId, action, error.type)
-      return [recheck(trackingId, true)]
-    }
-    if (isDefiniteWriteRejection(error)) {
-      // D38-08.5: a documented JSON 400/404 is a definite refusal raised before
-      // the external boundary — Auto Bangumi was never written. This is *not*
-      // "结果待确认": the intent is released and the page only reads back.
-      releaseSubmitIntent()
-      submitSession.value = createSubmitSession(trackingId, action, 'REJECTED')
-      return [recheck(trackingId, true)]
-    }
-    // Network, timeout, non-JSON, 5xx — anything we cannot read as a definite
-    // outcome: the external result is unknown. Keeping the locked intent can
-    // never duplicate a subscription, so this path fails closed and only reads
-    // back; it never mints a new key and never resends by itself.
-    submitSession.value = createSubmitSession(trackingId, action, 'UNKNOWN')
-    return [recheck(trackingId, true)]
-  }
-
-  // -- recovery family ------------------------------------------------------
-
-  function beginRecovery(
-    payload: { readonly action: TrackingRecoveryActionCode; readonly item: TrackingItem },
-    options: TrackingWriteBeginOptions & { readonly capabilities?: CapabilityResult | null } = {},
-  ): TrackingWriteStart {
-    // One page-level intent at a time: a confirmation is open, or a write or
-    // recovery is already running.
-    if (pending.value || loading.value) return ignoredStart()
-    const requested = payload.action
-    if (!isRecoveryActionCode(requested)) return ignoredStart()
-    const trackingId = payload.item.tracking_id
-    // Another record's unresolved write or recovery keeps the page's single
-    // intent, so this recovery is refused before it can race it (D38-09.4).
-    if (unresolvedOwner(trackingId)) return refuseAndStart(trackingId, 'INTENT')
-    // This record's own next step is legitimate: drop the earlier refusal notice.
-    refusalNotice.value = null
-    const confirmation = recoveryConfirmation(requested)
-    if (confirmation && options.confirmed !== true) {
-      return { ...ignoredStart(), ask: 'IMPACT', confirmation }
-    }
-    // Read the live session *after* the confirmation: a session cleared while
-    // the dialog was open must not be used (the local actions never need one).
-    const intent = createTrackingRecoveryIntent(
-      payload.item, requested, options.capabilities ?? null,
-    )
-    if (!intent) return ignoredStart()
-    const body = createTrackingRecoverBody(
-      intent.action, intent.expectedRevision, options.connection ?? null, options.storageDir,
-    )
-    // A body the page cannot build safely (external verification without the
-    // live session) is not sent at all, and is refused exactly like the other
-    // two families' unbuildable sessions (issue #193).
-    if (!body) return unbuildableStart(trackingId)
-    active = { family: 'RECOVERY', trackingId, action: intent.action }
-    loading.value = true
-    recoverySession.value = createRecoverySession(trackingId, intent.action, 'IN_FLIGHT')
-    return {
-      accepted: true,
-      refusal: null,
-      ask: null,
-      confirmation: null,
-      request: {
-        endpoint: operationEndpoint(intent.action),
-        path: { tracking_id: trackingId },
-        body,
-      },
-      effects: [],
-    }
-  }
-
-  function finishRecovery(result: TrackingRecoverResult): readonly TrackingWriteEffect[] {
-    const transport = active
-    if (!transport || transport.family !== 'RECOVERY') return []
-    active = null
-    const { trackingId, action } = transport
-    const session = projectRecoveryOutcome(trackingId, action, result)
-    recoverySession.value = session
-    // A decided recovery settles the record: every unresolved write intent it
-    // was recovering from is released.
-    if (session.state === 'ACTIVE' || session.state === 'SUBMIT_FAILED') releaseFor(trackingId)
-    return [recheck(trackingId, false)]
-  }
-
-  function failRecovery(error: TrackingWriteError): readonly TrackingWriteEffect[] {
-    const transport = active
-    if (!transport || transport.family !== 'RECOVERY') return []
-    if (error.cancelled === true && error.httpError !== true) return []
-    active = null
-    const { trackingId, action } = transport
-    if (error.status === 409) {
-      // Revision/state conflict: the recovery was refused before anything was
-      // persisted, so re-read the server state and let the user confirm again.
-      recoverySession.value = createRecoveryConflictSession(trackingId, action)
-      return [recheck(trackingId, true)]
-    }
-    if (isDefiniteWriteRejection(error)) {
-      // A documented JSON 400/404 is decided before any state change.
-      recoverySession.value = createRecoverySession(trackingId, action, 'REJECTED')
-      return [recheck(trackingId, true)]
-    }
-    // Anything unreadable stays indeterminate: read back, keep the recovery
-    // state and never resend on the user's behalf.
-    recoverySession.value = createRecoverySession(trackingId, action, 'UNKNOWN')
-    return [recheck(trackingId, true)]
-  }
-
-  // -- management family ----------------------------------------------------
-
-  function beginManagement(
-    payload: {
-      readonly action: TrackingAction
-      readonly item: TrackingItem
-      readonly targetScope: TrackingManagementScope
-      readonly patch: unknown
-      readonly localPlan?: unknown
-    },
-    options: TrackingWriteBeginOptions = {},
-  ): TrackingWriteStart {
-    const trackingId = payload.item.tracking_id
-    if (pending.value || loading.value) return ignoredStart()
-    if (managementReplayBlocked) return refuseAndStart(trackingId, 'REPLAY')
-    // Issue #89: a saved Auto Bangumi connection is all an external management
-    // write needs. The server re-validates connection, credentials, exact
-    // version and write capability in the same request and fails closed.
-    if (!options.connection) return ignoredStart()
-    const requested = payload.action.code
-    // Only the management actions this page can actually send are accepted.
-    if (!isSendableManagementAction(requested)) return ignoredStart()
-    const targetScope = payload.targetScope
-    if (!isTrackingManagementScope(targetScope)) return ignoredStart()
-    const sameItemWrite = submitSession.value?.trackingId === trackingId
-      && submitSession.value.keepsIntent
-    const sameItemRecovery = recoverySession.value?.trackingId === trackingId
-      && recoverySession.value.keepsIntent
-    if (sameItemWrite || sameItemRecovery) return refuseAndStart(trackingId, 'INTENT')
-    // Any other record still holding the page's single unresolved intent refuses
-    // this management request — with a stated reason, not a silent no-op.
-    if (unresolvedOwner(trackingId)) return refuseAndStart(trackingId, 'INTENT')
-
-    // The page re-validates the emitted request against the current server
-    // projection: the action and scope must still be offered for this revision,
-    // the patch must belong to the chosen scope and the enable direction must
-    // still be the one the record's own status implies.
-    const projectedIntent = createTrackingManagementActionIntent(
-      payload.item, requested, targetScope, payload.patch, payload.localPlan,
-    )
-    if (!projectedIntent) return ignoredStart()
-    // A locked intent still owns the single opaque key *and* the request it was
-    // confirmed with. Replaying it for a different scope, patch or direction
-    // would send something the user did not ask for, and minting a new key while
-    // the external result is unresolved could apply the change twice.
-    const locked = managementIntent && managementSession.value?.trackingId === trackingId
-      ? managementIntent
-      : null
-    if (locked && !sameManagementRequest(locked, projectedIntent)) {
-      return refuseAndStart(trackingId, 'INTENT')
-    }
-    const intent = locked ?? projectedIntent
-    // The user is replaying the one locked request (or starting a fresh one):
-    // the refusal notice has served its purpose.
-    refusalNotice.value = null
-    if (options.confirmed !== true) {
-      return { ...ignoredStart(), ask: 'IMPACT', confirmation: managementConfirmation(intent) }
-    }
-    const requestConfig = locked ? managementConfigSnapshot : options.connection
-    if (!requestConfig) return unbuildableStart(trackingId)
-    managementIntent = intent
-    if (!locked) managementConfigSnapshot = { ...requestConfig }
-    // A body the page cannot build safely (no server address, missing scope
-    // patch, no known enable direction) is refused here, before any in-flight
-    // session exists: it sends zero requests and converges on a definite failure
-    // instead of leaving the panel stuck on "正在提交外部修改，请稍候…".
-    const body = createTrackingManagementBody(intent, requestConfig, options.storageDir)
-    if (!body) {
-      managementIntent = null
-      managementSession.value = createManagementSession(
-        trackingId, intent.action, targetScope, 'REJECTED', false, MANAGEMENT_UNBUILDABLE_MESSAGE,
-      )
-      return { ...ignoredStart(), effects: [recheck(trackingId, true)] }
-    }
-    active = { family: 'MANAGEMENT', trackingId, action: intent.action, targetScope }
-    loading.value = true
-    managementSession.value = createManagementSession(trackingId, intent.action, targetScope, 'IN_FLIGHT')
-    return {
-      accepted: true,
-      refusal: null,
-      ask: null,
-      confirmation: null,
-      request: {
-        endpoint: operationEndpoint(intent.action),
-        path: { tracking_id: trackingId },
-        body,
-      },
-      effects: [],
-    }
-  }
-
-  function finishManagement(result: TrackingManagementResult): readonly TrackingWriteEffect[] {
-    const transport = active
-    if (!transport || transport.family !== 'MANAGEMENT') return []
-    active = null
-    const { trackingId, action, targetScope } = transport
-    const session = projectManagementOutcome(trackingId, action, targetScope, result)
-    managementSession.value = session
-    if (!session.keepsIntent) managementIntent = null
-    return [recheck(trackingId, false)]
-  }
-
-  function failManagement(error: TrackingWriteError): readonly TrackingWriteEffect[] {
-    const transport = active
-    if (!transport || transport.family !== 'MANAGEMENT') return []
-    if (error.cancelled === true && error.httpError !== true) return []
-    active = null
-    const { trackingId, action, targetScope } = transport
-    if (error.status === 409) {
-      // Every documented management 409 is raised while the operation is being
-      // prepared, i.e. before the external boundary: nothing was submitted. The
-      // locked intent is spent, so re-read both and require a new confirmation.
-      managementIntent = null
-      managementSession.value = createManagementSession(
-        trackingId, action, targetScope, 'CONFLICT', false,
-        managementConflictMessage(error.type, action),
-      )
-      return [recheck(trackingId, true)]
-    }
-    if (isDefiniteWriteRejection(error)) {
-      // A structured non-409 4xx is a definite refusal raised before the
-      // external boundary, so Auto Bangumi was never touched. The intent is
-      // released and the page only reads the latest state back.
-      managementIntent = null
-      managementSession.value = createManagementSession(trackingId, action, targetScope, 'REJECTED')
-      return [recheck(trackingId, true)]
-    }
-    // Network, timeout, non-JSON, 5xx — anything we cannot read as a definite
-    // verdict: the external result is unknown. Keeping the locked intent can
-    // never apply the change twice, so this path fails closed and only reads
-    // back; it never mints a new key and never resends by itself.
-    managementSession.value = createManagementSession(trackingId, action, targetScope, 'UNKNOWN', true)
-    return [recheck(trackingId, true)]
-  }
-
-  // -- unified plan delete (issue #92) --------------------------------------
-
-  function beginPlanDelete(
-    payload: { readonly item: TrackingItem; readonly deleteExternal: boolean },
-    options: TrackingWriteBeginOptions = {},
-  ): TrackingWriteStart {
-    const connection = options.connection ?? null
-    // Issue #96: a purely local delete needs no Auto Bangumi connection at all;
-    // only the optional external delete requires the saved connection.
-    if (payload.deleteExternal && !connection?.connection_ref) return ignoredStart()
-    const trackingId = payload.item.tracking_id
-    planDeleteExternal = payload.deleteExternal
-    planDelete.value = createPlanDeleteSession(trackingId, 'IN_FLIGHT')
-    const storageDir = options.storageDir
-    // The generated body declares ``connection_ref`` unconditionally, but a
-    // purely local delete deliberately carries no credential at all (issue #96).
-    const body = {
-      confirm: true as const,
-      delete_external: payload.deleteExternal,
-      idempotency_key: makeOpaqueKey(),
-      ...(payload.deleteExternal && connection?.connection_ref
-        ? {
-            connection_ref: connection.connection_ref,
-            configuration_revision: connection.configuration_revision,
-          }
-        : {}),
-      ...(storageDir ? { storage_dir: storageDir } : {}),
-    }
-    return {
-      accepted: true,
-      refusal: null,
-      ask: null,
-      confirmation: null,
-      request: {
-        endpoint: PLAN_DELETE_ENDPOINT,
-        path: { tracking_id: trackingId },
-        body,
-      },
-      effects: [],
-    }
-  }
-
-  function finishPlanDelete(result: TrackingPlanDeleteResult): readonly TrackingWriteEffect[] {
-    const current = planDelete.value
-    if (!current) return []
-    const trackingId = current.trackingId
-    const state = result?.outcome === 'DELETED'
-      ? 'DELETED'
-      : result?.outcome === 'EXTERNAL_FAILED' ? 'EXTERNAL_FAILED' : 'EXTERNAL_UNKNOWN'
-    planDelete.value = createPlanDeleteSession(trackingId, state)
-    if (state === 'DELETED') {
-      return [
-        {
-          kind: 'notify',
-          feedback: {
-            channel: 'success',
-            title: '追番方案已删除',
-            message: planDeleteExternal
-              ? '已同时删除受控外部订阅；已下载媒体保留。'
-              : 'Auto Bangumi 中的订阅继续运行，MiGuOrca 不再管理它。',
-          },
-        },
-        recheck(null, true),
-      ]
-    }
-    return [recheck(trackingId, true)]
-  }
-
-  function failPlanDelete(error: TrackingWriteError): readonly TrackingWriteEffect[] {
-    const current = planDelete.value
-    if (!current) return []
-    if (error.cancelled === true && error.httpError !== true) return []
-    const trackingId = current.trackingId
-    planDelete.value = createPlanDeleteSession(
-      trackingId, error.status === 409 ? 'EXTERNAL_FAILED' : 'EXTERNAL_UNKNOWN',
-    )
-    return [recheck(trackingId, true)]
-  }
-
-  // -- explicit batch submit (issue #87) -----------------------------------
-
-  // -- bounded read-only check of a pending submission (issue #183) ---------
-
-  /**
    * A read-only check that proved the exact external object settles the pending
    * *submission*: only that family's intent is released, so a recovery or
    * management lock that is still unresolved stays locked and the server's
@@ -2780,19 +2422,529 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
     if (submit?.trackingId !== trackingId || !submit.keepsIntent) return
     submitSession.value = null
     releaseSubmitIntent()
-    submitReplayBlocked = false
-    submitConfigSnapshot = null
-  }
-
-  function setAutoCheck(armed: boolean): void {
-    autoCheckArmed.value = armed
+    core.submitReplayBlocked = false
+    core.submitConfigSnapshot = null
   }
 
   function resetCheck(): void {
-    checkAttempt = null
+    core.checkAttempt = null
     checkLoading.value = false
     check.value = null
     autoCheckArmed.value = false
+  }
+
+  /** The page owns the impact dialog; it reports the dialog's open state here. */
+  function setPending(value: boolean): void {
+    core.pending.value = value
+  }
+
+  return core
+}
+
+/**
+ * The submit family (US-310, US-311): 提交 and 重试, plus the write phase of the
+ * one risk-confirmed resubmission (issue #184), which reports through this slot.
+ */
+function createSubmitFamily(core: TrackingWriteCore) {
+  /**
+   * The page's fixed presentation of one decided submit-family session: a
+   * success notice, a blocking dialog with a settings deep link, or nothing the
+   * user must be interrupted with.
+   */
+  function submitFeedback(session: TrackingWriteSession): TrackingWriteEffect[] {
+    if (session.state === 'ACTIVE') {
+      return [{
+        kind: 'notify',
+        feedback: { channel: 'success', title: '提交成功', message: '已在 Auto Bangumi 创建外部订阅。' },
+      }]
+    }
+    const category = session.failureCategory
+    if (!category || !(WRITE_FAILURE_CATEGORIES as readonly string[]).includes(category)) return []
+    const presentation = WRITE_FAILURE_PRESENTATIONS[category as WriteFailureCategory]
+    if (presentation.channel !== 'dialog') return []
+    return [{
+      kind: 'notify',
+      feedback: { channel: 'dialog', title: presentation.title, message: presentation.message },
+    }]
+  }
+
+  // -- submit family --------------------------------------------------------
+
+  function beginSubmit(
+    payload: TrackingWriteTarget,
+    options: TrackingWriteBeginOptions = {},
+  ): TrackingWriteStart {
+    const trackingId = payload.item.tracking_id
+    // One page-level intent at a time: a confirmation is already open, or an
+    // external write/recovery is already running.
+    if (core.pending.value || core.loading.value) return ignoredStart()
+    if (core.submitReplayBlocked) return core.refuseAndStart(trackingId, 'REPLAY')
+    // Issue #86: a saved Auto Bangumi connection is all an external write needs.
+    // The server re-validates connection, credentials, exact version and write
+    // capability inside the same request and fails closed.
+    if (!options.connection) return ignoredStart()
+    const sameItemRecovery = core.recoverySession.value?.trackingId === trackingId
+      && core.recoverySession.value.keepsIntent
+    const sameItemManagement = core.managementSession.value?.trackingId === trackingId
+      && core.managementSession.value.keepsIntent
+    if (sameItemRecovery || sameItemManagement) return core.refuseAndStart(trackingId, 'INTENT')
+    // Any *other* record still holding the page's single unresolved intent
+    // refuses this request — with a stated next step instead of a silent no-op.
+    if (core.unresolvedOwner(trackingId)) return core.refuseAndStart(trackingId, 'INTENT')
+    const requested = payload.action.code
+    if (!isWriteActionCode(requested)) return ignoredStart()
+    // A locked intent still owns the single opaque key for this item. Replaying
+    // it under a different action would send something the user did not ask for.
+    const locked = core.submitIntent && core.submitSession.value?.trackingId === trackingId ? core.submitIntent : null
+    if (locked && locked.action !== requested) return core.refuseAndStart(trackingId, 'INTENT')
+    // Issue #98 AC 2: the entry only opens the mode choice for the submit family.
+    if (!options.mode) {
+      return { ...ignoredStart(), ask: 'SUBMISSION_MODE' }
+    }
+    // This item's own next step is legitimate: the earlier refusal notice has
+    // served its purpose.
+    core.refusalNotice.value = null
+    if (options.confirmed !== true) {
+      return {
+        ...ignoredStart(),
+        ask: 'IMPACT',
+        confirmation: WRITE_ACTION_CONFIRMATIONS[requested],
+      }
+    }
+
+    const intent = locked ?? createTrackingActionIntent(payload.item, payload.action)
+    if (!intent) return ignoredStart()
+    const requestConfig = locked ? core.submitConfigSnapshot : options.connection
+    if (!requestConfig) return core.unbuildableStart(trackingId)
+    core.submitIntent = intent
+    if (!locked) core.submitConfigSnapshot = { ...requestConfig }
+    const storageDir = options.storageDir
+    const body: TrackingWriteBody = {
+      expected_revision: intent.expectedRevision,
+      idempotency_key: intent.idempotencyKey,
+      confirm: true,
+      ...(options.mode ? { submission_mode: options.mode } : {}),
+      connection_ref: requestConfig.connection_ref!,
+      configuration_revision: requestConfig.configuration_revision!,
+      ...(storageDir ? { storage_dir: storageDir } : {}),
+    }
+    core.active = { family: 'SUBMIT', trackingId, action: requested, mode: options.mode ?? null }
+    core.loading.value = true
+    core.submitSession.value = createSubmitSession(trackingId, requested, 'IN_FLIGHT')
+    return {
+      accepted: true,
+      refusal: null,
+      ask: null,
+      confirmation: null,
+      request: {
+        endpoint: operationEndpoint(requested),
+        path: { tracking_id: trackingId },
+        body,
+      },
+      effects: [],
+    }
+  }
+
+  function finishSubmit(
+    result: TrackingWriteResult | TrackingResubmitResult,
+  ): readonly TrackingWriteEffect[] {
+    const transport = core.active
+    if (!transport || (transport.family !== 'SUBMIT' && transport.family !== 'RESUBMIT')) return []
+    core.active = null
+    const session = projectSubmitOutcome(
+      transport.trackingId, transport.action, result, transport.mode,
+    )
+    core.submitSession.value = session
+    if (!session.keepsIntent) {
+      core.releaseSubmitIntent()
+    } else {
+      // Issue #183: a submit whose result is still unproven owes one automatic
+      // bounded read-only check, which is exactly what the submit area shows.
+      core.autoCheckArmed.value = true
+    }
+    return [core.recheck(transport.trackingId, false), ...submitFeedback(session)]
+  }
+
+  function failSubmit(error: TrackingWriteError): readonly TrackingWriteEffect[] {
+    const transport = core.active
+    if (!transport || (transport.family !== 'SUBMIT' && transport.family !== 'RESUBMIT')) return []
+    // A cancellation that cannot have crossed the external boundary is not a
+    // result: the session and its intent stay exactly as they were.
+    if (error.cancelled === true && error.httpError !== true) return []
+    core.active = null
+    const { trackingId, action } = transport
+    if (error.status === 409) {
+      // Every documented 409 is raised before the external boundary, so nothing
+      // was submitted. The locked intent is spent and the error body carries no
+      // authoritative tracking, so re-read both and require a new confirmation.
+      core.releaseSubmitIntent()
+      core.submitSession.value = transport.family === 'RESUBMIT'
+        ? createSubmitSession(trackingId, action, 'CONFLICT', {
+            message: resubmitConflictMessage(error.type),
+          })
+        : createSubmitConflictSession(trackingId, action, error.type)
+      return [core.recheck(trackingId, true)]
+    }
+    if (isDefiniteWriteRejection(error)) {
+      // D38-08.5: a documented JSON 400/404 is a definite refusal raised before
+      // the external boundary — Auto Bangumi was never written. This is *not*
+      // "结果待确认": the intent is released and the page only reads back.
+      core.releaseSubmitIntent()
+      core.submitSession.value = createSubmitSession(trackingId, action, 'REJECTED')
+      return [core.recheck(trackingId, true)]
+    }
+    // Network, timeout, non-JSON, 5xx — anything we cannot read as a definite
+    // outcome: the external result is unknown. Keeping the locked intent can
+    // never duplicate a subscription, so this path fails closed and only reads
+    // back; it never mints a new key and never resends by itself.
+    core.submitSession.value = createSubmitSession(trackingId, action, 'UNKNOWN')
+    return [core.recheck(trackingId, true)]
+  }
+
+  return { beginSubmit, finishSubmit, failSubmit }
+}
+
+/**
+ * The recovery family (US-312): the three local conclusions and the one
+ * credential-bearing read-only ``VERIFY_EXTERNAL``.
+ */
+function createRecoveryFamily(core: TrackingWriteCore) {
+  // -- recovery family ------------------------------------------------------
+
+  function beginRecovery(
+    payload: { readonly action: TrackingRecoveryActionCode; readonly item: TrackingItem },
+    options: TrackingWriteBeginOptions & { readonly capabilities?: CapabilityResult | null } = {},
+  ): TrackingWriteStart {
+    // One page-level intent at a time: a confirmation is open, or a write or
+    // recovery is already running.
+    if (core.pending.value || core.loading.value) return ignoredStart()
+    const requested = payload.action
+    if (!isRecoveryActionCode(requested)) return ignoredStart()
+    const trackingId = payload.item.tracking_id
+    // Another record's unresolved write or recovery keeps the page's single
+    // intent, so this recovery is refused before it can race it (D38-09.4).
+    if (core.unresolvedOwner(trackingId)) return core.refuseAndStart(trackingId, 'INTENT')
+    // This record's own next step is legitimate: drop the earlier refusal notice.
+    core.refusalNotice.value = null
+    const confirmation = recoveryConfirmation(requested)
+    if (confirmation && options.confirmed !== true) {
+      return { ...ignoredStart(), ask: 'IMPACT', confirmation }
+    }
+    // Read the live session *after* the confirmation: a session cleared while
+    // the dialog was open must not be used (the local actions never need one).
+    const intent = createTrackingRecoveryIntent(
+      payload.item, requested, options.capabilities ?? null,
+    )
+    if (!intent) return ignoredStart()
+    const body = createTrackingRecoverBody(
+      intent.action, intent.expectedRevision, options.connection ?? null, options.storageDir,
+    )
+    // A body the page cannot build safely (external verification without the
+    // live session) is not sent at all, and is refused exactly like the other
+    // two families' unbuildable sessions (issue #193).
+    if (!body) return core.unbuildableStart(trackingId)
+    core.active = { family: 'RECOVERY', trackingId, action: intent.action }
+    core.loading.value = true
+    core.recoverySession.value = createRecoverySession(trackingId, intent.action, 'IN_FLIGHT')
+    return {
+      accepted: true,
+      refusal: null,
+      ask: null,
+      confirmation: null,
+      request: {
+        endpoint: operationEndpoint(intent.action),
+        path: { tracking_id: trackingId },
+        body,
+      },
+      effects: [],
+    }
+  }
+
+  function finishRecovery(result: TrackingRecoverResult): readonly TrackingWriteEffect[] {
+    const transport = core.active
+    if (!transport || transport.family !== 'RECOVERY') return []
+    core.active = null
+    const { trackingId, action } = transport
+    const session = projectRecoveryOutcome(trackingId, action, result)
+    core.recoverySession.value = session
+    // A decided recovery settles the record: every unresolved write intent it
+    // was recovering from is released.
+    if (session.state === 'ACTIVE' || session.state === 'SUBMIT_FAILED') core.releaseFor(trackingId)
+    return [core.recheck(trackingId, false)]
+  }
+
+  function failRecovery(error: TrackingWriteError): readonly TrackingWriteEffect[] {
+    const transport = core.active
+    if (!transport || transport.family !== 'RECOVERY') return []
+    if (error.cancelled === true && error.httpError !== true) return []
+    core.active = null
+    const { trackingId, action } = transport
+    if (error.status === 409) {
+      // Revision/state conflict: the recovery was refused before anything was
+      // persisted, so re-read the server state and let the user confirm again.
+      core.recoverySession.value = createRecoveryConflictSession(trackingId, action)
+      return [core.recheck(trackingId, true)]
+    }
+    if (isDefiniteWriteRejection(error)) {
+      // A documented JSON 400/404 is decided before any state change.
+      core.recoverySession.value = createRecoverySession(trackingId, action, 'REJECTED')
+      return [core.recheck(trackingId, true)]
+    }
+    // Anything unreadable stays indeterminate: read back, keep the recovery
+    // state and never resend on the user's behalf.
+    core.recoverySession.value = createRecoverySession(trackingId, action, 'UNKNOWN')
+    return [core.recheck(trackingId, true)]
+  }
+
+  return { beginRecovery, finishRecovery, failRecovery }
+}
+
+/**
+ * The management family (US-313, US-314, US-315): 修改 / 启停 / 立即刷新 /
+ * 删除外部对象, each routed by the validated intent's own declaration.
+ */
+function createManagementFamily(core: TrackingWriteCore) {
+  // -- management family ----------------------------------------------------
+
+  function beginManagement(
+    payload: {
+      readonly action: TrackingAction
+      readonly item: TrackingItem
+      readonly targetScope: TrackingManagementScope
+      readonly patch: unknown
+      readonly localPlan?: unknown
+    },
+    options: TrackingWriteBeginOptions = {},
+  ): TrackingWriteStart {
+    const trackingId = payload.item.tracking_id
+    if (core.pending.value || core.loading.value) return ignoredStart()
+    if (core.managementReplayBlocked) return core.refuseAndStart(trackingId, 'REPLAY')
+    // Issue #89: a saved Auto Bangumi connection is all an external management
+    // write needs. The server re-validates connection, credentials, exact
+    // version and write capability in the same request and fails closed.
+    if (!options.connection) return ignoredStart()
+    const requested = payload.action.code
+    // Only the management actions this page can actually send are accepted.
+    if (!isSendableManagementAction(requested)) return ignoredStart()
+    const targetScope = payload.targetScope
+    if (!isTrackingManagementScope(targetScope)) return ignoredStart()
+    const sameItemWrite = core.submitSession.value?.trackingId === trackingId
+      && core.submitSession.value.keepsIntent
+    const sameItemRecovery = core.recoverySession.value?.trackingId === trackingId
+      && core.recoverySession.value.keepsIntent
+    if (sameItemWrite || sameItemRecovery) return core.refuseAndStart(trackingId, 'INTENT')
+    // Any other record still holding the page's single unresolved intent refuses
+    // this management request — with a stated reason, not a silent no-op.
+    if (core.unresolvedOwner(trackingId)) return core.refuseAndStart(trackingId, 'INTENT')
+
+    // The page re-validates the emitted request against the current server
+    // projection: the action and scope must still be offered for this revision,
+    // the patch must belong to the chosen scope and the enable direction must
+    // still be the one the record's own status implies.
+    const projectedIntent = createTrackingManagementActionIntent(
+      payload.item, requested, targetScope, payload.patch, payload.localPlan,
+    )
+    if (!projectedIntent) return ignoredStart()
+    // A locked intent still owns the single opaque key *and* the request it was
+    // confirmed with. Replaying it for a different scope, patch or direction
+    // would send something the user did not ask for, and minting a new key while
+    // the external result is unresolved could apply the change twice.
+    const locked = core.managementIntent && core.managementSession.value?.trackingId === trackingId
+      ? core.managementIntent
+      : null
+    if (locked && !sameManagementRequest(locked, projectedIntent)) {
+      return core.refuseAndStart(trackingId, 'INTENT')
+    }
+    const intent = locked ?? projectedIntent
+    // The user is replaying the one locked request (or starting a fresh one):
+    // the refusal notice has served its purpose.
+    core.refusalNotice.value = null
+    if (options.confirmed !== true) {
+      return { ...ignoredStart(), ask: 'IMPACT', confirmation: managementConfirmation(intent) }
+    }
+    const requestConfig = locked ? core.managementConfigSnapshot : options.connection
+    if (!requestConfig) return core.unbuildableStart(trackingId)
+    core.managementIntent = intent
+    if (!locked) core.managementConfigSnapshot = { ...requestConfig }
+    // A body the page cannot build safely (no server address, missing scope
+    // patch, no known enable direction) is refused here, before any in-flight
+    // session exists: it sends zero requests and converges on a definite failure
+    // instead of leaving the panel stuck on "正在提交外部修改，请稍候…".
+    const body = createTrackingManagementBody(intent, requestConfig, options.storageDir)
+    if (!body) {
+      core.managementIntent = null
+      core.managementSession.value = createManagementSession(
+        trackingId, intent.action, targetScope, 'REJECTED', false, MANAGEMENT_UNBUILDABLE_MESSAGE,
+      )
+      return { ...ignoredStart(), effects: [core.recheck(trackingId, true)] }
+    }
+    core.active = { family: 'MANAGEMENT', trackingId, action: intent.action, targetScope }
+    core.loading.value = true
+    core.managementSession.value = createManagementSession(trackingId, intent.action, targetScope, 'IN_FLIGHT')
+    return {
+      accepted: true,
+      refusal: null,
+      ask: null,
+      confirmation: null,
+      request: {
+        endpoint: operationEndpoint(intent.action),
+        path: { tracking_id: trackingId },
+        body,
+      },
+      effects: [],
+    }
+  }
+
+  function finishManagement(result: TrackingManagementResult): readonly TrackingWriteEffect[] {
+    const transport = core.active
+    if (!transport || transport.family !== 'MANAGEMENT') return []
+    core.active = null
+    const { trackingId, action, targetScope } = transport
+    const session = projectManagementOutcome(trackingId, action, targetScope, result)
+    core.managementSession.value = session
+    if (!session.keepsIntent) core.managementIntent = null
+    return [core.recheck(trackingId, false)]
+  }
+
+  function failManagement(error: TrackingWriteError): readonly TrackingWriteEffect[] {
+    const transport = core.active
+    if (!transport || transport.family !== 'MANAGEMENT') return []
+    if (error.cancelled === true && error.httpError !== true) return []
+    core.active = null
+    const { trackingId, action, targetScope } = transport
+    if (error.status === 409) {
+      // Every documented management 409 is raised while the operation is being
+      // prepared, i.e. before the external boundary: nothing was submitted. The
+      // locked intent is spent, so re-read both and require a new confirmation.
+      core.managementIntent = null
+      core.managementSession.value = createManagementSession(
+        trackingId, action, targetScope, 'CONFLICT', false,
+        managementConflictMessage(error.type, action),
+      )
+      return [core.recheck(trackingId, true)]
+    }
+    if (isDefiniteWriteRejection(error)) {
+      // A structured non-409 4xx is a definite refusal raised before the
+      // external boundary, so Auto Bangumi was never touched. The intent is
+      // released and the page only reads the latest state back.
+      core.managementIntent = null
+      core.managementSession.value = createManagementSession(trackingId, action, targetScope, 'REJECTED')
+      return [core.recheck(trackingId, true)]
+    }
+    // Network, timeout, non-JSON, 5xx — anything we cannot read as a definite
+    // verdict: the external result is unknown. Keeping the locked intent can
+    // never apply the change twice, so this path fails closed and only reads
+    // back; it never mints a new key and never resends by itself.
+    core.managementSession.value = createManagementSession(trackingId, action, targetScope, 'UNKNOWN', true)
+    return [core.recheck(trackingId, true)]
+  }
+
+  return { beginManagement, finishManagement, failManagement }
+}
+
+/**
+ * The unified plan delete (issue #92): a local delete that optionally asks Auto
+ * Bangumi to drop the external object as well.
+ */
+function createPlanDeleteFamily(core: TrackingWriteCore) {
+  // -- unified plan delete (issue #92) --------------------------------------
+
+  function beginPlanDelete(
+    payload: { readonly item: TrackingItem; readonly deleteExternal: boolean },
+    options: TrackingWriteBeginOptions = {},
+  ): TrackingWriteStart {
+    const connection = options.connection ?? null
+    // Issue #96: a purely local delete needs no Auto Bangumi connection at all;
+    // only the optional external delete requires the saved connection.
+    if (payload.deleteExternal && !connection?.connection_ref) return ignoredStart()
+    const trackingId = payload.item.tracking_id
+    core.planDeleteExternal = payload.deleteExternal
+    core.planDelete.value = createPlanDeleteSession(trackingId, 'IN_FLIGHT')
+    const storageDir = options.storageDir
+    // The generated body declares ``connection_ref`` unconditionally, but a
+    // purely local delete deliberately carries no credential at all (issue #96).
+    const body = {
+      confirm: true as const,
+      delete_external: payload.deleteExternal,
+      idempotency_key: makeOpaqueKey(),
+      ...(payload.deleteExternal && connection?.connection_ref
+        ? {
+            connection_ref: connection.connection_ref,
+            configuration_revision: connection.configuration_revision,
+          }
+        : {}),
+      ...(storageDir ? { storage_dir: storageDir } : {}),
+    }
+    return {
+      accepted: true,
+      refusal: null,
+      ask: null,
+      confirmation: null,
+      request: {
+        endpoint: PLAN_DELETE_ENDPOINT,
+        path: { tracking_id: trackingId },
+        body,
+      },
+      effects: [],
+    }
+  }
+
+  function finishPlanDelete(result: TrackingPlanDeleteResult): readonly TrackingWriteEffect[] {
+    const current = core.planDelete.value
+    if (!current) return []
+    const trackingId = current.trackingId
+    const state = result?.outcome === 'DELETED'
+      ? 'DELETED'
+      : result?.outcome === 'EXTERNAL_FAILED' ? 'EXTERNAL_FAILED' : 'EXTERNAL_UNKNOWN'
+    core.planDelete.value = createPlanDeleteSession(trackingId, state)
+    if (state === 'DELETED') {
+      return [
+        {
+          kind: 'notify',
+          feedback: {
+            channel: 'success',
+            title: '追番方案已删除',
+            message: core.planDeleteExternal
+              ? '已同时删除受控外部订阅；已下载媒体保留。'
+              : 'Auto Bangumi 中的订阅继续运行，MiGuOrca 不再管理它。',
+          },
+        },
+        core.recheck(null, true),
+      ]
+    }
+    return [core.recheck(trackingId, true)]
+  }
+
+  function failPlanDelete(error: TrackingWriteError): readonly TrackingWriteEffect[] {
+    const current = core.planDelete.value
+    if (!current) return []
+    if (error.cancelled === true && error.httpError !== true) return []
+    const trackingId = current.trackingId
+    core.planDelete.value = createPlanDeleteSession(
+      trackingId, error.status === 409 ? 'EXTERNAL_FAILED' : 'EXTERNAL_UNKNOWN',
+    )
+    return [core.recheck(trackingId, true)]
+  }
+
+  function resetPlanDelete(): void {
+    core.planDelete.value = null
+  }
+
+  return {
+    beginPlanDelete,
+    finishPlanDelete,
+    failPlanDelete,
+    resetPlanDelete,
+  }
+}
+
+/**
+ * The bounded read-only check of a pending submission (issue #183): its own slot
+ * and its own attempt, holding no page-level intent.
+ */
+function createCheckFamily(core: TrackingWriteCore) {
+  function setAutoCheck(armed: boolean): void {
+    core.autoCheckArmed.value = armed
   }
 
   /**
@@ -2812,22 +2964,22 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
     const trackingId = payload.item.tracking_id
     const revision = payload.item.revision
     if (typeof revision !== 'number') return ignoredStart()
-    if (payload.automatic && !autoCheckArmed.value) return ignoredStart()
-    if (checkLoading.value) return ignoredStart()
-    if (unresolvedOwner(trackingId)) {
+    if (payload.automatic && !core.autoCheckArmed.value) return ignoredStart()
+    if (core.checkLoading.value) return ignoredStart()
+    if (core.unresolvedOwner(trackingId)) {
       if (payload.automatic) return ignoredStart()
-      return refuseAndStart(trackingId, 'INTENT')
+      return core.refuseAndStart(trackingId, 'INTENT')
     }
-    if (payload.automatic) autoCheckArmed.value = false
-    refusalNotice.value = null
+    if (payload.automatic) core.autoCheckArmed.value = false
+    core.refusalNotice.value = null
     const storageDir = options.storageDir
     const body: TrackingCheckBody = {
       expected_revision: revision,
       ...(storageDir ? { storage_dir: storageDir } : {}),
     }
-    checkAttempt = { trackingId, revision }
-    checkLoading.value = true
-    check.value = createCheckSession(trackingId, 'IN_FLIGHT', null, revision)
+    core.checkAttempt = { trackingId, revision }
+    core.checkLoading.value = true
+    core.check.value = createCheckSession(trackingId, 'IN_FLIGHT', null, revision)
     return {
       accepted: true,
       refusal: null,
@@ -2843,30 +2995,38 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
   }
 
   function finishCheck(result: TrackingCheckResult): readonly TrackingWriteEffect[] {
-    const attempt = checkAttempt
+    const attempt = core.checkAttempt
     if (!attempt) return []
-    checkAttempt = null
-    checkLoading.value = false
+    core.checkAttempt = null
+    core.checkLoading.value = false
     const session = projectCheckResult(attempt.trackingId, result, attempt.revision)
-    check.value = session
-    if (session.state === 'CONFIRMED') releaseSettledSubmission(attempt.trackingId)
-    return [recheck(attempt.trackingId, true)]
+    core.check.value = session
+    if (session.state === 'CONFIRMED') core.releaseSettledSubmission(attempt.trackingId)
+    return [core.recheck(attempt.trackingId, true)]
   }
 
   function failCheck(error: TrackingWriteError): readonly TrackingWriteEffect[] {
-    const attempt = checkAttempt
+    const attempt = core.checkAttempt
     if (!attempt) return []
-    checkAttempt = null
-    checkLoading.value = false
+    core.checkAttempt = null
+    core.checkLoading.value = false
     // A cancellation that cannot have reached the server is not a result: the
     // in-flight session stays as it is, exactly as the write families do.
     if (error.cancelled === true && error.httpError !== true) return []
-    check.value = error.status === 409
+    core.check.value = error.status === 409
       ? createCheckSession(attempt.trackingId, 'CONFLICT', null, attempt.revision)
       : createCheckSession(attempt.trackingId, 'UNKNOWN', null, attempt.revision)
-    return [recheck(attempt.trackingId, true)]
+    return [core.recheck(attempt.trackingId, true)]
   }
 
+  return { setAutoCheck, beginCheck, finishCheck, failCheck }
+}
+
+/**
+ * The risk-confirmed single manual resubmission (issue #184): its own read-only
+ * offer slot, then one new operation reported through the submit family's slot.
+ */
+function createResubmitFamily(core: TrackingWriteCore) {
   // -- risk-confirmed resubmission (issue #184) -----------------------------
 
   /** The one confirmation body of a resubmit, rebuilt from its exact binding. */
@@ -2896,33 +3056,33 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
     options: TrackingWriteBeginOptions = {},
   ): TrackingWriteStart {
     const trackingId = payload.item.tracking_id
-    if (pending.value || loading.value || resubmitLoading.value) return ignoredStart()
-    const locked = resubmitIntent?.trackingId === trackingId ? resubmitIntent : null
+    if (core.pending.value || core.loading.value || core.resubmitLoading.value) return ignoredStart()
+    const locked = core.resubmitIntent?.trackingId === trackingId ? core.resubmitIntent : null
     if (locked) {
-      if (submitReplayBlocked) return refuseAndStart(trackingId, 'REPLAY')
-      refusalNotice.value = null
-      active = {
+      if (core.submitReplayBlocked) return core.refuseAndStart(trackingId, 'REPLAY')
+      core.refusalNotice.value = null
+      core.active = {
         family: 'RESUBMIT', trackingId, action: 'SUBMIT', mode: 'CONTINUE_TRACKING',
       }
-      loading.value = true
-      submitSession.value = createSubmitSession(trackingId, 'SUBMIT', 'IN_FLIGHT')
+      core.loading.value = true
+      core.submitSession.value = createSubmitSession(trackingId, 'SUBMIT', 'IN_FLIGHT')
       return {
         ...acceptedStart(resubmitRequest(trackingId, locked.binding, options.storageDir)),
         resubmitPhase: 'CONFIRMATION',
       }
     }
-    if (unresolvedOwner(trackingId)) return refuseAndStart(trackingId, 'INTENT')
+    if (core.unresolvedOwner(trackingId)) return core.refuseAndStart(trackingId, 'INTENT')
     const revision = payload.item.revision
     if (typeof revision !== 'number') return ignoredStart()
-    refusalNotice.value = null
+    core.refusalNotice.value = null
     const body: TrackingResubmitBody = {
       expected_revision: revision,
       confirm: false,
       ...(options.storageDir ? { storage_dir: options.storageDir } : {}),
     }
-    resubmitAttempt = { trackingId, revision }
-    resubmitLoading.value = true
-    resubmit.value = createResubmitSession(trackingId, 'IN_FLIGHT', null, revision)
+    core.resubmitAttempt = { trackingId, revision }
+    core.resubmitLoading.value = true
+    core.resubmit.value = createResubmitSession(trackingId, 'IN_FLIGHT', null, revision)
     return {
       ...acceptedStart({
         endpoint: TRACKING_RESUBMIT_ENDPOINT,
@@ -2939,43 +3099,43 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
    * still-unresolved result asks the page for the explicit risk confirmation.
    */
   function finishResubmitOffer(result: TrackingResubmitResult): readonly TrackingWriteEffect[] {
-    const attempt = resubmitAttempt
+    const attempt = core.resubmitAttempt
     if (!attempt) return []
-    resubmitAttempt = null
-    resubmitLoading.value = false
+    core.resubmitAttempt = null
+    core.resubmitLoading.value = false
     const session = projectResubmitOffer(attempt.trackingId, result, attempt.revision)
-    resubmit.value = session
-    if (session.state === 'CONFIRMED') releaseSettledSubmission(attempt.trackingId)
+    core.resubmit.value = session
+    if (session.state === 'CONFIRMED') core.releaseSettledSubmission(attempt.trackingId)
     if (session.state !== 'UNKNOWN' || !session.binding) {
-      return [recheck(attempt.trackingId, true)]
+      return [core.recheck(attempt.trackingId, true)]
     }
     return [
-      recheck(attempt.trackingId, true),
+      core.recheck(attempt.trackingId, true),
       { kind: 'confirmResubmitRisk', trackingId: attempt.trackingId, binding: session.binding },
     ]
   }
 
   function failResubmitOffer(error: TrackingWriteError): readonly TrackingWriteEffect[] {
-    const attempt = resubmitAttempt
+    const attempt = core.resubmitAttempt
     if (!attempt) return []
-    resubmitAttempt = null
-    resubmitLoading.value = false
+    core.resubmitAttempt = null
+    core.resubmitLoading.value = false
     if (error.cancelled === true && error.httpError !== true) return []
     // Every documented 409 is raised before the external boundary, so the proven
     // reason is stated and the page re-reads instead of guessing a cause.
-    resubmit.value = error.status === 409
+    core.resubmit.value = error.status === 409
       ? createResubmitSession(
           attempt.trackingId, 'CONFLICT', null, attempt.revision, resubmitConflictMessage(error.type),
         )
       : createResubmitSession(attempt.trackingId, 'UNKNOWN', null, attempt.revision)
-    return [recheck(attempt.trackingId, true)]
+    return [core.recheck(attempt.trackingId, true)]
   }
 
   /** The user cancelled the risk confirmation: no request, no new operation. */
   function cancelResubmit(trackingId: string): void {
-    const session = resubmit.value
+    const session = core.resubmit.value
     if (!session || session.trackingId !== trackingId || !session.binding) return
-    resubmit.value = createResubmitSession(
+    core.resubmit.value = createResubmitSession(
       trackingId, 'CANCELLED', session.reason, session.revision,
     )
   }
@@ -2991,8 +3151,8 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
     binding: TrackingResubmitBinding,
     options: TrackingWriteBeginOptions = {},
   ): TrackingWriteStart {
-    if (pending.value || loading.value) return ignoredStart()
-    const offer = resubmit.value
+    if (core.pending.value || core.loading.value) return ignoredStart()
+    const offer = core.resubmit.value
     if (
       !offer
       || !offer.binding
@@ -3003,21 +3163,43 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
       return ignoredStart()
     }
     const trackingId = offer.trackingId
-    if (unresolvedOwner(trackingId)) return refuseAndStart(trackingId, 'INTENT')
-    refusalNotice.value = null
-    resubmitIntent = { trackingId, binding: offer.binding }
-    resubmit.value = null
+    if (core.unresolvedOwner(trackingId)) return core.refuseAndStart(trackingId, 'INTENT')
+    core.refusalNotice.value = null
+    core.resubmitIntent = { trackingId, binding: offer.binding }
+    core.resubmit.value = null
     // The confirmation is a submit-family external write: one new operation and
     // the ordinary submit result panel.
-    submitConfigSnapshot = null
-    active = { family: 'RESUBMIT', trackingId, action: 'SUBMIT', mode: 'CONTINUE_TRACKING' }
-    loading.value = true
-    submitSession.value = createSubmitSession(trackingId, 'SUBMIT', 'IN_FLIGHT')
+    core.submitConfigSnapshot = null
+    core.active = { family: 'RESUBMIT', trackingId, action: 'SUBMIT', mode: 'CONTINUE_TRACKING' }
+    core.loading.value = true
+    core.submitSession.value = createSubmitSession(trackingId, 'SUBMIT', 'IN_FLIGHT')
     return {
       ...acceptedStart(resubmitRequest(trackingId, offer.binding, options.storageDir)),
       resubmitPhase: 'CONFIRMATION',
     }
   }
+
+  return {
+    beginResubmit,
+    finishResubmitOffer,
+    failResubmitOffer,
+    cancelResubmit,
+    beginResubmitConfirmation,
+  }
+}
+
+/**
+ * The explicit batch submit (issue #87, #100): one request for one confirmed
+ * selection, projected into per-entry outcomes.
+ */
+function createBatchFamily(core: TrackingWriteCore) {
+  function resetBatch(): void {
+    core.batchSelection.value = EMPTY_BATCH_SELECTION
+    core.batchOutcome.value = null
+    core.batchNotice.value = ''
+  }
+
+  // -- explicit batch submit (issue #87) -----------------------------------
 
   function beginBatchSubmit(
     payload: { readonly items: readonly TrackingItem[]; readonly mode: TrackingSubmissionMode | null },
@@ -3027,9 +3209,9 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
     if (!connection?.connection_ref) return { ...ignoredStart(), skipped: [], skippedTitle: '' }
     // AC 5/6/9: the local pre-check result is stated before (and separately from)
     // any external result, and a fully skipped batch sends nothing at all.
-    const skipped = skippedBatchEntries(batchSelection.value, payload.items)
+    const skipped = skippedBatchEntries(core.batchSelection.value, payload.items)
     const body = buildBatchSubmitBody(
-      batchSelection.value,
+      core.batchSelection.value,
       payload.items,
       { connection_ref: connection.connection_ref, configuration_revision: connection.configuration_revision! },
       options.storageDir,
@@ -3037,16 +3219,16 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
     )
     if (!body) {
       // AC 6: a fully skipped batch proves zero Auto Bangumi requests.
-      batchOutcome.value = null
-      batchNotice.value = '没有可提交的方案'
+      core.batchOutcome.value = null
+      core.batchNotice.value = '没有可提交的方案'
       return { ...ignoredStart(), skipped, skippedTitle: '没有可提交的方案' }
     }
     // AC 4: the information dialog never gates the run — the submittable plans
     // start immediately, with no second confirmation.  The banner is cleared for
     // the new attempt; the dialog's title is returned instead of being shown.
-    batchOutcome.value = null
-    batchNotice.value = ''
-    batchLoading.value = true
+    core.batchOutcome.value = null
+    core.batchNotice.value = ''
+    core.batchLoading.value = true
     return {
       accepted: true,
       refusal: null,
@@ -3061,12 +3243,12 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
 
   function finishBatchSubmit(result: TrackingBatchResult): readonly TrackingWriteEffect[] {
     const outcome = projectBatchOutcome(result)
-    batchOutcome.value = outcome
-    batchSelection.value = selectionAfterBatch(batchSelection.value, outcome)
+    core.batchOutcome.value = outcome
+    core.batchSelection.value = selectionAfterBatch(core.batchSelection.value, outcome)
     const unknown = outcome.unresolved.length
-    batchNotice.value = `本次批量提交：成功 ${outcome.succeeded} 条，失败 ${outcome.failed} 条${unknown ? `，其中 ${unknown} 条结果待确认需先恢复` : ''}。`
-    batchLoading.value = false
-    const effects: TrackingWriteEffect[] = [recheck(null, true)]
+    core.batchNotice.value = `本次批量提交：成功 ${outcome.succeeded} 条，失败 ${outcome.failed} 条${unknown ? `，其中 ${unknown} 条结果待确认需先恢复` : ''}。`
+    core.batchLoading.value = false
+    const effects: TrackingWriteEffect[] = [core.recheck(null, true)]
     if (outcome.succeeded) {
       effects.unshift({
         kind: 'notify',
@@ -3081,74 +3263,84 @@ export function useTrackingWriteSession(): TrackingWriteSessionApi {
   }
 
   function failBatchSubmit(error: TrackingWriteError): void {
-    batchLoading.value = false
+    core.batchLoading.value = false
     // A cancellation that cannot have crossed the external boundary keeps the
     // previous copy: nothing was resolved and nothing is resent.
     if (error.cancelled === true && error.httpError !== true) return
     // Nothing was resolved: keep the selection and never resend on our own.
-    batchNotice.value = '批量提交请求未能确认送达，已保留当前选择；请核对连接后重新确认。'
+    core.batchNotice.value = '批量提交请求未能确认送达，已保留当前选择；请核对连接后重新确认。'
   }
 
   return {
-    sessions,
-    loading,
-    pending,
-    planDelete,
-    check,
-    checkLoading,
-    autoCheckArmed,
-    batchSelection,
-    batchOutcome,
-    batchLoading,
-    batchNotice,
-    batchSkippedNotice,
-    hasUnresolvedLock,
-    unresolvedOwner,
-    busyFor,
-    noticeFor,
-    reset,
-    preserveAfterClear,
-    setPending(value: boolean) { pending.value = value },
-    beginSubmit,
-    finishSubmit,
-    failSubmit,
-    finishAttempt,
-    beginRecovery,
-    finishRecovery,
-    failRecovery,
-    beginManagement,
-    finishManagement,
-    failManagement,
-    beginPlanDelete,
-    finishPlanDelete,
-    failPlanDelete,
-    resetPlanDelete,
-    setAutoCheck,
-    beginCheck,
-    finishCheck,
-    failCheck,
-    resubmit,
-    resubmitLoading,
-    beginResubmit,
-    finishResubmitOffer,
-    failResubmitOffer,
-    cancelResubmit,
-    beginResubmitConfirmation,
-    isBatchSelected: (trackingId: string) => isBatchSelected(batchSelection.value, trackingId),
+    isBatchSelected: (trackingId: string) => isBatchSelected(core.batchSelection.value, trackingId),
     toggleBatchRow(trackingId: string) {
-      batchSelection.value = toggleBatchSelection(batchSelection.value, trackingId)
+      core.batchSelection.value = toggleBatchSelection(core.batchSelection.value, trackingId)
     },
     selectAllBatch(items: readonly TrackingItem[]) {
-      batchSelection.value = selectAllBatch(items)
+      core.batchSelection.value = selectAllBatch(items)
     },
     clearBatchSelection() {
-      batchSelection.value = EMPTY_BATCH_SELECTION
+      core.batchSelection.value = EMPTY_BATCH_SELECTION
     },
     batchSkipReason,
-    batchSummary: (visible: readonly TrackingItem[]) => batchSelectionSummary(batchSelection.value, visible),
+    batchSummary: (visible: readonly TrackingItem[]) => (
+      batchSelectionSummary(core.batchSelection.value, visible)
+    ),
     resetBatch,
     beginBatchSubmit,
     finishBatchSubmit,
     failBatchSubmit,
+  }
+}
+
+/**
+ * The page's one write session: the assembly of the core and its families.
+ *
+ * Every family factory above returns only its own commands, and this function is
+ * the single place that knows they all belong to one surface.  It performs no
+ * policy itself: the snapshots, the lock queries and the hard reset come from the
+ * core, and each family's commands come from that family.
+ */
+export function useTrackingWriteSession(): TrackingWriteSessionApi {
+  const core = createTrackingWriteCore()
+  const submitFamily = createSubmitFamily(core)
+  const recoveryFamily = createRecoveryFamily(core)
+  const managementFamily = createManagementFamily(core)
+  const planDeleteFamily = createPlanDeleteFamily(core)
+  const checkFamily = createCheckFamily(core)
+  const resubmitFamily = createResubmitFamily(core)
+  const batchFamily = createBatchFamily(core)
+  return {
+    // -- snapshots and lock queries, all from the one core ------------------
+    sessions: core.sessions,
+    loading: core.loading,
+    pending: core.pending,
+    planDelete: core.planDelete,
+    check: core.check,
+    checkLoading: core.checkLoading,
+    autoCheckArmed: core.autoCheckArmed,
+    resubmit: core.resubmit,
+    resubmitLoading: core.resubmitLoading,
+    batchSelection: core.batchSelection,
+    batchOutcome: core.batchOutcome,
+    batchLoading: core.batchLoading,
+    batchNotice: core.batchNotice,
+    batchSkippedNotice: core.batchSkippedNotice,
+    hasUnresolvedLock: core.hasUnresolvedLock,
+    unresolvedOwner: core.unresolvedOwner,
+    busyFor: core.busyFor,
+    noticeFor: core.noticeFor,
+    reset: core.reset,
+    preserveAfterClear: core.preserveAfterClear,
+    setPending: core.setPending,
+    finishAttempt: core.finishAttempt,
+    // -- one command set per family -----------------------------------------
+    ...submitFamily,
+    ...recoveryFamily,
+    ...managementFamily,
+    ...planDeleteFamily,
+    ...checkFamily,
+    ...resubmitFamily,
+    ...batchFamily,
   }
 }
