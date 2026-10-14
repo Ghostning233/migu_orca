@@ -368,6 +368,8 @@ const seasonConfirmations = ref<Record<string, number | null>>({})
 // Draft detail state.
 const draftApplyErrors = ref<Record<string, string>>({})
 const detailEditor = ref<InstanceType<typeof AnimeDraftEditor> | null>(null)
+/** #198：右栏详情滚动容器句柄（策略见下方 `watch(currentItemId)` 的口径注释）。 */
+const detailPane = ref<HTMLElement | null>(null)
 
 /**
  * #162：草案会话与编辑调度器两个句柄 Map 归模块所有。视图只提供「怎么造」——
@@ -637,6 +639,23 @@ watch([reviewQuery, reviewStatus, needsProcessingOnly], (_values, oldValues) => 
     reviewScrollPositions.set(`${query}\u0000${status}\u0000${needsProcessing}`, reviewList.value.scrollTop)
   }
   void restoreReviewScrollPosition()
+})
+
+/**
+ * #198：右栏滚动策略是**显式口径**——切换条目时右栏回到顶部。
+ *
+ * 取证实测（#198 评论，真实 Chromium）：切换条目后 `#batch-detail-pane.scrollTop`
+ * 会保留上一条目的偏移（300 → 300），因为滚动容器是外层 pane，内部 `AnimeDraftEditor`
+ * 虽按条目 key 重挂载却不影响它。右栏是每条目独立的审核面板，保留上一条目的偏移会让
+ * 用户在另一个条目上落在与预期无关的表单位置，因此这里做最小重置——**不做按条目记忆**
+ * （那属新的 UX 需求，需要另开票）。
+ *
+ * 重置只在 `currentItemId` 变化时发生：同一条目内的编辑/保存/资源弹窗不改变它，
+ * 因此不打断栏内滚动（左栏 `reviewScrollPositions` 是另一个容器、另一套策略）。
+ */
+watch(currentItemId, async () => {
+  await nextTick()
+  if (detailPane.value) detailPane.value.scrollTop = 0
 })
 
 /** #149：放大镜浮层不参与布局；打开即聚焦输入，关闭后关键词与结果保留。 */
@@ -1961,6 +1980,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 
           <aside
             id="batch-detail-pane"
+            ref="detailPane"
             class="batch-detail-pane"
             data-screen-scroll="inner"
             aria-label="当前批量条目详情"

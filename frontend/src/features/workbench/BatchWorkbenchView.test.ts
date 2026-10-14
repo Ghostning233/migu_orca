@@ -2606,3 +2606,86 @@ describe('BatchWorkbenchView lifecycle characterization (#161)', () => {
     wrapper.unmount()
   })
 })
+
+describe('BatchWorkbenchView detail pane scroll policy (#198)', () => {
+  // #198 的显式口径：切换条目时右栏回到顶部（不做按条目记忆）。真实浏览器里滚动
+  // 容器是外层 `#batch-detail-pane`，内部 AnimeDraftEditor 按条目重挂载不会动它。
+  beforeEach(() => {
+    localStorage.clear()
+    apiPost.mockReset()
+  })
+
+  function draftRow(itemId: string, title: string) {
+    return batchItem({
+      item_id: itemId,
+      raw_title: title,
+      status: 'DRAFT',
+      canonical_title_candidates: [`${title} 第一季`],
+      preview_request: previewRequest(`req-${itemId}`),
+      draft_id: `draft-${itemId}`,
+      draft_revision: 1,
+    })
+  }
+
+  async function parseTwoDrafts() {
+    apiPost.mockResolvedValueOnce(
+      parseResult({ items: [draftRow('item-1', '甲S1'), draftRow('item-2', '乙S1')] }),
+    )
+    const mounted = await mountBatch()
+    await mounted.wrapper.find('#batch-raw-input').setValue('甲S1\n乙S1')
+    await mounted.wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    return mounted
+  }
+
+  /**
+   * jsdom 不做布局滚动，真实元素的 scrollTop 恒为 0；这里在真实 DOM 节点上装一个
+   * 可读写的 scrollTop，让「视图有没有重置右栏滚动」成为可观察结果，而不是去断言实现细节。
+   */
+  function observePaneScroll(
+    wrapper: Awaited<ReturnType<typeof mountBatch>>['wrapper'],
+    initial: number,
+  ) {
+    const element = wrapper.find('#batch-detail-pane').element as HTMLElement
+    let value = initial
+    Object.defineProperty(element, 'scrollTop', {
+      configurable: true,
+      get: () => value,
+      set: (next: number) => {
+        value = next
+      },
+    })
+    return {
+      read: () => value,
+      write: (next: number) => {
+        value = next
+      },
+    }
+  }
+
+  it('#198: 切换条目时右栏回到顶部，且不按条目记忆', async () => {
+    const { wrapper } = await parseTwoDrafts()
+    const pane = observePaneScroll(wrapper, 300)
+    expect(pane.read()).toBe(300)
+
+    await wrapper.find('.batch-draft-card[data-item-id="item-2"]').trigger('click')
+    await flushPromises()
+    expect(pane.read()).toBe(0)
+
+    // 不做按条目记忆：切回原条目同样回顶，而不是恢复离开时记住的位置。
+    pane.write(240)
+    await wrapper.find('.batch-draft-card[data-item-id="item-1"]').trigger('click')
+    await flushPromises()
+    expect(pane.read()).toBe(0)
+  })
+
+  it('#198: 同一条目内的编辑不改变左栏策略所不覆盖的右栏滚动位置', async () => {
+    const { wrapper } = await parseTwoDrafts()
+    const pane = observePaneScroll(wrapper, 300)
+
+    // 同一条目内的编辑不改变 currentItemId，因此不得打断栏内滚动。
+    await wrapper.find('#batch-preview-must-contain').setValue('未应用修改')
+    await flushPromises()
+    expect(pane.read()).toBe(300)
+  })
+})
