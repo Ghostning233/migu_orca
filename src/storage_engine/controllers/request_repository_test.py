@@ -4,7 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from apps.migu_orca_entry.controllers.entry_controller import generate_request
+from plan_engine.controllers.data_sources import StaticFixtureDataSource
+from plan_engine.controllers.plan_generation import build_plan
 from shared.errors import Stage1Error
 from shared.models import EntryRequest
 from storage_engine.controllers.request_repository import (
@@ -20,7 +21,7 @@ def test_save_and_load_request_snapshot_preserves_request_fields(
     tmp_path: Path,
 ) -> None:
     config = load_storage_config(tmp_path / "migu-state")
-    request = generate_request(EntryRequest(raw_title="芙莉莲"))["request"]
+    request = build_plan(EntryRequest(raw_title="芙莉莲"), data_source=StaticFixtureDataSource())["request"]
 
     saved = save_request_snapshot(config, request)
     loaded = load_request_snapshot(config, request["request_id"])
@@ -41,11 +42,11 @@ def test_list_request_snapshots_returns_saved_requests_in_filename_order(
 ) -> None:
     config = load_storage_config(tmp_path / "migu-state")
     request_a = {
-        **generate_request(EntryRequest(raw_title="芙莉莲"))["request"],
+        **build_plan(EntryRequest(raw_title="芙莉莲"), data_source=StaticFixtureDataSource())["request"],
         "request_id": "request-b",
     }
     request_b = {
-        **generate_request(EntryRequest(raw_title="咒术回战第三季"))["request"],
+        **build_plan(EntryRequest(raw_title="咒术回战第三季"), data_source=StaticFixtureDataSource())["request"],
         "request_id": "request-a",
     }
     save_request_snapshot(config, request_a)
@@ -157,7 +158,7 @@ def test_save_request_snapshot_returns_stable_error_for_write_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = load_storage_config(tmp_path / "migu-state")
-    request = generate_request(EntryRequest(raw_title="芙莉莲"))["request"]
+    request = build_plan(EntryRequest(raw_title="芙莉莲"), data_source=StaticFixtureDataSource())["request"]
 
     def fail_write_text(
         self: Path,
@@ -190,7 +191,7 @@ def test_delete_request_snapshot_removes_request_and_refreshes_list(
     tmp_path: Path,
 ) -> None:
     config = load_storage_config(tmp_path / "migu-state")
-    request = generate_request(EntryRequest(raw_title="芙莉莲"))["request"]
+    request = build_plan(EntryRequest(raw_title="芙莉莲"), data_source=StaticFixtureDataSource())["request"]
     save_request_snapshot(config, request)
 
     deleted = delete_request_snapshot(config, request["request_id"])
@@ -227,7 +228,7 @@ def test_delete_request_snapshot_rejects_path_traversal_request_id(
     tmp_path: Path,
 ) -> None:
     config = load_storage_config(tmp_path / "migu-state")
-    request = generate_request(EntryRequest(raw_title="芙莉莲"))["request"]
+    request = build_plan(EntryRequest(raw_title="芙莉莲"), data_source=StaticFixtureDataSource())["request"]
     save_request_snapshot(config, request)
 
     with pytest.raises(Stage1Error) as error:
@@ -260,7 +261,7 @@ def test_delete_request_snapshot_returns_stable_error_for_unlink_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = load_storage_config(tmp_path / "migu-state")
-    request = generate_request(EntryRequest(raw_title="芙莉莲"))["request"]
+    request = build_plan(EntryRequest(raw_title="芙莉莲"), data_source=StaticFixtureDataSource())["request"]
     save_request_snapshot(config, request)
 
     def fail_unlink(self: Path) -> None:

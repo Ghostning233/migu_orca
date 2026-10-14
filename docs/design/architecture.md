@@ -28,7 +28,7 @@ CLI                     Vue SPA (frontend/, Flask 同源 /app/)
 
 | 目录 | 主要责任 |
 | --- | --- |
-| `apps/migu_orca_entry` | CLI、Request 生成总编排、显式 AutoBangumi 提交入口 |
+| `apps/migu_orca_entry` | CLI 适配器、`generate_request` 兼容薄壳与显式 AutoBangumi 提交入口 |
 | `apps/migu_orca_web` | Flask 页面、JSON API、Web 请求/响应适配与静态前端资源 |
 | `extensions/flask_api` | API envelope、校验、异常转换和错误脱敏 |
 | `batch_engine` | 批量输入、标题解析、查询计划、偏好应用、接受与提交队列 |
@@ -37,6 +37,7 @@ CLI                     Vue SPA (frontend/, Flask 同源 /app/)
 | `rss_engine` | RSS 解析与种子筛选 |
 | `subscription_engine` | 字幕组选择与文件夹命名 |
 | `request_engine` | Request 契约、确认、取消、受限修改和摘要 |
+| `plan_engine` | 方案生成编排（`build_plan`）、数据源适配器（真实 MiKan / 离线夹具）与方案确认/修改/保存动作 |
 | `tracking_engine` | 统一追番记录/operation、外部映射、复核/提交/管理写与恢复规则 |
 | `ab_engine` | AutoBangumi 配置、认证 adapter、payload 与提交结果 |
 | `qbittorrent_engine` | 历史 qB 适配；Web 连接测试已退役，不进入默认运行时 |
@@ -52,7 +53,7 @@ CLI                     Vue SPA (frontend/, Flask 同源 /app/)
 5. 外部 HTTP、认证与存储细节留在对应 adapter/repository，不进入纯规则函数。
 6. 不在多个 engine 中复制标题季数、Request 状态或提交状态模型。
 
-当前存在的跨 engine 依赖包括 Request 使用订阅命名、RSS 使用 MiKan transport 数据、批量接受/提交使用 Request 与 AutoBangumi 能力、storage queue repository 使用批量队列模型。这些是现有用例关系，不代表可以任意增加双向依赖。
+当前存在的跨 engine 依赖包括 Request 使用订阅命名、RSS 使用 MiKan transport 数据、批量接受/提交使用 Request 与 AutoBangumi 能力、storage queue repository 使用批量队列模型、`plan_engine` 编排 catalog/MiKan/RSS、调用 `request_engine` 组装快照并把方案写入 storage。这些是现有用例关系，不代表可以任意增加双向依赖。
 
 ## 5. Web 边界现状
 

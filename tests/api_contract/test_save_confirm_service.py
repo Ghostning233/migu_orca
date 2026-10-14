@@ -21,7 +21,6 @@ from typing import Any
 
 import pytest
 
-from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from apps.migu_orca_web.save_confirm_service import (
     BATCH_OUTCOME_CONFIRMED,
     BATCH_OUTCOME_FAILED,
@@ -39,6 +38,8 @@ from apps.migu_orca_web.save_confirm_service import (
     run_save_confirm,
     serialize_batch_save_confirm_result,
 )
+from plan_engine.controllers.data_sources import StaticFixtureDataSource
+from plan_engine.controllers.plan_generation import build_plan
 from request_engine.controllers.request_controller import accept_request
 from shared.errors import Stage1Error
 from shared.models import EntryRequest
@@ -62,7 +63,7 @@ def _config(tmp_path: Path):
 
 def _draft_request(title: str = "芙莉莲") -> dict[str, Any]:
     """Return a generated PENDING_CONFIRM draft-like Request dict."""
-    return generate_request(EntryRequest(raw_title=title))["request"]
+    return build_plan(EntryRequest(raw_title=title), data_source=StaticFixtureDataSource())["request"]
 
 
 class _SaveConfirmHarness:

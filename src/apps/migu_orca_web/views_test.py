@@ -8,7 +8,6 @@ import pytest
 from flask.testing import FlaskClient
 
 from apps.base import create_app
-from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from batch_engine.controllers.anime_title_parser import FakeAnimeTitleParsingProvider
 from batch_engine.models import (
     BATCH_ITEM_STATUS_EMPTY,
@@ -23,6 +22,8 @@ from mikan_engine.controllers.mikan_config import (
     default_mikan_config,
 )
 from mikan_engine.controllers.mikan_poster_cache import poster_cache_key
+from plan_engine.controllers.data_sources import MikanDataSource, StaticFixtureDataSource
+from plan_engine.controllers.plan_generation import build_plan
 from request_engine.controllers.request_controller import (
     accept_request,
     cancel_request,
@@ -72,7 +73,7 @@ def _client() -> FlaskClient:
 
 def _saved_request(tmp_path: Path, title: str, request_id: str) -> dict[str, Any]:
     request = {
-        **generate_request(EntryRequest(raw_title=title))["request"],
+        **build_plan(EntryRequest(raw_title=title), data_source=StaticFixtureDataSource())["request"],
         "request_id": request_id,
     }
     save_request_snapshot(load_storage_config(tmp_path / "storage"), request)
@@ -86,7 +87,7 @@ def _saved_accepted_request(
 ) -> dict[str, Any]:
     request = accept_request(
         {
-            **generate_request(EntryRequest(raw_title=title))["request"],
+            **build_plan(EntryRequest(raw_title=title), data_source=StaticFixtureDataSource())["request"],
             "request_id": request_id,
         }
     )
@@ -101,7 +102,7 @@ def _saved_cancelled_request(
 ) -> dict[str, Any]:
     request = cancel_request(
         {
-            **generate_request(EntryRequest(raw_title=title))["request"],
+            **build_plan(EntryRequest(raw_title=title), data_source=StaticFixtureDataSource())["request"],
             "request_id": request_id,
         },
         "不需要",
@@ -781,7 +782,7 @@ def test_safe_info_omits_sensitive_snapshot_fields_recursively(
     including nested keys and scalar string values (magnet/file names).
     """
     request = {
-        **generate_request(EntryRequest(raw_title="芙莉莲"))["request"],
+        **build_plan(EntryRequest(raw_title="芙莉莲"), data_source=StaticFixtureDataSource())["request"],
         "request_id": "request-1",
         "source_info": {
             "matched_bangumi": {
@@ -935,7 +936,7 @@ def test_safe_info_without_storage_dir_uses_server_root_and_null_profile(
     """US-217: omitting storage_dir resolves to the server root and reports
     storage_profile=null (the root itself), never a CLI default path."""
     request = {
-        **generate_request(EntryRequest(raw_title="芙莉莲"))["request"],
+        **build_plan(EntryRequest(raw_title="芙莉莲"), data_source=StaticFixtureDataSource())["request"],
         "request_id": "request-1",
     }
     save_request_snapshot(load_storage_config(tmp_path), request)
@@ -1105,7 +1106,7 @@ def test_create_request_generates_without_writing_storage(
             '<rss><channel><item><title>芙莉莲 - 01</title><link>https://example.invalid/1</link></item></channel></rss>',
     })
     monkeypatch.setattr(
-        "apps.migu_orca_entry.controllers.entry_controller.mikan_client_module.create_mikan_client",
+        "plan_engine.controllers.data_sources.mikan_client_module.create_mikan_client",
         lambda config: create_mikan_client(config, transport=transport),
     )
 
@@ -1139,7 +1140,7 @@ def test_create_request_defaults_to_static_fixture_without_mikan_config(
             '<rss><channel><item><title>芙莉莲 - 01</title><link>https://example.invalid/1</link></item></channel></rss>',
     })
     monkeypatch.setattr(
-        "apps.migu_orca_entry.controllers.entry_controller.mikan_client_module.create_mikan_client",
+        "plan_engine.controllers.data_sources.mikan_client_module.create_mikan_client",
         lambda config: create_mikan_client(config, transport=transport),
     )
 
@@ -1170,7 +1171,7 @@ def test_create_request_uses_inline_mikan_config_when_explicitly_requested(
         nonlocal called
         called = True
         raise AssertionError("inline MiKan config must be rejected before generation")
-    monkeypatch.setattr("apps.migu_orca_web.routes_requests.generate_request", fail_if_called)
+    monkeypatch.setattr("apps.migu_orca_web.routes_requests.build_plan", fail_if_called)
 
     response = _client().post(
         "/api/v1/requests",
@@ -1218,7 +1219,7 @@ def test_create_request_accepts_request_scoped_mikan_direct_entry(
         return create_mikan_client(config, transport=transport)
 
     monkeypatch.setattr(
-        "apps.migu_orca_entry.controllers.entry_controller.mikan_client_module.create_mikan_client",
+        "plan_engine.controllers.data_sources.mikan_client_module.create_mikan_client",
         fake_create_mikan_client,
     )
 
@@ -1271,7 +1272,7 @@ def test_create_request_does_not_trust_client_candidate_aliases_for_season(
             "error": None,
         }
 
-    monkeypatch.setattr("apps.migu_orca_web.routes_requests.generate_request", fake_generate_request)
+    monkeypatch.setattr("apps.migu_orca_web.routes_requests.build_plan", fake_generate_request)
     response = _client().post(
         "/api/v1/requests",
         json={
@@ -1310,7 +1311,7 @@ def test_create_request_requires_one_time_server_candidate_context_for_nonfirst_
             "error": None,
         }
 
-    monkeypatch.setattr("apps.migu_orca_web.routes_requests.generate_request", fake_generate_request)
+    monkeypatch.setattr("apps.migu_orca_web.routes_requests.build_plan", fake_generate_request)
     payload = {"title": "公开标题", "mikan_bangumi": mikan_url}
 
     rejected = _client().post(
@@ -1357,7 +1358,7 @@ def test_create_request_rejects_invalid_mikan_direct_entry(
         called = True
         raise AssertionError("generate_request should not be called for invalid payload")
 
-    monkeypatch.setattr("apps.migu_orca_web.routes_requests.generate_request", fail_if_called)
+    monkeypatch.setattr("apps.migu_orca_web.routes_requests.build_plan", fail_if_called)
 
     response = _client().post(
         "/api/v1/requests",
@@ -1397,16 +1398,20 @@ def test_create_request_uses_default_mikan_config_when_source_is_mikan(
         )
         return _FakeMikanClient(config, transport)
 
-    def spy_generate_request(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        captured["source_mode"] = kwargs.get("source_mode")
-        captured["mikan_config"] = kwargs.get("mikan_config")
-        return generate_request(*args, **kwargs)
+    import apps.migu_orca_web.routes_requests as routes_requests
+
+    original_default_mikan_config = routes_requests.default_mikan_config
+
+    def spy_default_mikan_config() -> MikanConfig:
+        config = original_default_mikan_config()
+        captured["mikan_config"] = config
+        return config
 
     monkeypatch.setattr(
-        "apps.migu_orca_entry.controllers.entry_controller.mikan_client_module.create_mikan_client",
+        "plan_engine.controllers.data_sources.mikan_client_module.create_mikan_client",
         fake_create_mikan_client,
     )
-    monkeypatch.setattr("apps.migu_orca_web.routes_requests.generate_request", spy_generate_request)
+    monkeypatch.setattr(routes_requests, "default_mikan_config", spy_default_mikan_config)
 
     response = _client().post(
         "/api/v1/requests",
@@ -1419,7 +1424,9 @@ def test_create_request_uses_default_mikan_config_when_source_is_mikan(
     request = payload["result"]["request"]
     assert response.status_code == 200
     assert payload["ok"] is True
-    assert captured["source_mode"] == "mikan_http"
+    # The Web default plan source is the real MiKan adapter (issue #174), and
+    # it uses the server default config rather than any client-supplied one.
+    assert isinstance(routes_requests._plan_data_source(), MikanDataSource)
     assert isinstance(captured["mikan_config"], MikanConfig)
     assert captured["mikan_config"] == default_mikan_config()
     assert captured["mikan_config"].search_endpoint == "https://mikanani.me/Home/Search"
@@ -1439,7 +1446,7 @@ def test_create_request_rejects_unsupported_source(
         called = True
         raise AssertionError("generate_request should not be called for invalid payload")
 
-    monkeypatch.setattr("apps.migu_orca_web.routes_requests.generate_request", fail_if_called)
+    monkeypatch.setattr("apps.migu_orca_web.routes_requests.build_plan", fail_if_called)
 
     response = _client().post(
         "/api/v1/requests",
@@ -1467,7 +1474,7 @@ def test_create_request_rejects_invalid_mikan_timeout(
         called = True
         raise AssertionError("generate_request should not be called for invalid payload")
 
-    monkeypatch.setattr("apps.migu_orca_web.routes_requests.generate_request", fail_if_called)
+    monkeypatch.setattr("apps.migu_orca_web.routes_requests.build_plan", fail_if_called)
 
     response = _client().post(
         "/api/v1/requests",
@@ -3363,15 +3370,26 @@ def test_default_request_create_does_not_call_candidate_search_api_or_real_mikan
 
 
 
+def _use_offline_plan_source() -> None:
+    """Point the request route at the offline fixture adapter.
+
+    ``views_test`` issues drafts through the real route, whose production data
+    source is the real MiKan site. Every request-creating helper in this module
+    installs the static fixture adapter first; the replacement is module-scoped
+    (it stays installed for the rest of the module, exactly like the pre-#174
+    ``routes_requests.generate_request`` test-side replacement), so helpers that
+    issue drafts must call this before posting.
+    """
+    from apps.migu_orca_web import routes_requests
+
+    routes_requests._plan_data_source = lambda: StaticFixtureDataSource()
+
+
 def _issue_draft(
     client: FlaskClient, title: str = "咒术回战"
 ) -> tuple[str, int]:
     """Generate an unsaved draft through a test-only offline engine seam."""
-    from apps.migu_orca_web import routes_requests
-
-    routes_requests.generate_request = lambda entry, **_kwargs: generate_request(
-        entry, source_mode="static_fixture"
-    )
+    _use_offline_plan_source()
     response = client.post("/api/v1/requests", json={"title": title})
     payload = response.get_json()
     assert response.status_code == 200
@@ -3565,6 +3583,7 @@ def test_save_confirm_persists_confirms_and_returns_handoff(tmp_path: Path) -> N
     """US-214: one save-confirm call persists, accepts and hands off ACCEPTED."""
     storage_dir = tmp_path / "storage"
     client = _client()
+    _use_offline_plan_source()
     issued = client.post(
         "/api/v1/requests", json={"title": "芙莉莲"}
     ).get_json()["result"]
@@ -3623,6 +3642,7 @@ def test_save_confirm_confirm_failure_returns_saved_confirm_failed_envelope(
 
     storage_dir = tmp_path / "storage"
     client = _client()
+    _use_offline_plan_source()
     issued = client.post(
         "/api/v1/requests", json={"title": "芙莉莲"}
     ).get_json()["result"]
@@ -3664,7 +3684,7 @@ def test_save_confirm_persist_failure_releases_draft_for_retry(
     tmp_path: Path,
 ) -> None:
     """US-214: a persistence failure keeps the draft; a same-id/key retry succeeds."""
-    from apps.migu_orca_entry.controllers.entry_controller import apply_request_save_action as original_save
+    from plan_engine.controllers.plan_actions import apply_request_save_action as original_save
 
     storage_dir = tmp_path / "storage"
     client = _client()
@@ -4288,6 +4308,7 @@ def _issue_batch_draft_items(
     titles: list[str],
 ) -> list[dict[str, object]]:
     """Issue one preview draft per title; return batch item descriptors."""
+    _use_offline_plan_source()
     items: list[dict[str, object]] = []
     for index, title in enumerate(titles):
         issued = client.post(
@@ -4481,7 +4502,7 @@ def test_batch_save_confirm_api_persist_failure_fails_item_only(
     tmp_path: Path,
 ) -> None:
     """US-216: a persistence failure is a per-item failure, never a 500."""
-    from apps.migu_orca_entry.controllers.entry_controller import (
+    from plan_engine.controllers.plan_actions import (
         apply_request_save_action as original_save,
     )
 
@@ -4730,7 +4751,7 @@ def test_safe_info_redacts_embedded_sensitive_text_and_non_string_values(
     """US-217 fix: sensitive text embedded inside a label is redacted and a
     non-string value never surfaces via str(dict)/str(list)."""
     request = {
-        **generate_request(EntryRequest(raw_title="芙莉莲"))["request"],
+        **build_plan(EntryRequest(raw_title="芙莉莲"), data_source=StaticFixtureDataSource())["request"],
         "request_id": "request-redact",
         "source_info": {
             "matched_bangumi": {
@@ -4938,6 +4959,7 @@ def test_save_confirm_tracking_write_failure_returns_not_ready_handoff(
 
     storage_dir = tmp_path / "storage"
     client = _client()
+    _use_offline_plan_source()
     issued = client.post(
         "/api/v1/requests", json={"title": "芙莉莲"}
     ).get_json()["result"]

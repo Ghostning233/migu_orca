@@ -17,7 +17,6 @@ from typing import Any
 import pytest
 from flask.testing import FlaskClient
 
-from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from apps.migu_orca_web import tracking_poster
 from apps.migu_orca_web.api_contract import (
     TrackingDetailResultDTO,
@@ -29,6 +28,8 @@ from mikan_engine.controllers.mikan_poster_cache import (
     poster_cache_key,
 )
 from mikan_engine.controllers.mikan_poster_service import MikanPosterService
+from plan_engine.controllers.data_sources import StaticFixtureDataSource
+from plan_engine.controllers.plan_generation import build_plan
 from request_engine.controllers.request_controller import accept_request
 from shared.models import EntryRequest
 from storage_engine.controllers.operation_repository import bind_tracking_operation
@@ -69,7 +70,7 @@ def _accepted_request(
     config = _config(tmp_path)
     request = accept_request(
         {
-            **generate_request(EntryRequest(raw_title="芙莉莲"))["request"],
+            **build_plan(EntryRequest(raw_title="芙莉莲"), data_source=StaticFixtureDataSource())["request"],
             "request_id": request_id,
         }
     )
@@ -604,7 +605,7 @@ def _accepted_request_with_cover(
     config = _config(tmp_path)
     request = accept_request(
         {
-            **generate_request(EntryRequest(raw_title="芙莉莲"))["request"],
+            **build_plan(EntryRequest(raw_title="芙莉莲"), data_source=StaticFixtureDataSource())["request"],
             "request_id": request_id,
         }
     )

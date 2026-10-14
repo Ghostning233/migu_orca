@@ -4,13 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from apps.migu_orca_web.tracking_handoff import (
     TRACKING_HANDOFF_RETRY_MESSAGE,
     TrackingHandoff,
     ensure_confirmed_request_tracking,
     unavailable_tracking_handoff,
 )
+from plan_engine.controllers.data_sources import StaticFixtureDataSource
+from plan_engine.controllers.plan_generation import build_plan
 from request_engine.controllers.request_controller import accept_request
 from shared.errors import Stage1Error
 from shared.models import EntryRequest
@@ -37,7 +38,7 @@ def _config(tmp_path: Path) -> StorageConfig:
 
 
 def _accepted_request(request_id: str = "request-1") -> dict[str, object]:
-    request = generate_request(EntryRequest(raw_title=TITLE))["request"]
+    request = build_plan(EntryRequest(raw_title=TITLE), data_source=StaticFixtureDataSource())["request"]
     return accept_request({**request, "request_id": request_id})
 
 
@@ -158,7 +159,7 @@ def test_unavailable_handoff_is_always_deterministic(tmp_path: Path) -> None:
 def test_ensure_rejects_non_accepted_request(tmp_path: Path) -> None:
     """US-222: only an ACCEPTED Request may enter the tracking handoff."""
     config = _config(tmp_path)
-    pending = generate_request(EntryRequest(raw_title=TITLE))["request"]
+    pending = build_plan(EntryRequest(raw_title=TITLE), data_source=StaticFixtureDataSource())["request"]
     pending["request_id"] = "request-pending"
 
     with pytest.raises(ValueError):

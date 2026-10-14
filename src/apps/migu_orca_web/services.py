@@ -15,11 +15,6 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
-from apps.migu_orca_entry.controllers.entry_controller import (
-    _build_history_event,
-    apply_confirmation_action,
-    apply_request_save_action,
-)
 from apps.migu_orca_web.serializers import (
     _optional_error,
     _raise_result_error,
@@ -65,6 +60,11 @@ from mikan_engine.controllers.mikan_candidate_cache import (
 from mikan_engine.controllers.mikan_config import (
     MikanConfig,
     default_mikan_config,
+)
+from plan_engine.controllers.plan_actions import (
+    apply_confirmation_action,
+    apply_request_save_action,
+    build_history_event,
 )
 from request_engine.controllers.request_controller import (
     ACCEPTED,
@@ -739,7 +739,7 @@ def _build_save_confirm_confirm_saved(storage_dir: Path | None):
         )
         if not result["success"]:
             _raise_result_error(result)
-        history_event = _build_history_event(
+        history_event = build_history_event(
             request,
             result["request"],
             action="ACCEPT",

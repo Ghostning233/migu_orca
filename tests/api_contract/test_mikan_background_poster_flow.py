@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from ab_engine.controllers.subscription_payload import build_legacy_31_subscription_payload
-from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from apps.migu_orca_web import tracking_poster
 from apps.migu_orca_web.tracking_handoff import ensure_confirmed_request_tracking
 from apps.migu_orca_web.tracking_serializers import tracking_summary_fields
@@ -14,6 +13,8 @@ from mikan_engine.controllers.mikan_client import create_mikan_client
 from mikan_engine.controllers.mikan_config import MikanConfig
 from mikan_engine.controllers.mikan_poster_cache import MikanPosterCacheConfig, poster_cache_key
 from mikan_engine.controllers.mikan_poster_service import MikanPosterService
+from plan_engine.controllers.data_sources import MikanDataSource
+from plan_engine.controllers.plan_generation import build_plan
 from request_engine.controllers.request_controller import accept_request
 from shared.models import EntryRequest
 from storage_engine.controllers.request_repository import load_request_snapshot, save_request_snapshot
@@ -52,9 +53,9 @@ def test_selected_collection_cover_reaches_saved_tracking_and_ab(
     config = MikanConfig(search_endpoint="https://mikan.example/Home/Search", timeout_seconds=5)
     transport = _Transport(with_cover)
     client = create_mikan_client(config, transport=transport)
-    result = generate_request(
+    result = build_plan(
         EntryRequest(raw_title="BanG Dream! YUME∞MITA"),
-        source_mode="mikan_http", mikan_config=config, mikan_client=client,
+        data_source=MikanDataSource(config=config, client=client),
         mikan_bangumi="https://mikan.example/Home/Bangumi/1",
     )
     assert result["success"] is True

@@ -13,10 +13,11 @@ from typing import Any
 
 import pytest
 
-from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from apps.migu_orca_web.save_confirm_service import compute_request_fingerprint
 from apps.migu_orca_web.tracking_handoff import ensure_confirmed_request_tracking
 from apps.migu_orca_web.tracking_revalidate_service import run_tracking_revalidate
+from plan_engine.controllers.data_sources import StaticFixtureDataSource
+from plan_engine.controllers.plan_generation import build_plan
 from request_engine.controllers.request_controller import accept_request
 from shared.errors import Stage1Error
 from shared.models import EntryRequest
@@ -65,7 +66,7 @@ def _accepted_request(
     config = _config(tmp_path)
     request = accept_request(
         {
-            **generate_request(EntryRequest(raw_title="芙莉莲"))["request"],
+            **build_plan(EntryRequest(raw_title="芙莉莲"), data_source=StaticFixtureDataSource())["request"],
             "request_id": request_id,
         }
     )

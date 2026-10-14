@@ -4,7 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from apps.migu_orca_entry.controllers.entry_controller import generate_request
+from plan_engine.controllers.data_sources import StaticFixtureDataSource
+from plan_engine.controllers.plan_generation import build_plan
 from shared.errors import Stage1Error
 from shared.models import EntryRequest
 from storage_engine.controllers.storage_config import (
@@ -90,7 +91,7 @@ def test_generate_request_default_path_does_not_create_storage(
         storage_dir,
     )
 
-    result = generate_request(EntryRequest(raw_title="芙莉莲"))
+    result = build_plan(EntryRequest(raw_title="芙莉莲"), data_source=StaticFixtureDataSource())
 
     assert result["success"] is True
     assert not storage_dir.exists()
