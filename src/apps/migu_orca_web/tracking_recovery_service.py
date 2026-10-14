@@ -34,8 +34,8 @@ from dataclasses import replace
 from typing import Any
 
 from ab_engine.controllers.ab_config import AutoBangumiConfig
-from ab_engine.controllers.ab_http_client import UrlopenAutoBangumiHttpTransport
 from ab_engine.controllers.ab_management_client import Legacy31ManagementClient
+from ab_engine.controllers.ab_management_factory import create_management_client
 from ab_engine.controllers.reconcile import ReconcileDecision, normalize_match_text
 from ab_engine.models.management import ExternalSubscription
 from apps.migu_orca_web.save_confirm_service import compute_request_fingerprint
@@ -224,7 +224,7 @@ def _management_client(
 ) -> Legacy31ManagementClient:
     if config.auth_mode != "password":
         raise Stage1Error("ab_management_unsupported", "当前认证模式不支持外部核验", _RECOVER_FAILED_STEP)
-    return Legacy31ManagementClient(config, transport=UrlopenAutoBangumiHttpTransport(), timeout=timeout)
+    return create_management_client(config, timeout=timeout)
 
 
 def _external_matches(

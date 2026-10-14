@@ -4,8 +4,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from ab_engine.controllers.ab_http_client import UrlopenAutoBangumiHttpTransport
-from ab_engine.controllers.ab_management_client import create_legacy_31_management_client
+# The module-level seam name stays historical: existing tests inject a fake
+# factory under ``create_legacy_31_management_client`` while transport selection
+# and the default timeout now live in the AB factory (issue #175).
+from ab_engine.controllers.ab_management_factory import (
+    create_management_client as create_legacy_31_management_client,
+)
 from apps.migu_orca_web.schemas import SavedTrackingManagementInput
 from apps.migu_orca_web.services import _storage_dir
 from apps.migu_orca_web.tracking_management_service import (
@@ -46,9 +50,7 @@ def run_saved_tracking_management(
     repository = AutoBangumiConfigRepository(config_root)
     with repository.acquire_lease(connection_ref=ref, configuration_revision=payload.configuration_revision) as lease:
         assert lease.record.config is not None
-        client = create_legacy_31_management_client(
-            lease.record.config.to_runtime_config(), transport=UrlopenAutoBangumiHttpTransport()
-        )
+        client = create_legacy_31_management_client(lease.record.config.to_runtime_config())
         if write is None:
             write = management_writer(client, payload.operation)
         return run_tracking_management(

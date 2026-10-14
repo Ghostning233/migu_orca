@@ -13,6 +13,7 @@ from ab_engine.controllers.ab_management_client import (
     AutoBangumiManagementClient,
     Legacy31ManagementClient,
 )
+from ab_engine.controllers.ab_management_factory import create_management_client
 from ab_engine.controllers.reconcile import (
     RECONCILE_WARNING_CONFLICT,
     RECONCILE_WARNING_UNPROVEN,
@@ -92,12 +93,7 @@ def run_tracking_sync(
     if management_client is None:
         if ab_config is None:
             raise Stage1Error("config_error", "缺少 Auto Bangumi 配置", "tracking_sync")
-        from ab_engine.controllers.ab_http_client import UrlopenAutoBangumiHttpTransport
-        from ab_engine.controllers.ab_management_client import create_legacy_31_management_client
-
-        management_client = create_legacy_31_management_client(
-            ab_config, transport=UrlopenAutoBangumiHttpTransport()
-        )
+        management_client = create_management_client(ab_config)
 
     try:
         capabilities, externals, _rss = management_client.read_snapshot()

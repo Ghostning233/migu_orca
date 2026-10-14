@@ -184,7 +184,7 @@ class AutoBangumiHttpClient:
         try:
             status = self._transport.request_json(
                 "GET",
-                _api_endpoint(self._config.base_url, "/api/v1/status"),
+                api_endpoint(self._config.base_url, "/api/v1/status"),
                 {
                     "Accept": "application/json",
                     "Authorization": f"Bearer {self._config.token}",
@@ -241,7 +241,7 @@ class LegacyAutoBangumi31Client:
         self._authenticate()
         status = self._request_json(
             "GET",
-            _api_endpoint(self._config.base_url, "/api/v1/status"),
+            api_endpoint(self._config.base_url, "/api/v1/status"),
             {"Accept": "application/json", "Cookie": self._session_cookie()},
         )
         version = _status_version(status)
@@ -267,7 +267,7 @@ class LegacyAutoBangumi31Client:
         # safely-retryable failure instead of an ambiguous external outcome.
         self._pre_write_check()
         response = self._post_json(
-            _api_endpoint(self._config.base_url, "/api/v1/rss/subscribe"),
+            api_endpoint(self._config.base_url, "/api/v1/rss/subscribe"),
             {
                 "Accept": "application/json",
                 "Content-Type": "application/json",
@@ -305,7 +305,7 @@ class LegacyAutoBangumi31Client:
             self._authenticate()
             status = self._request_json(
                 "GET",
-                _api_endpoint(self._config.base_url, "/api/v1/status"),
+                api_endpoint(self._config.base_url, "/api/v1/status"),
                 {"Accept": "application/json", "Cookie": self._session_cookie()},
             )
         except Stage1Error as exc:
@@ -322,7 +322,7 @@ class LegacyAutoBangumi31Client:
     def _authenticate(self) -> None:
         login = self._request_json(
             "POST",
-            _api_endpoint(self._config.base_url, "/api/v1/auth/login"),
+            api_endpoint(self._config.base_url, "/api/v1/auth/login"),
             {"Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"},
             {"username": self._config.username or "", "password": self._config.password or ""},
         )
@@ -801,8 +801,12 @@ def _raise_for_status(status: int, *, step: str) -> None:
     )
 
 
-def _api_endpoint(base_url: str, path: str) -> str:
-    """Append a fixed API path after re-checking the configured service origin."""
+def api_endpoint(base_url: str, path: str) -> str:
+    """Append a fixed API path after re-checking the configured service origin.
+
+    Public seam: the legacy management adapter shares it (issue #175), so the
+    origin check cannot diverge between the transport and its callers.
+    """
     parsed = urlsplit(base_url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise Stage1Error("config_error", "Auto Bangumi 配置无效", "probe_ab_connection")
