@@ -12494,6 +12494,16 @@
           "relation": "批量保存确认并 handoff tracking",
           "authority": "TrackingRecord"
         },
+        "parameters": [
+          {
+            "name": "batch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -15134,6 +15144,16 @@
           "relation": "保存后确认失败的 Request 恢复入口",
           "authority": "Request + TrackingRecord"
         },
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -16542,6 +16562,16 @@
           "relation": "待确认 Request 的显式取消",
           "authority": "Request store"
         },
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -16757,6 +16787,16 @@
           "relation": "本地 Request 显式删除入口",
           "authority": "Request store"
         },
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -18111,6 +18151,16 @@
           "relation": "已保存 Request 的兼容修改入口",
           "authority": "Request store"
         },
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -20836,6 +20886,16 @@
           "relation": "结果待确认提交的有界只读确认（已保存连接，只读）",
           "authority": "TrackingRecord + operation"
         },
+        "parameters": [
+          {
+            "name": "tracking_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -21853,6 +21913,16 @@
           "relation": "删除追番方案（可选同时删除受控外部订阅）",
           "authority": "Request + TrackingRecord + operation"
         },
+        "parameters": [
+          {
+            "name": "tracking_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -21900,7 +21970,23 @@
                   "confirm",
                   "idempotency_key"
                 ],
-                "type": "object"
+                "type": "object",
+                "if": {
+                  "properties": {
+                    "delete_external": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "delete_external"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "connection_ref",
+                    "configuration_revision"
+                  ]
+                }
               },
               "example": {
                 "confirm": true,
@@ -25099,6 +25185,16 @@
           "relation": "结果待确认保守恢复；不得盲目重放",
           "authority": "TrackingRecord + operation"
         },
+        "parameters": [
+          {
+            "name": "tracking_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -25152,7 +25248,39 @@
                   "expected_revision",
                   "action"
                 ],
-                "type": "object"
+                "type": "object",
+                "if": {
+                  "properties": {
+                    "action": {
+                      "const": "VERIFY_EXTERNAL"
+                    }
+                  },
+                  "required": [
+                    "action"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "connection_ref",
+                    "configuration_revision"
+                  ]
+                },
+                "else": {
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "connection_ref"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "configuration_revision"
+                        ]
+                      }
+                    ]
+                  }
+                }
               },
               "example": {
                 "expected_revision": 1,
@@ -26676,6 +26804,16 @@
           "relation": "结果待确认提交的风险确认单条主动重新提交（先只读检查，确认后才新建 operation）",
           "authority": "TrackingRecord + operation"
         },
+        "parameters": [
+          {
+            "name": "tracking_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -26719,7 +26857,39 @@
                 "required": [
                   "expected_revision"
                 ],
-                "type": "object"
+                "type": "object",
+                "if": {
+                  "properties": {
+                    "confirm": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "confirm"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "previous_operation_id",
+                    "connection_ref"
+                  ]
+                },
+                "else": {
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "previous_operation_id"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "connection_ref"
+                        ]
+                      }
+                    ]
+                  }
+                }
               },
               "example": {
                 "expected_revision": 1,
@@ -27460,6 +27630,16 @@
           "relation": "明确失败的可靠重试",
           "authority": "TrackingRecord + operation"
         },
+        "parameters": [
+          {
+            "name": "tracking_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -28171,6 +28351,16 @@
           "relation": "提交前本地复核",
           "authority": "TrackingRecord"
         },
+        "parameters": [
+          {
+            "name": "tracking_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -29634,6 +29824,16 @@
           "relation": "可靠外部提交",
           "authority": "TrackingRecord + operation"
         },
+        "parameters": [
+          {
+            "name": "tracking_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
