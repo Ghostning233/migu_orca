@@ -166,11 +166,15 @@ export type TrackingManagementActionCode = OperationsOfFamily<'MANAGEMENT'>
  * ``TrackingScope`` is the generated public scope enum, but the requested scope
  * is only real if this page has a request body shape for it, so the vocabulary
  * lives with the write session that owns every management request.  The display
- * projection and the forms read it from here; a scope without such a shape can
- * never be sent, and it fails closed at the guard below rather than at the
- * boundary.
+ * projection and the forms read the type and the guard from here; a scope without
+ * such a shape can never be sent, and it fails closed at the guard below rather
+ * than at the boundary.
+ *
+ * The array itself is deliberately *not* exported (issue #193, #168 review item
+ * 5): the type and the guard are what consumers need, and exporting the values
+ * too would add exactly the kind of consumer-less export this ticket removed.
  */
-export const TRACKING_MANAGEMENT_SCOPES = ['SUBSCRIPTION', 'ASSOCIATED_RSS'] as const
+const TRACKING_MANAGEMENT_SCOPES = ['SUBSCRIPTION', 'ASSOCIATED_RSS'] as const
 
 export type TrackingManagementScope = (typeof TRACKING_MANAGEMENT_SCOPES)[number]
 
@@ -2558,6 +2562,14 @@ function createSubmitFamily(core: SubmitFamilyCore) {
     const intent = locked ?? createTrackingActionIntent(payload.item, payload.action)
     if (!intent) return ignoredStart()
     const requestConfig = locked ? core.submitConfigSnapshot : options.connection
+    // Defensive, and unreachable from the page (issue #193, independent audit
+    // I-1): a locked intent is only ever released together with its generation
+    // (``releaseSubmitIntent``/``releaseSettledSubmission``/``releaseFor``), and a
+    // clear that drops the generation raises ``submitReplayBlocked`` first, so the
+    // gate above refuses before this line.  It stays as the same unification the
+    // recovery arm uses rather than a silent no-op, and the invariant that makes
+    // it dead is pinned by "keeps the cleared-connection refusal at its gate" in
+    // useTrackingWriteSession.test.ts.
     if (!requestConfig) return core.unbuildableStart(trackingId)
     core.submitIntent = intent
     if (!locked) core.submitConfigSnapshot = { ...requestConfig }
@@ -2852,6 +2864,12 @@ function createManagementFamily(core: ManagementFamilyCore) {
       return { ...ignoredStart(), ask: 'IMPACT', confirmation: managementConfirmation(intent) }
     }
     const requestConfig = locked ? core.managementConfigSnapshot : options.connection
+    // Defensive and unreachable from the page for exactly the same reason as the
+    // submit family's arm (issue #193, independent audit I-1): a locked
+    // management intent and its generation are released together, and a clear
+    // raises ``managementReplayBlocked`` first.  The reachable sibling just below
+    // — a generation that exists but cannot become a body — is the one that owes
+    // the user a statement, and it keeps its own definite-failure session.
     if (!requestConfig) return core.unbuildableStart(trackingId)
     core.managementIntent = intent
     if (!locked) core.managementConfigSnapshot = { ...requestConfig }
@@ -3352,6 +3370,7 @@ function createResubmitFamily(core: ResubmitFamilyCore) {
  * | ``TrackingBatchEntryOutcome`` / ``TrackingBatchOutcome`` | internal interfaces here (the ``batchOutcome`` ref's type) |
  * | ``EMPTY_BATCH_SELECTION`` | internal constant here |
  * | ``batchSkipReason`` | internal function, re-exposed unchanged by the page API |
+ * | ``skippedBatchEntries`` | internal function here, unchanged (called by ``beginBatchSubmit``) |
  * | ``isBatchSelected`` / ``toggleBatchSelection`` / ``selectAllBatch`` | internal functions; the API keeps ``isBatchSelected`` / ``toggleBatchRow`` / ``selectAllBatch`` |
  * | ``clearBatchSelection`` | the API's ``clearBatchSelection`` writes the ref directly (the old pure function returned the empty selection) |
  * | ``batchSelectionSummary`` | internal function, exposed as the API's ``batchSummary`` |
