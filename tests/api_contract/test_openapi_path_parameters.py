@@ -128,10 +128,22 @@ def test_every_request_body_endpoint_gained_its_path_parameter() -> None:
     assert without_parameters == []
 
 
-def test_known_path_parameter_overlay_is_accepted() -> None:
+def test_renamed_path_parameter_overlay_is_rejected() -> None:
     """A renamed declaration is rejected: the rule is the only name source."""
     entry = {"parameters": [{"name": "item_id", "in": "path", "description": "改名了"}]}
     with pytest.raises(ValueError, match="not a URL rule parameter"):
+        _derived_path_parameters(_CHECK, _normalized_path(_CHECK), entry)
+
+
+def test_duplicate_path_parameter_overlay_is_rejected() -> None:
+    """A repeated overlay name fails closed instead of silently keeping the last."""
+    entry = {
+        "parameters": [
+            {"name": "tracking_id", "in": "path", "description": "第一次"},
+            {"name": "tracking_id", "in": "path", "description": "第二次"},
+        ]
+    }
+    with pytest.raises(ValueError, match="more than once"):
         _derived_path_parameters(_CHECK, _normalized_path(_CHECK), entry)
 
 

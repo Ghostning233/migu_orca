@@ -354,6 +354,29 @@ _PATH_PARAMETER_OVERLAY_KEYS = frozenset({"name", "in", "description"})
 #: subtree, where they discriminate a branch instead of restating the body.
 _MERGE_CONSTRAINT_KEYS = frozenset({"allOf", "anyOf", "oneOf", "not", "if", "then", "else"})
 
+#: Keys allowed inside a merge refinement *condition* subtree (issue #203).
+#: ``then``/``else``/``allOf`` branches are still constraints, so an unknown
+#: structural keyword (``type``/``additionalProperties``/``minProperties`` …)
+#: there would be the second structure source this ticket removes.
+_MERGE_CONDITION_KEYS = frozenset(
+    {
+        "properties",
+        "required",
+        "const",
+        "enum",
+        "not",
+        "anyOf",
+        "allOf",
+        "oneOf",
+        "if",
+        "then",
+        "else",
+    }
+)
+#: Constraint keys whose value must be an array of subschemas / a subschema.
+_MERGE_SEQUENCE_KEYS = frozenset({"allOf", "anyOf", "oneOf"})
+_MERGE_MAPPING_KEYS = frozenset({"not", "if", "then", "else"})
+
 #: Keys allowed inside a ``properties`` entry of a merge refinement: a branch
 #: predicate may compare a value (``const``/``enum``), never redefine its type.
 _MERGE_PREDICATE_KEYS = frozenset({"const", "enum"})
@@ -515,15 +538,50 @@ def _validate_merge_fragment(
 
 
 def _validate_merge_conditions(node: Any, *, allowed_names: set[str]) -> None:
-    """Reject an invented property name or a restated property type anywhere."""
+    """Reject any structure a merge refinement is not allowed to publish.
+
+    Applies to every ``if``/``then``/``else``/``allOf``/... subtree, not just to
+    the top of the fragment:
+
+    - only the constraint keywords in ``_MERGE_CONDITION_KEYS`` may appear;
+    - ``properties`` must be a mapping whose entries are ``const``/``enum``
+      predicates over property names the endpoint's model already declares;
+    - every ``required`` name must already exist in the model.
+    """
     if isinstance(node, list):
         for item in node:
             _validate_merge_conditions(item, allowed_names=allowed_names)
         return
     if not isinstance(node, dict):
         return
+    unknown = sorted(set(node) - _MERGE_CONDITION_KEYS)
+    if unknown:
+        raise ValueError(
+            f"merge refinement condition declares non-constraint key(s) {unknown}; only "
+            f"{sorted(_MERGE_CONDITION_KEYS)} may appear inside an if/then/else subtree "
+            "(issue #203)."
+        )
+    required = node.get("required")
+    if required is not None:
+        if not isinstance(required, list) or not all(
+            isinstance(name, str) for name in required
+        ):
+            raise ValueError(
+                "merge refinement 'required' must be a list of property names (issue #203)."
+            )
+        invented = sorted(set(required) - allowed_names)
+        if invented:
+            raise ValueError(
+                f"merge refinement requires propert(ies) {invented} that are not a model "
+                f"field ({sorted(allowed_names)}); a merge may not invent property names "
+                "(issue #203)."
+            )
     properties = node.get("properties")
-    if isinstance(properties, dict):
+    if properties is not None:
+        if not isinstance(properties, dict):
+            raise ValueError(
+                "merge refinement 'properties' must be a mapping of field names (issue #203)."
+            )
         invented = sorted(set(properties) - allowed_names)
         if invented:
             raise ValueError(
@@ -546,8 +604,17 @@ def _validate_merge_conditions(node: Any, *, allowed_names: set[str]) -> None:
             _validate_merge_conditions(predicate, allowed_names=allowed_names)
     for key in _MERGE_CONSTRAINT_KEYS:
         child = node.get(key)
-        if child is not None:
-            _validate_merge_conditions(child, allowed_names=allowed_names)
+        if child is None:
+            continue
+        if key in _MERGE_SEQUENCE_KEYS and not isinstance(child, list):
+            raise ValueError(
+                f"merge refinement {key!r} must be an array of subschemas (issue #203)."
+            )
+        if key in _MERGE_MAPPING_KEYS and not isinstance(child, dict):
+            raise ValueError(
+                f"merge refinement {key!r} must be a mapping of constraints (issue #203)."
+            )
+        _validate_merge_conditions(child, allowed_names=allowed_names)
 
 
 def _merge_refinement(
@@ -1977,6 +2044,11 @@ def _path_parameter_overlays(key: str, entry: dict[str, Any]) -> dict[str, dict[
                 f"{key} hand-writes the path parameter skeleton key(s) {restated} for "
                 f"{name!r}; the URL rule owns name/in/required/schema — keep only the "
                 "documentation description (issue #203)."
+            )
+        if name in overlays:
+            raise ValueError(
+                f"{key} declares the path parameter overlay {name!r} more than once; the "
+                "URL rule owns the skeleton — keep a single description (issue #203)."
             )
         overlays[name] = parameter
     return overlays

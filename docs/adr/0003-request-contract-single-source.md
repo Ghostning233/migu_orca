@@ -2,7 +2,8 @@
 
 [Issue #171](../api/openapi-request-body-equivalence-171.md) 之前，`docs/api/openapi.json` 的 requestBody 是
 `schemas.py` 的手写副本，两份副本已经漂移（`local_plan`、`submission_mode`、retry 的
-`connection_ref` 等）。#171 让「能执行的」当源、「被生成的」当产物；[Issue #203] 补上同一方向上的
+`connection_ref` 等）。#171 让「能执行的」当源、「被生成的」当产物；
+[Issue #203](https://github.com/Ghostning233/migu_orca/issues/203) 补上同一方向上的
 路径参数与条件必需约束。本决策固化这条边界，防止第二结构源以「文档更好看」为名回流。
 
 ## 决策
@@ -24,8 +25,9 @@
    - 键登记在 `_REFINEMENT_ALLOWLIST`（`<endpoint>|<path>`、`|merge:<path>`、
      `|required+=<name>`）；未登记的细化让 `_build_openapi()` 抛错，宁可生成失败也不产出第二源；
    - `merge` 式细化只允许**追加** `allOf`/`anyOf`/`oneOf`/`not`/`if`/`then`/`else`；不允许
-     新增或覆盖属性名。`properties` 只允许出现在条件子树里作 `const`/`enum` 分支判别，
-     不得重述属性类型；
+     新增或覆盖属性名。条件（`if`/`then`/`else`）子树同样只接受约束键，`properties` 只允许
+     作 `const`/`enum` 分支判别且字段名必须已存在于模型，任意位置的 `required` 也只能引用
+     已存在的属性名，不得重述属性类型；
    - 能下沉到模型同一 schema 内表达的规则优先下沉，细化只处理跨字段/分支语义。
 5. **不在 `_ENDPOINTS` 重写结构。** 维护约束：加字段先改 `schemas.py`；加端点先确认 URL rule
    与路径参数；跨字段规则先核实运行时 validator，再作为已评审 `merge` 细化加入并补对照用例。
@@ -37,11 +39,27 @@
 - `delete-plan`/`recover`/`resubmit` 的「何时必需、何时禁止」在文档中可直接读出，并由
   `tests/api_contract/test_openapi_conditional_required.py` 与真实 route 的 400/404 对照冻结。
 - 已知不精确处（**不修**，只登记）：JSON Schema 的 `required` 只看键是否存在，运行时校验器比较
-  值是否为 `None`。因此显式 `null` 与「未提供」不等价 —— `recover` 的
-  `connection_ref: null`/`configuration_revision: null`、`resubmit` 的 `connection_ref: null`、
-  `delete-plan` 的 `configuration_revision: null` 等少数分支会出现「文档判定」与运行时相反的
-  结果。要逐字等价就必须在细化里重述属性类型，正是本决策禁止的第二结构源；这些分支改为由测试
-  逐一冻结（含方向），而不是被静默掩盖。
+  值是否为 `None`。因此显式 `null` 与「未提供」不等价，少数分支会出现「文档判定」与运行时相反
+  的结果。要逐字等价就必须在细化里重述属性类型，正是本决策禁止的第二结构源；
+  `tests/api_contract/test_openapi_conditional_required.py` 为每个端点族冻结一个**代表性方向**，
+  其余已知形状列在下方「已知残留」，不被静默掩盖。
 - `delete-plan` 故意没有 `else`：模型在 `delete_external=false` 时仍接受
   `connection_ref`/`configuration_revision`，补一个「其它分支禁止携带」的 `else` 会与运行时
   validator 冲突。
+
+## 已知残留（后续票候选）
+
+1. **未逐一冻结的 null 形状。** 除测试已冻结的代表性方向外，以下形状同样由「`required` 只看键
+   存在」造成，行为已实测但未写成用例：`delete-plan` 且 `delete_external=true` 时
+   `connection_ref=null`、以及二者同为 `null`；`recover` 且 `action=VERIFY_EXTERNAL` 时
+   `configuration_revision=null`、以及二者同为 `null`；`resubmit` 且 `confirm=true` 时二者同为
+   `null`；`recover` 且 `action=AUTO` 时二者同为 `null`。前五者运行时 400、文档判定「满足」，
+   最后一者运行时 404、文档判定「禁止」。补齐这些用例属独立票，本决策只要求它们被登记而非
+   被当作已覆盖。
+2. **`recover` 的 `MARK_* → confirm=true` 未在契约表达。** 运行时要求
+   `action` 为 `MARK_SUCCEEDED`/`MARK_FAILED` 时 `confirm` 必须为 `true`（无 `confirm` 实测
+   400）。**分层原因**：该规则由 handoff 层模型 `SavedTrackingRecoveryInput._manual_confirmation`
+   与 `tracking_saved_recovery_service` 强制，而签约 requestBody 的来源模型是
+   `TrackingRecoverPayload`（#171 单一来源原则）；为 handoff 层规则在 `_ENDPOINTS`/细化里重述结构
+   会重新制造第二源，因此本票只登记不改。若产品要求客户端可见该约束，应作为独立票先确认
+   来源模型边界再评审加入。

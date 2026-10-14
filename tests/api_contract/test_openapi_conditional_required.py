@@ -363,8 +363,9 @@ def test_explicit_null_is_a_frozen_documented_divergence(
     """Explicit ``null`` vs "absent" is the one place the projection is inexact.
 
     A ``null`` value satisfies ``required`` (the key exists) but the validator
-    compares the value to ``None``.  Pinning the direction of each divergence
-    keeps it visible instead of silently pretending the document is exact.
+    compares the value to ``None``.  This pins a *representative* direction for
+    each endpoint family instead of silently pretending the document is exact;
+    the remaining null shapes are listed in ADR-0003 as known and unfrozen.
     """
     response = client.post(_request_path(openapi_path), json=body)
     assert response.status_code == expected_status, response.get_json()
@@ -432,13 +433,110 @@ def test_merge_refinement_rejects_property_structure_restatement() -> None:
 
 
 def test_merge_refinement_appends_instead_of_overwriting() -> None:
-    root = {"type": "object", "properties": {}, "allOf": [{"a": 1}]}
-    openapi_gen._merge_refinement(root, "", {"allOf": [{"b": 2}]}, endpoint="TEST")
-    assert root["allOf"] == [{"a": 1}, {"b": 2}]
-    # A different shape for an existing key is an overwrite, not an append.
+    first = {"not": {"required": ["confirm"]}}
+    second = {"not": {"required": ["connection_ref"]}}
+    root = {
+        "type": "object",
+        "properties": {"confirm": {}, "connection_ref": {}},
+        "allOf": [first],
+    }
+    openapi_gen._merge_refinement(root, "", {"allOf": [second]}, endpoint="TEST")
+    assert root["allOf"] == [first, second]
+    # Two ``if`` constraints merge recursively; a scalar collision is an
+    # overwrite, not an append.
+    conditional = {"properties": {"confirm": {}}, "if": {"const": True}}
+    openapi_gen._merge_refinement(
+        conditional, "", {"if": {"not": {"required": ["confirm"]}}}, endpoint="TEST"
+    )
+    assert conditional["if"] == {"const": True, "not": {"required": ["confirm"]}}
     with pytest.raises(ValueError, match="overwrite"):
         openapi_gen._merge_refinement(
-            {"not": {"required": ["confirm"]}}, "", {"not": ["confirm"]}, endpoint="TEST"
+            {"if": {"const": True}}, "", {"if": {"const": False}}, endpoint="TEST"
+        )
+
+
+@pytest.mark.parametrize(
+    "fragment",
+    [
+        {"allOf": {"required": ["confirm"]}},
+        {"not": ["confirm"]},
+        {"then": ["required"]},
+    ],
+)
+def test_merge_refinement_rejects_malformed_composition_values(
+    fragment: dict[str, Any],
+) -> None:
+    """A composition keyword with the wrong value shape would emit invalid JSON Schema."""
+    with pytest.raises(ValueError, match="merge refinement"):
+        openapi_gen._validate_merge_fragment(fragment, allowed_names=_CONDITION_NAMES)
+
+
+#: Property names used by the negative guard cases below. They mirror the
+#: derived ``delete-plan`` body so the failures are about the fragment, not the
+#: allowed set.
+_CONDITION_NAMES = {
+    "confirm",
+    "delete_external",
+    "idempotency_key",
+    "connection_ref",
+    "configuration_revision",
+    "storage_dir",
+}
+
+
+@pytest.mark.parametrize(
+    "fragment",
+    [
+        # A condition subtree may not smuggle an unknown property name.
+        {"then": {"required": ["mystery"]}},
+        # ... nor a structural keyword the model already owns.
+        {"then": {"type": "object"}},
+        {"then": {"additionalProperties": False}},
+        {"then": {"minProperties": 1}},
+        {"allOf": [{"type": "object"}]},
+    ],
+)
+def test_merge_refinement_rejects_loose_condition_subtrees(fragment: dict[str, Any]) -> None:
+    """``then``/``if``/``else`` are constraint subtrees, not a structure escape.
+
+    Before the tightened guard these fragments were accepted: an unknown
+    ``required`` name, or ``type``/``additionalProperties``/``minProperties``
+    passed straight through into the published schema — exactly the second
+    structure source issue #171 removed.
+    """
+    with pytest.raises(ValueError, match="merge refinement"):
+        openapi_gen._validate_merge_fragment(fragment, allowed_names=_CONDITION_NAMES)
+
+
+def test_merge_refinement_rejects_invented_required_name_in_a_condition() -> None:
+    with pytest.raises(ValueError, match="not a model field"):
+        openapi_gen._validate_merge_fragment(
+            {"then": {"required": ["mystery"]}}, allowed_names=_CONDITION_NAMES
+        )
+    with pytest.raises(ValueError, match="not a model field"):
+        openapi_gen._validate_merge_fragment(
+            {"else": {"not": {"anyOf": [{"required": ["invented"]}]}}},
+            allowed_names=_CONDITION_NAMES,
+        )
+
+
+def test_merge_refinement_rejects_a_non_mapping_properties_node() -> None:
+    """``properties: "not-a-dict"`` would publish a schema-invalid node."""
+    with pytest.raises(ValueError, match="'properties' must be a mapping"):
+        openapi_gen._validate_merge_fragment(
+            {"if": {"properties": "not-a-dict"}}, allowed_names=_CONDITION_NAMES
+        )
+
+
+def test_registered_conditional_refinements_pass_the_tightened_guard() -> None:
+    """The three published merges stay valid, unchanged, under the new guard."""
+    for openapi_path, condition in (
+        (DELETE_PLAN, openapi_gen._DELETE_PLAN_CONDITION),
+        (RECOVER, openapi_gen._RECOVER_CONDITION),
+        (RESUBMIT, openapi_gen._RESUBMIT_CONDITION),
+    ):
+        openapi_gen._validate_merge_fragment(
+            condition, allowed_names=set(_body_schema(openapi_path)["properties"])
         )
 
 
