@@ -165,7 +165,9 @@ def test_mikan_source_requires_explicit_configuration() -> None:
     }
 
 
-def test_mikan_source_loads_config_from_path_and_wires_transport(tmp_path: Path) -> None:
+def test_mikan_source_loads_config_from_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     config_path = tmp_path / "mikan.json"
     config_path.write_text(
         json.dumps(
@@ -176,31 +178,62 @@ def test_mikan_source_loads_config_from_path_and_wires_transport(tmp_path: Path)
         ),
         encoding="utf-8",
     )
+    created: list[MikanConfig] = []
+
+    def fake_create_mikan_client(config: MikanConfig) -> _FakeClient:
+        created.append(config)
+        return _FakeClient()
+
+    monkeypatch.setattr(
+        "plan_engine.controllers.data_sources.mikan_client_module.create_mikan_client",
+        fake_create_mikan_client,
+    )
+    source = MikanDataSource(config_path=config_path)
+
+    assert source.list_candidates("芙莉莲") == []
+    assert created == [
+        MikanConfig(
+            search_endpoint="https://mikan.example/Home/Search",
+            timeout_seconds=3.0,
+        )
+    ]
+
+
+def test_mikan_source_parse_rss_prefers_the_injected_transport() -> None:
+    http_source = RssSource(
+        subtitle_group="Loli",
+        rss_url="https://example.invalid/rss.xml",
+        source_type="mikan_http",
+        fixture_path="",
+    )
     transport = _FakeTransport(
-        {
-            "https://mikan.example/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2": _SEARCH_PAGE,
-            "https://mikan.example/Home/Bangumi/123": _DETAIL_PAGE,
-            "https://mikan.example/RSS/Bangumi?bangumiId=123&subgroupid=10": _RSS_PAGE,
-        }
+        {"https://example.invalid/rss.xml": _FIXTURE_RSS_XML}
     )
-    source = MikanDataSource(config_path=config_path, transport=transport)
+    client = _FakeClient()
+    source = MikanDataSource(client=client, transport=transport)
 
-    candidates = source.list_candidates("芙莉莲")
-    assert [candidate.title for candidate in candidates] == ["芙莉莲"]
+    parsed = source.parse_rss(http_source)
 
-    candidate = candidates[0]
-    matched = MatchedBangumi(
-        title=candidate.title,
-        aliases=candidate.aliases,
-        mikan_url=candidate.mikan_url,
-        match_score=1.0,
-    )
-    rss_sources = source.list_rss_sources(matched, candidate)
-    assert [rss_source.subtitle_group for rss_source in rss_sources] == ["Loli"]
-
-    parsed = source.parse_rss(rss_sources[0])
     assert [seed.title for seed in parsed.seeds] == ["芙莉莲 - 01"]
-    assert {timeout for _, timeout in transport.requests} == {3.0}
+    # The RSS override transport served the read with the client's timeout; the
+    # client's own transport (an empty fake) was never used.
+    assert transport.requests == [("https://example.invalid/rss.xml", 7.5)]
+    assert client.transport.requests == []
+
+
+def test_mikan_source_parse_rss_resolves_fixtures_under_its_root(tmp_path: Path) -> None:
+    (tmp_path / "rss.xml").write_text(_FIXTURE_RSS_XML, encoding="utf-8")
+    fixture_source = RssSource(
+        subtitle_group="Loli",
+        rss_url="https://example.invalid/rss.xml",
+        source_type="static_fixture",
+        fixture_path="rss.xml",
+    )
+    source = MikanDataSource(client=_FakeClient(), rss_fixture_root=tmp_path)
+
+    parsed = source.parse_rss(fixture_source)
+
+    assert [seed.title for seed in parsed.seeds] == ["芙莉莲 - 01"]
 
 
 def test_mikan_source_direct_entry_maps_detail_to_matched_bangumi() -> None:
@@ -278,14 +311,7 @@ def test_mikan_source_accepts_an_inline_config() -> None:
         search_endpoint="https://mikan.example/Home/Search",
         timeout_seconds=4,
     )
-    transport = _FakeTransport(
-        {
-            "https://mikan.example/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2": _SEARCH_PAGE,
-        }
-    )
-    source = MikanDataSource(config=config, transport=transport)
+    client = _FakeClient()
+    source = MikanDataSource(config=config, client=client)
 
-    assert [candidate.title for candidate in source.list_candidates("芙莉莲")] == [
-        "芙莉莲"
-    ]
-    assert [timeout for _, timeout in transport.requests] == [4.0]
+    assert source.list_candidates("芙莉莲") == []

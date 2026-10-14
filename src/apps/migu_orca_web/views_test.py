@@ -3370,13 +3370,26 @@ def test_default_request_create_does_not_call_candidate_search_api_or_real_mikan
 
 
 
+def _use_offline_plan_source() -> None:
+    """Point the request route at the offline fixture adapter.
+
+    ``views_test`` issues drafts through the real route, whose production data
+    source is the real MiKan site. Every request-creating helper in this module
+    installs the static fixture adapter first; the replacement is module-scoped
+    (it stays installed for the rest of the module, exactly like the pre-#174
+    ``routes_requests.generate_request`` test-side replacement), so helpers that
+    issue drafts must call this before posting.
+    """
+    from apps.migu_orca_web import routes_requests
+
+    routes_requests._plan_data_source = lambda: StaticFixtureDataSource()
+
+
 def _issue_draft(
     client: FlaskClient, title: str = "咒术回战"
 ) -> tuple[str, int]:
     """Generate an unsaved draft through a test-only offline engine seam."""
-    from apps.migu_orca_web import routes_requests
-
-    routes_requests._plan_data_source = lambda: StaticFixtureDataSource()
+    _use_offline_plan_source()
     response = client.post("/api/v1/requests", json={"title": title})
     payload = response.get_json()
     assert response.status_code == 200
@@ -4293,6 +4306,7 @@ def _issue_batch_draft_items(
     titles: list[str],
 ) -> list[dict[str, object]]:
     """Issue one preview draft per title; return batch item descriptors."""
+    _use_offline_plan_source()
     items: list[dict[str, object]] = []
     for index, title in enumerate(titles):
         issued = client.post(

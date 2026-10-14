@@ -68,7 +68,13 @@ class PlanDataSource(Protocol):
         matched: MatchedBangumi,
         candidate: BangumiCandidate,
     ) -> list[RssSource]:
-        """Return the RSS sources to parse for the matched bangumi."""
+        """Return the RSS sources to parse for the matched bangumi.
+
+        Both inputs are passed because the two adapters read different ones:
+        the real MiKan source fetches the sources from the upstream bangumi page
+        (``matched``), while the offline fixture source carries them on the
+        catalog candidate card (``candidate``).
+        """
 
     def parse_rss(self, source: RssSource) -> ParsedRss:
         """Parse one RSS source, raising Stage1Error on a stable failure."""
@@ -127,7 +133,9 @@ class MikanDataSource:
 
     The client is resolved lazily on first use so a missing/invalid MiKan
     configuration still fails inside the plan result envelope (``config_error``)
-    instead of at adapter construction time.
+    instead of at adapter construction time. ``transport`` overrides only the RSS
+    reads (mirroring the historical ``mikan_rss_transport``); the client itself
+    is always built from the configured MiKan config.
     """
 
     def __init__(
@@ -138,11 +146,13 @@ class MikanDataSource:
         config: MikanConfig | None = None,
         client: MikanClient | None = None,
         transport: MikanTransport | None = None,
+        rss_fixture_root: Path = PROJECT_ROOT,
     ) -> None:
         self._user_config_path = user_config_path
         self._config_path = config_path
         self._config = config
         self._transport = transport
+        self._rss_fixture_root = rss_fixture_root
         self._client = client
 
     def load_preference(self) -> UserPreference:
@@ -177,7 +187,7 @@ class MikanDataSource:
         client = self._require_client()
         return parse_rss(
             source,
-            PROJECT_ROOT,
+            self._rss_fixture_root,
             transport=self._transport or client.transport,
             timeout=client.config.timeout_seconds,
         )
@@ -196,13 +206,5 @@ class MikanDataSource:
             )
         else:
             config = load_mikan_config(self._config_path)
-        if self._transport is None:
-            self._client = mikan_client_module.create_mikan_client(config)
-        else:
-            # A caller-supplied transport keeps the whole MiKan source (search,
-            # detail reads and RSS) offline-injectable; production never sets it.
-            self._client = mikan_client_module.create_mikan_client(
-                config,
-                transport=self._transport,
-            )
+        self._client = mikan_client_module.create_mikan_client(config)
         return self._client

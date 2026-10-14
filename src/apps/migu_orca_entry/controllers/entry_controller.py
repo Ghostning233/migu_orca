@@ -117,6 +117,7 @@ def _cli_data_source(
             config=mikan_config,
             client=mikan_client,
             transport=mikan_rss_transport,
+            rss_fixture_root=project_root,
         )
     return _UnsupportedDataSource(source_mode, user_config_path=user_config_path)
 

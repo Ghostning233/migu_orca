@@ -4,8 +4,8 @@ from __future__ import annotations
 
 `build_plan` is the single orchestration entry for turning a raw title (or a
 direct MiKan entry) into a PENDING_CONFIRM plan snapshot. It knows nothing about
-``source_mode``/``catalog_path``/``user_config_path``/``project_root``: all of
-that is resolved by the injected `PlanDataSource`.
+which data source is selected or where the caller's catalog/user-config/fixture
+roots live: all of that is resolved by the injected `PlanDataSource`.
 """
 
 import logging
