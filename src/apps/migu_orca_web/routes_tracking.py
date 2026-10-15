@@ -370,7 +370,6 @@ def _management_result(config, *, tracking_id: str, action: str, result: dict[st
     return {
         "action": action,
         "management_status": management_status or "RECOVERY_REQUIRED",
-        "outcome": result.get("outcome"),
         "needs_manual": result.get("needs_manual") is True,
         "safe_message": safe_message,
         "operation_id": result.get("operation_id"),

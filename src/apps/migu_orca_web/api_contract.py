@@ -7,6 +7,12 @@ here with ``extra="forbid"`` so an unknown field (a typo, a leaked engine
 dict, a future accidental addition) fails validation instead of silently
 passing through the API boundary.
 
+That check is a **test-time** guarantee: no production route validates its own
+response through these DTOs (``ok_result`` only frames the envelope). The
+``tests/api_contract`` audit validates every real ``/api/v1`` success envelope
+against the DTO declared in ``openapi_gen._ENDPOINTS`` — see
+``docs/adr/0004-response-dto-validation-is-test-time.md``.
+
 Scope notes
 -----------
 - The *request* schemas live in ``schemas.py`` (``RequestCreatePayload``
@@ -21,9 +27,6 @@ Scope notes
   existing serializers/sanitizers that own those dicts.  This mirrors the
   current API contract (golden tests freeze the envelope and top-level
   result keys) without pretending the opaque dicts are fully typed today.
-- ``strict_success_result`` exists for tests that must prove a *specific*
-  DTO rejects unknown fields in its whitelisted ``result`` sub-shape
-  (e.g. the connection-test whitelist and the request ``summary``).
 """
 
 from typing import Any, Literal
@@ -568,7 +571,10 @@ class BatchParseItemDTO(_SnapshotBase):
     attempted_queries: list[dict[str, Any]] = []
     candidates: list[MikanCandidateDTO] = []
     applied_preferences: dict[str, Any] | None = None
-    preference_hits: list[dict[str, Any]] = []
+    #: ``None`` together with ``applied_preferences`` when the saved
+    #: preferences were unavailable and the item fell back to the default flow
+    #: (``serializers._serialize_preference_application``, issue #204).
+    preference_hits: list[dict[str, Any]] | None = None
     preference_warnings: list[str] = []
     review_hints: list[str] = []
     enhanced_search_queries: list[dict[str, Any]] = []
@@ -1369,19 +1375,17 @@ class TrackingSyncResultDTO(_StrictBase):
 
 
 # ---------------------------------------------------------------------------
-# Serialization entry points (envelope-level validation)
+# Serialization entry points (shared success envelope, no runtime validation)
 # ---------------------------------------------------------------------------
 
 
-def ok_result(result: Any, dto: type[BaseModel] | None = None) -> Any:
-    """Return a validated ``{ok: true, result}`` envelope.
+def ok_result(result: Any) -> Any:
+    """Return a plain ``{ok: true, result}`` envelope.
 
-    When ``dto`` is given the result is validated against it first, so a
-    whitelisted result shape that gains an unexpected field fails loudly.
-    The validated model is dumped to JSON-safe dicts before the shared
-    ``ok_response`` envelope is built (Flask's jsonify cannot serialize
-    pydantic models directly).
+    This helper only frames the shared success envelope; it performs **no**
+    validation. The declared ``_ENDPOINTS[...]["success"]`` DTOs are the
+    contract, and a real response is checked against them **only at test time**
+    by ``tests/api_contract`` (see
+    ``docs/adr/0004-response-dto-validation-is-test-time.md``), never here.
     """
-    if dto is not None:
-        result = dto.model_validate(result).model_dump(mode="json")
     return ok_response(result)

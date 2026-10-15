@@ -322,13 +322,20 @@
                                 "title": "Applied Preferences"
                               },
                               "preference_hits": {
-                                "default": [],
-                                "items": {
-                                  "additionalProperties": true,
-                                  "type": "object"
-                                },
-                                "title": "Preference Hits",
-                                "type": "array"
+                                "anyOf": [
+                                  {
+                                    "items": {
+                                      "additionalProperties": true,
+                                      "type": "object"
+                                    },
+                                    "type": "array"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "default": null,
+                                "title": "Preference Hits"
                               },
                               "preference_warnings": {
                                 "default": [],
@@ -918,7 +925,7 @@
                         "attempted_queries": [],
                         "candidates": [],
                         "applied_preferences": null,
-                        "preference_hits": [],
+                        "preference_hits": null,
                         "preference_warnings": [],
                         "review_hints": [],
                         "enhanced_search_queries": [],
@@ -1240,13 +1247,20 @@
                             "title": "Applied Preferences"
                           },
                           "preference_hits": {
-                            "default": [],
-                            "items": {
-                              "additionalProperties": true,
-                              "type": "object"
-                            },
-                            "title": "Preference Hits",
-                            "type": "array"
+                            "anyOf": [
+                              {
+                                "items": {
+                                  "additionalProperties": true,
+                                  "type": "object"
+                                },
+                                "type": "array"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "default": null,
+                            "title": "Preference Hits"
                           },
                           "preference_warnings": {
                             "default": [],
@@ -2111,13 +2125,20 @@
                                   "title": "Applied Preferences"
                                 },
                                 "preference_hits": {
-                                  "default": [],
-                                  "items": {
-                                    "additionalProperties": true,
-                                    "type": "object"
-                                  },
-                                  "title": "Preference Hits",
-                                  "type": "array"
+                                  "anyOf": [
+                                    {
+                                      "items": {
+                                        "additionalProperties": true,
+                                        "type": "object"
+                                      },
+                                      "type": "array"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "default": null,
+                                  "title": "Preference Hits"
                                 },
                                 "preference_warnings": {
                                   "default": [],
