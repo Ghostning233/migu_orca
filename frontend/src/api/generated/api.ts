@@ -6012,7 +6012,9 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                batch_id: string;
+            };
             cookie?: never;
         };
         /** @description 批量保存并确认选中草案（逐条部分成功） */
@@ -6775,7 +6777,9 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                request_id: string;
+            };
             cookie?: never;
         };
         /** @description 确认订阅方案 */
@@ -7438,7 +7442,9 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                request_id: string;
+            };
             cookie?: never;
         };
         /** @description 取消订阅方案 */
@@ -8106,7 +8112,9 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                request_id: string;
+            };
             cookie?: never;
         };
         /** @description 删除订阅方案 */
@@ -8235,7 +8243,9 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                request_id: string;
+            };
             cookie?: never;
         };
         /** @description 修改已保存订阅方案 */
@@ -9969,7 +9979,9 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                tracking_id: string;
+            };
             cookie?: never;
         };
         /** @description 有界只读确认待确认的持续追番提交 */
@@ -10706,7 +10718,9 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                tracking_id: string;
+            };
             cookie?: never;
         };
         /** @description 删除追番方案（可选同时删除受控外部订阅） */
@@ -11573,7 +11587,9 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                tracking_id: string;
+            };
             cookie?: never;
         };
         /** @description 恢复统一追番记录（AUTO 纯本地或人工核验） */
@@ -12328,7 +12344,9 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                tracking_id: string;
+            };
             cookie?: never;
         };
         /** @description 风险确认后的单条主动重新提交 */
@@ -12819,7 +12837,9 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                tracking_id: string;
+            };
             cookie?: never;
         };
         /** @description 重试明确失败的统一追番提交（可靠顺序） */
@@ -13267,7 +13287,9 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                tracking_id: string;
+            };
             cookie?: never;
         };
         /** @description 复核统一追番方案（纯本地） */
@@ -14013,7 +14035,9 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                tracking_id: string;
+            };
             cookie?: never;
         };
         /** @description 提交统一追番方案到 Auto Bangumi（可靠顺序） */

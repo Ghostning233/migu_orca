@@ -12,6 +12,10 @@ the derived pipeline:
 - the few structural refinements pydantic cannot project are frozen in
   ``_REFINEMENT_ALLOWLIST``, so handwriting a second structure source (or a new
   one) turns red.
+
+Issue #203 extends the refinement channel with ``merge`` (append-only
+constraint composition, e.g. ``if``/``then``/``else``).  Its keys are frozen in
+the same allowlist, so the single-source assertion below covers both channels.
 """
 
 from typing import Any
@@ -108,7 +112,10 @@ def test_request_body_overlay_never_invents_a_field() -> None:
         with_overlay = _request_body_schema(spec, path_parameters)
         without_overlay = _request_body_schema(
             openapi_gen._rb(
-                spec.model, replace=spec.replace, required_extra=spec.required_extra
+                spec.model,
+                replace=spec.replace,
+                required_extra=spec.required_extra,
+                merge=spec.merge,
             ),
             path_parameters,
         )

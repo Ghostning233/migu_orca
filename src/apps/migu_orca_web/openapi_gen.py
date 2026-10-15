@@ -342,6 +342,45 @@ _DROPPED_SCHEMA_KEYS = frozenset({"title", "description"})
 _NULLABLE_UNION_TYPES = frozenset({"string", "integer", "number", "boolean", "array", "object"})
 _MISSING = object()
 
+#: Keys a registry ``in: path`` parameter entry may carry (issue #203). The URL
+#: rule owns ``required``/``schema``; only the documentation ``description`` may
+#: be declared here, so a registry entry is an overlay, never a skeleton.
+_PATH_PARAMETER_OVERLAY_KEYS = frozenset({"name", "in", "description"})
+
+#: JSON-Schema keywords a ``merge`` refinement may append to a body node
+#: (issue #203). They compose constraints; they never declare a property or a
+#: ``required`` list of their own, so the model stays the single structure
+#: source. ``properties``/``required`` may only appear *inside* a condition
+#: subtree, where they discriminate a branch instead of restating the body.
+_MERGE_CONSTRAINT_KEYS = frozenset({"allOf", "anyOf", "oneOf", "not", "if", "then", "else"})
+
+#: Keys allowed inside a merge refinement *condition* subtree (issue #203).
+#: ``then``/``else``/``allOf`` branches are still constraints, so an unknown
+#: structural keyword (``type``/``additionalProperties``/``minProperties`` …)
+#: there would be the second structure source this ticket removes.
+_MERGE_CONDITION_KEYS = frozenset(
+    {
+        "properties",
+        "required",
+        "const",
+        "enum",
+        "not",
+        "anyOf",
+        "allOf",
+        "oneOf",
+        "if",
+        "then",
+        "else",
+    }
+)
+#: Constraint keys whose value must be an array of subschemas / a subschema.
+_MERGE_SEQUENCE_KEYS = frozenset({"allOf", "anyOf", "oneOf"})
+_MERGE_MAPPING_KEYS = frozenset({"not", "if", "then", "else"})
+
+#: Keys allowed inside a ``properties`` entry of a merge refinement: a branch
+#: predicate may compare a value (``const``/``enum``), never redefine its type.
+_MERGE_PREDICATE_KEYS = frozenset({"const", "enum"})
+
 
 @dataclass(frozen=True)
 class _RequestBodySpec:
@@ -351,6 +390,8 @@ class _RequestBodySpec:
     overlay: dict[str, Any] = field(default_factory=dict)
     #: ``path`` -> replacement node for constraints pydantic cannot project.
     replace: dict[str, Any] = field(default_factory=dict)
+    #: ``path`` -> constraint fragment appended (never overwritten) at that node.
+    merge: dict[str, Any] = field(default_factory=dict)
     #: Names the route enforces but the model leaves optional (loose ``Any``).
     required_extra: tuple[str, ...] = ()
 
@@ -360,6 +401,7 @@ def _rb(
     *,
     overlay: dict[str, Any] | None = None,
     replace: dict[str, Any] | None = None,
+    merge: dict[str, Any] | None = None,
     required_extra: tuple[str, ...] = (),
 ) -> _RequestBodySpec:
     """Declare a request body derived from ``model`` plus reviewed overlays."""
@@ -367,6 +409,7 @@ def _rb(
         model=model,
         overlay=dict(overlay or {}),
         replace=dict(replace or {}),
+        merge=dict(merge or {}),
         required_extra=required_extra,
     )
 
@@ -455,6 +498,206 @@ def _replace_node(root: dict[str, Any], path: str, node: dict[str, Any]) -> None
     parent[parts[-1]] = deepcopy(node)
 
 
+def _node_at(root: dict[str, Any], path: str, *, endpoint: str) -> dict[str, Any]:
+    """Return the existing node at ``path`` (``""`` is the root)."""
+    node = root
+    if not path:
+        return node
+    for part in path.split("."):
+        child = node.get(part) if isinstance(node, dict) else None
+        if not isinstance(child, dict):
+            raise ValueError(
+                f"{endpoint}: refinement path {path!r} does not exist in the derived body"
+            )
+        node = child
+    return node
+
+
+def _validate_merge_fragment(
+    fragment: dict[str, Any], *, allowed_names: set[str]
+) -> None:
+    """Fail closed on a merge refinement that restates body structure.
+
+    A ``merge`` may only append constraint composition (``allOf``/``not``/
+    ``if``/``then``/``else`` ...). Its top level therefore cannot carry
+    ``properties``/``required``/``type`` — that would be the second structure
+    source issue #171 removed. Inside a condition subtree ``properties`` is how
+    a branch is discriminated, so it is allowed there but restricted to ``const``
+    /``enum`` predicates over names the model already declares.
+    """
+    if not isinstance(fragment, dict) or not fragment:
+        raise ValueError("merge refinement must be a non-empty mapping of constraint keys")
+    unknown = sorted(set(fragment) - _MERGE_CONSTRAINT_KEYS)
+    if unknown:
+        raise ValueError(
+            f"merge refinement key(s) {unknown} are not constraint keywords "
+            f"({sorted(_MERGE_CONSTRAINT_KEYS)}); a merge only appends JSON-Schema "
+            "constraints, it never restates properties/required (issue #203)."
+        )
+    _validate_merge_conditions(fragment, allowed_names=allowed_names)
+
+
+def _validate_merge_conditions(node: Any, *, allowed_names: set[str]) -> None:
+    """Reject any structure a merge refinement is not allowed to publish.
+
+    Applies to every ``if``/``then``/``else``/``allOf``/... subtree, not just to
+    the top of the fragment. Every allowed key has an explicit shape check, so
+    the guard cannot publish an invalid JSON Schema:
+
+    - only the constraint keywords in ``_MERGE_CONDITION_KEYS`` may appear;
+    - ``required`` is a non-empty, duplicate-free array of existing field names;
+    - ``enum`` is a non-empty array;
+    - ``properties`` is a mapping whose entries are ``const``/``enum``
+      predicates over property names the endpoint's model already declares;
+    - ``allOf``/``anyOf``/``oneOf`` are non-empty arrays of subschema mappings;
+    - ``not``/``if``/``then``/``else`` are subschema mappings;
+    - ``const`` accepts any JSON value (nothing to check).
+
+    Key presence is tested with ``in``: an explicit ``null`` must fail the shape
+    check instead of slipping past a "missing key" test.
+    """
+    if not isinstance(node, dict):
+        raise ValueError(
+            "merge refinement subschema must be a mapping of constraints (issue #203)."
+        )
+    unknown = sorted(set(node) - _MERGE_CONDITION_KEYS)
+    if unknown:
+        raise ValueError(
+            f"merge refinement condition declares non-constraint key(s) {unknown}; only "
+            f"{sorted(_MERGE_CONDITION_KEYS)} may appear inside an if/then/else subtree "
+            "(issue #203)."
+        )
+    if "required" in node:
+        _validate_merge_required(node["required"], allowed_names=allowed_names)
+    if "enum" in node:
+        _validate_merge_enum(node["enum"])
+    if "properties" in node:
+        _validate_merge_properties(node["properties"], allowed_names=allowed_names)
+    for key in _MERGE_SEQUENCE_KEYS:
+        if key in node:
+            _validate_merge_sequence(key, node[key], allowed_names=allowed_names)
+    for key in _MERGE_MAPPING_KEYS:
+        if key not in node:
+            continue
+        child = node[key]
+        if not isinstance(child, dict):
+            raise ValueError(
+                f"merge refinement {key!r} must be a mapping of constraints (issue #203)."
+            )
+        _validate_merge_conditions(child, allowed_names=allowed_names)
+
+
+def _validate_merge_required(value: Any, *, allowed_names: set[str]) -> None:
+    """``required`` is a non-empty, duplicate-free array of existing field names."""
+    if not isinstance(value, list) or not value:
+        raise ValueError(
+            "merge refinement 'required' must be a non-empty array of property names "
+            "(issue #203)."
+        )
+    for name in value:
+        if not isinstance(name, str) or not name:
+            raise ValueError(
+                "merge refinement 'required' entries must be non-empty property names "
+                "(issue #203)."
+            )
+    if len(set(value)) != len(value):
+        raise ValueError(
+            "merge refinement 'required' must not repeat a property name (issue #203)."
+        )
+    invented = sorted(set(value) - allowed_names)
+    if invented:
+        raise ValueError(
+            f"merge refinement requires propert(ies) {invented} that are not a model "
+            f"field ({sorted(allowed_names)}); a merge may not invent property names "
+            "(issue #203)."
+        )
+
+
+def _validate_merge_enum(value: Any) -> None:
+    """JSON Schema 2020-12: ``enum`` must be a non-empty array."""
+    if not isinstance(value, list) or not value:
+        raise ValueError(
+            "merge refinement 'enum' must be a non-empty array of allowed values "
+            "(issue #203)."
+        )
+
+
+def _validate_merge_properties(value: Any, *, allowed_names: set[str]) -> None:
+    """``properties`` maps existing field names to ``const``/``enum`` predicates."""
+    if not isinstance(value, dict):
+        raise ValueError(
+            "merge refinement 'properties' must be a mapping of field names (issue #203)."
+        )
+    invented = sorted(set(value) - allowed_names)
+    if invented:
+        raise ValueError(
+            f"merge refinement names propert(ies) {invented} that are not a model "
+            f"field ({sorted(allowed_names)}); a merge may not invent property "
+            "names (issue #203)."
+        )
+    for name, predicate in value.items():
+        if not isinstance(predicate, dict) or not predicate:
+            raise ValueError(
+                f"merge refinement predicate for {name!r} must be a non-empty mapping"
+            )
+        structural = sorted(set(predicate) - _MERGE_PREDICATE_KEYS)
+        if structural:
+            raise ValueError(
+                f"merge refinement predicate for {name!r} declares {structural}; only "
+                f"{sorted(_MERGE_PREDICATE_KEYS)} may appear in a merge predicate "
+                "(restating a type is a second structure source, issue #203)."
+            )
+        _validate_merge_conditions(predicate, allowed_names=allowed_names)
+
+
+def _validate_merge_sequence(key: str, value: Any, *, allowed_names: set[str]) -> None:
+    """``allOf``/``anyOf``/``oneOf`` are non-empty arrays of subschema mappings."""
+    if not isinstance(value, list) or not value:
+        raise ValueError(
+            f"merge refinement {key!r} must be a non-empty array of subschemas (issue #203)."
+        )
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError(
+                f"merge refinement {key!r} entries must be subschema mappings (issue #203)."
+            )
+        _validate_merge_conditions(item, allowed_names=allowed_names)
+
+
+def _merge_refinement(
+    root: dict[str, Any], path: str, fragment: dict[str, Any], *, endpoint: str
+) -> None:
+    """Append a reviewed constraint fragment at ``path`` (issue #203).
+
+    Semantics is *append*: a list-valued keyword (``allOf``/``anyOf``/``oneOf``)
+    is extended, a mapping is merged recursively, and any other collision is an
+    error instead of a silent overwrite.
+    """
+    target = _node_at(root, path, endpoint=endpoint)
+    _validate_merge_fragment(fragment, allowed_names=set(target.get("properties", {})))
+    _merge_constraint_maps(target, fragment, endpoint=endpoint)
+
+
+def _merge_constraint_maps(
+    target: dict[str, Any], fragment: dict[str, Any], *, endpoint: str
+) -> None:
+    for key, value in fragment.items():
+        if key not in target:
+            target[key] = deepcopy(value)
+            continue
+        existing = target[key]
+        if isinstance(existing, list) and isinstance(value, list):
+            existing.extend(deepcopy(value))
+            continue
+        if isinstance(existing, dict) and isinstance(value, dict):
+            _merge_constraint_maps(existing, value, endpoint=endpoint)
+            continue
+        raise ValueError(
+            f"{endpoint}: merge refinement would overwrite the existing {key!r} node "
+            "(a merge only appends constraints, issue #203)."
+        )
+
+
 #: Overlay keys that introduce a nested tree rather than a documentation value:
 #: ``properties`` maps field names, ``items`` carries an array element schema.
 _OVERLAY_CONTAINER_KEYS = frozenset({"properties", "items"})
@@ -486,16 +729,19 @@ def _merge_overlay(
 
 
 def _request_body_schema(
-    spec: _RequestBodySpec, path_parameters: frozenset[str]
+    spec: _RequestBodySpec, path_parameters: frozenset[str], *, endpoint: str | None = None
 ) -> dict[str, Any]:
     """Build one request body: model structure + reviewed refinements + overlay.
 
     ``path_parameters`` are the URL rule's ``<param>`` names: the view merges
     them into the JSON body before validation, so they are never body fields.
     """
+    label = endpoint or spec.model.__name__
     schema = _drop_declared_properties(_request_body_node(spec.model), set(path_parameters))
     for path, node in spec.replace.items():
         _replace_node(schema, path, node)
+    for path, fragment in spec.merge.items():
+        _merge_refinement(schema, path, fragment, endpoint=label)
     if spec.required_extra:
         schema["required"] = [*schema.get("required", []), *spec.required_extra]
     _merge_overlay(schema, spec.overlay)
@@ -652,14 +898,18 @@ _PREVIEW_MODIFY_PATCH: dict[str, Any] = {
 }
 
 #: Reviewed structural refinements, as ``"<endpoint>|<path>"`` where ``""`` is
-#: the body root and ``required+=<name>`` marks an extra required name. Every
-#: entry is a constraint a ``model_validator`` enforces but pydantic cannot
-#: project; adding one turns the request-body source test red until reviewed.
+#: the body root, ``merge:<path>`` marks an appended constraint fragment and
+#: ``required+=<name>`` marks an extra required name. Every entry is a constraint
+#: a ``model_validator`` enforces but pydantic cannot project; adding one turns
+#: the request-body source test red until reviewed.
 _REFINEMENT_ALLOWLIST: frozenset[str] = frozenset(
     {
         "PUT /api/v1/settings/autobangumi|properties.config",
         "POST /api/v1/settings/autobangumi/test|properties.config",
         "POST /api/v1/tracking/items/<path:tracking_id>/modify|",
+        "POST /api/v1/tracking/items/<path:tracking_id>/delete-plan|merge:",
+        "POST /api/v1/tracking/items/<path:tracking_id>/recover|merge:",
+        "POST /api/v1/tracking/items/<path:tracking_id>/resubmit|merge:",
         "POST /api/v1/requests/preview-modify|properties.patch",
         "POST /api/v1/preferences|properties.preferences",
         "POST /api/v1/preferences|required+=preferences",
@@ -669,10 +919,63 @@ _REFINEMENT_ALLOWLIST: frozenset[str] = frozenset(
 )
 
 
+def _condition(field: str, value: Any) -> dict[str, Any]:
+    """A JSON-Schema ``if`` that matches when ``field`` carries ``value``."""
+    return {"properties": {field: {"const": value}}, "required": [field]}
+
+
+def _forbid_any(names: tuple[str, ...]) -> dict[str, Any]:
+    """``else`` branch for "none of these may be carried at all" (issue #203)."""
+    return {"not": {"anyOf": [{"required": [name]} for name in names]}}
+
+
+def _conditional_required(
+    *, when: dict[str, Any], required: tuple[str, ...], forbid_else: bool
+) -> dict[str, Any]:
+    """Document a ``model_validator`` cross-field rule with ``if``/``then``(/``else``).
+
+    ``forbid_else`` is only set when the validator really rejects the fields on
+    the other branch. ``delete-plan`` keeps them optional when the delete stays
+    local, so it publishes no ``else`` (an ``else`` there would forbid something
+    the running validator accepts).
+    """
+    node: dict[str, Any] = {"if": when, "then": {"required": list(required)}}
+    if forbid_else:
+        node["else"] = _forbid_any(required)
+    return node
+
+
+#: ``SavedTrackingPlanDeleteInput._require_connection_for_external_delete``:
+#: an external delete needs the saved connection; a local one leaves both
+#: fields optional (carrying them is accepted), so there is no ``else``.
+_DELETE_PLAN_CONDITION = _conditional_required(
+    when=_condition("delete_external", True),
+    required=("connection_ref", "configuration_revision"),
+    forbid_else=False,
+)
+
+#: ``TrackingRecoverPayload._verify_external_requires_config``: only
+#: ``VERIFY_EXTERNAL`` needs the connection; every other action forbids it.
+_RECOVER_CONDITION = _conditional_required(
+    when=_condition("action", "VERIFY_EXTERNAL"),
+    required=("connection_ref", "configuration_revision"),
+    forbid_else=True,
+)
+
+#: ``TrackingResubmitPayload._require_binding_only_when_confirming``: the
+#: confirmed resubmit needs the published binding; the read-only check forbids it.
+_RESUBMIT_CONDITION = _conditional_required(
+    when=_condition("confirm", True),
+    required=("previous_operation_id", "connection_ref"),
+    forbid_else=True,
+)
+
+
 def refinement_keys(key: str, spec: _RequestBodySpec) -> frozenset[str]:
     """The ``"<endpoint>|<path>"`` keys of one spec's structural refinements."""
     return frozenset(
         [f"{key}|{path}" for path in spec.replace]
+        + [f"{key}|merge:{path}" for path in spec.merge]
         + [f"{key}|required+={name}" for name in spec.required_extra]
     )
 
@@ -695,11 +998,14 @@ _MANAGEMENT_ERRORS = {
 
 
 def _management_endpoint(operation_id: str, summary: str, model: type[BaseModel]) -> dict[str, Any]:
-    """One saved-connection management write; the body comes from ``model``."""
+    """One saved-connection management write; the body comes from ``model``.
+
+    The ``tracking_id`` path parameter comes from the URL rule (issue #203) —
+    the registry must not restate the skeleton.
+    """
     return {
         "operationId": operation_id,
         "summary": summary,
-        "parameters": [{"name": "tracking_id", "in": "path", "required": True, "schema": {"type": "string"}}],
         "requestBody": _rb(model),
         "success": TrackingManagementResultDTO,
         "errors": _MANAGEMENT_ERRORS,
@@ -775,6 +1081,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                     },
                 },
             },
+            merge={"": _DELETE_PLAN_CONDITION},
         ),
         "success": TrackingPlanDeleteResultDTO,
         "errors": {
@@ -834,9 +1141,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             {
                 "name": "request_id",
                 "in": "path",
-                "required": True,
                 "description": "已保存订阅方案的 request_id。",
-                "schema": {"type": "string"},
             },
             {
                 "name": "storage_dir",
@@ -960,9 +1265,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             {
                 "name": "request_id",
                 "in": "path",
-                "required": True,
                 "description": "已保存订阅方案的 request_id。",
-                "schema": {"type": "string"},
             },
             {
                 "name": "storage_dir",
@@ -1190,9 +1493,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             {
                 "name": "tracking_id",
                 "in": "path",
-                "required": True,
                 "description": "统一追番记录的 tracking_id。",
-                "schema": {"type": "string"},
             },
             {
                 "name": "storage_dir",
@@ -1416,6 +1717,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                     },
                 },
             },
+            merge={"": _RECOVER_CONDITION},
         ),
         "success": TrackingRecoverResultDTO,
         "errors": {
@@ -1501,6 +1803,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                     },
                 },
             },
+            merge={"": _RESUBMIT_CONDITION},
         ),
         "success": TrackingResubmitResultDTO,
         "errors": {
@@ -1551,9 +1854,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             {
                 "name": "key",
                 "in": "path",
-                "required": True,
                 "description": "候选搜索签发的 opaque poster key。",
-                "schema": {"type": "string"},
             }
         ],
         "success": None,
@@ -1758,11 +2059,112 @@ def _normalized_path(path: str) -> str:
     return re.sub(r"<(?:path:)?([^>]+)>", r"{\1}", path)
 
 
-def _path_parameters(path: str) -> frozenset[str]:
-    """The URL rule's ``{param}`` names for a normalized OpenAPI path."""
+def _ordered_path_parameters(path: str) -> tuple[str, ...]:
+    """The URL rule's ``{param}`` names, in the order they appear in the rule."""
     import re
 
-    return frozenset(re.findall(r"\{([^}]+)\}", path))
+    return tuple(re.findall(r"\{([^}]+)\}", path))
+
+
+def _path_parameters(path: str) -> frozenset[str]:
+    """The URL rule's ``{param}`` names for a normalized OpenAPI path."""
+    return frozenset(_ordered_path_parameters(path))
+
+
+def _path_parameter_overlays(key: str, entry: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """The registry's ``in: path`` entries, keyed by name (issue #203).
+
+    Only a documentation ``description`` may be declared: ``required`` and
+    ``schema`` come from the URL rule, and a registry that restates them is the
+    second structure source this ticket removes.
+    """
+    overlays: dict[str, dict[str, Any]] = {}
+    for parameter in entry.get("parameters", []):
+        if parameter.get("in") != "path":
+            continue
+        name = parameter.get("name")
+        if not name:
+            raise ValueError(f"{key} declares a path parameter overlay without a name")
+        restated = sorted(set(parameter) - _PATH_PARAMETER_OVERLAY_KEYS)
+        if restated:
+            raise ValueError(
+                f"{key} hand-writes the path parameter skeleton key(s) {restated} for "
+                f"{name!r}; the URL rule owns name/in/required/schema — keep only the "
+                "documentation description (issue #203)."
+            )
+        if name in overlays:
+            raise ValueError(
+                f"{key} declares the path parameter overlay {name!r} more than once; the "
+                "URL rule owns the skeleton — keep a single description (issue #203)."
+            )
+        overlays[name] = parameter
+    return overlays
+
+
+def _derived_path_parameters(
+    key: str, path: str, entry: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Derive path parameters from the URL rule and merge the doc overlay.
+
+    The rule decides which names exist and in which order; an overlay naming
+    something the rule does not carry (a typo or a rename) aborts generation.
+    """
+    names = _ordered_path_parameters(path)
+    overlays = _path_parameter_overlays(key, entry)
+    unknown = sorted(set(overlays) - set(names))
+    if unknown:
+        raise ValueError(
+            f"{key} declares path parameter overlay(s) {unknown} that are not a URL rule "
+            f"parameter ({list(names)}); the URL rule is the only name source (issue #203)."
+        )
+    derived: list[dict[str, Any]] = []
+    for name in names:
+        parameter: dict[str, Any] = {"name": name, "in": "path", "required": True}
+        description = overlays.get(name, {}).get("description")
+        if description is not None:
+            parameter["description"] = description
+        parameter["schema"] = {"type": "string"}
+        derived.append(parameter)
+    return derived
+
+
+def _operation_parameters(key: str, path: str, entry: dict[str, Any]) -> list[dict[str, Any]]:
+    """Path parameters first (derived), then the registry's query parameters.
+
+    Query parameter declarations are untouched by this ticket; only path
+    parameters moved to the URL-rule source.
+    """
+    parameters = _derived_path_parameters(key, path, entry)
+    for parameter in entry.get("parameters", []):
+        location = parameter.get("in")
+        if location == "path":
+            continue
+        if location not in {"query", "header", "cookie"}:
+            raise ValueError(
+                f"{key} declares an unsupported parameter location {location!r}; path "
+                "parameters are derived from the URL rule (issue #203)."
+            )
+        parameters.append(parameter)
+    return parameters
+
+
+def _path_parameter_consistency(
+    rule_parameters: tuple[str, ...], declared_parameters: list[dict[str, Any]]
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """``(missing, extra)`` path parameter names for a documented operation.
+
+    ``missing`` names are declared by the URL rule but absent from the document;
+    ``extra`` names are documented but the rule does not have them (this is also
+    what a rename produces). Both empty means the sets are exactly equal.
+    """
+    declared = tuple(
+        parameter["name"]
+        for parameter in declared_parameters
+        if parameter.get("in") == "path"
+    )
+    missing = tuple(name for name in rule_parameters if name not in declared)
+    extra = tuple(name for name in declared if name not in rule_parameters)
+    return missing, extra
 
 
 def _build_openapi() -> dict[str, Any]:
@@ -1784,7 +2186,7 @@ def _build_openapi() -> dict[str, Any]:
             spec = entry.get("requestBody")
             if isinstance(spec, _RequestBodySpec):
                 _assert_reviewed_refinements(key, spec)
-            operation = _operation(entry, method, path)
+            operation = _operation(entry, method, path, key=key)
             paths.setdefault(path, {})[method.lower()] = operation
 
     # Prefer the {param} placeholder form in path ordering (stable sort).
@@ -1917,7 +2319,10 @@ def _operation_id(method: str, path: str) -> str:
     return method.lower() + base[0].upper() + base[1:]
 
 
-def _operation(entry: dict[str, Any], method: str, path: str) -> dict[str, Any]:
+def _operation(
+    entry: dict[str, Any], method: str, path: str, *, key: str | None = None
+) -> dict[str, Any]:
+    endpoint_key = key or f"{method} {path}"
     op: dict[str, Any] = {
         "summary": entry.get("summary", ""),
         "description": entry.get("description", ""),
@@ -1945,7 +2350,7 @@ def _operation(entry: dict[str, Any], method: str, path: str) -> dict[str, Any]:
         # Additional representations of the same successful operation (Issue
         # 112: the batch parse SSE progress stream).
         op["responses"]["200"]["content"].update(extra_content)
-    parameters = list(entry.get("parameters", []))
+    parameters = _operation_parameters(endpoint_key, path, entry)
     if parameters:
         op["parameters"] = parameters
     request_body = entry.get("requestBody")
@@ -1956,7 +2361,9 @@ def _operation(entry: dict[str, Any], method: str, path: str) -> dict[str, Any]:
                 "declare it with _rb(<schemas.py model>) instead (issue #171)."
             )
         op["requestBody"] = _request_body(
-            _request_body_schema(request_body, _path_parameters(path)),
+            _request_body_schema(
+                request_body, _path_parameters(path), endpoint=endpoint_key
+            ),
             description=entry.get("summary", ""),
         )
     errors = entry.get("errors", {})
