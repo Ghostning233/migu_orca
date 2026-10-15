@@ -15,6 +15,7 @@ import pytest
 from pydantic import ValidationError
 
 from apps.migu_orca_web.api_contract import (
+    BatchParseItemDTO,
     BatchParseResultDTO,
     BatchSaveConfirmResultDTO,
     CorrectionsResultDTO,
@@ -723,6 +724,22 @@ def test_batch_parse_dto_shape() -> None:
     assert BatchParseResultDTO.model_validate(payload) is not None
     with pytest.raises(ValidationError):
         BatchParseResultDTO.model_validate({**payload, "raw_rss": "<rss>"})
+
+
+def test_batch_parse_item_dto_allows_null_preference_hits() -> None:
+    """#204: the preference fallback publishes ``null`` for both applied fields.
+
+    ``serializers._serialize_preference_application`` documents that
+    ``applied_preferences`` and ``preference_hits`` are ``None`` together when
+    the saved preferences were unavailable; the DTO must not contradict the
+    serializer (the consumer already writes ``item.preference_hits ?? []``).
+    """
+    item = BatchParseItemDTO.model_validate(
+        {"item_id": "item-1", "applied_preferences": None, "preference_hits": None}
+    )
+
+    assert item.preference_hits is None
+    assert item.applied_preferences is None
 
 
 def test_batch_parse_dto_accepts_real_serialized_items() -> None:

@@ -22,11 +22,39 @@ from storage_engine.controllers.request_repository import (
     save_request_snapshot,
 )
 from storage_engine.controllers.storage_config import load_storage_config
+from tests.api_contract.response_dto_audit import install_response_dto_audit
 
 
 @pytest.fixture()
 def client() -> FlaskClient:
     return create_app("testing").test_client()
+
+
+@pytest.fixture(autouse=True)
+def _response_dto_audit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Audit every real ``/api/v1`` success envelope against its DTO (#204).
+
+    A function-scoped install keeps the hook exactly inside this package's
+    tests: other suites running later in the same pytest session see the
+    pristine ``Flask.process_response``. The accumulated result is asserted by
+    ``test_zz_response_dto_audit`` (see ADR-0004).
+    """
+    install_response_dto_audit(monkeypatch)
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Run the response-DTO coverage assertion after every other test (#204).
+
+    The assertion is only meaningful once the whole package produced its real
+    responses, so its file is reordered to the end deterministically instead of
+    relying on the alphabetical collection order.
+    """
+    audit_file = "tests/api_contract/test_zz_response_dto_audit.py"
+    audit_items = [item for item in items if item.nodeid.startswith(audit_file)]
+    if not audit_items:
+        return
+    other_items = [item for item in items if not item.nodeid.startswith(audit_file)]
+    items[:] = other_items + audit_items
 
 
 @pytest.fixture(autouse=True)

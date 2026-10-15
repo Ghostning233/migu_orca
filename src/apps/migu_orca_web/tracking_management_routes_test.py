@@ -73,7 +73,8 @@ def test_management_result_distinguishes_explicit_failure_from_unknown(monkeypat
     )
     assert result["needs_manual"] is False
     assert result["safe_message"] == "管理操作明确失败，外部系统未确认应用"
-    assert result["outcome"] == "DEFINITE_FAILURE"
+    # #204: ``outcome`` is not part of the public safe result any more.
+    assert "outcome" not in result
 
     # Issue #169: an indeterminate management write is 结果待确认, not a failure.
     unknown = routes_tracking._management_result(

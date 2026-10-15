@@ -732,7 +732,7 @@ export interface operations {
                      *             "attempted_queries": [],
                      *             "candidates": [],
                      *             "applied_preferences": null,
-                     *             "preference_hits": [],
+                     *             "preference_hits": null,
                      *             "preference_warnings": [],
                      *             "review_hints": [],
                      *             "enhanced_search_queries": [],
@@ -883,11 +883,11 @@ export interface operations {
                                 } | null;
                                 /**
                                  * Preference Hits
-                                 * @default []
+                                 * @default null
                                  */
                                 preference_hits: {
                                     [key: string]: unknown;
-                                }[];
+                                }[] | null;
                                 /**
                                  * Preference Warnings
                                  * @default []
