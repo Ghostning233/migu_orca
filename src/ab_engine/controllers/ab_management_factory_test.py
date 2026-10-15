@@ -151,6 +151,23 @@ def test_timeout_and_config_reach_the_adapter_unmodified() -> None:
     assert [call["timeout"] for call in transport.calls] == [1.5, 1.5]
 
 
+def test_the_implicit_default_timeout_reaches_the_adapter() -> None:
+    """Issue #207: the omitted ``timeout`` is 30s, and it really arrives.
+
+    The neighbouring test only proves an *explicit* ``timeout=1.5`` survives, so
+    the implicit default was unpinned: a caller that omits ``timeout`` would
+    silently get whatever the factory (or a later adapter default) happened to
+    say.  Observing the transport here shows the factory's own literal reaches
+    the single HTTP call instead of being swallowed on the way.
+    """
+    transport = RecordingTransport()
+
+    client = create_management_client(_config(), transport=transport)
+
+    assert client.probe_capabilities().version == "3.1.18"
+    assert [call["timeout"] for call in transport.calls] == [30.0, 30.0]
+
+
 def test_monotonic_is_forwarded_so_one_deadline_still_bounds_every_sub_request() -> None:
     """Issue #183: the shared read deadline keeps shrinking through the factory."""
     clock = {"now": 0.0}

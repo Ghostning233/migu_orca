@@ -3,12 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-# The module-level seam name stays historical: existing tests inject a fake
-# factory under ``create_legacy_31_management_client`` while transport selection
-# and the default timeout now live in the AB factory (issue #175).
-from ab_engine.controllers.ab_management_factory import (
-    create_management_client as create_legacy_31_management_client,
-)
+from ab_engine.controllers.ab_management_factory import create_management_client
 from apps.migu_orca_web.schemas import SavedTrackingRecoveryInput
 from apps.migu_orca_web.services import _storage_dir
 from apps.migu_orca_web.tracking_recovery_service import run_tracking_recover
@@ -77,7 +72,7 @@ def run_saved_tracking_recovery(
         configuration_revision=payload.configuration_revision,
     ) as lease:
         assert lease.record.config is not None
-        client = management_client or create_legacy_31_management_client(
+        client = management_client or create_management_client(
             lease.record.config.to_runtime_config()
         )
         return run_tracking_recover(

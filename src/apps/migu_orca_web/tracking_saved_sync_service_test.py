@@ -78,7 +78,7 @@ def test_saved_sync_binds_mapping_to_requested_connection(monkeypatch, tmp_path:
         }), expected_configuration_revision=0,
     )
     monkeypatch.setattr(
-        "apps.migu_orca_web.tracking_saved_sync_service.create_legacy_31_management_client",
+        "apps.migu_orca_web.tracking_saved_sync_service.create_management_client",
         lambda *_args, **_kwargs: _Client(),
     )
     monkeypatch.setattr("apps.migu_orca_web.services._WEB_STORAGE_ROOT", tmp_path / "business")
@@ -127,7 +127,7 @@ def test_saved_sync_stale_ref_rejects_without_constructing_client(monkeypatch, t
         calls += 1
         return _Client()
 
-    monkeypatch.setattr("apps.migu_orca_web.tracking_saved_sync_service.create_legacy_31_management_client", factory)
+    monkeypatch.setattr("apps.migu_orca_web.tracking_saved_sync_service.create_management_client", factory)
     with pytest.raises(Stage1Error, match="已变化"):
         run_saved_tracking_sync(
             SavedTrackingSyncInput(connection_ref=str(first.connection_ref), configuration_revision=second.configuration_revision, confirm=True),
@@ -194,7 +194,7 @@ def test_saved_sync_ambiguous_rss_match_preserves_old_record_bytes(monkeypatch, 
             ], []
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.tracking_saved_sync_service.create_legacy_31_management_client",
+        "apps.migu_orca_web.tracking_saved_sync_service.create_management_client",
         lambda *_args, **_kwargs: AmbiguousClient(),
     )
     result = run_saved_tracking_sync(_payload(record), config_root=private)
@@ -215,7 +215,7 @@ def test_saved_sync_dual_instances_same_external_id_are_isolated(monkeypatch, tm
         pass
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.tracking_saved_sync_service.create_legacy_31_management_client",
+        "apps.migu_orca_web.tracking_saved_sync_service.create_management_client",
         lambda *_args, **_kwargs: clients.append(Client()) or clients[-1],
     )
     first_local = replace(
@@ -264,7 +264,7 @@ def test_saved_sync_partial_or_failed_snapshot_preserves_existing_record(monkeyp
     )
     ensure_tracking_record(config, local)
     monkeypatch.setattr(
-        "apps.migu_orca_web.tracking_saved_sync_service.create_legacy_31_management_client",
+        "apps.migu_orca_web.tracking_saved_sync_service.create_management_client",
         lambda *_args, **_kwargs: _Client(),
     )
     run_saved_tracking_sync(_payload(saved), config_root=private)
@@ -276,7 +276,7 @@ def test_saved_sync_partial_or_failed_snapshot_preserves_existing_record(monkeyp
             raise RuntimeError("secret-password must not escape")
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.tracking_saved_sync_service.create_legacy_31_management_client",
+        "apps.migu_orca_web.tracking_saved_sync_service.create_management_client",
         lambda *_args, **_kwargs: Broken(),
     )
     result = run_saved_tracking_sync(_payload(saved), config_root=private)
@@ -318,7 +318,7 @@ def test_saved_sync_degraded_capability_preserves_existing_record(
     partial_subscriptions = [ExternalSubscription("partial-sub", "Show", 1, "Group")]
     client.read_snapshot = read_once
     monkeypatch.setattr(
-        "apps.migu_orca_web.tracking_saved_sync_service.create_legacy_31_management_client",
+        "apps.migu_orca_web.tracking_saved_sync_service.create_management_client",
         lambda *_args, **_kwargs: client,
     )
     result = run_saved_tracking_sync(_payload(saved), config_root=private)
@@ -346,7 +346,7 @@ def test_saved_sync_lease_blocks_save_and_delete_then_releases(monkeypatch, tmp_
             return super().read_snapshot()
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.tracking_saved_sync_service.create_legacy_31_management_client",
+        "apps.migu_orca_web.tracking_saved_sync_service.create_management_client",
         lambda *_args, **_kwargs: Blocking(),
     )
     monkeypatch.setattr("apps.migu_orca_web.services._WEB_STORAGE_ROOT", tmp_path / "business")
@@ -387,7 +387,7 @@ def test_saved_sync_exception_releases_lease(monkeypatch, tmp_path: Path) -> Non
             raise RuntimeError("upstream")
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.tracking_saved_sync_service.create_legacy_31_management_client",
+        "apps.migu_orca_web.tracking_saved_sync_service.create_management_client",
         lambda *_args, **_kwargs: Broken(),
     )
     monkeypatch.setattr("apps.migu_orca_web.services._WEB_STORAGE_ROOT", tmp_path / "business")
@@ -407,7 +407,7 @@ def test_saved_sync_safe_result_contains_no_private_or_upstream_values(monkeypat
     secure_client = _Client()
     secure_client.subscriptions = [ExternalSubscription("sub-1", "Show", 1, "Group", rss_urls=("http://raw-rss.test/feed",))]
     monkeypatch.setattr(
-        "apps.migu_orca_web.tracking_saved_sync_service.create_legacy_31_management_client",
+        "apps.migu_orca_web.tracking_saved_sync_service.create_management_client",
         lambda *_args, **_kwargs: secure_client,
     )
     result = run_saved_tracking_sync(_payload(saved), config_root=private)
@@ -431,7 +431,7 @@ def test_saved_sync_protects_unknown_tracking_status(monkeypatch, tmp_path: Path
     ensure_tracking_record(config, local)
     path = business / "tracking" / f"{local.tracking_id}.json"
     before = path.read_bytes()
-    monkeypatch.setattr("apps.migu_orca_web.tracking_saved_sync_service.create_legacy_31_management_client", lambda *_args, **_kwargs: _Client())
+    monkeypatch.setattr("apps.migu_orca_web.tracking_saved_sync_service.create_management_client", lambda *_args, **_kwargs: _Client())
     run_saved_tracking_sync(_payload(saved), config_root=private)
     assert path.read_bytes() == before
 
@@ -457,7 +457,7 @@ def test_saved_sync_protects_real_operation_states(monkeypatch, tmp_path: Path, 
     tracking_path = business / "tracking" / f"{local.tracking_id}.json"
     operation_path = business / "tracking_operations" / f"{operation.operation_id}.json"
     before_tracking, before_operation = tracking_path.read_bytes(), operation_path.read_bytes()
-    monkeypatch.setattr("apps.migu_orca_web.tracking_saved_sync_service.create_legacy_31_management_client", lambda *_args, **_kwargs: _Client())
+    monkeypatch.setattr("apps.migu_orca_web.tracking_saved_sync_service.create_management_client", lambda *_args, **_kwargs: _Client())
     run_saved_tracking_sync(_payload(saved), config_root=private)
     assert tracking_path.read_bytes() == before_tracking
     assert operation_path.read_bytes() == before_operation
@@ -481,6 +481,6 @@ def test_saved_sync_protects_missing_or_corrupt_current_operation(monkeypatch, t
         path.write_text("{broken", encoding="utf-8")
     tracking_path = business / "tracking" / f"{local.tracking_id}.json"
     before = tracking_path.read_bytes()
-    monkeypatch.setattr("apps.migu_orca_web.tracking_saved_sync_service.create_legacy_31_management_client", lambda *_args, **_kwargs: _Client())
+    monkeypatch.setattr("apps.migu_orca_web.tracking_saved_sync_service.create_management_client", lambda *_args, **_kwargs: _Client())
     run_saved_tracking_sync(_payload(saved), config_root=private)
     assert tracking_path.read_bytes() == before

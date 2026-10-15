@@ -109,7 +109,7 @@ def test_auto_and_manual_do_not_load_saved_config_or_construct_client(monkeypatc
     record = _move_record(tmp_path, _seeded_tracking(tmp_path, request), TRACKING_STATUS_RECOVERY_REQUIRED)
     monkeypatch.setattr("apps.migu_orca_web.services._WEB_STORAGE_ROOT", tmp_path)
     monkeypatch.setattr(
-        "apps.migu_orca_web.tracking_saved_recovery_service.create_legacy_31_management_client",
+        "apps.migu_orca_web.tracking_saved_recovery_service.create_management_client",
         lambda *_a, **_k: pytest.fail("local recovery must not construct client"),
     )
     auto = run_saved_tracking_recovery(_payload(record), config_root=tmp_path / "missing")
@@ -244,7 +244,7 @@ def _uncertain_management(monkeypatch, tmp_path: Path, operation: str, scope: st
     client = FakeClient()
     monkeypatch.setattr("apps.migu_orca_web.services._WEB_STORAGE_ROOT", tmp_path)
     monkeypatch.setattr(
-        "apps.migu_orca_web.tracking_saved_management_service.create_legacy_31_management_client",
+        "apps.migu_orca_web.tracking_saved_management_service.create_management_client",
         lambda *_a, **_k: client,
     )
     first = run_saved_tracking_management(
