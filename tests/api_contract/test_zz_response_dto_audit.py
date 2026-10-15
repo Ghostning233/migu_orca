@@ -247,7 +247,7 @@ def _patch_management_client(
     monkeypatch: pytest.MonkeyPatch, client: _ManagementFakeAbClient
 ) -> None:
     monkeypatch.setattr(
-        "apps.migu_orca_web.tracking_saved_management_service.create_legacy_31_management_client",
+        "apps.migu_orca_web.tracking_saved_management_service.create_management_client",
         lambda *_args, **_kwargs: client,
     )
 
