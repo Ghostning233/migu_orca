@@ -42,18 +42,38 @@ def _response_dto_audit(monkeypatch: pytest.MonkeyPatch) -> None:
     install_response_dto_audit(monkeypatch)
 
 
+_AUDIT_TEST_FILE = "test_zz_response_dto_audit.py"
+
+
+def _is_audit_item(item: pytest.Item) -> bool:
+    """Match the audit file by its nodeid basename, not by an absolute path."""
+    node_file = item.nodeid.split("::", 1)[0]
+    return node_file.rsplit("/", 1)[-1] == _AUDIT_TEST_FILE
+
+
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     """Run the response-DTO coverage assertion after every other test (#204).
 
     The assertion is only meaningful once the whole package produced its real
-    responses, so its file is reordered to the end deterministically instead of
+    responses, so its file is moved to the tail of the session instead of
     relying on the alphabetical collection order.
+
+    Assumptions this hook relies on (kept deliberately small):
+
+    - only the audit file's items move; every other item keeps its relative
+      order, so a run without that file (or with a renamed file) is a no-op;
+    - collection order is deterministic (no ``pytest-randomly`` in this repo),
+      which is what makes "last" well defined across the verified invocation
+      matrix (``tests/api_contract`` alone, both directory orders, and the full
+      non-browser suite);
+    - a partial selection that never reaches the audit file simply does not run
+      the assertion; running the audit file alone *does* run it and fails
+      closed by design (it then observes too few endpoints).
     """
-    audit_file = "tests/api_contract/test_zz_response_dto_audit.py"
-    audit_items = [item for item in items if item.nodeid.startswith(audit_file)]
-    if not audit_items:
+    audit_items = [item for item in items if _is_audit_item(item)]
+    if not audit_items or len(audit_items) == len(items):
         return
-    other_items = [item for item in items if not item.nodeid.startswith(audit_file)]
+    other_items = [item for item in items if not _is_audit_item(item)]
     items[:] = other_items + audit_items
 
 

@@ -31,7 +31,9 @@ def declared_success_dtos() -> dict[str, type[BaseModel]]:
 
     Endpoints that declare ``success=None`` (the binary poster view) or a value
     that is not a pydantic model are deliberately absent: they have no JSON
-    envelope contract to validate.
+    envelope contract to validate. They are not silently ignored —
+    :func:`unregistered_success_declarations` proves each one either carries a
+    typed DTO or an explicit ``responses`` mapping.
     """
     declared: dict[str, type[BaseModel]] = {}
     for key, entry in _ENDPOINTS.items():
@@ -39,6 +41,30 @@ def declared_success_dtos() -> dict[str, type[BaseModel]]:
         if isinstance(success, type) and issubclass(success, BaseModel):
             declared[key] = success
     return declared
+
+
+def unregistered_success_declarations(
+    endpoints: dict[str, dict[str, Any]] | None = None,
+) -> list[str]:
+    """Return the ``_ENDPOINTS`` keys whose success shape is declared nowhere.
+
+    A success shape is accounted for structurally: either ``success`` is a
+    pydantic model, or the entry explicitly declares a non-empty ``responses``
+    mapping (the binary poster shape). A bare ``success=None`` — or a non-model
+    class such as ``dict`` — is unregistered, so adding one while removing a DTO
+    can never keep the DTO count looking correct.
+    """
+    registry = _ENDPOINTS if endpoints is None else endpoints
+    unregistered: list[str] = []
+    for key, entry in registry.items():
+        success = entry.get("success")
+        if isinstance(success, type) and issubclass(success, BaseModel):
+            continue
+        responses = entry.get("responses")
+        if success is None and isinstance(responses, dict) and responses:
+            continue
+        unregistered.append(key)
+    return sorted(unregistered)
 
 
 def _render_errors(exc: ValidationError) -> list[str]:
@@ -66,6 +92,8 @@ class ResponseDtoAudit:
         self.observations: dict[str, EndpointObservation] = {}
         #: ``/api/v1`` JSON success envelopes for keys _ENDPOINTS does not type.
         self.undeclared: dict[str, list[str]] = {}
+        #: Registry keys whose success shape is declared nowhere (fail closed).
+        self.unregistered: list[str] = unregistered_success_declarations()
         #: Exceptions raised inside the hook itself (never swallowed silently).
         self.hook_errors: list[str] = []
 
@@ -108,6 +136,9 @@ class ResponseDtoAudit:
             f"declared success DTO endpoints: {len(self.declared)}",
             f"observed: {len(self.observations)}",
         ]
+        if self.unregistered:
+            lines.append("endpoints whose success shape is declared nowhere:")
+            lines.extend(f"  - {key}" for key in self.unregistered)
         if self.missing:
             lines.append("unobserved endpoints (fail closed):")
             lines.extend(f"  - {key}" for key in self.missing)
@@ -174,4 +205,5 @@ __all__ = [
     "ResponseDtoAudit",
     "declared_success_dtos",
     "install_response_dto_audit",
+    "unregistered_success_declarations",
 ]

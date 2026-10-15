@@ -30,6 +30,7 @@ from tests.api_contract.response_dto_audit import (
     RESPONSE_DTO_AUDIT,
     ResponseDtoAudit,
     declared_success_dtos,
+    unregistered_success_declarations,
 )
 from tests.api_contract.test_golden_contracts import _fake_mikan_search
 from tests.api_contract.test_tracking_confirmation_local_ab import (
@@ -306,13 +307,55 @@ def test_management_write_real_success_path(
 # ---------------------------------------------------------------------------
 
 
-def test_audit_recorder_fails_closed_on_every_drift_shape() -> None:
-    """The recorder itself must never let a drift shape pass silently.
+def test_success_registry_rejects_unnamed_success_declarations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every ``_ENDPOINTS`` entry must declare its success shape structurally.
 
-    A fresh recorder (independent of the session singleton) is used so the
-    three fail-closed shapes are proven without perturbing the real run:
-    an unobserved declared endpoint, a JSON success envelope with no declared
-    success DTO, and a declared result that violates its DTO.
+    A typed ``success`` model *or* an explicit ``responses`` mapping is a
+    declaration; anything else (a bare ``success=None``, or a non-model class
+    such as ``dict``) is an unregistered endpoint and must fail closed even
+    though the DTO count alone could still look right.
+    """
+    typed = declared_success_dtos()["POST /api/v1/batches/parse"]
+    synthetic = {
+        "GET /api/v1/binary": {
+            "success": None,
+            "responses": {"200": {"description": "bytes"}},
+        },
+        "POST /api/v1/typed": {"success": typed},
+        "GET /api/v1/unregistered": {"success": None},
+        "GET /api/v1/not-a-model": {"success": dict},
+    }
+
+    assert unregistered_success_declarations(synthetic) == [
+        "GET /api/v1/not-a-model",
+        "GET /api/v1/unregistered",
+    ]
+
+    # The recorder the coverage assertion reads must flag the same hole, and the
+    # failure must be locatable in the message it prints.
+    from tests.api_contract import response_dto_audit as audit_module
+
+    grown_registry = dict(audit_module._ENDPOINTS)
+    grown_registry["GET /api/v1/new-binary"] = {"success": None}
+    monkeypatch.setattr(audit_module, "_ENDPOINTS", grown_registry)
+    audit = ResponseDtoAudit()
+
+    assert audit.unregistered == ["GET /api/v1/new-binary"]
+    assert "declared nowhere" in audit.report()
+    assert "GET /api/v1/new-binary" in audit.report()
+
+
+def test_audit_recorder_fails_closed_on_every_drift_shape() -> None:
+    """The recorder's observation channels must never let a drift pass silently.
+
+    A fresh recorder (independent of the session singleton) is used so three
+    fail-closed shapes are proven without perturbing the real run: an
+    unobserved declared endpoint, a JSON success envelope with no declared
+    success DTO, and a declared result that violates its DTO. The fourth
+    channel — the hook's own errors — is pinned by
+    ``test_audit_hook_records_its_own_failure``.
     """
     audit = ResponseDtoAudit()
     assert "GET /api/v1/preferences" in audit.missing
@@ -329,12 +372,48 @@ def test_audit_recorder_fails_closed_on_every_drift_shape() -> None:
     assert "items" in audit.failures["POST /api/v1/batches/parse"][0]
 
 
+def test_audit_hook_records_its_own_failure(
+    client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A hook error is recorded and located; it never breaks the response.
+
+    The real hook path is exercised (a live ``/api/v1`` request) while the
+    recorder raises, so both halves of the contract are pinned: the failure
+    lands in ``hook_errors`` with the request path — the exact condition the
+    coverage assertion checks — and the response still reaches the client
+    untouched. ``monkeypatch`` restores the singleton's recorder/list, so the
+    session-wide audit is not perturbed.
+    """
+    audit = RESPONSE_DTO_AUDIT
+    monkeypatch.setattr(audit, "hook_errors", [])
+
+    def exploding_observe(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("audit recorder exploded")
+
+    monkeypatch.setattr(audit, "observe", exploding_observe)
+
+    response = client.get(
+        "/api/v1/preferences", query_string={"storage_dir": "storage"}
+    )
+
+    assert response.status_code == 200, response.get_json()
+    assert len(audit.hook_errors) == 1, audit.report()
+    assert "/api/v1/preferences" in audit.hook_errors[0]
+    assert "RuntimeError" in audit.hook_errors[0]
+    # This is the coverage assertion's fail-closed condition for the channel,
+    # and the failure is locatable in the assertion message it would print.
+    assert audit.hook_errors != []
+    assert "audit hook errors:" in audit.report()
+    assert "RuntimeError" in audit.report()
+
+
 def test_every_declared_success_endpoint_was_observed_and_valid() -> None:
     """All declared success DTOs were produced by a real response and passed."""
     audit = RESPONSE_DTO_AUDIT
     assert len(declared_success_dtos()) == 37, (
         "the endpoint registry changed; review the audit coverage:\n" + audit.report()
     )
+    assert audit.unregistered == [], audit.report()
     assert audit.hook_errors == [], audit.report()
     assert audit.undeclared == {}, audit.report()
     assert audit.missing == [], audit.report()

@@ -483,6 +483,11 @@ MiKan Web 的公共请求不接受 `mikan_config` 或 `source`；搜索配置统
   业务失败与脱敏错误 golden contract（全部基于 fake/隔离，无真实外部写操作）；
   US-192 起断言 HTTP 状态（400/404/409/401/502/503/504/500）与 envelope 双语义。
 - `tests/api_contract/test_dto_contracts.py`（US-190）：公开响应 DTO 拒绝未知/敏感字段。
+- `tests/api_contract/response_dto_audit.py` + `tests/api_contract/test_zz_response_dto_audit.py`
+  （#204）：把真实 route/serializer 产出的 `/api/v1` 成功信封逐端点套
+  `_ENDPOINTS[...]["success"]` 校验，并 fail closed 断言全部声明 DTO 的端点都被观测且通过
+  （`ok_result` 运行时不再校验，测试期是唯一执法点，见
+  [ADR-0004](../adr/0004-response-dto-validation-is-test-time.md)）。
 - `tests/api_contract/test_openapi_generation.py`（US-190）：OpenAPI 覆盖全部端点、
   确定性生成、脱敏示例、海报二进制 content type 与漂移检查；`_ENDPOINTS` 注册表的
   `errors` 声明与 `_error_http_status` 分类保持一致。
