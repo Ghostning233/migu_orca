@@ -129,7 +129,7 @@ def _seed(tmp_path: Path):
 def _fake_client(monkeypatch: pytest.MonkeyPatch) -> FakeAbClient:
     client = FakeAbClient()
     monkeypatch.setattr(
-        "apps.migu_orca_web.tracking_saved_management_service.create_legacy_31_management_client",
+        "apps.migu_orca_web.tracking_saved_management_service.create_management_client",
         lambda *_args, **_kwargs: client,
     )
     return client

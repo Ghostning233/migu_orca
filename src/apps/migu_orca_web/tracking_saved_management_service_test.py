@@ -152,7 +152,7 @@ def test_saved_management_real_entrypoint_four_actions_uses_ref_and_writer(
     config, record = _record(tmp_path, saved)
     client = FakeClient()
     monkeypatch.setattr(
-        "apps.migu_orca_web.tracking_saved_management_service.create_legacy_31_management_client",
+        "apps.migu_orca_web.tracking_saved_management_service.create_management_client",
         lambda *_a, **_k: client,
     )
     monkeypatch.setattr("apps.migu_orca_web.services._WEB_STORAGE_ROOT", tmp_path)
@@ -185,7 +185,7 @@ def test_saved_management_mapping_missing_legacy_or_other_ref_has_zero_writes(mo
     )
     client = FakeClient()
     monkeypatch.setattr(
-        "apps.migu_orca_web.tracking_saved_management_service.create_legacy_31_management_client",
+        "apps.migu_orca_web.tracking_saved_management_service.create_management_client",
         lambda *_a, **_k: client,
     )
     monkeypatch.setattr("apps.migu_orca_web.services._WEB_STORAGE_ROOT", tmp_path)
@@ -210,7 +210,7 @@ def test_saved_management_degraded_capability_is_fail_closed(monkeypatch, tmp_pa
     )
     client = FakeClient(capabilities=caps)
     monkeypatch.setattr(
-        "apps.migu_orca_web.tracking_saved_management_service.create_legacy_31_management_client",
+        "apps.migu_orca_web.tracking_saved_management_service.create_management_client",
         lambda *_a, **_k: client,
     )
     monkeypatch.setattr("apps.migu_orca_web.services._WEB_STORAGE_ROOT", tmp_path)
@@ -300,7 +300,7 @@ def test_saved_management_allows_active_record_after_terminal_submit(monkeypatch
     compare_and_swap_tracking_record(config, record.tracking_id, 1, record)
     client = FakeClient()
     monkeypatch.setattr(
-        "apps.migu_orca_web.tracking_saved_management_service.create_legacy_31_management_client",
+        "apps.migu_orca_web.tracking_saved_management_service.create_management_client",
         lambda *_a, **_k: client,
     )
     monkeypatch.setattr("apps.migu_orca_web.services._WEB_STORAGE_ROOT", tmp_path)
@@ -320,7 +320,7 @@ def test_saved_management_terminal_replay_and_binding_conflicts_are_at_most_once
     config, record = _record(tmp_path, saved)
     client = FakeClient()
     monkeypatch.setattr(
-        "apps.migu_orca_web.tracking_saved_management_service.create_legacy_31_management_client",
+        "apps.migu_orca_web.tracking_saved_management_service.create_management_client",
         lambda *_a, **_k: client,
     )
     monkeypatch.setattr("apps.migu_orca_web.services._WEB_STORAGE_ROOT", tmp_path)
@@ -329,7 +329,7 @@ def test_saved_management_terminal_replay_and_binding_conflicts_are_at_most_once
     writes = len(client.calls)
     AutoBangumiConfigRepository(private).delete(expected_configuration_revision=saved.configuration_revision)
     monkeypatch.setattr(
-        "apps.migu_orca_web.tracking_saved_management_service.create_legacy_31_management_client",
+        "apps.migu_orca_web.tracking_saved_management_service.create_management_client",
         lambda *_args, **_kwargs: pytest.fail("terminal replay constructed client"),
     )
     replay = run_saved_tracking_management(original, config_root=private)
@@ -354,7 +354,7 @@ def test_saved_management_unknown_replay_and_fresh_key_never_reissue(monkeypatch
     config, record = _record(tmp_path, saved)
     client = FakeClient()
     monkeypatch.setattr(
-        "apps.migu_orca_web.tracking_saved_management_service.create_legacy_31_management_client",
+        "apps.migu_orca_web.tracking_saved_management_service.create_management_client",
         lambda *_a, **_k: client,
     )
     monkeypatch.setattr("apps.migu_orca_web.services._WEB_STORAGE_ROOT", tmp_path)
@@ -383,7 +383,7 @@ def test_old_terminal_key_preserves_later_operation_and_history(monkeypatch, tmp
     client = FakeClient()
     monkeypatch.setattr("apps.migu_orca_web.services._WEB_STORAGE_ROOT", tmp_path)
     monkeypatch.setattr(
-        "apps.migu_orca_web.tracking_saved_management_service.create_legacy_31_management_client",
+        "apps.migu_orca_web.tracking_saved_management_service.create_management_client",
         lambda *_args, **_kwargs: client,
     )
     original = _payload(saved, record, "MODIFY", patch={"title": "New"})
@@ -430,7 +430,7 @@ def test_saved_management_lease_spans_read_write_readback_and_releases(monkeypat
     original_read = client.read_snapshot
     client.read_snapshot = lambda: touch_repository() or original_read()
     monkeypatch.setattr(
-        "apps.migu_orca_web.tracking_saved_management_service.create_legacy_31_management_client",
+        "apps.migu_orca_web.tracking_saved_management_service.create_management_client",
         lambda *_a, **_k: client,
     )
     monkeypatch.setattr("apps.migu_orca_web.services._WEB_STORAGE_ROOT", tmp_path)
@@ -538,7 +538,7 @@ def test_legacy31_delete_is_single_file_safe_and_local_bytes_survive(monkeypatch
     request_bytes = request_path.read_bytes()
     path = config.tracking_dir / f"{record.tracking_id}.json"
     monkeypatch.setattr(
-        "apps.migu_orca_web.tracking_saved_management_service.create_legacy_31_management_client",
+        "apps.migu_orca_web.tracking_saved_management_service.create_management_client",
         lambda *_a, **_k: client,
     )
     monkeypatch.setattr("apps.migu_orca_web.services._WEB_STORAGE_ROOT", tmp_path)

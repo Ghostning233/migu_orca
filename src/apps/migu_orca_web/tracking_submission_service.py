@@ -42,14 +42,7 @@ from dataclasses import replace
 from typing import Any
 from uuid import UUID
 
-# Transport selection and the default timeout live in the AB factory (issue
-# #175).  The module-level name stays ``create_legacy_31_management_client``
-# because existing tests inject a fake factory under it; the contract test in
-# ``tests/api_contract/test_ab_transport_deadline.py`` wraps this alias to
-# shorten only the per-attempt timeout.
-from ab_engine.controllers.ab_management_factory import (
-    create_management_client as create_legacy_31_management_client,
-)
+from ab_engine.controllers.ab_management_factory import create_management_client
 from ab_engine.controllers.tracking_submit_adapter import compose_tracking_submit_one
 from apps.migu_orca_web.save_confirm_service import compute_request_fingerprint
 from apps.migu_orca_web.schemas import (
@@ -201,7 +194,7 @@ def compose_tracking_readback_external(config: Any) -> Callable[[], Any]:
     lease alive for its duration, exactly like the submit seam.
     """
     # One read may never outlive the bounded check it belongs to (issue #183).
-    client = create_legacy_31_management_client(config, timeout=attempt_timeout_seconds())
+    client = create_management_client(config, timeout=attempt_timeout_seconds())
 
     def read_bounded() -> Any:
         read = read_snapshot_bounded(lambda deadline: client.read_snapshot(deadline=deadline))

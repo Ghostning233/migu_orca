@@ -442,10 +442,10 @@ class TestSubmitReadbackDeadline:
             # decoder, adapters and persistence all still run.
             import apps.migu_orca_web.tracking_submission_service as submission
 
-            real_factory = submission.create_legacy_31_management_client
+            real_factory = submission.create_management_client
             monkeypatch.setattr(
                 submission,
-                "create_legacy_31_management_client",
+                "create_management_client",
                 lambda config, **kwargs: real_factory(
                     config, **{**kwargs, "timeout": 0.2}
                 ),

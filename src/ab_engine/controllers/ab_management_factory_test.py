@@ -17,6 +17,7 @@ from typing import Any
 
 import pytest
 
+import ab_engine.controllers.ab_management_factory as ab_management_factory
 from ab_engine.controllers.ab_config import AutoBangumiConfig
 from ab_engine.controllers.ab_http_client import UrlopenAutoBangumiHttpTransport
 from ab_engine.controllers.ab_management_client import Legacy31ManagementClient
@@ -149,6 +150,55 @@ def test_timeout_and_config_reach_the_adapter_unmodified() -> None:
         "https://ab.internal.example:8443/api/v1/status",
     ]
     assert [call["timeout"] for call in transport.calls] == [1.5, 1.5]
+
+
+def test_the_implicit_default_timeout_reaches_the_adapter() -> None:
+    """Issue #207: omitting ``timeout`` bounds each call at 30 seconds.
+
+    The neighbouring test only pins an *explicit* ``timeout=1.5``; this one pins
+    the effective bound a caller gets when it omits ``timeout`` entirely, by
+    observing the transport call.  Because the adapter's own default is also 30,
+    this observation alone cannot tell whether the factory forwarded the keyword
+    at all -- see the mandatory-keyword spy below for that claim.
+    """
+    transport = RecordingTransport()
+
+    client = create_management_client(_config(), transport=transport)
+
+    assert client.probe_capabilities().version == "3.1.18"
+    assert [call["timeout"] for call in transport.calls] == [30.0, 30.0]
+
+
+def test_the_factory_forwards_its_default_timeout_to_the_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #207: the omitted ``timeout`` is not dropped before the delegation.
+
+    The transport observation above stays green even if the factory stops
+    passing ``timeout`` through, because the adapter defaults to 30 as well.  So
+    this spy makes ``timeout`` a *mandatory* keyword at the delegation boundary:
+    a dropped forward raises ``TypeError`` instead of silently falling back to
+    the adapter default, and the recorded keyword proves the factory's literal.
+    """
+    real_factory = ab_management_factory.create_legacy_31_management_client
+    forwarded: list[float] = []
+
+    def spy(
+        config: AutoBangumiConfig,
+        *,
+        transport: Any,
+        timeout: float,
+        monotonic: Any = None,
+    ) -> Legacy31ManagementClient:
+        forwarded.append(timeout)
+        return real_factory(config, transport=transport, timeout=timeout, monotonic=monotonic)
+
+    monkeypatch.setattr(ab_management_factory, "create_legacy_31_management_client", spy)
+
+    client = create_management_client(_config(), transport=RecordingTransport())
+
+    assert forwarded == [30.0]
+    assert isinstance(client, Legacy31ManagementClient)
 
 
 def test_monotonic_is_forwarded_so_one_deadline_still_bounds_every_sub_request() -> None:

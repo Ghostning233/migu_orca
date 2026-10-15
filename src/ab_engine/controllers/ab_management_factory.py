@@ -43,6 +43,11 @@ def create_management_client(
     injectable-client seam; ``timeout`` stays a single-call bound, so a caller
     inside an endpoint-level budget (issue #183) passes its derived per-attempt
     value instead of widening any global default.
+
+    The ``timeout`` default below is the same single-call bound the adapter
+    defaults to (``ab_management_client.create_legacy_31_management_client``),
+    and ``ab_management_factory_test.py`` pins that the omitted value reaches the
+    transport as 30 seconds (issue #207).
     """
     if transport is None:
         transport = UrlopenAutoBangumiHttpTransport()
