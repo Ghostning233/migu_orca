@@ -20,24 +20,7 @@ from shared.models import EntryRequest
 from storage_engine.controllers.request_repository import save_request_snapshot
 from storage_engine.controllers.storage_config import load_storage_config
 
-CHROMIUM_LIB_DIRS = (
-    Path("/tmp/chromium-libs/usr/lib/x86_64-linux-gnu"),
-    Path("/tmp/chromium-libs/lib/x86_64-linux-gnu"),
-)
 PLAYWRIGHT_CACHE_DIR = Path.home() / ".cache/ms-playwright"
-
-
-def _chromium_lib_path_prefix() -> str:
-    return ":".join(str(path) for path in CHROMIUM_LIB_DIRS if path.is_dir())
-
-
-# Ensure Playwright-launched Chromium can find extracted system libraries.
-if _chromium_lib_path_prefix():
-    _existing_ld = os.environ.get("LD_LIBRARY_PATH", "")
-    _prefix = _chromium_lib_path_prefix()
-    os.environ["LD_LIBRARY_PATH"] = (
-        f"{_prefix}:{_existing_ld}" if _existing_ld else _prefix
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -65,25 +48,14 @@ def _browser_executable() -> str | None:
     return None
 
 
-def _browser_env() -> dict[str, str]:
-    """Build environment variables needed to run Chromium.
-
-    When system libraries are missing (e.g. libnspr4.so, libnss3.so),
-    we prepend extracted .deb libraries to LD_LIBRARY_PATH.
-    """
-    env = os.environ.copy()
-    if _chromium_lib_path_prefix():
-        existing = env.get("LD_LIBRARY_PATH", "")
-        prefix = _chromium_lib_path_prefix()
-        env["LD_LIBRARY_PATH"] = f"{prefix}:{existing}" if existing else prefix
-    return env
-
-
 _browser_available: bool | None = None
 
 
 def is_browser_available() -> bool:
-    """Check whether a working Chromium binary + libraries are available.
+    """Check whether a working Chromium binary + system libraries are available.
+
+    The probe runs the binary's ``--version``: a missing shared library makes that
+    non-zero, which is exactly the "browser present but cannot start" case.
 
     Result is cached after the first call.
     """
@@ -98,7 +70,6 @@ def is_browser_available() -> bool:
     try:
         result = subprocess.run(
             [exe, "--version"],
-            env=_browser_env(),
             capture_output=True,
             text=True,
             timeout=5,
@@ -125,13 +96,14 @@ def pytest_collection_modifyitems(
         "browser" in item.keywords for item in items
     ):
         raise RuntimeError(
-            "Browser binary or system libraries unavailable in CI. "
-            "Run './script/setup-browser-deps.sh' (or install Chromium deps) "
-            "before the browser job — a skipped browser suite is not a pass."
+            "Browser binary or system libraries unavailable in CI. Install the "
+            "Chromium system dependencies before the browser job — a skipped "
+            "browser suite is not a pass. See "
+            "docs/development/browser-test-environment.md."
         )
     skip_browser = pytest.mark.skip(
-        reason="Browser binary or system libraries unavailable. "
-        "Run './script/setup-browser-deps.sh' or install Chromium system deps."
+        reason="Chromium binary or its system libraries are unavailable. See "
+        "docs/development/browser-test-environment.md for the one-time install."
     )
     for item in items:
         if "browser" in item.keywords:
@@ -139,7 +111,8 @@ def pytest_collection_modifyitems(
     if any("browser" in item.keywords for item in items):
         print(
             "\n⚠  Browser not available — browser tests will be skipped.\n"
-            "  See docs for manual fallback instructions.\n",
+            "  Install the Chromium system dependencies; see "
+            "docs/development/browser-test-environment.md.\n",
             file=sys.stderr,
         )
 

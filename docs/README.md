@@ -7,6 +7,7 @@
 - 项目使用、运行方式与已实现能力：[仓库 README](../README.md)
 - Agent 常驻入口与全仓库规范：[AGENTS.md](../AGENTS.md)
 - 按需查阅的验证、审核与发布流程：[开发流程](development/workflow.md)
+- 浏览器测试环境的一次性安装、可用性探测与故障排查：[浏览器测试环境](development/browser-test-environment.md)
 - 工作包开发、Luna/Fable 调用与长期中文 PR Agent：[子 Agent 编排](development/subagent-orchestration.md)
 - Stage 39 的归档、Gate 5 结论与后续审核安排：[Stage 39 收尾记录](archive/stage39/closeout.md)
 - Stage 40～41 的执行范围与验收基线：[添加番剧可靠性与体验改版 PRD](MiGuOrca_stage40_add_anime_reliability_and_ux_PRD.md)
