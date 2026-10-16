@@ -19,7 +19,9 @@ uv run pytest tests/browser/ -q        # Stage 收尾的完整门禁，通常一
 
 前置条件：
 
-- Chromium 可用（必要时先跑 `script/setup-browser-deps.sh`；`bin/chromium-wrapper.sh` 是包装脚本）
+- Chromium 与系统库可用：`uv run playwright install chromium` + 系统依赖
+  `sudo apt-get install -y libnspr4 libnss3`（或 `sudo uv run playwright install-deps chromium`）。
+  一次性安装、可用性探测与故障排查见 [浏览器测试环境](../../../docs/development/browser-test-environment.md)
 - 核对仓库根 `.migu_orca/storage`：陈旧运行数据会污染空状态/黄金路径；gitignore 不代表可以删除。
   优先隔离测试根；确需移走时先核对内容，移动到唯一备份目录、报告位置，不覆盖旧备份/丢失用户数据。
 - SPA 测试需要最新 `frontend/dist`（依赖缺失时先 `npm ci`，然后 `npm run build`）；CI browser job 先构建再跑

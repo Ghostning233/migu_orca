@@ -6,12 +6,9 @@ __pycache__/
 .mypy_cache/
 .migu_orca/
 scripts/ralph/.last-branch
-# Locally extracted Chromium system libraries for browser tests (see script/setup-browser-deps.sh)
-.agents/.chromium-libs/
 # Local tool caches (npm/uv) when the home cache is read-only
 .npm-cache/
 .uv-cache/
-.chromium-deps/
 
 logs/*
 !logs/.gitkeep
