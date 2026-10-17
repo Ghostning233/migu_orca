@@ -107,6 +107,9 @@ def build_legacy_31_collection_payload(request: dict[str, Any]) -> dict[str, Any
 
     payload = deepcopy(build_legacy_31_subscription_payload(request)["data"])
     payload.pop("id", None)
+    # ``filter`` is guaranteed by the reused subscribe builder (``_legacy_31_filter``
+    # always returns a ``str`` or raises ``ab_filter_unsupported``); a shape change
+    # there is a programming error and fails loud instead of being classified here.
     if _COLLECTION_FILTER_UNSUPPORTED in payload["filter"]:
         # Raised before any client or credential exists: zero external writes.
         raise Stage1Error(

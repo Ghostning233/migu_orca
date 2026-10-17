@@ -4,6 +4,7 @@ import re
 
 import pytest
 
+from ab_engine.controllers import subscription_payload as subscription_payload_module
 from ab_engine.controllers.subscription_payload import (
     build_ab_submit_payload,
     build_ab_subscription_payload,
@@ -354,16 +355,37 @@ def test_build_legacy_31_collection_payload_never_carries_an_id() -> None:
     assert "999999" not in str(payload)
 
 
-def test_build_legacy_31_collection_payload_is_a_deep_copy() -> None:
-    request = _accepted_request()
-    request["source_info"]["matched_bangumi"]["poster_url"] = "https://mikan.example/cover.jpg"
+def test_build_legacy_31_collection_payload_never_shares_the_subscribe_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reused subscribe ``data`` object must be deep-copied, never aliased.
 
-    payload = build_legacy_31_collection_payload(request)
-    request["source_info"]["matched_bangumi"]["poster_url"] = "https://evil.example/other.jpg"
-    request["confirmable_config"]["filter_rule"]["must_contain"] = "changed"
+    Patching the builder is the only way to observe the copy: the real ``data``
+    is rebuilt from strings on every call, so an aliasing regression there would
+    be invisible to an end-to-end assertion.
+    """
 
-    assert payload["poster_link"] == "https://mikan.example/cover.jpg"
-    assert payload["filter"] == "(?is)(?:^(?!.*(?:1080p)).*$|.*(?:SP).*)"
+    shared = {
+        "official_title": "番剧 标准标题",
+        "filter": "(?!)",
+        "save_path": "番剧 标准标题",
+        "rss_link": "https://example.invalid/rss.xml",
+        "nested": {"must_contain": "1080p"},
+    }
+    monkeypatch.setattr(
+        subscription_payload_module,
+        "build_legacy_31_subscription_payload",
+        lambda request: {"data": shared, "rss": {"url": shared["rss_link"]}},
+    )
+
+    payload = build_legacy_31_collection_payload(_accepted_request())
+
+    assert payload == shared
+    assert payload is not shared
+    shared["nested"]["must_contain"] = "changed"
+    shared["save_path"] = "changed"
+    assert payload["nested"]["must_contain"] == "1080p"
+    assert payload["save_path"] == "番剧 标准标题"
 
 
 def test_build_legacy_31_collection_payload_requires_an_accepted_request() -> None:
@@ -386,6 +408,10 @@ def test_build_legacy_31_collection_payload_requires_an_accepted_request() -> No
         (
             {"must_contain": "1080p, 简体", "must_not_contain": "", "use_regex": False, "case_sensitive": False},
             "(?is)(?:^(?!.*(?:1080p,\\ 简体)).*$)",
+        ),
+        (
+            {"must_contain": "1080p", "must_not_contain": "SP, OVA", "use_regex": False, "case_sensitive": False},
+            "(?is)(?:^(?!.*(?:1080p)).*$|.*(?:SP,\\ OVA).*)",
         ),
     ],
 )

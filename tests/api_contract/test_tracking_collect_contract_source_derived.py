@@ -22,9 +22,14 @@ those exact bytes, so the assertions measure the real transport and the real
 Nothing here talks to a real Auto Bangumi, and no credential is used besides the
 obviously fake ``ab-session`` cookie the stand-in never validates.
 
-Scope note: the exact-200 tightening (201/204/3xx must fail) is issue #216 AC1;
-this file pins the mapping the current shared channel already proves, and the
-transport seam used by ``_post_collect`` is the one #216 AC2 refines.
+Scope note: the exact-200 tightening (201/204/3xx must fail) and the
+``msg_en``/``msg_zh`` field validation are issue #216 AC1, so they are not
+asserted here yet.  The file's only seam stub is ``_TransportCollectClient``,
+which performs exactly the one POST the production collect client will perform;
+every judgement asserted below — HTTP status mapping, ``ab_submit_result``
+normalization and the "download existing resources" classification — is
+production code, and the transport call the stub makes is the seam #216 AC2
+refines.
 """
 
 import contextlib
@@ -36,14 +41,14 @@ from typing import Any
 
 import pytest
 
+from ab_engine.controllers.ab_client import FakeAutoBangumiClient, submit_ab_subscription
 from ab_engine.controllers.ab_http_client import UrlopenAutoBangumiHttpTransport
-from ab_engine.controllers.submit_result import ab_submit_failure, ab_submit_success
+from ab_engine.controllers.submit_result import ab_submit_success
 from ab_engine.controllers.subscription_payload import build_legacy_31_collection_payload
 from request_engine.controllers.request_controller import (
     accept_request,
     build_pending_request,
 )
-from shared.errors import Stage1Error
 from shared.models import (
     EntryRequest,
     FilterRule,
@@ -312,6 +317,9 @@ def _stand_in(case: _CollectCase):
     """Yield ``(base_url, server_or_None)`` for one case's exchange."""
 
     if case.refused:
+        # Take a free loopback port and release it, so the following connect is
+        # refused.  Assumption: nothing else binds that port in between (a
+        # standard, tiny-probability local-test race, never a real service).
         holder = socket.socket()
         holder.bind(("127.0.0.1", 0))
         port = holder.getsockname()[1]
@@ -343,7 +351,9 @@ def _collect_body() -> dict[str, Any]:
     return build_legacy_31_collection_payload(_accepted_request())
 
 
-def _post_collect(base_url: str, *, timeout: float) -> dict[str, Any]:
+def _post_collect(
+    base_url: str, *, timeout: float, payload: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """One real transport POST to the collect path with the built body.
 
     This is the single point coupling this file to the transport seam that
@@ -358,8 +368,33 @@ def _post_collect(base_url: str, *, timeout: float) -> dict[str, Any]:
             "Content-Type": "application/json",
             "Cookie": "token=ab-session",
         },
-        _collect_body(),
+        _collect_body() if payload is None else payload,
         timeout=timeout,
+    )
+
+
+class _TransportCollectClient:
+    """The minimal Auto Bangumi client over the verified external collect path.
+
+    The file's only seam stub: it performs exactly the one POST the production
+    collect client will perform, so the *response* fed into the production
+    ``submit_ab_subscription``/``classify_existing_resource_result`` chain is the
+    real wire result instead of a test-constructed result object.
+    """
+
+    def __init__(self, base_url: str, *, timeout: float) -> None:
+        self._base_url = base_url
+        self._timeout = timeout
+
+    def create_subscription(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return _post_collect(self._base_url, timeout=self._timeout, payload=payload)
+
+
+def _collect_exchange(base_url: str, *, timeout: float) -> dict[str, Any]:
+    """One collect attempt normalized by the production submit chain."""
+
+    return submit_ab_subscription(
+        _TransportCollectClient(base_url, timeout=timeout), _collect_body()
     )
 
 
@@ -412,8 +447,16 @@ def test_collect_success_is_a_bare_bangumi_body_and_added_to_download() -> None:
     parsed = json.loads(sent)
     assert parsed == _collect_body()
     assert "data" not in parsed and "rss" not in parsed and "id" not in parsed
-    # A one-time collection establishes no controlled subscription, so the
-    # normalized success carries no external subscription id.
+    # A one-time collection establishes no controlled subscription and its
+    # success envelope carries no subscription id, so the shared subscribe
+    # normalization provably cannot carry it: the collect seam must normalize
+    # this one case itself (production work for #217 after #216).
+    refused = submit_ab_subscription(
+        FakeAutoBangumiClient(response=dict(body)), _collect_body()
+    )
+    assert refused["success"] is False
+    assert refused["error"]["error_type"] == "invalid_ab_submit_result"
+    # The collect-mode outcome is then 已加入下载, never a subscription state.
     assert classify_existing_resource_result(ab_submit_success(None, body)) == (
         TRACKING_STATUS_ADDED_TO_DOWNLOAD
     )
@@ -431,31 +474,37 @@ def test_collect_406_dual_semantics_collapse_to_one_definite_failure(
     invent evidence Auto Bangumi does not provide.
     """
 
-    with _stand_in(case) as (base_url, _server), pytest.raises(Stage1Error) as error:
-        _post_collect(base_url, timeout=case.timeout)
+    with _stand_in(case) as (base_url, server):
+        assert server is not None
+        result = _collect_exchange(base_url, timeout=case.timeout)
 
-    assert error.value.error_type == "ab_submit_failed"
-    assert error.value.details.get("status_code") == 406
-    outcome = classify_existing_resource_result(ab_submit_failure(error.value))
-    assert outcome == TRACKING_STATUS_SUBMIT_FAILED
+    assert len(server.requests) == 1, case.name
+    assert result["success"] is False, case.name
+    assert result["error"]["error_type"] == "ab_submit_failed", case.name
+    assert result["error"]["details"].get("status_code") == 406, case.name
+    assert classify_existing_resource_result(result) == TRACKING_STATUS_SUBMIT_FAILED
 
 
 @pytest.mark.parametrize("case", _FAILURE_CASES, ids=lambda case: case.name)
 def test_source_derived_failures_are_definite_collect_failures(
     case: _CollectCase,
 ) -> None:
-    with _stand_in(case) as (base_url, _server), pytest.raises(Stage1Error) as error:
-        _post_collect(base_url, timeout=case.timeout)
+    with _stand_in(case) as (base_url, server):
+        result = _collect_exchange(base_url, timeout=case.timeout)
 
-    exc = error.value
-    assert exc.error_type == case.expected_error_type, case.name
+    if server is not None:
+        # One attempt, one external call: collect never auto-retries a fault.
+        assert len(server.requests) == 1, case.name
+    assert result["success"] is False, case.name
+    error = result["error"]
+    assert error["error_type"] == case.expected_error_type, case.name
     if case.expected_http_status is None:
-        assert "status_code" not in exc.details, case.name
+        assert "status_code" not in error["details"], case.name
     else:
-        assert exc.details.get("status_code") == case.expected_http_status, case.name
+        assert error["details"].get("status_code") == case.expected_http_status, case.name
 
     # The raw upstream envelope and the session cookie never leave the adapter.
-    serialized = json.dumps(exc.as_dict(), ensure_ascii=False)
+    serialized = json.dumps(error, ensure_ascii=False)
     for leaked in (
         "种子已经添加",
         "Unauthorized",
@@ -465,7 +514,7 @@ def test_source_derived_failures_are_definite_collect_failures(
     ):
         assert leaked not in serialized, case.name
 
-    outcome = classify_existing_resource_result(ab_submit_failure(exc))
+    outcome = classify_existing_resource_result(result)
     assert outcome == TRACKING_STATUS_SUBMIT_FAILED, case.name
     # Collect is a one-time request: a fault stays a retryable 提交失败 and must
     # never be promoted into a controlled-subscription confirmation state.
