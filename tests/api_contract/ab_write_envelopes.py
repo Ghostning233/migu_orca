@@ -15,6 +15,11 @@ Provenance of every constant below:
     Recorded from the real 3.1.18 test instance during issue #216's work package
     (2026-10-17).  Only the public message fields are kept: endpoint, credential,
     Cookie, raw body, full RSS URL and local paths are never copied here.
+The issue's own recorded table (``POST /api/v1/rss/disable/many`` with an empty
+body → ``200 {"msg_en": "Disable RSS successfully.", "msg_zh": "禁用 RSS 成功。"}``)
+is the same envelope shape; it is not repeated here because no current client
+call reaches that exact route.
+
 ``SOURCE_DERIVED_*``
     Synthetic but shape-exact fixtures derived from the upstream ``u_response``
     source where no byte-for-byte recording exists.  They exist so no test keeps
@@ -56,13 +61,13 @@ RECORDED_SUBSCRIBE_FEED_FAILED_ENVELOPE = {
 RECORDED_SUBSCRIBE_SERVER_ERROR_STATUS = 500
 RECORDED_SUBSCRIBE_SERVER_ERROR_BODY = b""
 
-#: Issued from the issue's own recorded real-machine table: an accepted
-#: ``POST /api/v1/rss/disable/many`` with an empty body answers 200 and this
-#: envelope.
-RECORDED_DISABLE_MANY_STATUS = 200
-RECORDED_DISABLE_MANY_ENVELOPE = {
-    "msg_en": "Disable RSS successfully.",
-    "msg_zh": "禁用 RSS 成功。",
+#: Recorded ``GET /api/v1/rss/refresh/<id>``: HTTP 200 with the success
+#: envelope.  A write-through-GET uses the very same write envelope, so the
+#: criterion is not specific to POST/PATCH/DELETE.
+RECORDED_REFRESH_RSS_STATUS = 200
+RECORDED_REFRESH_RSS_ENVELOPE = {
+    "msg_en": "Refresh RSS successfully.",
+    "msg_zh": "刷新 RSS 成功。",
 }
 
 #: Shape-exact synthetic success envelope for a persistent subscription write.

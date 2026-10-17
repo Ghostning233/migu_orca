@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Protocol
 
+from ab_engine.controllers.ab_http_client import is_verified_write_envelope
 from ab_engine.controllers.fallback_config import build_ab_fallback_config
 from ab_engine.controllers.submit_result import ab_submit_failure, ab_submit_success
 from shared.errors import Stage1Error
@@ -76,7 +77,7 @@ def _subscription_id(ab_response: dict[str, Any]) -> str | None:
         value = ab_response.get(field)
         if isinstance(value, str) and value.strip():
             return value
-    if all(isinstance(ab_response.get(field), str) for field in _VERIFIED_WRITE_ENVELOPE_FIELDS):
+    if is_verified_write_envelope(ab_response):
         return None
     raise Stage1Error(
         "invalid_ab_submit_result",
@@ -84,8 +85,3 @@ def _subscription_id(ab_response: dict[str, Any]) -> str | None:
         "submit_ab_subscription",
         {"fields": ["id", "subscription_id", "ab_subscription_id"]},
     )
-
-
-#: The verified 3.1.18 write envelope (issue #216): two message strings and no
-#: ``status`` field.  It proves the write itself, never an external identity.
-_VERIFIED_WRITE_ENVELOPE_FIELDS = ("msg_en", "msg_zh")

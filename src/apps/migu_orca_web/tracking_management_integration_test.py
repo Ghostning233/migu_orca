@@ -171,7 +171,7 @@ def test_real_delete_readback_requires_list_absence_not_deleted_flag(tmp_path: P
                 "message_zh": "无法找到 id 999999", "message_en": "Can't find id 999999",
             },
         ),
-        (401, "ab_auth_failed", {"status_code": 401}),
+        (401, "ab_auth_failed", {"status_code": 401, "http_status": 401}),
     ],
 )
 def test_real_transport_accepts_a_management_write_only_on_the_exact_status(

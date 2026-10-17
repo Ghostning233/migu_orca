@@ -195,6 +195,21 @@ def _trickle_body(connection: socket.socket, stop: threading.Event, path: str) -
             return
 
 
+def _created_then_stall(connection: socket.socket, stop: threading.Event, path: str) -> None:
+    """A 201 whose declared body never arrives: the status is already decided."""
+    del path
+    _send(
+        connection,
+        b"HTTP/1.1 201 Created\r\nContent-Length: 4000\r\n\r\n",
+    )
+    for _ in range(4000):
+        if stop.is_set():
+            return
+        time.sleep(0.05)
+        if not _send(connection, b"x"):
+            return
+
+
 def _stalled_handshake(connection: socket.socket, stop: threading.Event, path: str) -> None:
     """Accept TCP and then say nothing, so the TLS handshake cannot finish."""
     del path
@@ -521,6 +536,21 @@ class TestConnectionPhaseDeadline:
         finally:
             server.close()
         assert status == 401, status
+        assert elapsed < 2.0 + _TOLERANCE_SECONDS, elapsed
+
+    def test_a_non_200_2xx_write_keeps_its_status_when_the_body_never_arrives(self) -> None:
+        """Issue #216: only an exact 200 may be a write success.
+
+        A 201/202/206 body is therefore diagnostic, not the decision: it gets the
+        same short sub-budget as any other rejection, so a stalled body can never
+        replace the proven status with an unproven timeout.
+        """
+        server = _LocalAbServer(_created_then_stall)
+        try:
+            status, elapsed = _write_elapsed(server.base_url, 10.0)
+        finally:
+            server.close()
+        assert status == 201, status
         assert elapsed < 2.0 + _TOLERANCE_SECONDS, elapsed
 
     def test_a_proven_unauthorized_status_is_never_reported_as_a_timeout(self) -> None:

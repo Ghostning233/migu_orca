@@ -9,13 +9,18 @@ import time
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
 
-from ab_engine.controllers.ab_client import AutoBangumiClient
 from ab_engine.controllers.ab_config import AutoBangumiConfig
 from shared.errors import Stage1Error
+
+if TYPE_CHECKING:
+    # Type-only: this module owns the verified write contract that ``ab_client``
+    # imports at runtime, so the client protocol must not be a runtime import
+    # here (it would be a cycle).
+    from ab_engine.controllers.ab_client import AutoBangumiClient
 
 
 @dataclass(frozen=True, slots=True)
@@ -310,10 +315,18 @@ class LegacyAutoBangumi31Client:
             # envelope ``{"msg_en": str, "msg_zh": str}``; there is no ``status``
             # field to look for and no id to require (issue #216).
             return deepcopy(response.payload)
-        if _looks_like_duplicate_subscription(response.payload):
-            # A distinguishable business rejection: an equal subscription already
-            # exists upstream.  Only the category is derived here — the upstream
-            # text is never returned, logged or persisted.
+        # Only a 4xx that is *not* an authentication failure can be the
+        # distinguishable business rejection: a 401/403 body that happens to
+        # mention an existing subscription is still a rejected credential, and a
+        # 5xx (or any other status) may already have been processed upstream, so
+        # neither may be published as the definite "an equal subscription
+        # already exists".  Only the category is derived here — the upstream text
+        # is never returned, logged or persisted (issue #86).
+        if (
+            response.status_code not in (401, 403)
+            and 400 <= response.status_code < 500
+            and _looks_like_duplicate_subscription(response.payload)
+        ):
             raise Stage1Error(
                 "ab_duplicate_subscription",
                 "Auto Bangumi 中已存在相同订阅",
@@ -487,7 +500,23 @@ _DEFAULT_PORTS = {"http": 80, "https": 443}
 #: The complete verified 3.1.18 write envelope (issue #216).  There is no
 #: ``status`` field: the real ``u_response`` helper answers every write with
 #: exactly these two message strings, and the HTTP status carries the result.
-_WRITE_ENVELOPE_FIELDS = ("msg_en", "msg_zh")
+#: Public because the submit-side normalizer must recognize the same envelope
+#: instead of re-declaring it (``ab_client._subscription_id``).
+WRITE_ENVELOPE_FIELDS = ("msg_en", "msg_zh")
+
+
+def is_verified_write_envelope(payload: Any) -> bool:
+    """True only for the verified 3.1.18 write envelope (two string messages)."""
+    return isinstance(payload, Mapping) and all(
+        isinstance(payload.get(field), str) for field in WRITE_ENVELOPE_FIELDS
+    )
+
+
+#: A rejected write still returns its bounded body when it arrives quickly, so
+#: callers can tell one documented business rejection from another.  The wait is
+#: deliberately short: the status already decided the exchange, and the body is
+#: only extra detail (issue #216).
+_ERROR_BODY_BUDGET_SECONDS = 1.0
 
 
 class _Deadline:
@@ -550,32 +579,30 @@ def _exchange(
         request_bytes = _request_bytes(method, target, parsed, headers, body)
         _send_bounded(connection, request_bytes, deadline, step)
         status, response_headers, buffered = _read_headers(connection, deadline, step)
-        accepted = 200 <= status < 300
-        if not accepted and not inspect_error_body:
+        rejected = not 200 <= status < 300
+        if rejected and not inspect_error_body:
             _raise_for_status(status, step=step)
-        body_deadline = deadline if accepted else _error_body_deadline(deadline, monotonic)
+        # A write's body is the decision for an exact 200 and mere diagnostics for
+        # every other status: only then does it get a short sub-budget and may it
+        # be dropped, so a slow/oversized rejection body can never replace the
+        # proven status with an unproven timeout (issue #216).  Reads keep the
+        # previous behaviour exactly: a non-2xx is classified before its body and
+        # an unreadable 2xx body still fails loudly.
+        diagnostic_only = inspect_error_body and status != 200
+        body_deadline = deadline if not diagnostic_only else _error_body_deadline(deadline, monotonic)
         try:
             payload = _read_body(
                 connection, body_deadline, response_headers, status=status, method=method,
                 buffered=buffered, step=step,
             )
         except Stage1Error:
-            if accepted:
+            if not diagnostic_only:
                 raise
-            # The status line already proves the rejection; an unreadable error
-            # body only costs the extra diagnostic detail.
             payload = b""
     finally:
         with contextlib.suppress(OSError):
             connection.close()
     return status, response_headers, payload
-
-
-#: A rejected write still returns its bounded body when it arrives quickly, so
-#: callers can tell one documented business rejection from another.  The wait is
-#: deliberately short: the status already decided the exchange, and the body is
-#: only extra detail (issue #216).
-_ERROR_BODY_BUDGET_SECONDS = 1.0
 
 
 def _error_body_deadline(deadline: _Deadline, monotonic: Callable[[], float]) -> _Deadline:
@@ -610,12 +637,12 @@ def _write_response(status: int, raw: bytes, *, step: str) -> AutoBangumiWriteRe
 def _write_envelope(raw: bytes, *, step: str) -> dict[str, Any]:
     """The verified 3.1.18 write envelope: an object with two string messages."""
     payload = _decode_object(raw, step=step)
-    if not all(isinstance(payload.get(field), str) for field in _WRITE_ENVELOPE_FIELDS):
+    if not is_verified_write_envelope(payload):
         raise Stage1Error(
             "invalid_ab_response",
             "Auto Bangumi 写响应缺少成功字段",
             step,
-            {"fields": list(_WRITE_ENVELOPE_FIELDS)},
+            {"fields": list(WRITE_ENVELOPE_FIELDS)},
         )
     return payload
 
@@ -644,7 +671,10 @@ def write_failure(response: AutoBangumiWriteResponse, *, step: str) -> Stage1Err
             "ab_auth_failed",
             "Auto Bangumi 认证失败",
             step,
-            {"status_code": response.status_code},
+            # Both status keys are deliberate: engine classifiers read
+            # ``status_code`` and the published diagnostics DTO reads
+            # ``http_status`` (issue #101/#216).
+            {"status_code": response.status_code, "http_status": response.status_code},
         )
     return Stage1Error(
         "ab_submit_failed",

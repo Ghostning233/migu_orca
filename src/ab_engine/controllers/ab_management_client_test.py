@@ -258,8 +258,8 @@ def test_subscription_write_actions_use_exact_routes_and_clear_session() -> None
     ("status", "envelope", "expected_error", "expected_details"),
     [
         (200, WRITE_ENVELOPE, None, {"status_code": 200}),
-        (401, {"detail": "Unauthorized"}, "ab_auth_failed", {"status_code": 401}),
-        (403, {"detail": "Forbidden"}, "ab_auth_failed", {"status_code": 403}),
+        (401, {"detail": "Unauthorized"}, "ab_auth_failed", {"status_code": 401, "http_status": 401}),
+        (403, {"detail": "Forbidden"}, "ab_auth_failed", {"status_code": 403, "http_status": 403}),
         (
             406,
             {"msg_en": "Can't find id 999999", "msg_zh": "无法找到 id 999999"},

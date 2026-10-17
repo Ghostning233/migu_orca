@@ -121,7 +121,10 @@ def management_writer(client: Any, action: str) -> ManagementWriter:
                     calls.append(client.delete_rss(item.external_id))
                 elif action == "REFRESH_RSS":
                     calls.append(client.refresh_rss(item.external_id))
-        statuses = [(200 if result.get("status") is True else 400 if result.get("status") is False else result.get("status_code")) for result in calls if isinstance(result, dict)]
+        # Issue #216: the only accepted-action evidence is the adapter's exact
+        # HTTP status.  Auto Bangumi 3.1.18 write bodies carry no ``status``
+        # field, so a body-shaped guess must never decide this.
+        statuses = [result.get("status_code") for result in calls if isinstance(result, dict)]
         if statuses and all(isinstance(status, int) and 200 <= status < 300 for status in statuses):
             return {"status_code": 200}
         if any(isinstance(status, int) and 200 <= status < 300 for status in statuses) and any(not isinstance(status, int) or not 200 <= status < 300 for status in statuses):
@@ -546,10 +549,9 @@ def _run_management_write(
         return None
     if not responses:
         return {"status_code": 200}
-    statuses = [
-        (200 if item.get("status") is True else 400 if item.get("status") is False else item.get("status_code"))
-        for item in responses
-    ]
+    # Issue #216: see ``management_writer`` — the adapter's exact status code is
+    # the only accepted-action evidence; there is no body ``status`` field.
+    statuses = [item.get("status_code") for item in responses]
     if all(isinstance(status, int) and 200 <= status < 300 for status in statuses):
         return {"status_code": 200}
     if any(not isinstance(status, int) or status < 200 or status >= 300 for status in statuses):

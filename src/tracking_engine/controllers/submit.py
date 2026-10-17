@@ -190,9 +190,12 @@ def classify_external_submit_result(result: Any) -> str:
     error_type = str(error.get("error_type") or "ab_submit_failed")
     if error_type in _DEFINITE_FAILURE_ERROR_TYPES:
         return TRACKING_OPERATION_STATE_FAILED
-    if error_type == "ab_submit_failed" and not _http_status_ge_500(error):
-        # A <500 rejection provably did not create the subscription; a 5xx may
-        # have been processed upstream and stays OUTCOME_UNKNOWN below.
+    if error_type == "ab_submit_failed" and not _write_may_have_created(error):
+        # A rejection that provably did not create the subscription is a definite
+        # failure; a status that leaves a real side effect possible stays
+        # OUTCOME_UNKNOWN below (issue #216: the real 3.1.18 instance answered
+        # ``rss/subscribe`` with 406 and still created the subscription and its
+        # RSS row, so a 406 can never be read as "nothing was created").
         return TRACKING_OPERATION_STATE_FAILED
     # Every ambiguous/unknown code stays OUTCOME_UNKNOWN so an upstream result
     # that cannot be proven safe-to-retry is never blindly retried.
@@ -256,12 +259,30 @@ def tracking_status_for_operation_state(operation_state: str) -> str:
         raise ValueError(f"no tracking status for operation state: {operation_state}") from exc
 
 
-def _http_status_ge_500(error: Any) -> bool:
+#: Rejection statuses that prove nothing about side effects for an Auto Bangumi
+#: write (issue #216).  406 is the instance's recorded business rejection *and*
+#: the recorded partial-effect case; a 5xx is handled by the same rule because it
+#: may already have been processed upstream.
+_AMBIGUOUS_WRITE_STATUSES = frozenset({406})
+
+
+def _write_may_have_created(error: Any) -> bool:
+    """True when one failed write cannot prove it created nothing (issue #216)."""
+    status_code = _http_status(error)
+    return status_code is not None and (
+        status_code >= 500 or status_code in _AMBIGUOUS_WRITE_STATUSES
+    )
+
+
+def _http_status(error: Any) -> int | None:
+    """The exact HTTP status carried by one failed write, or ``None``."""
     details = error.get("details") if isinstance(error, dict) else None
     if not isinstance(details, dict):
-        return False
+        return None
     status_code = details.get("status_code")
-    return isinstance(status_code, int) and not isinstance(status_code, bool) and status_code >= 500
+    if isinstance(status_code, int) and not isinstance(status_code, bool):
+        return status_code
+    return None
 
 
 __all__ = [

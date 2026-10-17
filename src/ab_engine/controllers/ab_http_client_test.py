@@ -216,7 +216,9 @@ def test_write_failure_classifies_the_exact_status_without_leaking_the_body(
     unauthorized = _write(monkeypatch, (401, b'{"detail": "Unauthorized"}'))
     failure = write_failure(unauthorized, step="create_ab_subscription")
     assert failure.error_type == "ab_auth_failed"
-    assert failure.details == {"status_code": 401}
+    # Engine classifiers read ``status_code``; the published diagnostics DTO
+    # reads ``http_status``.  Both carry the same exact status.
+    assert failure.details == {"status_code": 401, "http_status": 401}
 
     rejected = _write(monkeypatch, (406, json.dumps(missing_id).encode("utf-8")))
     rejection = write_failure(rejected, step="ab_management")
@@ -322,6 +324,50 @@ def test_submit_checks_connection_credentials_and_version_before_writing() -> No
         ).create_subscription(_legacy_payload())
     assert unsupported_failure.value.error_type == "ab_unsupported_version"
     assert not any("rss/subscribe" in call["endpoint"] for call in unsupported.calls)
+
+
+@pytest.mark.parametrize(
+    ("status", "expected_error"),
+    [
+        # The real duplicate rejection: a 4xx business refusal whose bounded
+        # message names the conflict.
+        (400, "ab_duplicate_subscription"),
+        (406, "ab_duplicate_subscription"),
+        # Authentication is never a business rejection, whatever its body says.
+        (401, "ab_auth_failed"),
+        (403, "ab_auth_failed"),
+        # A 5xx (and anything else) may already have been processed upstream:
+        # it must stay the ambiguous failure the submit classifier turns into
+        # 结果待确认, never the definite "already exists".
+        (302, "ab_submit_failed"),
+        (500, "ab_submit_failed"),
+    ],
+)
+def test_only_a_4xx_business_rejection_can_be_a_duplicate_subscription(
+    status: int, expected_error: str
+) -> None:
+    """Issue #216 AC3: the duplicate category needs a 4xx rejection, not just wording.
+
+    The verified 3.1.18 write endpoints can answer a rejection while the object
+    still exists, so a body that mentions an existing subscription may only be
+    read as a duplicate for a client rejection; authentication failures and
+    server errors keep their own (and, for 5xx, deliberately ambiguous) class.
+    """
+    marker = {"msg_en": "The subscription already exists.", "msg_zh": "该订阅已存在，请勿重复添加。"}
+    transport = _RecordingTransport([
+        {"access_token": "secret-cookie"},
+        {"version": "3.1.18"},
+        AutoBangumiWriteResponse(status, marker),
+    ])
+
+    with pytest.raises(Stage1Error) as failure:
+        create_auto_bangumi_submit_client(
+            _password_config(), transport=transport
+        ).create_subscription(_legacy_payload())
+
+    assert failure.value.error_type == expected_error
+    if expected_error == "ab_submit_failed":
+        assert failure.value.details["status_code"] == status
 
 
 def test_submit_classifies_a_duplicate_subscription_with_bounded_upstream_reason() -> None:

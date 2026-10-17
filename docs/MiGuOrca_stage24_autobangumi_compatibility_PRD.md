@@ -19,6 +19,7 @@ Stage 20 已建立单个/批量 Request 的 AutoBangumi 提交队列、重试、
 2. 当前 MiGuOrca 强制用户提供 token，并把 endpoint 当作完整创建 URL，无法让普通用户直接填写服务根地址和账号密码。
 3. 3.1.18 创建订阅使用 `POST /api/v1/rss/subscribe`，body 是 `{data: Bangumi, rss: RSSItem}`；当前自定义 `{title, rss_url, save_path, filter_rule}` payload 不兼容。
 4. 3.1.18 成功响应使用 `status/msg_en/msg_zh`；当前 client 强制要求订阅 ID，会把有效响应误判为失败。
+   > 2026-10-17 复核修正：真实写响应体是 `{"msg_en", "msg_zh"}`，**不含 `status` 字段**，结果只在 HTTP 状态码上（判据见 #216）。本条记录的当时判断已被取代。
 5. 新版 AutoBangumi 已存在 API Token/Bearer 模式，因此不能用旧版 Cookie 登录实现替换全部兼容能力。
 
 Stage 24 的目标是让已经跑通的 Request 创建/接受/队列流程能够真实、安全地连接 AutoBangumi，而不是扩展为 AutoBangumi 管理器。
@@ -78,7 +79,7 @@ Request 到 `{data, rss}` 的映射集中在 M10 纯函数并有 fixture 测试�
 
 ### 5.5 成功与幂等边界
 
-3.1.18 响应 `status == true` 即表示 AutoBangumi 接受请求；订阅 ID 为可选字段，不再作为通用成功前提。结果保存继续使用 MiGuOrca 的稳定 `ab_submit_result`，没有外部 ID 时允许 `ab_subscription_id = null`。
+3.1.18 的写入成功判据是**精确 HTTP 200 且响应体为 `{msg_en, msg_zh}` 写信封**（2026-10-17 复核修正；写响应不含 `status`，见 #216）；订阅 ID 为可选字段，不再作为通用成功前提。结果保存继续使用 MiGuOrca 的稳定 `ab_submit_result`，没有外部 ID 时允许 `ab_subscription_id = null`。
 
 Stage 20 的 `SUBMITTING`、`SUCCEEDED`、`RESULT_PERSIST_FAILED` 和人工恢复边界保持不变；不因新 adapter 自动重试不确定写结果。
 
@@ -129,7 +130,7 @@ Settings 的 AutoBangumi 分区在没有 `request_id` 时也显示“测试连�
 
 ### US-175：实现 3.1.18 订阅 payload 与响应适配
 
-把已接受 Request 映射到 `/api/v1/rss/subscribe` 的 `{data, rss}`，显式处理不可表达筛选规则，并以 `status` 判断成功、允许无订阅 ID。不得调用真实实例写接口。
+把已接受 Request 映射到 `/api/v1/rss/subscribe` 的 `{data, rss}`，显式处理不可表达筛选规则，并以**精确 HTTP 200 ＋ `{msg_en, msg_zh}` 写信封**判断成功（#216 修正）、允许无订阅 ID。不得调用真实实例写接口。
 
 ### US-176：保留新版 API Token/Bearer 兼容模式
 

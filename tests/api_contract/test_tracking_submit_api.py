@@ -50,6 +50,7 @@ from tests.api_contract.ab_write_envelopes import (
     RECORDED_SUBSCRIBE_FEED_FAILED_STATUS,
     RECORDED_SUBSCRIBE_SERVER_ERROR_BODY,
     RECORDED_SUBSCRIBE_SERVER_ERROR_STATUS,
+    SOURCE_DERIVED_DUPLICATE_ENVELOPE,
     SOURCE_DERIVED_SUBSCRIBE_ENVELOPE,
 )
 from tracking_engine.controllers.submit import (
@@ -885,7 +886,12 @@ class _BareArrayAbOpener:
     """
 
     def __init__(
-        self, rss_url: str, *, write_status: int = 200, write_body: bytes | None = None
+        self,
+        rss_url: str,
+        *,
+        write_status: int = 200,
+        write_body: bytes | None = None,
+        readback: str = "present",
     ) -> None:
         self.rss_url = rss_url
         #: The raw write response.  It defaults to the verified 3.1.18 envelope
@@ -893,6 +899,9 @@ class _BareArrayAbOpener:
         #: legacy body instead.
         self.write_status = write_status
         self.write_body = write_body or json.dumps(SOURCE_DERIVED_SUBSCRIBE_ENVELOPE).encode("utf-8")
+        #: ``present`` serves the exact RSS + owning subscription; ``empty``
+        #: serves a legal empty snapshot (a read-back that proves nothing).
+        self.readback = readback
         self.calls: list[str] = []
 
     def exchange(
@@ -905,23 +914,114 @@ class _BareArrayAbOpener:
         elif path == "/api/v1/status":
             body = b'{"version": "3.1.18"}'
         elif path == "/api/v1/bangumi/get/all":
-            body = json.dumps([{
+            rows = [] if self.readback == "empty" else [{
                 "id": 42, "official_title": "\u846c\u9001\u7684\u8299\u8389\u83b2",
                 "title_raw": "Frieren", "season": 1, "season_raw": "1",
                 "group_name": "\u55b5\u840c", "rss_link": self.rss_url,
                 "rss_ids": [7], "deleted": False,
-            }]).encode("utf-8")
+            }]
+            body = json.dumps(rows).encode("utf-8")
         elif path == "/api/v1/rss":
-            body = json.dumps([{
+            rows = [] if self.readback == "empty" else [{
                 "id": 7, "name": "RSS", "url": self.rss_url,
                 "aggregate": False, "parser": "rss", "enabled": True,
-            }]).encode("utf-8")
+            }]
+            body = json.dumps(rows).encode("utf-8")
         elif path == "/api/v1/rss/subscribe":
             body = self.write_body
         else:  # pragma: no cover - the fixture must stay exhaustive
             raise AssertionError(f"unexpected Auto Bangumi path: {path}")
         status = self.write_status if path == "/api/v1/rss/subscribe" else 200
         return status, {}, body
+
+
+@pytest.mark.parametrize(
+    ("write_status", "write_body"),
+    [
+        # Recorded on the real 3.1.18 instance (406, message naming the failed
+        # download) and a bare 500 with no body at all.
+        (
+            RECORDED_SUBSCRIBE_FEED_FAILED_STATUS,
+            json.dumps(RECORDED_SUBSCRIBE_FEED_FAILED_ENVELOPE).encode("utf-8"),
+        ),
+        (RECORDED_SUBSCRIBE_SERVER_ERROR_STATUS, RECORDED_SUBSCRIBE_SERVER_ERROR_BODY),
+    ],
+)
+def test_submit_keeps_a_rejected_write_unresolved_when_the_readback_cannot_prove_it(
+    tmp_path: Path,
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+    write_status: int,
+    write_body: bytes,
+) -> None:
+    """Issue #216: a rejection plus an unconvincing read-back must stay 待确认.
+
+    The recorded instance answered ``rss/subscribe`` with 406/500 *and* left a
+    subscription the exact-RSS read-back could not bind, so a rejected write is
+    not proof that nothing was created: the record stays 结果待确认 and the page
+    never invites a resubmit that could duplicate the external subscription.
+    """
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    stored_request = load_request_snapshot(_config(tmp_path), request["request_id"])
+    rss_url = stored_request["confirmable_config"]["selected_rss_url"]
+    opener = _BareArrayAbOpener(
+        rss_url, write_status=write_status, write_body=write_body, readback="empty"
+    )
+    monkeypatch.setattr("ab_engine.controllers.ab_http_client._exchange", opener.exchange)
+
+    response = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/submit", json=_submit_body(record)
+    )
+
+    assert response.status_code == 200
+    result = response.get_json()["result"]
+    assert result["tracking"]["status"] == TRACKING_STATUS_VERIFYING_EXTERNAL
+    assert result["failure_category"] == "OUTCOME_UNKNOWN"
+    stored = load_tracking_record(_config(tmp_path), record.tracking_id)
+    assert stored.external_mapping is None
+    assert stored.last_error is not None
+    assert stored.last_error.get("reason_code") == "NOT_FOUND"
+    messages = [str(event.get("safe_message") or "") for event in stored.audit_events]
+    assert not any("可重新提交" in message for message in messages), messages
+    assert opener.calls.count("POST /api/v1/rss/subscribe") == 1
+
+
+def test_submit_surfaces_a_duplicate_subscription_rejection(
+    tmp_path: Path,
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #216 AC3: the real 406 rejection body reaches the duplicate class.
+
+    The write is refused with the verified 3.1.18 envelope whose bounded message
+    names the existing subscription, so the published category is
+    ``DUPLICATE_SUBSCRIPTION`` and the copy tells the user to look at the
+    existing subscription instead of resubmitting.
+    """
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    stored_request = load_request_snapshot(_config(tmp_path), request["request_id"])
+    rss_url = stored_request["confirmable_config"]["selected_rss_url"]
+    opener = _BareArrayAbOpener(
+        rss_url,
+        write_status=406,
+        write_body=json.dumps(SOURCE_DERIVED_DUPLICATE_ENVELOPE).encode("utf-8"),
+        readback="empty",
+    )
+    monkeypatch.setattr("ab_engine.controllers.ab_http_client._exchange", opener.exchange)
+
+    response = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/submit", json=_submit_body(record)
+    )
+
+    assert response.status_code == 200
+    result = response.get_json()["result"]
+    assert result["tracking"]["status"] == TRACKING_STATUS_SUBMIT_FAILED
+    assert result["failure_category"] == "DUPLICATE_SUBSCRIPTION"
+    body_text = response.get_data(as_text=True)
+    for forbidden in ("already exists", "请勿重复添加", "ab-session"):
+        assert forbidden not in body_text
 
 
 @pytest.mark.parametrize(

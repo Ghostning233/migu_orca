@@ -88,9 +88,14 @@ def test_management_result_distinguishes_explicit_failure_from_unknown(monkeypat
 
 
 def test_rss_mixed_write_statuses_are_not_reduced_to_the_first_failure() -> None:
+    """Issue #216: the mixed-result rule reads the adapter's exact status code.
+
+    The real 3.1.18 adapter never returns a body ``status`` field, so a fake that
+    still fed one could only prove a criterion production no longer uses.
+    """
     class Client:
         def delete_rss(self, external_id: str) -> dict[str, object]:
-            return {"status": external_id == "2"}
+            return {"status_code": 200 if external_id == "2" else 502}
 
     result = routes_tracking._management_writer(Client(), "DELETE_EXTERNAL")(
         ResolvedManagementTarget(
