@@ -968,6 +968,14 @@ def _submit_through_external(
         raise
     operation = in_flight
 
+    # Issue #217: the persistent operation is the authority for the submission
+    # mode.  A PREPARED resume (crash between the bind and the durable
+    # PREPARED -> IN_PROGRESS gate) resolves through a path that carries no mode,
+    # so deriving it here prevents a one-time "download existing resources"
+    # request from ever degrading into an RSS subscription write (ADR-0001).
+    if submission_mode is None and operation is not None:
+        submission_mode = operation.submission_mode
+
     one_time = submission_mode == TRACKING_SUBMISSION_MODE_DOWNLOAD_EXISTING
     if one_time:
         try:

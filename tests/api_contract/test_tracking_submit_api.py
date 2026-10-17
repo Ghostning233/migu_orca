@@ -922,6 +922,55 @@ def _open_collect_surface(
     return opener
 
 
+def test_download_existing_prepared_resume_never_becomes_a_subscription_write(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #217 AC4: a resumed PREPARED one-time request stays a collection.
+
+    A crash between binding the operation and the durable PREPARED ->
+    IN_PROGRESS gate leaves a resumable operation.  Its persisted submission
+    mode is the authority, so the same-key resume must collect and must never
+    create an RSS subscription or a controlled mapping.
+    """
+    from storage_engine.controllers.operation_repository import bind_tracking_operation
+    from tracking_engine.models.operation import TRACKING_OPERATION_KIND_SUBMIT
+
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    config = _config(tmp_path)
+    bound, created = bind_tracking_operation(
+        config,
+        tracking_id=record.tracking_id,
+        operation=TRACKING_OPERATION_KIND_SUBMIT,
+        idempotency_key="resume-key",
+        expected_revision=record.revision,
+        request_fingerprint=record.request_fingerprint or "fingerprint",
+        connection_ref=SAVED_GENERATION[0],
+        submission_mode="DOWNLOAD_EXISTING",
+        now="2026-09-08T00:00:00+00:00",
+    )
+    assert created is True
+    opener = _open_collect_surface(tmp_path, request, monkeypatch)
+
+    response = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/submit",
+        json=_submit_body(
+            record, idempotency_key="resume-key", submission_mode="DOWNLOAD_EXISTING"
+        ),
+    )
+
+    assert response.status_code == 200
+    result = response.get_json()["result"]
+    assert result["tracking"]["status"] == "ADDED_TO_DOWNLOAD"
+    assert result["outcome"] == "ADDED_TO_DOWNLOAD"
+    assert result["operation_id"] == bound.operation_id
+    assert opener.calls.count("POST /api/v1/rss/collect") == 1
+    assert "POST /api/v1/rss/subscribe" not in opener.calls
+    stored = load_tracking_record(config, record.tracking_id)
+    assert stored.status == "ADDED_TO_DOWNLOAD"
+    assert stored.external_mapping is None
+
+
 def test_download_existing_verified_200_becomes_added_to_download(
     tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
