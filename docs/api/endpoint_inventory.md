@@ -491,3 +491,45 @@ MiKan Web 的公共请求不接受 `mikan_config` 或 `source`；搜索配置统
 - `tests/api_contract/test_openapi_generation.py`（US-190）：OpenAPI 覆盖全部端点、
   确定性生成、脱敏示例、海报二进制 content type 与漂移检查；`_ENDPOINTS` 注册表的
   `errors` 声明与 `_error_http_status` 分类保持一致。
+
+## 7. 外部一次收集契约（Auto Bangumi 3.1.18 —— 非本服务端点）
+
+> 本节记录一个**外部** Auto Bangumi 端点，供「下载现有资源」的一次收集使用。它**不是**
+> MiGuOrca 的 `/api/v1` 契约：不注册 Flask route、不进入 `docs/api/openapi.json`、不生成
+> TypeScript client，也不参与 `tests/api_contract/test_inventory_consistency.py` 的
+> url_map 自动核对（该校对只覆盖本服务 §2 总表）。
+
+| 项 | 结论 |
+| --- | --- |
+| 方法/路径 | `POST /api/v1/rss/collect`（上游 `backend/src/module/api/rss.py:185-191`；需登录会话，`dependencies=[Depends(get_current_user)]`） |
+| 请求体 | **裸 `Bangumi` 模型**，不套 `data`：真实 3.1.18 实例 `openapi.json` 的 requestBody 为 `$ref #/components/schemas/Bangumi`，而 `/rss/subscribe` 用的是包装体 `$ref #/components/schemas/Body_subscribe_api_v1_rss_subscribe_post`。`Bangumi` 声明字段为 `official_title`/`title_raw`/`season`/`season_raw`/`group_name`/`filter`/`rss_link`/`save_path`/`poster_link`/`dpi`/`source`/`subtitle`/`year`/`eps_collect`/`added`/`offset`/`rule_name`/`deleted`/`id` |
+| `id` | payload **不得包含** `id`（上游 `collector.py:28-29` 为 `if engine.bangumi.update(bangumi): engine.bangumi.add(bangumi)`；带 `id` 会走更新既有规则的分支） |
+| 是否需要先有 RSS | 不需要：直接使用 body 的 `rss_link`，为空时上游才回退站点搜索（本产品不使用该回退） |
+| 成功判定 | **HTTP 200 且响应为顶层 JSON 对象且 `msg_en`/`msg_zh` 均为字符串**；响应体**没有 `status` 字段**（上游 `response.py:7-14` 的 `u_response` 把 `ResponseModel.status` 折进 HTTP 状态码，只回两个消息字段）。非对象、非法 JSON、缺字段一律失败 |
+| 失败 | HTTP **406，双语义**：过滤后无匹配 **或** 下载器添加失败/重复；上游对两者返回同一条文案（`collector.py:37-46`），客户端**不可区分**，因此不得把 406 猜成成功 |
+| 其他状态 | 未登录 401（实测未登录 `GET /api/v1/status` 返回 `401 {"detail":"Unauthorized"}`，与 collect 共用 `get_current_user`）、403、请求体校验 422（实例 `openapi.json` 只声明 200 与 422） |
+| 副作用 | 成功后**写入或尝试写入一条 AB Bangumi 规则**（`collector.py:27-30`），**不创建 RSS 订阅**（对比 `/rss/subscribe`）。因 payload 无 `id`，`update` 返回 False 后走 `add`；`add` 按 `title_raw` 去重且其返回值被忽略（`backend/src/module/database/bangumi.py:16-38`）⇒ **不更新既有规则**。`eps_collect=True` 之后的补收集由 AB 自身既有配置决定 |
+| filter 逗号 | 上游对整个 filter 执行 `.replace(",", "|")`（`collector.py:20`）：`a{1,3}` 会变成 `a{1|3}`，编译可能仍通过但语义已变。MiGuOrca 侧在 `build_legacy_31_collection_payload`（`src/ab_engine/controllers/subscription_payload.py`）对最终 filter 做 ASCII 逗号守卫，命中即 `ab_filter_unsupported` 且零外部写，**不做静默改写** |
+
+### 7.1 证据来源
+
+- 真机 3.1.18 实例：`GET /api/v1/status` → `{"status": true, "version": "3.1.18", "first_run": false}`。
+- 同一实例的 `openapi.json`：`POST /api/v1/rss/collect` 的 requestBody 为
+  `$ref #/components/schemas/Bangumi`；`POST /api/v1/rss/subscribe` 为
+  `$ref #/components/schemas/Body_subscribe_api_v1_rss_subscribe_post`。
+- 上游 tag `3.1.18`（`EstrellaXD/Auto_Bangumi`）：`backend/src/module/api/rss.py:185-191`、
+  `backend/src/module/manager/collector.py:11-46`、`backend/src/module/api/response.py:7-14`、
+  `backend/src/module/database/bangumi.py:16-38`。
+- 端点与凭据只存本地 gitignored 位置（`.migu_orca/ab-test-instance.md` / `MIGU_ORCA_TEST_AB_*`），
+  不入库；本节与相关契约测试不记录端点值、账号或凭据。
+- 契约测试：`tests/api_contract/test_tracking_collect_contract_source_derived.py` 以
+  **source-derived**（非真机录制）原始 HTTP 夹具钉住上述判据映射。
+
+### 7.2 MiGuOrca 侧现状（issue #217）
+
+- 已落地：`build_legacy_31_collection_payload` 复用 subscribe body 的 `data` 深拷贝，去掉 `id`、
+  不套 `data`，保留非空 `save_path` 与精确 `rss_link`，并带上述 ASCII 逗号守卫（零外部写）。
+- 尚未落地（等依赖票 #216 的 exact-200 判据通道合并后继续）：transport 调用与
+  `compose_tracking_collect_one`（`src/apps/migu_orca_web/tracking_submission_service.py`）
+  接缝替换——该默认接缝当前仍 fail closed（`ab_submit_unsupported`，零外部写）；以及
+  「仅 password 模式 ＋ 精确 3.1.18，token 模式/未知版本/无效 payload 一律零外部写」的能力边界。
