@@ -87,10 +87,37 @@ def test_management_result_distinguishes_explicit_failure_from_unknown(monkeypat
     assert unknown["safe_message"] == "外部管理结果待确认，请人工恢复；不会自动重试"
 
 
-def test_rss_mixed_write_statuses_are_not_reduced_to_the_first_failure() -> None:
+def test_management_writer_never_reads_a_body_status_as_success() -> None:
+    """Issue #216: a body ``status`` is no longer accepted-action evidence.
+
+    The real 3.1.18 adapter answers with an exact HTTP status and never with a
+    ``status`` field, so a writer that fed one must not reach the success branch:
+    without an exact status code the result stays the fail-closed 502.
+    """
     class Client:
         def delete_rss(self, external_id: str) -> dict[str, object]:
-            return {"status": external_id == "2"}
+            del external_id
+            return {"status": True}
+
+    result = routes_tracking._management_writer(Client(), "DELETE_EXTERNAL")(
+        ResolvedManagementTarget(
+            scope="ASSOCIATED_RSS", rss=(ExternalRss("1", "one", "https://rss.invalid/1"),)
+        ),
+        None,
+    )
+
+    assert result == {"status_code": 502}
+
+
+def test_rss_mixed_write_statuses_are_not_reduced_to_the_first_failure() -> None:
+    """Issue #216: the mixed-result rule reads the adapter's exact status code.
+
+    The real 3.1.18 adapter never returns a body ``status`` field, so a fake that
+    still fed one could only prove a criterion production no longer uses.
+    """
+    class Client:
+        def delete_rss(self, external_id: str) -> dict[str, object]:
+            return {"status_code": 200 if external_id == "2" else 502}
 
     result = routes_tracking._management_writer(Client(), "DELETE_EXTERNAL")(
         ResolvedManagementTarget(

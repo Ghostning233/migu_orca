@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import json
+from typing import Any
+from urllib.parse import urlsplit
+
 import pytest
 from pydantic import ValidationError
 
+from ab_engine.controllers.ab_config import AutoBangumiConfig
+from ab_engine.controllers.ab_http_client import UrlopenAutoBangumiHttpTransport
+from ab_engine.controllers.ab_management_client import create_legacy_31_management_client
 from apps.migu_orca_web.api_contract import TrackingAvailableActionDTO, TrackingManagementResultDTO
 from apps.migu_orca_web.openapi_gen import generate_openapi
 from apps.migu_orca_web.schemas import (
@@ -13,6 +20,15 @@ from apps.migu_orca_web.schemas import (
 )
 from apps.migu_orca_web.tracking_contract import MANAGEMENT_ACTION_CONTRACTS, MANAGEMENT_ERROR_SEMANTICS
 from extensions.flask_api.api import _error_http_status
+from shared.errors import Stage1Error
+from tests.api_contract.ab_write_envelopes import (
+    RECORDED_MISSING_ID_ENVELOPE,
+    RECORDED_MISSING_ID_STATUS,
+    RECORDED_REFRESH_RSS_ENVELOPE,
+    RECORDED_REFRESH_RSS_STATUS,
+    RECORDED_RSS_DELETE_ENVELOPE,
+    RECORDED_RSS_DELETE_STATUS,
+)
 
 
 def test_management_contract_freezes_actions_and_guards() -> None:
@@ -248,3 +264,74 @@ def test_management_action_scopes_are_server_computed_per_action_without_mapping
     subscription_only = tracking_available_actions("ACTIVE", {"subscription_id": "opaque-sub", "rss_ids": []})
     assert "REFRESH_RSS" not in {item["code"] for item in subscription_only}
     assert tracking_available_actions("ACTIVE", None) == []
+
+
+# ---------------------------------------------------------------------------
+# The verified 3.1.18 write contract (issue #216)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    ("action", "path", "status", "envelope", "expected_error", "expected_details"),
+    [
+        ("refresh_rss", "/api/v1/rss/refresh/7", RECORDED_REFRESH_RSS_STATUS, RECORDED_REFRESH_RSS_ENVELOPE, None, {"status_code": 200}),
+        ("delete_rss", "/api/v1/rss/delete/7", RECORDED_RSS_DELETE_STATUS, RECORDED_RSS_DELETE_ENVELOPE, None, {"status_code": 200}),
+        (
+            "delete_rss", "/api/v1/rss/delete/7", RECORDED_MISSING_ID_STATUS, RECORDED_MISSING_ID_ENVELOPE,
+            "ab_submit_failed",
+            {
+                "status_code": 406, "http_status": 406,
+                "message_zh": RECORDED_MISSING_ID_ENVELOPE["msg_zh"],
+                "message_en": RECORDED_MISSING_ID_ENVELOPE["msg_en"],
+            },
+        ),
+        ("delete_rss", "/api/v1/rss/delete/7", 500, None, "ab_submit_failed", {"status_code": 500, "http_status": 500}),
+    ],
+)
+def test_recorded_management_write_envelopes_decide_by_their_exact_status(
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+    path: str,
+    status: int,
+    envelope: dict[str, Any] | None,
+    expected_error: str | None,
+    expected_details: dict[str, Any],
+) -> None:
+    """Issue #216 AC2/AC4: the exact status plus the recorded envelope decide.
+
+    The real transport, the real JSON decoder and the real management adapter
+    run; only the HTTP exchange is replaced, and the recorded 3.1.18 envelopes
+    are served verbatim.  A body-only judgement (the deleted ``else -> 502``
+    branch) turned every accepted action into a failure and could not tell a
+    proven 200 from a 406/500.
+    """
+
+    def exchange(
+        method: str, endpoint: str, headers: Any, body: Any, *,
+        timeout: float, step: str, inspect_error_body: bool = False, monotonic: Any = None,
+    ) -> tuple[int, dict[str, str], bytes]:
+        request_path = urlsplit(endpoint).path
+        if request_path == "/api/v1/auth/login":
+            return 200, {}, b'{"access_token": "ab-session"}'
+        if request_path == "/api/v1/status":
+            return 200, {}, b'{"version": "3.1.18"}'
+        assert request_path == path, request_path
+        raw = b"" if envelope is None else json.dumps(envelope).encode("utf-8")
+        return status, {}, raw
+
+    monkeypatch.setattr("ab_engine.controllers.ab_http_client._exchange", exchange)
+    client = create_legacy_31_management_client(
+        AutoBangumiConfig(
+            base_url="https://ab.invalid", auth_mode="password", fallback_enabled=False,
+            username="user", password="secret",
+        ),
+        transport=UrlopenAutoBangumiHttpTransport(),
+    )
+
+    if expected_error is None:
+        assert getattr(client, action)("7") == expected_details
+    else:
+        with pytest.raises(Stage1Error) as error:
+            getattr(client, action)("7")
+        assert error.value.error_type == expected_error
+        assert error.value.details == expected_details
+        assert "ab-session" not in repr(error.value.as_dict())

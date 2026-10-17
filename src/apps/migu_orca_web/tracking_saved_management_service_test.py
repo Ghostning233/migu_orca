@@ -9,6 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from ab_engine.controllers.ab_config import AutoBangumiConfig
+from ab_engine.controllers.ab_http_client import AutoBangumiWriteResponse
 from ab_engine.controllers.ab_management_client import create_legacy_31_management_client
 from ab_engine.models.management import AutoBangumiCapabilities, ExternalRss, ExternalSubscription
 from apps.migu_orca_web.schemas import SavedTrackingManagementInput
@@ -462,7 +463,7 @@ def test_saved_management_lease_spans_read_write_readback_and_releases(monkeypat
     assert replacement.configuration_revision == 2
 
 
-@pytest.mark.parametrize("outcome", ["success", "unknown", "failed"])
+@pytest.mark.parametrize("outcome", ["success", "unknown", "failed", "server_error"])
 def test_legacy31_delete_is_single_file_safe_and_local_bytes_survive(monkeypatch, tmp_path, outcome):
     class OfflineTransport:
         def __init__(self):
@@ -492,11 +493,26 @@ def test_legacy31_delete_is_single_file_safe_and_local_bytes_survive(monkeypatch
                     }
                 if endpoint.endswith("/rss"):
                     return {"data": []}
+            raise AssertionError(f"unexpected read request: {endpoint}")
+
+        def write_json(self, method, endpoint, headers, payload=None, *, timeout, step="create_ab_subscription"):
+            """The one delete write, answered with the verified 3.1.18 envelope.
+
+            ``unknown`` is an unreadable response (no verdict at all), ``failed``
+            is a real 406 rejection envelope and ``success`` an exact 200.
+            """
+            self.calls.append((method, endpoint, payload))
             if outcome == "unknown":
                 raise TimeoutError("offline")
+            if outcome == "server_error":
+                # A 5xx may have been processed upstream: the status code must
+                # stay readable by the coordinator's unknown-write classifier.
+                return AutoBangumiWriteResponse(500, {"msg_en": "Internal error", "msg_zh": "服务器错误"})
             if outcome == "failed":
-                return {"status": False}
-            return {"status": True}
+                return AutoBangumiWriteResponse(
+                    406, {"msg_en": "Can't find id 999999", "msg_zh": "无法找到 id 999999"}
+                )
+            return AutoBangumiWriteResponse(200, {"msg_en": "Success.", "msg_zh": "成功。"})
 
     transport = OfflineTransport()
     client = create_legacy_31_management_client(
@@ -545,7 +561,9 @@ def test_legacy31_delete_is_single_file_safe_and_local_bytes_survive(monkeypatch
     media = config.storage_dir / "media.bin"
     media.write_bytes(b"downloaded-media")
     payload = _payload(saved, record, "DELETE_EXTERNAL")
-    if outcome == "unknown":
+    if outcome in {"unknown", "server_error"}:
+        # An unreadable response and a 5xx are both indeterminate: neither may be
+        # reported as a definite failure (the write may have been processed).
         result = run_saved_tracking_management(payload, config_root=private)
         assert result["outcome"] == "OUTCOME_UNKNOWN"
     else:

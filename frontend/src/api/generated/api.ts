@@ -4964,7 +4964,7 @@ export interface operations {
                                      * Failure Category
                                      * @default null
                                      */
-                                    failure_category: ("CONNECTION" | "AUTHENTICATION" | "VERSION" | "DUPLICATE_SUBSCRIPTION" | "VALIDATION" | "REJECTED" | "OUTCOME_UNKNOWN") | null;
+                                    failure_category: ("CONNECTION" | "AUTHENTICATION" | "VERSION" | "CAPABILITY" | "DUPLICATE_SUBSCRIPTION" | "VALIDATION" | "REJECTED" | "OUTCOME_UNKNOWN") | null;
                                     /**
                                      * Verification Reason
                                      * @default null
@@ -12536,7 +12536,7 @@ export interface operations {
                              * Failure Category
                              * @default null
                              */
-                            failure_category: ("CONNECTION" | "AUTHENTICATION" | "VERSION" | "DUPLICATE_SUBSCRIPTION" | "VALIDATION" | "REJECTED" | "OUTCOME_UNKNOWN") | null;
+                            failure_category: ("CONNECTION" | "AUTHENTICATION" | "VERSION" | "CAPABILITY" | "DUPLICATE_SUBSCRIPTION" | "VALIDATION" | "REJECTED" | "OUTCOME_UNKNOWN") | null;
                             /**
                              * TrackingSubmitDiagnosticsDTO
                              * @description Bounded, sanitized Auto Bangumi failure diagnostics (issue #101).
@@ -13006,7 +13006,7 @@ export interface operations {
                              * Failure Category
                              * @default null
                              */
-                            failure_category: ("CONNECTION" | "AUTHENTICATION" | "VERSION" | "DUPLICATE_SUBSCRIPTION" | "VALIDATION" | "REJECTED" | "OUTCOME_UNKNOWN") | null;
+                            failure_category: ("CONNECTION" | "AUTHENTICATION" | "VERSION" | "CAPABILITY" | "DUPLICATE_SUBSCRIPTION" | "VALIDATION" | "REJECTED" | "OUTCOME_UNKNOWN") | null;
                             /**
                              * Verification Reason
                              * @default null
@@ -14204,7 +14204,7 @@ export interface operations {
                              * Failure Category
                              * @default null
                              */
-                            failure_category: ("CONNECTION" | "AUTHENTICATION" | "VERSION" | "DUPLICATE_SUBSCRIPTION" | "VALIDATION" | "REJECTED" | "OUTCOME_UNKNOWN") | null;
+                            failure_category: ("CONNECTION" | "AUTHENTICATION" | "VERSION" | "CAPABILITY" | "DUPLICATE_SUBSCRIPTION" | "VALIDATION" | "REJECTED" | "OUTCOME_UNKNOWN") | null;
                             /**
                              * Verification Reason
                              * @default null

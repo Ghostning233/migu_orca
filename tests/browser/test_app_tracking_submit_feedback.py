@@ -198,6 +198,36 @@ class TestSubmitFeedback:
         # The record keeps the actionable next step as well as the dialog.
         expect(page.locator("#tracking-submit-result")).to_contain_text("凭据")
 
+    def test_unsupported_capability_opens_the_settings_dialog_not_a_version_hint(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        """Issue #216 AC8: an unsupported submit capability is its own class.
+
+        The saved connection cannot submit (for example an API Token connection)
+        while the version is exactly the verified one, so the page must not claim
+        a version problem: it offers the settings next step like the other
+        blocking connection classes.
+        """
+        item = _pending_item()
+        _install(page, item, {
+            "outcome": "SUBMIT_FAILED",
+            "failure_category": "CAPABILITY",
+            "tracking": {**item, "status": "SUBMIT_FAILED", "status_label": "提交失败", "status_group": "ATTENTION"},
+        })
+        _open(page, live_server_url, storage_dir)
+
+        page.locator("#tracking-submit").click()
+        _confirm(page)
+
+        page.wait_for_function(
+            "() => document.querySelector('.confirm-dialog-title')?.textContent?.includes('不支持创建订阅')"
+        )
+        expect(page.locator(".confirm-dialog-message")).to_contain_text("API Token")
+        expect(page.locator(".confirm-dialog .primary-button")).to_contain_text("前往设置")
+        # The record keeps the actionable next step and never blames the version.
+        expect(page.locator("#tracking-submit-result")).to_contain_text("不支持创建外部订阅")
+        expect(page.locator("#tracking-submit-result")).not_to_contain_text("版本不在已验证")
+
     def test_external_rejection_stays_on_the_record_without_a_dialog(
         self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:

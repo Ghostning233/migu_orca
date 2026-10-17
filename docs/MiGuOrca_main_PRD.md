@@ -87,7 +87,7 @@ Stage 22 已完成。单个与批量搜索继续复用 `_search_mikan_candidates
 
 Stage 23 已完成。MiKan 封面现经服务端安全同源缓存异步加载，搜索 transport 以结构感知提前停止，批量候选/草案布局、剧集摘要和禁用按钮反馈均已收敛。
 
-Stage 24 已完成。AutoBangumi 3.1.18 默认使用账号密码登录、单次 token Cookie、`/api/v1/status` 与 `/api/v1/rss/subscribe` 的 `{data, rss}` 契约，成功以 `status=true` 判断且订阅 ID 可为空；Settings 提供 request-scoped 只读连接测试，单个/批量队列复用同一 adapter/payload/result seam。API Token/Bearer 模式维持兼容但无已证明写契约时 fail closed。执行 PRD 见 `docs/MiGuOrca_stage24_autobangumi_compatibility_PRD.md`。其他未开发事项只按 backlog 优先级排序，不预绑定 Stage 编号。
+Stage 24 已完成。AutoBangumi 3.1.18 默认使用账号密码登录、单次 token Cookie、`/api/v1/status` 与 `/api/v1/rss/subscribe` 的 `{data, rss}` 契约，写入成功以**精确 HTTP 200 且响应体为 `{msg_en, msg_zh}` 写信封**判断（Auto Bangumi 3.1.18 的写响应不含 `status` 字段，判据见 #216），订阅 ID 由精确回查确定（可为空）；Settings 提供 request-scoped 只读连接测试，单个/批量队列复用同一 adapter/payload/result seam。API Token/Bearer 模式维持兼容但无已证明写契约时 fail closed。执行 PRD 见 `docs/MiGuOrca_stage24_autobangumi_compatibility_PRD.md`。其他未开发事项只按 backlog 优先级排序，不预绑定 Stage 编号。
 
 Stage 25 已完成。单个与批量 MiKan 搜索共享确定性正式番名/季数解析、结构化 season、有界 query plan 和可审核来源展示；parser 只生成搜索提示，真实合集仍由用户显式选择，只有选中候选公开证据或用户确认能证明的季数才能进入 Request、M07 与 M10。执行 PRD 见 `docs/MiGuOrca_stage25_title_season_parsing_PRD.md`。
 

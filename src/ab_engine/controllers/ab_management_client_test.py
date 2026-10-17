@@ -6,15 +6,22 @@ from typing import Any
 import pytest
 
 from ab_engine.controllers.ab_config import AutoBangumiConfig
+from ab_engine.controllers.ab_http_client import AutoBangumiWriteResponse
 from ab_engine.controllers.ab_management_client import create_legacy_31_management_client
 from ab_engine.models.management import AutoBangumiCapabilities
 from shared.errors import Stage1Error
+
+#: The verified 3.1.18 write envelope (issue #216): the write endpoints answer an
+#: accepted action with these two string fields and no ``status`` field at all.
+#: This is the real recording documented (with its provenance) in
+#: ``tests/api_contract/ab_write_envelopes.py``.
+WRITE_ENVELOPE = {"msg_en": "Delete RSS successfully.", "msg_zh": "删除 RSS 成功。"}
 
 
 class RecordingTransport:
     """Offline transport that makes every management request auditable."""
 
-    def __init__(self, responses: list[dict[str, Any] | Exception]) -> None:
+    def __init__(self, responses: list[Any]) -> None:
         self.responses = list(responses)
         self.calls: list[dict[str, Any]] = []
 
@@ -33,8 +40,21 @@ class RecordingTransport:
             raise result
         return result
 
-    def post_json_same_origin(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        raise AssertionError("management adapter must never use the write transport")
+    def write_json(
+        self,
+        method: str,
+        endpoint: str,
+        headers: Mapping[str, str],
+        payload: Any | None = None,
+        *,
+        timeout: float,
+        step: str = "create_ab_subscription",
+    ) -> AutoBangumiWriteResponse:
+        self.calls.append({"method": method, "endpoint": endpoint, "headers": dict(headers), "payload": payload})
+        result = self.responses.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
 
 
 def _config(**overrides: str) -> AutoBangumiConfig:
@@ -198,10 +218,14 @@ def test_api_token_management_is_fail_closed_without_transport_calls() -> None:
 
 def test_subscription_write_actions_use_exact_routes_and_clear_session() -> None:
     transport = RecordingTransport([
-        {"access_token": "write-secret"}, {"version": "3.1.18"}, {"status": True},
-        {"access_token": "enable-secret"}, {"version": "3.1.18"}, {"status": True},
-        {"access_token": "disable-secret"}, {"version": "3.1.18"}, {"status": True},
-        {"access_token": "delete-secret"}, {"version": "3.1.18"}, {"status": True},
+        {"access_token": "write-secret"}, {"version": "3.1.18"},
+        AutoBangumiWriteResponse(200, WRITE_ENVELOPE),
+        {"access_token": "enable-secret"}, {"version": "3.1.18"},
+        AutoBangumiWriteResponse(200, WRITE_ENVELOPE),
+        {"access_token": "disable-secret"}, {"version": "3.1.18"},
+        AutoBangumiWriteResponse(200, WRITE_ENVELOPE),
+        {"access_token": "delete-secret"}, {"version": "3.1.18"},
+        AutoBangumiWriteResponse(200, WRITE_ENVELOPE),
     ])
     client = create_legacy_31_management_client(_config(), transport=transport)
 
@@ -230,6 +254,67 @@ def test_subscription_write_actions_use_exact_routes_and_clear_session() -> None
     assert all("write-secret" not in repr(call) for call in transport.calls[3:])
 
 
+@pytest.mark.parametrize(
+    ("status", "envelope", "expected_error", "expected_details"),
+    [
+        (200, WRITE_ENVELOPE, None, {"status_code": 200}),
+        (401, {"detail": "Unauthorized"}, "ab_auth_failed", {"status_code": 401, "http_status": 401}),
+        (403, {"detail": "Forbidden"}, "ab_auth_failed", {"status_code": 403, "http_status": 403}),
+        (
+            406,
+            {"msg_en": "Can't find id 999999", "msg_zh": "无法找到 id 999999"},
+            "ab_submit_failed",
+            {
+                "status_code": 406, "http_status": 406,
+                "message_zh": "无法找到 id 999999", "message_en": "Can't find id 999999",
+            },
+        ),
+        (
+            500, {"detail": "server error"}, "ab_submit_failed",
+            {"status_code": 500, "http_status": 500, "message_zh": "server error"},
+        ),
+    ],
+)
+def test_management_write_classifies_by_the_exact_http_status(
+    status: int, envelope: dict[str, Any], expected_error: str | None, expected_details: dict[str, Any]
+) -> None:
+    """Issue #216 AC4: 200 accepted / 401·403 authentication / 406+other failures.
+
+    The real 3.1.18 write body carries no ``status`` field, so a body-only
+    classification (the deleted ``else -> 502`` branch) reported every accepted
+    action as failed.
+    """
+    transport = RecordingTransport([
+        {"access_token": "write-secret"}, {"version": "3.1.18"},
+        AutoBangumiWriteResponse(status, envelope),
+    ])
+    client = create_legacy_31_management_client(_config(), transport=transport)
+
+    if expected_error is None:
+        assert client.delete_subscription("sub-42") == expected_details
+    else:
+        with pytest.raises(Stage1Error) as error:
+            client.delete_subscription("sub-42")
+        assert error.value.error_type == expected_error
+        assert error.value.details == expected_details
+        assert "write-secret" not in repr(error.value.as_dict())
+
+    assert transport.calls[2]["method"] == "DELETE"
+
+
+def test_management_write_rejects_a_response_that_is_not_a_transport_result() -> None:
+    """A bare body can never be read as an accepted action (fail closed)."""
+    transport = RecordingTransport([
+        {"access_token": "write-secret"}, {"version": "3.1.18"}, {"msg_en": "ok", "msg_zh": "成功"},
+    ])
+    client = create_legacy_31_management_client(_config(), transport=transport)
+
+    with pytest.raises(Stage1Error) as error:
+        client.delete_subscription("sub-42")
+
+    assert error.value.error_type == "invalid_ab_response"
+
+
 def test_write_capability_is_unknown_for_non_exact_version() -> None:
     transport = RecordingTransport([{"access_token": "secret"}, {"version": "3.1.19"}])
     capabilities = create_legacy_31_management_client(_config(), transport=transport).probe_capabilities()
@@ -241,11 +326,16 @@ def test_write_capability_is_unknown_for_non_exact_version() -> None:
 
 def test_rss_write_actions_use_bounded_routes_and_preserve_snapshot_url() -> None:
     transport = RecordingTransport([
-        {"access_token": "update-secret"}, {"version": "3.1.18"}, {"status": True},
-        {"access_token": "enable-secret"}, {"version": "3.1.18"}, {"status": True},
-        {"access_token": "disable-secret"}, {"version": "3.1.18"}, {"status": True},
-        {"access_token": "delete-secret"}, {"version": "3.1.18"}, {"status": True},
-        {"access_token": "refresh-secret"}, {"version": "3.1.18"}, {"status": True},
+        {"access_token": "update-secret"}, {"version": "3.1.18"},
+        AutoBangumiWriteResponse(200, WRITE_ENVELOPE),
+        {"access_token": "enable-secret"}, {"version": "3.1.18"},
+        AutoBangumiWriteResponse(200, WRITE_ENVELOPE),
+        {"access_token": "disable-secret"}, {"version": "3.1.18"},
+        AutoBangumiWriteResponse(200, WRITE_ENVELOPE),
+        {"access_token": "delete-secret"}, {"version": "3.1.18"},
+        AutoBangumiWriteResponse(200, WRITE_ENVELOPE),
+        {"access_token": "refresh-secret"}, {"version": "3.1.18"},
+        AutoBangumiWriteResponse(200, WRITE_ENVELOPE),
     ])
     client = create_legacy_31_management_client(_config(), transport=transport)
 
@@ -303,8 +393,8 @@ def test_snapshot_deadline_bounds_every_sub_request_together() -> None:
                 return {"version": "3.1.18"}
             return []
 
-        def post_json_same_origin(self, *args, **kwargs):  # pragma: no cover
-            raise AssertionError("management adapter must never write")
+        def write_json(self, *args, **kwargs):  # pragma: no cover
+            raise AssertionError("management adapter must never write during a read")
 
     client = create_legacy_31_management_client(
         _config(), transport=_Transport(), monotonic=lambda: clock["now"]

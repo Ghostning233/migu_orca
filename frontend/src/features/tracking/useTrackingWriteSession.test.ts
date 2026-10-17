@@ -630,9 +630,30 @@ describe('submission failure diagnostics (issue #101)', () => {
     ])
   })
 
+  it('explains an unsupported submit capability without blaming the version', () => {
+    const { writes } = inFlightSubmit({ mode: 'CONTINUE_TRACKING' })
+    const effects = writes.finishSubmit(submitResult({
+      outcome: 'SUBMIT_FAILED', failure_category: 'CAPABILITY',
+    }))
+    const settled = writes.sessions.value.submit!
+    expect(settled.failureCategory).toBe('CAPABILITY')
+    expect(settled.message).toContain('不支持创建外部订阅')
+    expect(settled.message).not.toContain('版本不在已验证')
+    expect(effects).toContainEqual({
+      kind: 'notify',
+      feedback: {
+        channel: 'dialog', title: '当前连接不支持创建订阅',
+        message: '保存的连接类型当前不支持创建外部订阅（例如 API Token 模式）。请前往设置改用已验证的账号密码连接后重试；本次未创建外部订阅。',
+      },
+    })
+  })
+
   it('routes only a blocking connection class to the dialog channel', () => {
     for (const [category, channel] of [
       ['CONNECTION', 'dialog'], ['AUTHENTICATION', 'dialog'], ['VERSION', 'dialog'],
+      // Issue #216: an unsupported submit capability is a blocking, fixable
+      // connection problem, not a version mismatch.
+      ['CAPABILITY', 'dialog'],
       ['DUPLICATE_SUBSCRIPTION', 'item'], ['VALIDATION', 'item'], ['REJECTED', 'item'],
       ['OUTCOME_UNKNOWN', 'recovery'],
     ] as ReadonlyArray<[string, string]>) {

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from ab_engine.controllers.ab_config import AutoBangumiConfig
+from ab_engine.controllers.ab_http_client import AutoBangumiWriteResponse
 from ab_engine.controllers.ab_management_client import create_legacy_31_management_client
 from apps.migu_orca_web.routes_tracking import _management_writer
 from apps.migu_orca_web.tracking_management_service import run_tracking_management
@@ -12,11 +13,19 @@ from storage_engine.controllers.storage_config import load_storage_config
 from storage_engine.controllers.tracking_repository import ensure_tracking_record, load_tracking_record
 from tracking_engine.models.tracking import create_external_tracking_record
 
+#: The verified 3.1.18 write envelope (issue #216): two message strings, no
+#: ``status`` field, and the exact 200 carries the accepted-action result.  The
+#: wording is the real recording documented in
+#: ``tests/api_contract/ab_write_envelopes.py``.
+WRITE_ACCEPTED = AutoBangumiWriteResponse(
+    200, {"msg_en": "Delete RSS successfully.", "msg_zh": "删除 RSS 成功。"}
+)
+
 
 class _OfflineTransport:
     """Exact adapter transport script; it never opens a socket."""
 
-    def __init__(self, responses: list[dict[str, Any]]) -> None:
+    def __init__(self, responses: list[Any]) -> None:
         self.responses = responses
         self.calls: list[tuple[str, str, Mapping[str, Any] | None]] = []
 
@@ -24,6 +33,14 @@ class _OfflineTransport:
         self, method: str, endpoint: str, headers: Mapping[str, str],
         payload: Mapping[str, Any] | None = None, *, timeout: float,
     ) -> dict[str, Any]:
+        self.calls.append((method, endpoint, payload))
+        return self.responses.pop(0)
+
+    def write_json(
+        self, method: str, endpoint: str, headers: Mapping[str, str],
+        payload: Mapping[str, Any] | None = None, *, timeout: float,
+        step: str = "create_ab_subscription",
+    ) -> AutoBangumiWriteResponse:
         self.calls.append((method, endpoint, payload))
         return self.responses.pop(0)
 
@@ -55,7 +72,7 @@ def test_real_adapter_writer_and_coordinator_complete_modify_readback(tmp_path: 
         {"access_token": "first"}, {"version": "3.1.18"}, {"data": [_subscription("Test")]},
         {"data": [{"id": 7, "name": "Feed", "url": "https://rss.invalid/feed", "aggregate": False, "enabled": True}]},
         # The write action.
-        {"access_token": "write"}, {"version": "3.1.18"}, {"status": True},
+        {"access_token": "write"}, {"version": "3.1.18"}, WRITE_ACCEPTED,
         # Mandatory post-write snapshot.
         {"access_token": "readback"}, {"version": "3.1.18"}, {"data": [_subscription("Changed")]},
         {"data": [{"id": 7, "name": "Feed", "url": "https://rss.invalid/feed", "aggregate": False, "enabled": True}]},
@@ -88,7 +105,7 @@ def test_real_adapter_writer_and_coordinator_complete_rss_modify_readback(tmp_pa
     transport = _OfflineTransport([
         {"access_token": "first"}, {"version": "3.1.18"}, {"data": [_subscription("Test")]},
         {"data": [{"id": 7, "name": "Feed", "url": "https://rss.invalid/feed", "aggregate": False, "parser": "rss", "enabled": True}]},
-        {"access_token": "write"}, {"version": "3.1.18"}, {"status": True},
+        {"access_token": "write"}, {"version": "3.1.18"}, WRITE_ACCEPTED,
         {"access_token": "readback"}, {"version": "3.1.18"}, {"data": [_subscription("Test")]},
         {"data": [{"id": 7, "name": "Changed feed", "url": "https://rss.invalid/feed", "aggregate": False, "parser": "rss", "enabled": True}]},
     ])
@@ -122,7 +139,7 @@ def test_real_delete_readback_requires_list_absence_not_deleted_flag(tmp_path: P
     disabled = {**_subscription("Test"), "deleted": True}
     transport = _OfflineTransport([
         {"access_token": "first"}, {"version": "3.1.18"}, {"data": [disabled]}, {"data": [_rss()]},
-        {"access_token": "write"}, {"version": "3.1.18"}, {"status": True},
+        {"access_token": "write"}, {"version": "3.1.18"}, WRITE_ACCEPTED,
         # The disabled item remains in the actual upstream list.
         {"access_token": "readback"}, {"version": "3.1.18"}, {"data": [disabled]}, {"data": [_rss()]},
     ])

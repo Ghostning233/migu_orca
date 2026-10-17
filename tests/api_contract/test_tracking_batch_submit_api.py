@@ -38,6 +38,7 @@ from storage_engine.controllers.storage_config import (
     load_storage_config,
 )
 from storage_engine.controllers.tracking_repository import load_tracking_record
+from tests.api_contract.ab_write_envelopes import SOURCE_DERIVED_SUBSCRIBE_ENVELOPE
 from tracking_engine.controllers.submit import classify_external_submit_result
 from tracking_engine.models.operation import (
     TRACKING_OPERATION_STATE_FAILED,
@@ -434,7 +435,7 @@ class _EmptyListAbOpener:
         if path == "/api/v1/status":
             return 200, {}, b'{"version": "3.1.18"}'
         if path == "/api/v1/rss/subscribe":
-            return 200, {}, b'{"status": true}'
+            return 200, {}, json.dumps(SOURCE_DERIVED_SUBSCRIBE_ENVELOPE).encode("utf-8")
         if path in ("/api/v1/bangumi/get/all", "/api/v1/rss"):
             return 200, {}, b"[]"
         raise AssertionError(f"unexpected Auto Bangumi path: {path}")  # pragma: no cover
@@ -492,7 +493,7 @@ class _PerItemAbOpener:
             url = payload.get("rss", {}).get("url")
             if isinstance(url, str) and url not in self.registered:
                 self.registered[url] = len(self.registered) + 1
-            return 200, {}, b'{"status": true}'
+            return 200, {}, json.dumps(SOURCE_DERIVED_SUBSCRIBE_ENVELOPE).encode("utf-8")
         if path == "/api/v1/bangumi/get/all":
             rows = [
                 {

@@ -50,7 +50,8 @@ from tracking_engine.models.tracking import (
         (TRACKING_STATUS_SUBMIT_FAILED, "ab_timeout_pre_write", "CONNECTION"),
         (TRACKING_STATUS_SUBMIT_FAILED, "ab_auth_failed", "AUTHENTICATION"),
         (TRACKING_STATUS_SUBMIT_FAILED, "ab_unsupported_version", "VERSION"),
-        (TRACKING_STATUS_SUBMIT_FAILED, "ab_submit_unsupported", "VERSION"),
+        # Issue #216: an unsupported submit capability is not a version mismatch.
+        (TRACKING_STATUS_SUBMIT_FAILED, "ab_submit_unsupported", "CAPABILITY"),
         (TRACKING_STATUS_SUBMIT_FAILED, "ab_duplicate_subscription", "DUPLICATE_SUBSCRIPTION"),
         (TRACKING_STATUS_SUBMIT_FAILED, "config_error", "VALIDATION"),
         (TRACKING_STATUS_SUBMIT_FAILED, "invalid_ab_payload", "VALIDATION"),
@@ -96,6 +97,23 @@ def test_success_false_with_4xx_submit_failed_is_failed() -> None:
         },
     }
     assert classify_external_submit_result(result) == TRACKING_OPERATION_STATE_FAILED
+
+
+def test_success_false_with_a_406_submit_failed_is_outcome_unknown() -> None:
+    """Issue #216: the recorded 406 rejection still created the subscription.
+
+    The real 3.1.18 instance answered ``rss/subscribe`` with 406 *and* created the
+    subscription plus its RSS row, so a 406 rejection must never become the
+    definite, blindly-retryable failure.
+    """
+    result = {
+        "success": False,
+        "error": {
+            "error_type": "ab_submit_failed",
+            "details": {"status_code": 406},
+        },
+    }
+    assert classify_external_submit_result(result) == TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN
 
 
 def test_success_false_with_timeout_is_outcome_unknown() -> None:
