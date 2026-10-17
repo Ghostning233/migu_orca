@@ -86,6 +86,40 @@ def build_legacy_31_subscription_payload(request: dict[str, Any]) -> dict[str, A
     }
 
 
+#: Auto Bangumi 3.1.18's one-time collection rewrites the whole filter with
+#: ``bangumi.filter.replace(",", "|")`` (upstream ``module/manager/collector.py:20``),
+#: so an ASCII comma silently changes the expression's meaning (``a{1,3}``
+#: becomes ``a{1|3}``).  The collection body is therefore refused, never rewritten.
+_COLLECTION_FILTER_UNSUPPORTED = ","
+
+
+def build_legacy_31_collection_payload(request: dict[str, Any]) -> dict[str, Any]:
+    """Map an accepted Request to AutoBangumi 3.1's one-time collection body.
+
+    ``POST /api/v1/rss/collect`` takes a *bare* ``Bangumi`` model — the real
+    3.1.18 instance declares ``requestBody: $ref Bangumi``, while
+    ``/rss/subscribe`` uses its own wrapper body — and it never creates an RSS
+    subscription, so only the ``data`` object of the subscribe body is reused.
+    ``id`` is dropped: an upstream rule id would route the body through
+    AutoBangumi's ``update`` path (``collector.py:28``), and a one-time
+    collection must never modify an existing rule.
+    """
+
+    payload = deepcopy(build_legacy_31_subscription_payload(request)["data"])
+    payload.pop("id", None)
+    # ``filter`` is guaranteed by the reused subscribe builder (``_legacy_31_filter``
+    # always returns a ``str`` or raises ``ab_filter_unsupported``); a shape change
+    # there is a programming error and fails loud instead of being classified here.
+    if _COLLECTION_FILTER_UNSUPPORTED in payload["filter"]:
+        # Raised before any client or credential exists: zero external writes.
+        raise Stage1Error(
+            "ab_filter_unsupported",
+            "当前筛选规则无法兼容 Auto Bangumi 3.1",
+            "build_legacy_31_collection_payload",
+        )
+    return payload
+
+
 def build_ab_submit_payload(
     request: dict[str, Any], auth_mode: Literal["password", "api_token"]
 ) -> dict[str, Any]:
