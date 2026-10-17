@@ -19,6 +19,14 @@ def _payload() -> dict[str, Any]:
     }
 
 
+def _legacy_payload() -> dict[str, Any]:
+    """The 3.1 ``{data: Bangumi, rss: RSSItem}`` subscription body."""
+    return {
+        "data": {"official_title": "番剧", "season": 1, "rss_link": "https://example.invalid/rss.xml"},
+        "rss": {"name": "番剧", "url": "https://example.invalid/rss.xml", "aggregate": False, "parser": "mikan"},
+    }
+
+
 def test_fake_client_matches_auto_bangumi_client_protocol() -> None:
     client: AutoBangumiClient = FakeAutoBangumiClient()
 
@@ -59,7 +67,7 @@ def test_submit_ab_subscription_accepts_the_verified_write_envelope_without_id()
     read-back, so a missing id stays a clean success rather than a false failure.
     """
     envelope = {"msg_en": "Subscribe successfully.", "msg_zh": "订阅成功。"}
-    result = submit_ab_subscription(FakeAutoBangumiClient(response=envelope), _payload())
+    result = submit_ab_subscription(FakeAutoBangumiClient(response=envelope), _legacy_payload())
 
     assert result == {
         "success": True,
@@ -68,6 +76,44 @@ def test_submit_ab_subscription_accepts_the_verified_write_envelope_without_id()
         "fallback_config": None,
         "error": None,
     }
+
+
+def test_submit_ab_subscription_refuses_the_envelope_for_a_non_subscription_body() -> None:
+    """Issue #216/#217: only the subscription body may own the no-id envelope.
+
+    The bare ``Bangumi`` one-time collection body creates no controlled
+    subscription, so the shared subscribe normalizer must keep failing closed
+    instead of reporting a clean subscription success for it.
+    """
+    from ab_engine.controllers.subscription_payload import (
+        build_legacy_31_collection_payload,
+    )
+    from request_engine.controllers.request_controller import (
+        accept_request,
+        build_pending_request,
+    )
+    from shared.models import (
+        EntryRequest,
+        FilterRule,
+        MatchedBangumi,
+        SubtitleGroupSelection,
+    )
+
+    pending = build_pending_request(
+        EntryRequest("番剧"),
+        MatchedBangumi("番剧", [], "https://example.invalid/bangumi", 1.0),
+        [],
+        SubtitleGroupSelection("Loli", "https://example.invalid/rss.xml", []),
+        FilterRule(must_not_contain="SP"),
+        "番剧",
+    )
+    collection = build_legacy_31_collection_payload(accept_request(pending))
+    envelope = {"msg_en": "Collections completed.", "msg_zh": "收集完成。"}
+
+    result = submit_ab_subscription(FakeAutoBangumiClient(response=envelope), collection)
+
+    assert result["success"] is False
+    assert result["error"]["error_type"] == "invalid_ab_submit_result"
 
 
 def test_submit_ab_subscription_fails_closed_on_an_unrecognized_success_body() -> None:
