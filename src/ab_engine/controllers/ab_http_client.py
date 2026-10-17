@@ -556,12 +556,13 @@ def _exchange(
     remaining time, and the connection is always closed before returning. No
     redirect is ever followed.
 
-    A non-2xx status is classified from the header block before its body, so a
-    stalled rejection body can never turn a proven authentication/HTTP failure
-    into an unproven timeout (issue review).  A write exchange sets
-    ``inspect_error_body`` because a documented business rejection — an equal
-    subscription already exists — is only visible in that body (issue #216);
-    the body gets a short sub-budget and its absence never changes the status.
+    On a read, a non-2xx status is classified from the header block before its
+    body, so a stalled rejection body can never turn a proven
+    authentication/HTTP failure into an unproven timeout (issue review).  A write
+    exchange sets ``inspect_error_body`` because a documented business rejection —
+    an equal subscription already exists — is only visible in that body (issue
+    #216); only an exact 200 makes that body the decision, so every other status
+    reads it under a short sub-budget and drops it if it never arrives.
     """
     parsed = urlsplit(endpoint)
     scheme = parsed.scheme.lower()
@@ -645,7 +646,6 @@ def _write_envelope(raw: bytes, *, step: str) -> dict[str, Any]:
             {"fields": list(WRITE_ENVELOPE_FIELDS)},
         )
     return payload
-
 
 
 def _decode_error_object(raw: bytes) -> dict[str, Any]:
