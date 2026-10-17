@@ -4,7 +4,9 @@ from typing import Any
 
 from ab_engine.controllers.ab_client import (
     AutoBangumiClient,
+    AutoBangumiCollectClient,
     FakeAutoBangumiClient,
+    collect_ab_resources,
     submit_ab_subscription,
 )
 from shared.errors import Stage1Error
@@ -24,6 +26,20 @@ def _legacy_payload() -> dict[str, Any]:
     return {
         "data": {"official_title": "番剧", "season": 1, "rss_link": "https://example.invalid/rss.xml"},
         "rss": {"name": "番剧", "url": "https://example.invalid/rss.xml", "aggregate": False, "parser": "mikan"},
+    }
+
+
+def _collection_payload() -> dict[str, Any]:
+    """The 3.1.18 one-time collection body: a bare ``Bangumi`` model (issue #217)."""
+    return {
+        "official_title": "番剧",
+        "title_raw": "番剧",
+        "season": 1,
+        "group_name": "Loli",
+        "filter": "(?!)",
+        "rss_link": "https://example.invalid/rss.xml",
+        "save_path": "番剧",
+        "poster_link": None,
     }
 
 
@@ -223,3 +239,93 @@ def test_fake_client_returns_response_without_retaining_mutable_objects() -> Non
         "id": "sub-123",
         "data": {"status": "created"},
     }
+
+
+# -- issue #217: the one-time collection normalizer ---------------------------
+
+
+def test_fake_client_matches_the_collection_protocol() -> None:
+    client: AutoBangumiCollectClient = FakeAutoBangumiClient()
+    assert client.create_collection(_collection_payload()) == {
+        "msg_en": "Collections completed.",
+        "msg_zh": "收集完成。",
+    }
+
+
+def test_collect_ab_resources_normalizes_a_verified_success_without_an_id() -> None:
+    """A collection creates no controlled subscription, so it has no external id.
+
+    The verified 3.1.18 write envelope proves the request itself; nothing is read
+    back and no fallback plan is built (ADR-0001).
+    """
+    envelope = {"msg_en": "Collections completed.", "msg_zh": "收集完成。"}
+    payload = _collection_payload()
+    client = FakeAutoBangumiClient(collection_response=envelope)
+
+    result = collect_ab_resources(client, payload)
+
+    assert result == {
+        "success": True,
+        "ab_subscription_id": None,
+        "ab_response": envelope,
+        "fallback_config": None,
+        "error": None,
+    }
+    assert client.collection_calls == [payload]
+    # The subscription seam is never touched by a collection.
+    assert client.calls == []
+
+
+def test_collect_ab_resources_converts_a_controlled_failure() -> None:
+    error = Stage1Error(
+        "ab_submit_failed",
+        "Auto Bangumi HTTP 提交失败",
+        "collect_existing_resources",
+        {"http_status": 406, "status_code": 406},
+    )
+    client = FakeAutoBangumiClient(collection_error=error)
+
+    result = collect_ab_resources(client, _collection_payload())
+
+    assert result == {
+        "success": False,
+        "ab_subscription_id": None,
+        "ab_response": None,
+        "fallback_config": None,
+        "error": {
+            "error_type": "ab_submit_failed",
+            "error_message": "Auto Bangumi HTTP 提交失败",
+            "failed_step": "collect_existing_resources",
+            "details": {"http_status": 406, "status_code": 406},
+        },
+    }
+    assert len(client.collection_calls) == 1
+
+
+def test_collect_ab_resources_never_builds_a_fallback_subscription_plan() -> None:
+    """A one-time request must not fall back into creating an RSS subscription."""
+    client = FakeAutoBangumiClient(
+        collection_error=Stage1Error(
+            "ab_timeout", "Auto Bangumi HTTP 请求超时", "collect_existing_resources",
+            {"category": "timeout"},
+        )
+    )
+
+    result = collect_ab_resources(client, _collection_payload())
+
+    assert result["success"] is False
+    assert result["fallback_config"] is None
+    assert result["error"]["error_type"] == "ab_timeout"
+
+
+def test_fake_client_deep_copies_collection_payloads_and_responses() -> None:
+    payload = _collection_payload()
+    response = {"msg_en": "Collections completed.", "msg_zh": "收集完成。"}
+    client = FakeAutoBangumiClient(collection_response=response)
+
+    result = collect_ab_resources(client, payload)
+    payload["save_path"] = "changed"
+    response["msg_zh"] = "changed"
+
+    assert client.collection_calls == [_collection_payload()]
+    assert result["ab_response"]["msg_zh"] == "收集完成。"

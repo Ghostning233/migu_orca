@@ -50,6 +50,8 @@ from tests.api_contract.ab_write_envelopes import (
     RECORDED_SUBSCRIBE_FEED_FAILED_STATUS,
     RECORDED_SUBSCRIBE_SERVER_ERROR_BODY,
     RECORDED_SUBSCRIBE_SERVER_ERROR_STATUS,
+    SOURCE_DERIVED_COLLECT_ENVELOPE,
+    SOURCE_DERIVED_COLLECT_REJECTED_ENVELOPE,
     SOURCE_DERIVED_DUPLICATE_ENVELOPE,
     SOURCE_DERIVED_SUBSCRIBE_ENVELOPE,
 )
@@ -860,10 +862,14 @@ def test_download_existing_maps_every_other_outcome_to_submit_failed(
     assert "可重新提交" in str(payload["tracking"].get("last_error") or stored.last_error)
 
 
-def test_download_existing_fails_closed_without_a_verified_endpoint(
+def test_download_existing_makes_no_write_without_a_reachable_connection(
     tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The unverified default seam converges on 提交失败 instead of a 400."""
+    """An unreachable saved connection fails closed before any external write.
+
+    No transport is patched here: the real adapter has to resolve
+    ``http://ab.invalid``, which cannot succeed, so nothing is ever written.
+    """
     request = _accepted_request(tmp_path)
     record = _seed_tracking(tmp_path, request)
     _patch_ab_factory(monkeypatch, FakeAutoBangumiClient(), readback="empty")
@@ -874,7 +880,348 @@ def test_download_existing_fails_closed_without_a_verified_endpoint(
     )
 
     assert response.status_code == 200
-    assert response.get_json()["result"]["tracking"]["status"] == TRACKING_STATUS_SUBMIT_FAILED
+    result = response.get_json()["result"]
+    assert result["tracking"]["status"] == TRACKING_STATUS_SUBMIT_FAILED
+    assert result["failure_category"] == "CONNECTION"
+    stored = load_tracking_record(_config(tmp_path), record.tracking_id)
+    assert stored.external_mapping is None
+
+
+# -- issue #217: the verified one-time collection adapter ---------------------
+
+
+def _open_collect_surface(
+    tmp_path: Path,
+    request: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    collect_responses: list[tuple[int, bytes]] | None = None,
+    version: str = "3.1.18",
+) -> _BareArrayAbOpener:
+    """Script the real 3.1.18 HTTP surface and return the request log.
+
+    Only ``ab_http_client._exchange`` (the socket) is replaced, so the real
+    payload builder, the real 3.1.18 adapter (login, exact-version gate,
+    same-origin write, exact-200 envelope validation) and the real persistence
+    all run for a one-time collection.
+    """
+    stored_request = load_request_snapshot(_config(tmp_path), request["request_id"])
+    rss_url = stored_request["confirmable_config"]["selected_rss_url"]
+    opener = _BareArrayAbOpener(
+        rss_url, collect_responses=collect_responses, version=version
+    )
+    monkeypatch.setattr("ab_engine.controllers.ab_http_client._exchange", opener.exchange)
+    return opener
+
+
+def test_download_existing_verified_200_becomes_added_to_download(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #217 AC4: the default seam really posts the collect body.
+
+    The response is the verified 3.1.18 write envelope, so the outcome is
+    已加入下载 with no controlled external subscription and no read-back.
+    """
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    opener = _open_collect_surface(tmp_path, request, monkeypatch)
+
+    response = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/submit",
+        json=_submit_body(record, submission_mode="DOWNLOAD_EXISTING"),
+    )
+
+    assert response.status_code == 200
+    result = response.get_json()["result"]
+    assert result["tracking"]["status"] == "ADDED_TO_DOWNLOAD"
+    assert opener.calls.count("POST /api/v1/rss/collect") == 1
+    # A one-time request never creates an RSS subscription and never reads back.
+    assert "POST /api/v1/rss/subscribe" not in opener.calls
+    assert [body for body in opener.collect_bodies] == [
+        {
+            "official_title": opener.collect_bodies[0]["official_title"],
+            "title_raw": opener.collect_bodies[0]["title_raw"],
+            "season": 1,
+            "group_name": opener.collect_bodies[0]["group_name"],
+            "filter": opener.collect_bodies[0]["filter"],
+            "rss_link": opener.rss_url,
+            "save_path": opener.collect_bodies[0]["save_path"],
+            "poster_link": None,
+        }
+    ]
+    assert set(opener.collect_bodies[0]) == {
+        "official_title", "title_raw", "season", "group_name", "filter",
+        "rss_link", "save_path", "poster_link",
+    }
+    stored = load_tracking_record(_config(tmp_path), record.tracking_id)
+    assert stored.status == "ADDED_TO_DOWNLOAD"
+    assert stored.external_mapping is None
+
+
+def test_download_existing_406_is_never_read_as_success(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #217 AC4: the 406 (either semantics) is one retryable failure.
+
+    Upstream cannot tell "filtered to nothing" from "downloader rejected or
+    already added", so the record is 提交失败 with the bounded 406 diagnostics
+    and no external mapping — never an invented download success.
+    """
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    opener = _open_collect_surface(
+        tmp_path,
+        request,
+        monkeypatch,
+        collect_responses=[
+            (406, json.dumps(SOURCE_DERIVED_COLLECT_REJECTED_ENVELOPE).encode("utf-8"))
+        ],
+    )
+
+    response = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/submit",
+        json=_submit_body(record, submission_mode="DOWNLOAD_EXISTING"),
+    )
+
+    assert response.status_code == 200
+    result = response.get_json()["result"]
+    assert result["tracking"]["status"] == TRACKING_STATUS_SUBMIT_FAILED
+    assert result["diagnostics"]["http_status"] == 406
+    assert opener.calls.count("POST /api/v1/rss/collect") == 1
+    assert "POST /api/v1/rss/subscribe" not in opener.calls
+    stored = load_tracking_record(_config(tmp_path), record.tracking_id)
+    assert stored.status == TRACKING_STATUS_SUBMIT_FAILED
+    assert stored.external_mapping is None
+    assert "可重新提交" in str(result["tracking"].get("last_error") or stored.last_error)
+
+
+@pytest.mark.parametrize(
+    ("collect_responses", "expected_status"),
+    [
+        ([(500, b"")], 500),
+        ([(401, json.dumps({"detail": "Unauthorized"}).encode("utf-8"))], 401),
+        ([(200, b"{not json")], None),
+        ([(200, json.dumps({"msg_en": "no zh field"}).encode("utf-8"))], None),
+    ],
+)
+def test_download_existing_maps_every_other_collect_response_to_submit_failed(
+    tmp_path: Path,
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+    collect_responses: list[tuple[int, bytes]],
+    expected_status: int | None,
+) -> None:
+    """Issue #217 AC4/AC2: 5xx, 401, broken JSON and a missing envelope field.
+
+    ``expected_status`` is the exact status the diagnostics must publish when the
+    response carried one; a malformed 200 has none.
+    """
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    opener = _open_collect_surface(
+        tmp_path, request, monkeypatch, collect_responses=collect_responses
+    )
+
+    response = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/submit",
+        json=_submit_body(record, submission_mode="DOWNLOAD_EXISTING"),
+    )
+
+    assert response.status_code == 200
+    result = response.get_json()["result"]
+    assert result["tracking"]["status"] == TRACKING_STATUS_SUBMIT_FAILED
+    assert opener.calls.count("POST /api/v1/rss/collect") == 1
+    published = result["diagnostics"].get("http_status")
+    assert published == expected_status
+
+
+def test_download_existing_refuses_an_unverified_version_without_any_write(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #217 AC2: collect is gated on exactly 3.1.18.
+
+    A 3.1.17 instance is refused *before* the write boundary, so the collection
+    endpoint is never called at all.
+    """
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    opener = _open_collect_surface(tmp_path, request, monkeypatch, version="3.1.17")
+
+    response = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/submit",
+        json=_submit_body(record, submission_mode="DOWNLOAD_EXISTING"),
+    )
+
+    assert response.status_code == 200
+    result = response.get_json()["result"]
+    assert result["tracking"]["status"] == TRACKING_STATUS_SUBMIT_FAILED
+    assert result["failure_category"] == "VERSION"
+    assert "POST /api/v1/rss/collect" not in opener.calls
+    assert "POST /api/v1/rss/subscribe" not in opener.calls
+
+
+def test_download_existing_refuses_a_token_connection_without_any_write(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #217 AC2: only the verified password capability may collect.
+
+    A saved API Token connection cannot collect at all: the request fails closed
+    as a capability fact, without a single external call.
+    """
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    # Replace the seeded password connection with an API Token one (revision 1)
+    # before the submit, so the request binds to the token generation.
+    saved = AutoBangumiConfigRepository(tmp_path / "config").save(
+        build_stored_autobangumi_config(
+            {
+                "auth_mode": "api_token",
+                "base_url": "http://ab.invalid",
+                "token": "secret-token",
+            }
+        ),
+        expected_configuration_revision=1,
+    )
+    global SAVED_GENERATION
+    SAVED_GENERATION = (str(saved.connection_ref), saved.configuration_revision)
+    opener = _open_collect_surface(tmp_path, request, monkeypatch)
+
+    response = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/submit",
+        json=_submit_body(record, submission_mode="DOWNLOAD_EXISTING"),
+    )
+
+    assert response.status_code == 200
+    result = response.get_json()["result"]
+    assert result["tracking"]["status"] == TRACKING_STATUS_SUBMIT_FAILED
+    assert result["failure_category"] == "CAPABILITY"
+    assert opener.calls == []
+    stored = load_tracking_record(_config(tmp_path), record.tracking_id)
+    assert stored.external_mapping is None
+
+
+def test_download_existing_same_key_replay_never_calls_ab_again(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #217 AC5: a same-key replay of a settled collection is zero-write."""
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    opener = _open_collect_surface(tmp_path, request, monkeypatch)
+
+    url = f"/api/v1/tracking/items/{record.tracking_id}/submit"
+    body = _submit_body(record, submission_mode="DOWNLOAD_EXISTING")
+    first = client.post(url, json=body)
+    assert first.status_code == 200
+    assert first.get_json()["result"]["tracking"]["status"] == "ADDED_TO_DOWNLOAD"
+    assert opener.calls.count("POST /api/v1/rss/collect") == 1
+
+    replay = client.post(url, json=body)
+    assert replay.status_code == 200
+    replay_result = replay.get_json()["result"]
+    assert replay_result["tracking"]["status"] == "ADDED_TO_DOWNLOAD"
+    assert replay_result["operation_id"] == first.get_json()["result"]["operation_id"]
+    # The terminal replay reuses the operation and never touches Auto Bangumi.
+    assert opener.calls.count("POST /api/v1/rss/collect") == 1
+
+
+def test_download_existing_recovery_never_reruns_the_collection(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #217 AC5: recovery never claims success and never re-collects.
+
+    A one-time request has no controlled subscription to reconcile, so an
+    explicit recovery is a state conflict: nothing is read back, no "an existing
+    rule proves a download" claim is made, and Auto Bangumi is never called.
+    """
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    opener = _open_collect_surface(
+        tmp_path,
+        request,
+        monkeypatch,
+        collect_responses=[
+            (406, json.dumps(SOURCE_DERIVED_COLLECT_REJECTED_ENVELOPE).encode("utf-8"))
+        ],
+    )
+    submit = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/submit",
+        json=_submit_body(record, submission_mode="DOWNLOAD_EXISTING"),
+    )
+    assert submit.get_json()["result"]["tracking"]["status"] == TRACKING_STATUS_SUBMIT_FAILED
+    failed_record = load_tracking_record(_config(tmp_path), record.tracking_id)
+
+    recovered = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/recover",
+        json={
+            "expected_revision": failed_record.revision,
+            "action": "AUTO",
+            "confirm": True,
+            "storage_dir": "storage",
+        },
+    )
+
+    # Either the state is not recoverable at all (409) or recovery stays a
+    # definite failure; neither may invent a download success.
+    assert recovered.status_code in (200, 409)
+    if recovered.status_code == 200:
+        assert recovered.get_json()["result"]["outcome"] == TRACKING_STATUS_SUBMIT_FAILED
+    assert opener.calls.count("POST /api/v1/rss/collect") == 1
+    assert "POST /api/v1/rss/subscribe" not in opener.calls
+    stored = load_tracking_record(_config(tmp_path), record.tracking_id)
+    assert stored.status == TRACKING_STATUS_SUBMIT_FAILED
+    assert stored.external_mapping is None
+
+
+def test_download_existing_explicit_retry_creates_one_new_operation(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #217 AC5: only an explicit user retry may collect a second time.
+
+    The retry is a new operation with its own key; the original failed operation
+    is preserved, and exactly one further collection is attempted.
+    """
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    opener = _open_collect_surface(
+        tmp_path,
+        request,
+        monkeypatch,
+        collect_responses=[
+            (406, json.dumps(SOURCE_DERIVED_COLLECT_REJECTED_ENVELOPE).encode("utf-8")),
+            (200, json.dumps(SOURCE_DERIVED_COLLECT_ENVELOPE).encode("utf-8")),
+        ],
+    )
+    submit = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/submit",
+        json=_submit_body(record, submission_mode="DOWNLOAD_EXISTING"),
+    )
+    first_operation = submit.get_json()["result"]["operation_id"]
+    failed_record = load_tracking_record(_config(tmp_path), record.tracking_id)
+
+    retried = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/retry",
+        json={
+            "expected_revision": failed_record.revision,
+            "idempotency_key": "key-2",
+            "confirm": True,
+            "connection_ref": SAVED_GENERATION[0],
+            "configuration_revision": SAVED_GENERATION[1],
+            "submission_mode": "DOWNLOAD_EXISTING",
+            "storage_dir": "storage",
+        },
+    )
+
+    assert retried.status_code == 200
+    result = retried.get_json()["result"]
+    assert result["tracking"]["status"] == "ADDED_TO_DOWNLOAD"
+    assert result["operation_id"] != first_operation
+    assert opener.calls.count("POST /api/v1/rss/collect") == 2
+    from tracking_engine.models.operation import TRACKING_OPERATION_STATE_FAILED
+
+    assert load_tracking_operation(_config(tmp_path), first_operation).state == (
+        TRACKING_OPERATION_STATE_FAILED
+    )
+
 
 class _BareArrayAbOpener:
     """The verified 3.1.18 HTTP surface, served as raw bytes keyed by path.
@@ -892,6 +1239,8 @@ class _BareArrayAbOpener:
         write_status: int = 200,
         write_body: bytes | None = None,
         readback: str = "present",
+        collect_responses: list[tuple[int, bytes]] | None = None,
+        version: str = "3.1.18",
     ) -> None:
         self.rss_url = rss_url
         #: The raw write response.  It defaults to the verified 3.1.18 envelope
@@ -902,7 +1251,23 @@ class _BareArrayAbOpener:
         #: ``present`` serves the exact RSS + owning subscription; ``empty``
         #: serves a legal empty snapshot (a read-back that proves nothing).
         self.readback = readback
+        #: The one-time collection surface (issue #217): one ``(status, body)``
+        #: per collect call, the last entry repeating.  Defaults to the verified
+        #: 3.1.18 collect success envelope.
+        self.collect_responses = list(collect_responses) if collect_responses else [
+            (200, json.dumps(SOURCE_DERIVED_COLLECT_ENVELOPE).encode("utf-8"))
+        ]
+        #: The exact version ``GET /api/v1/status`` reports (collect is gated on
+        #: exactly ``3.1.18``).
+        self.version = version
         self.calls: list[str] = []
+        #: The parsed bodies of every collection POST, in order.
+        self.collect_bodies: list[Any] = []
+
+    def _next_collect(self) -> tuple[int, bytes]:
+        if len(self.collect_responses) > 1:
+            return self.collect_responses.pop(0)
+        return self.collect_responses[0]
 
     def exchange(
         self, method: str, endpoint: str, headers: Any, body: Any, **kwargs: Any
@@ -912,7 +1277,11 @@ class _BareArrayAbOpener:
         if path == "/api/v1/auth/login":
             body = b'{"access_token": "ab-session"}'
         elif path == "/api/v1/status":
-            body = b'{"version": "3.1.18"}'
+            body = json.dumps({"version": self.version}).encode("utf-8")
+        elif path == "/api/v1/rss/collect":
+            self.collect_bodies.append(json.loads((body or b"{}").decode("utf-8")))
+            status, body = self._next_collect()
+            return status, {}, body
         elif path == "/api/v1/bangumi/get/all":
             rows = [] if self.readback == "empty" else [{
                 "id": 42, "official_title": "\u846c\u9001\u7684\u8299\u8389\u83b2",
@@ -997,7 +1366,11 @@ def test_submit_surfaces_a_duplicate_subscription_rejection(
     The write is refused with the verified 3.1.18 envelope whose bounded message
     names the existing subscription, so the published category is
     ``DUPLICATE_SUBSCRIPTION`` and the copy tells the user to look at the
-    existing subscription instead of resubmitting.
+    existing subscription instead of resubmitting.  Issue #101 governs how that
+    reason is published: the *bounded, sanitized* message travels in the
+    collapsed ``diagnostics`` object (never the raw body, session Cookie or any
+    unbounded upstream text), so the client can show 未提供具体原因 or the
+    cleaned reason but never a raw response.
     """
     request = _accepted_request(tmp_path)
     record = _seed_tracking(tmp_path, request)
@@ -1019,8 +1392,14 @@ def test_submit_surfaces_a_duplicate_subscription_rejection(
     result = response.get_json()["result"]
     assert result["tracking"]["status"] == TRACKING_STATUS_SUBMIT_FAILED
     assert result["failure_category"] == "DUPLICATE_SUBSCRIPTION"
+    # Issue #101: only the bounded, sanitized reason is published, and only in
+    # the collapsed diagnostics object.
+    assert result["diagnostics"]["http_status"] == 406
+    assert result["diagnostics"]["message_zh"] == SOURCE_DERIVED_DUPLICATE_ENVELOPE["msg_zh"]
+    assert len(result["diagnostics"]["message_zh"]) <= 200
+    # The session Cookie and the raw response framing never leave the adapter.
     body_text = response.get_data(as_text=True)
-    for forbidden in ("already exists", "请勿重复添加", "ab-session"):
+    for forbidden in ("ab-session", "Content-Length", "HTTP/1.1", "msg_zh\\"):
         assert forbidden not in body_text
 
 

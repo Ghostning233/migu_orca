@@ -17,6 +17,13 @@ class AutoBangumiClient(Protocol):
         """Create a subscription and return the Auto Bangumi response."""
 
 
+class AutoBangumiCollectClient(Protocol):
+    """Minimal Auto Bangumi one-time collection interface (issue #217)."""
+
+    def create_collection(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Run one one-time collection and return its verified write envelope."""
+
+
 class FakeAutoBangumiClient:
     """Offline Auto Bangumi client for controller tests."""
 
@@ -25,15 +32,28 @@ class FakeAutoBangumiClient:
         *,
         response: dict[str, Any] | None = None,
         error: Stage1Error | None = None,
+        collection_response: dict[str, Any] | None = None,
+        collection_error: Stage1Error | None = None,
     ) -> None:
         if response is not None and error is not None:
             raise ValueError("response and error are mutually exclusive")
+        if collection_response is not None and collection_error is not None:
+            raise ValueError("collection_response and collection_error are mutually exclusive")
         self._response = deepcopy(response) if response is not None else {
             "id": "fake-ab-subscription",
             "status": "created",
         }
         self._error = error
+        # A collection answers with the verified 3.1.18 write envelope: two
+        # message strings and no id at all (issues #216/#217).
+        self._collection_response = (
+            deepcopy(collection_response)
+            if collection_response is not None
+            else {"msg_en": "Collections completed.", "msg_zh": "收集完成。"}
+        )
+        self._collection_error = collection_error
         self.calls: list[dict[str, Any]] = []
+        self.collection_calls: list[dict[str, Any]] = []
 
     def create_subscription(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(deepcopy(payload))
@@ -45,6 +65,37 @@ class FakeAutoBangumiClient:
                 deepcopy(self._error.details),
             )
         return deepcopy(self._response)
+
+    def create_collection(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.collection_calls.append(deepcopy(payload))
+        if self._collection_error is not None:
+            raise Stage1Error(
+                self._collection_error.error_type,
+                self._collection_error.message,
+                self._collection_error.failed_step,
+                deepcopy(self._collection_error.details),
+            )
+        return deepcopy(self._collection_response)
+
+
+def collect_ab_resources(
+    client: AutoBangumiCollectClient,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Run one one-time "download existing resources" request and normalize it.
+
+    A collection establishes no controlled external subscription and Auto
+    Bangumi reports no per-torrent result, so the normalized success carries no
+    external id and no fallback plan: ADR-0001's at-least-once semantics are the
+    whole contract, every failure is the same retryable 提交失败, and nothing is
+    read back to upgrade or downgrade that verdict (issue #98/#217).
+    """
+
+    try:
+        ab_response = client.create_collection(deepcopy(payload))
+    except Stage1Error as error:
+        return ab_submit_failure(error)
+    return ab_submit_success(None, ab_response)
 
 
 def submit_ab_subscription(

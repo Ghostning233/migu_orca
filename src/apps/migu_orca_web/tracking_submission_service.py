@@ -43,7 +43,10 @@ from typing import Any
 from uuid import UUID
 
 from ab_engine.controllers.ab_management_factory import create_management_client
-from ab_engine.controllers.tracking_submit_adapter import compose_tracking_submit_one
+from ab_engine.controllers.tracking_submit_adapter import (
+    collect_existing_resources,
+    compose_tracking_submit_one,
+)
 from apps.migu_orca_web.save_confirm_service import compute_request_fingerprint
 from apps.migu_orca_web.schemas import (
     SavedTrackingBatchSubmitInput,
@@ -165,22 +168,16 @@ _REPLAY_SAFE_MESSAGE: dict[str, str] = {
 
 
 def compose_tracking_collect_one() -> Callable[..., Any]:
-    """Return the Auto Bangumi one-time collection seam (issue #98).
+    """Return the Auto Bangumi one-time collection seam (issues #98/#217).
 
-    Auto Bangumi 3.1.18's exact “download the existing resources” endpoint is not
-    yet a verified contract in this repository, so the default implementation
-    fails closed with a stable error instead of writing to an unverified path.
-    Tests and the future verified adapter inject their own callable here.
+    The default implementation is the verified 3.1.18 ``POST /api/v1/rss/collect``
+    adapter: password connections on the exact verified version only, judged by
+    the exact-200 write envelope of issue #216, with every other status, timeout
+    or connection failure mapped to the same retryable 提交失败 (ADR-0001).
+    Tests inject their own callable here.
     """
 
-    def collect_one(_request: dict[str, Any], _config: Any) -> dict[str, Any]:
-        raise Stage1Error(
-            "ab_submit_unsupported",
-            "当前 Auto Bangumi 版本暂不支持“下载现有资源”",
-            "collect_existing_resources",
-        )
-
-    return collect_one
+    return collect_existing_resources
 
 
 def compose_tracking_readback_external(config: Any) -> Callable[[], Any]:
@@ -547,22 +544,28 @@ def run_saved_tracking_retry(
     readback_external: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
     """Retry only a definitely failed submit using the saved AB connection."""
+    coerced = _coerce_saved_submit_input(
+        payload,
+        tracking_id=tracking_id,
+        expected_revision=expected_revision,
+        idempotency_key=idempotency_key,
+        confirm=confirm,
+        connection_ref=connection_ref,
+        configuration_revision=configuration_revision,
+    )
     return _run_saved_tracking_submission(
         config,
-        payload=_coerce_saved_submit_input(
-            payload,
-            tracking_id=tracking_id,
-            expected_revision=expected_revision,
-            idempotency_key=idempotency_key,
-            confirm=confirm,
-            connection_ref=connection_ref,
-            configuration_revision=configuration_revision,
-        ),
+        payload=coerced,
         repository=repository,
         start_statuses=frozenset({TRACKING_STATUS_SUBMIT_FAILED}),
         submit_one=submit_one,
         persist_ab_result=persist_ab_result,
         readback_external=readback_external,
+        # Issue #217: the retry must keep the submission mode the client asked
+        # for.  Dropping it would silently turn a failed one-time "download
+        # existing resources" retry into a subscription write, which is a
+        # different operation semantics (ADR-0001).
+        submission_mode=coerced.submission_mode,
         now=now,
     )
 
@@ -599,6 +602,7 @@ def _run_saved_tracking_submission(
             start_statuses=start_statuses,
             submit_one=submit_one,
             persist_ab_result=persist_ab_result,
+            submission_mode=submission_mode,
             now=now,
         )
 
@@ -1235,6 +1239,7 @@ def _finalize_external_outcome(
     _sync_queue_projection(config, record_final, outcome)
     return _submit_result_payload(
         record=record_final,
+        ab_result=ab_result,
         outcome=outcome,
         checked_revision=expected_revision,
         operation_id=operation.operation_id,
