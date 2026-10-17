@@ -270,11 +270,6 @@ def test_management_action_scopes_are_server_computed_per_action_without_mapping
 # The verified 3.1.18 write contract (issue #216)
 # ---------------------------------------------------------------------------
 
-#: ``/api/v1/rss/refresh/<id>``, a write-through-GET whose recorded 200 envelope
-#: proves the criterion is not specific to one HTTP method.
-_REFRESH_SEEN: set[str] = set()
-
-
 @pytest.mark.parametrize(
     ("action", "path", "status", "envelope", "expected_error", "expected_details"),
     [
@@ -292,7 +287,7 @@ _REFRESH_SEEN: set[str] = set()
         ("delete_rss", "/api/v1/rss/delete/7", 500, None, "ab_submit_failed", {"status_code": 500, "http_status": 500}),
     ],
 )
-def test_real_transport_accepts_a_management_write_only_on_the_exact_status(
+def test_recorded_management_write_envelopes_decide_by_their_exact_status(
     monkeypatch: pytest.MonkeyPatch,
     action: str,
     path: str,
@@ -315,7 +310,6 @@ def test_real_transport_accepts_a_management_write_only_on_the_exact_status(
         timeout: float, step: str, inspect_error_body: bool = False, monotonic: Any = None,
     ) -> tuple[int, dict[str, str], bytes]:
         request_path = urlsplit(endpoint).path
-        _REFRESH_SEEN.add(request_path)
         if request_path == "/api/v1/auth/login":
             return 200, {}, b'{"access_token": "ab-session"}'
         if request_path == "/api/v1/status":
