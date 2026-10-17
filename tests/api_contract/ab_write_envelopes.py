@@ -86,3 +86,22 @@ SOURCE_DERIVED_DUPLICATE_ENVELOPE = {
     "msg_en": "The subscription already exists.",
     "msg_zh": "该订阅已存在，请勿重复添加。",
 }
+
+#: Shape-exact synthetic success envelope for the one-time collection endpoint
+#: ``POST /api/v1/rss/collect`` (issue #217).  Source-derived: 3.1.18 answers
+#: every write through the same ``u_response`` helper, so a collection success is
+#: the same two string keys with no ``status`` and no id.  The exact wording is
+#: irrelevant to the criterion and is deliberately not a recording.
+SOURCE_DERIVED_COLLECT_ENVELOPE = {
+    "msg_en": "Collections of MiguOrcaProbe217 Season 1 completed.",
+    "msg_zh": "收集 MiguOrcaProbe217 第 1 季完成。",
+}
+
+#: Shape-exact synthetic 406 envelope for the two semantics upstream cannot tell
+#: apart — "filtered to nothing" and "downloader rejected / already added"
+#: (``collector.py:37-46``).  Source-derived from that source; a collection
+#: rejection must never be read as a success.
+SOURCE_DERIVED_COLLECT_REJECTED_ENVELOPE = {
+    "msg_en": "Collection of MiguOrcaProbe217 Season 1 failed.",
+    "msg_zh": "收集 MiguOrcaProbe217 第 1 季失败, 种子已经添加。",
+}

@@ -136,34 +136,6 @@ class UrlopenAutoBangumiHttpTransport:
         _raise_for_status(_status, step="probe_ab_connection")
         return _decode_json(raw, step="probe_ab_connection")
 
-    def post_json_same_origin(
-        self,
-        endpoint: str,
-        headers: Mapping[str, str],
-        payload: dict[str, Any],
-        *,
-        timeout: float,
-    ) -> dict[str, Any]:
-        """The historical POST seam, kept for the merged #217 collect contract.
-
-        It predates :meth:`write_json` and exists only because the already-merged
-        ``tests/api_contract/test_tracking_collect_contract_source_derived.py``
-        pins this name as its single transport seam (that file belongs to #217
-        and is not edited here).  It applies the *same* verified criterion — exact
-        ``200`` plus the write envelope — and returns the decoded object, so it
-        can never accept a 2xx range or an upstream ``status`` field as success.
-        Production writes go through ``write_json`` (issue #216 AC2).
-        """
-        response = self.write_json("POST", endpoint, headers, payload, timeout=timeout)
-        if response.status_code != 200:
-            # Its historical contract is a status-only classification: the #101
-            # bounded message diagnostics belong to the subscription write seam
-            # (``write_json`` + ``create_subscription``), and the merged #217
-            # collect contract keeps every upstream message text inside the
-            # adapter, so this wrapper must not surface it either.
-            raise _status_only_failure(response.status_code, step="create_ab_subscription")
-        return response.payload
-
     def write_json(
         self,
         method: Literal["GET", "POST", "PATCH", "DELETE"],
@@ -234,6 +206,28 @@ class AutoBangumiHttpClient:
             "create_ab_subscription",
         )
 
+    def create_collection(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Reject a one-time collection until a Token write contract is verified.
+
+        Issue #217 keeps the collection capability on the same verified basis as
+        every other write: 3.1.18 password only.  The public call shape is still
+        validated first, so an invalid payload stays a validation failure and the
+        Bearer credential is never sent.
+        """
+
+        _validate_collection_payload(payload)
+        if self._config.auth_mode != "api_token" or not self._config.token:
+            raise Stage1Error(
+                "ab_submit_unsupported",
+                "当前 Auto Bangumi 认证模式暂不支持“下载现有资源”",
+                "collect_existing_resources",
+            )
+        raise Stage1Error(
+            "ab_submit_unsupported",
+            "当前 Auto Bangumi 认证模式暂不支持“下载现有资源”",
+            "collect_existing_resources",
+        )
+
     def probe(self) -> dict[str, Any]:
         """Probe a Token-authenticated service without attempting any write."""
 
@@ -275,6 +269,18 @@ class AutoBangumiHttpClient:
             "adapter": "api_token",
             "submit_supported": False,
         }
+
+
+#: The verified one-time collection endpoint (issue #217): ``POST
+#: /api/v1/rss/collect`` takes a *bare* ``Bangumi`` body and never creates an RSS
+#: subscription, unlike ``/api/v1/rss/subscribe``.
+_COLLECT_PATH = "/api/v1/rss/collect"
+
+#: The only Auto Bangumi version whose collection contract is verified.  Unlike
+#: the ``3.1.*`` subscribe family, collect is gated on this exact version: its
+#: upstream body shape, success envelope and dual-semantics 406 were established
+#: for 3.1.18 only (issue #217).
+_COLLECT_VERIFIED_VERSION = "3.1.18"
 
 
 class LegacyAutoBangumi31Client:
@@ -363,12 +369,60 @@ class LegacyAutoBangumi31Client:
             )
         raise write_failure(response, step="create_ab_subscription")
 
-    def _pre_write_check(self) -> None:
-        """Authenticate and verify the exact supported version before writing.
+    def create_collection(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Run one verified 3.1.18 one-time collection (issue #217).
+
+        The body is the bare ``Bangumi`` model the real instance declares, and
+        the result is judged by the very same channel as every other 3.1.18
+        write: an exact HTTP 200 that carries the verified ``{msg_en, msg_zh}``
+        envelope (issue #216).  Every other status — including the two
+        indistinguishable 406 semantics "filtered to nothing" and "downloader
+        already added / rejected" — becomes the stable definite failure, so a
+        rejection is never guessed to be a success (ADR-0001).
+
+        This is a *one-time* request: it creates no controlled external
+        subscription, sends no ``id`` (an upstream rule id would route the body
+        through Auto Bangumi's ``update`` path) and never reads anything back.
+        """
+
+        _validate_collection_payload(payload)
+        # The write boundary is entered only after the credential and the exact
+        # verified version are proven, so a bad connection/version is a definite,
+        # safely-retryable failure instead of an ambiguous external outcome.
+        self._pre_write_check(
+            required_version=_COLLECT_VERIFIED_VERSION,
+            step="collect_existing_resources",
+        )
+        response = self._write_json(
+            "POST",
+            api_endpoint(self._config.base_url, _COLLECT_PATH),
+            {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Cookie": self._session_cookie(),
+            },
+            payload,
+            step="collect_existing_resources",
+        )
+        if response.status_code == 200:
+            # The transport proved both facts: the exact 200 and the verified
+            # 3.1.18 write envelope.  There is no subscription id to report.
+            return deepcopy(response.payload)
+        raise write_failure(response, step="collect_existing_resources")
+
+    def _pre_write_check(
+        self,
+        *,
+        required_version: str | None = None,
+        step: str = "create_ab_subscription",
+    ) -> None:
+        """Authenticate and verify the supported version before writing.
 
         Raises a *pre-write* connection/version error, so the submit classifier
         can report a definite, user-actionable category (fix the connection /
         credentials / Auto Bangumi version) rather than an unknown outcome.
+        ``required_version`` demands that exact version (one-time collection);
+        without it the verified ``3.1.*`` family is accepted (subscribe).
         """
         try:
             self._authenticate()
@@ -380,11 +434,17 @@ class LegacyAutoBangumi31Client:
         except Stage1Error as exc:
             raise _as_pre_write_error(exc) from exc
         version = _status_version(status)
-        if not version.startswith("3.1."):
+        if required_version is not None and version != required_version:
             raise Stage1Error(
                 "ab_unsupported_version",
                 "当前 Auto Bangumi 版本暂不受支持",
-                "create_ab_subscription",
+                step,
+            )
+        if required_version is None and not version.startswith("3.1."):
+            raise Stage1Error(
+                "ab_unsupported_version",
+                "当前 Auto Bangumi 版本暂不受支持",
+                step,
             )
 
 
@@ -449,10 +509,12 @@ class LegacyAutoBangumi31Client:
         endpoint: str,
         headers: Mapping[str, str],
         payload: Any | None = None,
+        *,
+        step: str = "create_ab_subscription",
     ) -> AutoBangumiWriteResponse:
         try:
             return self._transport.write_json(
-                method, endpoint, headers, deepcopy(payload), timeout=self._timeout
+                method, endpoint, headers, deepcopy(payload), timeout=self._timeout, step=step
             )
         except Stage1Error:
             raise
@@ -685,19 +747,6 @@ def _decode_error_object(raw: bytes) -> dict[str, Any]:
     except (json.JSONDecodeError, UnicodeDecodeError):
         return {}
     return value if isinstance(value, dict) else {}
-
-
-def _status_only_failure(status_code: int, *, step: str) -> Stage1Error:
-    """The historical status-only write failure, without upstream message text."""
-    if status_code in (401, 403):
-        return Stage1Error(
-            "ab_auth_failed", "Auto Bangumi 认证失败", step,
-            {"status_code": status_code, "http_status": status_code},
-        )
-    return Stage1Error(
-        "ab_submit_failed", "Auto Bangumi HTTP 提交失败", step,
-        {"status_code": status_code, "http_status": status_code},
-    )
 
 
 def write_failure(response: AutoBangumiWriteResponse, *, step: str) -> Stage1Error:
@@ -1067,6 +1116,50 @@ def _decode_object(response_body: bytes, *, step: str) -> dict[str, Any]:
     if not isinstance(ab_response, dict):
         raise Stage1Error("invalid_ab_response", "Auto Bangumi 响应必须是 JSON 对象", step)
     return ab_response
+
+
+def _validate_collection_payload(payload: dict[str, Any]) -> None:
+    """Validate one bare ``Bangumi`` collection body before any external write.
+
+    Issue #217 refuses three shapes instead of repairing them:
+
+    - a non-object body (the endpoint takes the model, not a scalar/list);
+    - the ``{data, rss}`` subscribe wrapper (collect must never create an RSS
+      subscription);
+    - a body carrying ``id``: upstream routes an id-ed ``Bangumi`` through its
+      ``update`` path, so a one-time collection could silently modify an existing
+      rule — it is refused rather than dropped.
+
+    ``rss_link`` is required because an empty one makes Auto Bangumi fall back to
+    its own site search, which this product does not support.
+    """
+
+    if not isinstance(payload, Mapping):
+        raise Stage1Error(
+            "invalid_ab_payload",
+            "Auto Bangumi 3.1 一次性收集 payload 必须是对象",
+            "collect_existing_resources",
+        )
+    if "data" in payload or "rss" in payload:
+        raise Stage1Error(
+            "invalid_ab_payload",
+            "Auto Bangumi 3.1 一次性收集 payload 不能是订阅包装体",
+            "collect_existing_resources",
+        )
+    if "id" in payload:
+        raise Stage1Error(
+            "invalid_ab_payload",
+            "Auto Bangumi 3.1 一次性收集 payload 不得包含 id",
+            "collect_existing_resources",
+        )
+    rss_link = payload.get("rss_link")
+    if not isinstance(rss_link, str) or not rss_link.strip():
+        raise Stage1Error(
+            "invalid_ab_payload",
+            "Auto Bangumi 3.1 一次性收集 payload 缺少 rss_link",
+            "collect_existing_resources",
+            {"field": "rss_link"},
+        )
 
 
 def _validate_subscription_payload(payload: dict[str, Any]) -> dict[str, Any]:

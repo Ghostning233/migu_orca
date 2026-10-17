@@ -625,3 +625,126 @@ def _patch_readback(
         "apps.migu_orca_web.tracking_submission_service.compose_tracking_readback_external",
         lambda _config: read_snapshot,
     )
+
+
+class _OneTimeVerifySnapshot:
+    """A read-only snapshot that *would* match the plan's exact RSS identity.
+
+    It exists to prove the one-time guard: without it, external verification
+    would read this pre-existing subscription as the collection's success.
+    """
+
+    def __init__(
+        self,
+        subscriptions: list[ExternalSubscription],
+        rss_items: list[ExternalRss],
+    ) -> None:
+        self.subscriptions = subscriptions
+        self.rss_items = rss_items
+
+    def read_snapshot(self, *, deadline=None):
+        del deadline
+        capabilities = _ManagementSnapshot([], status="VERIFIED").capabilities
+        return capabilities, self.subscriptions, self.rss_items
+
+
+def test_verify_external_never_resolves_a_one_time_collection(tmp_path: Path) -> None:
+    """Issue #217 AC5: recovery must not turn a pre-existing subscription into
+    this one-time request's success.
+
+    A "download existing resources" operation creates no controlled external
+    subscription, so even a snapshot whose exact RSS matches the plan proves
+    nothing: the result stays manual recovery, no controlled mapping is written
+    and the operation is not marked succeeded.
+    """
+    from storage_engine.controllers.operation_repository import (
+        bind_tracking_operation,
+        compare_and_swap_tracking_operation,
+        load_tracking_operation,
+    )
+    from tracking_engine.models.operation import (
+        TRACKING_OPERATION_KIND_SUBMIT,
+        TRACKING_OPERATION_STATE_IN_PROGRESS,
+        TRACKING_OPERATION_STATE_PREPARED,
+        TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
+        TRACKING_SUBMISSION_MODE_DOWNLOAD_EXISTING,
+        transition_tracking_operation,
+    )
+
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    config = _config(tmp_path)
+    stored_request = load_request_snapshot(config, request["request_id"])
+    rss_url = stored_request["confirmable_config"]["selected_rss_url"]
+    bound, created = bind_tracking_operation(
+        config,
+        tracking_id=record.tracking_id,
+        operation=TRACKING_OPERATION_KIND_SUBMIT,
+        idempotency_key="one-time-key",
+        expected_revision=record.revision,
+        request_fingerprint=record.request_fingerprint or "fingerprint",
+        connection_ref=SAVED_GENERATION[0],
+        submission_mode=TRACKING_SUBMISSION_MODE_DOWNLOAD_EXISTING,
+        now="2026-09-08T00:00:00+00:00",
+    )
+    assert created is True
+    in_flight = compare_and_swap_tracking_operation(
+        config,
+        bound.operation_id,
+        expected_state=TRACKING_OPERATION_STATE_PREPARED,
+        record=transition_tracking_operation(
+            bound, state=TRACKING_OPERATION_STATE_IN_PROGRESS, now="2026-09-08T00:00:00+00:00"
+        ),
+    )
+    compare_and_swap_tracking_operation(
+        config,
+        bound.operation_id,
+        expected_state=TRACKING_OPERATION_STATE_IN_PROGRESS,
+        record=transition_tracking_operation(
+            in_flight,
+            state=TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
+            error_type="result_persist_failed",
+            now="2026-09-08T00:00:01+00:00",
+        ),
+    )
+    recovering = _move_record(
+        tmp_path,
+        record,
+        TRACKING_STATUS_RECOVERY_REQUIRED,
+        current_operation_id=bound.operation_id,
+    )
+
+    result = run_tracking_recover(
+        config,
+        tracking_id=record.tracking_id,
+        expected_revision=recovering.revision,
+        action="VERIFY_EXTERNAL",
+        confirm=False,
+        ab_config=build_ab_config(AB_CONFIG),
+        connection_ref=SAVED_GENERATION[0],
+        expected_operation_id=bound.operation_id,
+        expected_operation_kind=TRACKING_OPERATION_KIND_SUBMIT,
+        management_client=_OneTimeVerifySnapshot(
+            [
+                ExternalSubscription(
+                    "ab-1",
+                    "芙莉莲",
+                    1,
+                    "喵萌",
+                    rss_urls=(rss_url,),
+                    rss_ids=("rss-1",),
+                )
+            ],
+            [ExternalRss("rss-1", "芙莉莲", rss_url)],
+        ),
+    )
+
+    assert result["needs_manual"] is True
+    assert result["outcome"] == TRACKING_STATUS_RECOVERY_REQUIRED
+    stored = load_tracking_record(config, record.tracking_id)
+    assert stored.external_mapping is None
+    assert stored.status == TRACKING_STATUS_RECOVERY_REQUIRED
+    assert (
+        load_tracking_operation(config, bound.operation_id).state
+        == TRACKING_OPERATION_STATE_RECOVERY_REQUIRED
+    )

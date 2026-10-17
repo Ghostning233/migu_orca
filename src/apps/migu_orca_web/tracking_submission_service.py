@@ -43,7 +43,10 @@ from typing import Any
 from uuid import UUID
 
 from ab_engine.controllers.ab_management_factory import create_management_client
-from ab_engine.controllers.tracking_submit_adapter import compose_tracking_submit_one
+from ab_engine.controllers.tracking_submit_adapter import (
+    collect_existing_resources,
+    compose_tracking_submit_one,
+)
 from apps.migu_orca_web.save_confirm_service import compute_request_fingerprint
 from apps.migu_orca_web.schemas import (
     SavedTrackingBatchSubmitInput,
@@ -165,22 +168,16 @@ _REPLAY_SAFE_MESSAGE: dict[str, str] = {
 
 
 def compose_tracking_collect_one() -> Callable[..., Any]:
-    """Return the Auto Bangumi one-time collection seam (issue #98).
+    """Return the Auto Bangumi one-time collection seam (issues #98/#217).
 
-    Auto Bangumi 3.1.18's exact “download the existing resources” endpoint is not
-    yet a verified contract in this repository, so the default implementation
-    fails closed with a stable error instead of writing to an unverified path.
-    Tests and the future verified adapter inject their own callable here.
+    The default implementation is the verified 3.1.18 ``POST /api/v1/rss/collect``
+    adapter: password connections on the exact verified version only, judged by
+    the exact-200 write envelope of issue #216, with every other status, timeout
+    or connection failure mapped to the same retryable 提交失败 (ADR-0001).
+    Tests inject their own callable here.
     """
 
-    def collect_one(_request: dict[str, Any], _config: Any) -> dict[str, Any]:
-        raise Stage1Error(
-            "ab_submit_unsupported",
-            "当前 Auto Bangumi 版本暂不支持“下载现有资源”",
-            "collect_existing_resources",
-        )
-
-    return collect_one
+    return collect_existing_resources
 
 
 def compose_tracking_readback_external(config: Any) -> Callable[[], Any]:
@@ -547,22 +544,28 @@ def run_saved_tracking_retry(
     readback_external: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
     """Retry only a definitely failed submit using the saved AB connection."""
+    coerced = _coerce_saved_submit_input(
+        payload,
+        tracking_id=tracking_id,
+        expected_revision=expected_revision,
+        idempotency_key=idempotency_key,
+        confirm=confirm,
+        connection_ref=connection_ref,
+        configuration_revision=configuration_revision,
+    )
     return _run_saved_tracking_submission(
         config,
-        payload=_coerce_saved_submit_input(
-            payload,
-            tracking_id=tracking_id,
-            expected_revision=expected_revision,
-            idempotency_key=idempotency_key,
-            confirm=confirm,
-            connection_ref=connection_ref,
-            configuration_revision=configuration_revision,
-        ),
+        payload=coerced,
         repository=repository,
         start_statuses=frozenset({TRACKING_STATUS_SUBMIT_FAILED}),
         submit_one=submit_one,
         persist_ab_result=persist_ab_result,
         readback_external=readback_external,
+        # Issue #217: the retry must keep the submission mode the client asked
+        # for.  Dropping it would silently turn a failed one-time "download
+        # existing resources" retry into a subscription write, which is a
+        # different operation semantics (ADR-0001).
+        submission_mode=coerced.submission_mode,
         now=now,
     )
 
@@ -797,7 +800,19 @@ def _replay_terminal_outcome(
     timestamp: str,
 ) -> dict[str, Any]:
     """Replay a same-key terminal operation's public outcome (no external call)."""
-    outcome = tracking_status_for_operation_state(operation.state)
+    # Issue #217: a one-time "download existing resources" success is
+    # 已加入下载, never ACTIVE.  The replay reads the persisted operation mode (the
+    # same key must always answer with the same public outcome), and it also
+    # reconciles a record left mid-flight by a crash to that same status.
+    one_time_success = (
+        operation.submission_mode == TRACKING_SUBMISSION_MODE_DOWNLOAD_EXISTING
+        and operation.state == TRACKING_OPERATION_STATE_SUCCEEDED
+    )
+    outcome = (
+        TRACKING_STATUS_ADDED_TO_DOWNLOAD
+        if one_time_success
+        else tracking_status_for_operation_state(operation.state)
+    )
     reconciled = record
     if record.status == TRACKING_STATUS_SUBMITTING and record.status != outcome:
         # A crash between the record-final write and the operation-terminal
@@ -808,7 +823,11 @@ def _replay_terminal_outcome(
             audit_action=_REPLAY_AUDIT_ACTION[operation.state],
             audit_actor=TRACKING_AUDIT_ACTOR_SYSTEM,
             operation_id=operation.operation_id,
-            safe_message=_REPLAY_SAFE_MESSAGE[operation.state],
+            safe_message=(
+                ADDED_TO_DOWNLOAD_MESSAGE
+                if one_time_success
+                else _REPLAY_SAFE_MESSAGE[operation.state]
+            ),
             now=timestamp,
         )
         try:
@@ -948,6 +967,14 @@ def _submit_through_external(
             _raise_operation_in_progress(record)
         raise
     operation = in_flight
+
+    # Issue #217: the persistent operation is the authority for the submission
+    # mode.  A PREPARED resume (crash between the bind and the durable
+    # PREPARED -> IN_PROGRESS gate) resolves through a path that carries no mode,
+    # so deriving it here prevents a one-time "download existing resources"
+    # request from ever degrading into an RSS subscription write (ADR-0001).
+    if submission_mode is None and operation is not None:
+        submission_mode = operation.submission_mode
 
     one_time = submission_mode == TRACKING_SUBMISSION_MODE_DOWNLOAD_EXISTING
     if one_time:
@@ -1235,6 +1262,7 @@ def _finalize_external_outcome(
     _sync_queue_projection(config, record_final, outcome)
     return _submit_result_payload(
         record=record_final,
+        ab_result=ab_result,
         outcome=outcome,
         checked_revision=expected_revision,
         operation_id=operation.operation_id,

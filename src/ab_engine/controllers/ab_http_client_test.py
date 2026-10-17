@@ -16,7 +16,10 @@ from ab_engine.controllers.ab_http_client import (
     create_legacy_3_1_auto_bangumi_client,
     write_failure,
 )
-from ab_engine.controllers.subscription_payload import build_legacy_31_subscription_payload
+from ab_engine.controllers.subscription_payload import (
+    build_legacy_31_collection_payload,
+    build_legacy_31_subscription_payload,
+)
 from request_engine.controllers.request_controller import accept_request, build_pending_request
 from shared.errors import Stage1Error
 from shared.models import EntryRequest, FilterRule, MatchedBangumi, SubtitleGroupSelection
@@ -403,3 +406,153 @@ def test_submit_classifies_a_duplicate_subscription_with_bounded_upstream_reason
         "message_zh": canary,
         "message_en": "Subscription already exists.",
     }
+
+
+# -- issue #217: the verified one-time collection adapter ---------------------
+
+COLLECT_ENDPOINT = "/api/v1/rss/collect"
+
+
+def _collect_payload() -> dict[str, Any]:
+    request = accept_request(build_pending_request(
+        EntryRequest("番剧"), MatchedBangumi("番剧", [], "https://example.invalid/bangumi", 1.0), [],
+        SubtitleGroupSelection("Loli", "https://example.invalid/rss.xml", []),
+        FilterRule(must_contain="1080p", must_not_contain="SP"), "番剧",
+    ))
+    return build_legacy_31_collection_payload(request)
+
+
+def _collect_transport(
+    *,
+    version: str = "3.1.18",
+    write: Any = None,
+) -> _RecordingTransport:
+    """One login, one status and one scripted collect write."""
+    return _RecordingTransport([
+        {"access_token": "secret-cookie"},
+        {"version": version},
+        write if write is not None else AutoBangumiWriteResponse(
+            200, {"msg_en": "Collections completed.", "msg_zh": "收集完成。"}
+        ),
+    ])
+
+
+def test_collect_posts_the_bare_bangumi_body_to_the_verified_path() -> None:
+    """Issue #217 AC2: the real instance's requestBody is a bare ``Bangumi``."""
+    transport = _collect_transport()
+
+    assert create_auto_bangumi_submit_client(
+        _password_config(), transport=transport
+    ).create_collection(_collect_payload()) == {
+        "msg_en": "Collections completed.",
+        "msg_zh": "收集完成。",
+    }
+
+    writes = [
+        call
+        for call in transport.calls
+        if call["method"] == "POST" and COLLECT_ENDPOINT in call["endpoint"]
+    ]
+    assert len(writes) == 1
+    body = writes[0]["payload"]
+    assert set(body).isdisjoint({"id", "data", "rss"})
+    assert body["rss_link"] == "https://example.invalid/rss.xml"
+    assert body["filter"] == "(?is)(?:^(?!.*(?:1080p)).*$|.*(?:SP).*)"
+    # The session Cookie stays inside the adapter's own exchange.
+    assert writes[0]["headers"]["Cookie"] == "token=secret-cookie"
+
+
+@pytest.mark.parametrize(
+    ("status", "expected_error"),
+    [
+        # The recorded 3.1.18 collect rejection: either "filtered to nothing" or
+        # "downloader rejected / already added", and never a success.
+        (406, "ab_submit_failed"),
+        (401, "ab_auth_failed"),
+        (403, "ab_auth_failed"),
+        (422, "ab_submit_failed"),
+        (500, "ab_submit_failed"),
+        # 201/204/302 are outside the exact-200 criterion of issue #216.
+        (201, "ab_submit_failed"),
+        (204, "ab_submit_failed"),
+        (302, "ab_submit_failed"),
+    ],
+)
+def test_collect_maps_every_non_200_to_a_definite_failure(
+    status: int, expected_error: str
+) -> None:
+    canary = "收集 番剧 第 1 季失败, 种子已经添加。"
+    transport = _collect_transport(
+        write=AutoBangumiWriteResponse(status, {"msg_en": "failed", "msg_zh": canary})
+    )
+
+    with pytest.raises(Stage1Error) as failure:
+        create_auto_bangumi_submit_client(
+            _password_config(), transport=transport
+        ).create_collection(_collect_payload())
+
+    assert failure.value.error_type == expected_error
+    assert failure.value.failed_step == "collect_existing_resources"
+    if expected_error == "ab_submit_failed":
+        assert failure.value.details["status_code"] == status
+        assert failure.value.details["http_status"] == status
+    # The fixed message never echoes the upstream text, which only ever travels
+    # as the bounded, sanitized diagnostics value.
+    assert canary not in failure.value.message
+    assert "secret-cookie" not in str(failure.value.details or {})
+
+
+@pytest.mark.parametrize("version", ["3.1.17", "3.1.19", "3.2.0", "2.6.0"])
+def test_collect_requires_the_exact_verified_version_without_writing(version: str) -> None:
+    """Issue #217 AC2: collect is gated on exactly 3.1.18, with zero writes."""
+    transport = _collect_transport(version=version)
+
+    with pytest.raises(Stage1Error) as failure:
+        create_auto_bangumi_submit_client(
+            _password_config(), transport=transport
+        ).create_collection(_collect_payload())
+
+    assert failure.value.error_type == "ab_unsupported_version"
+    assert failure.value.failed_step == "collect_existing_resources"
+    assert not any(COLLECT_ENDPOINT in call["endpoint"] for call in transport.calls)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        # The subscribe wrapper: collect must never create an RSS subscription.
+        {"data": {"official_title": "番剧"}, "rss": {"url": "https://example.invalid/rss.xml"}},
+        # An upstream rule id would route the body through ``update``.
+        {"id": 7, "official_title": "番剧", "rss_link": "https://example.invalid/rss.xml"},
+        # An empty ``rss_link`` makes Auto Bangumi fall back to its site search.
+        {"official_title": "番剧", "rss_link": ""},
+        {"official_title": "番剧"},
+        "not-an-object",
+    ],
+)
+def test_collect_refuses_an_invalid_payload_without_any_external_call(payload: Any) -> None:
+    """Issue #217 AC2: an invalid payload is a validation failure with zero writes."""
+    transport = _collect_transport()
+
+    with pytest.raises(Stage1Error) as failure:
+        create_auto_bangumi_submit_client(
+            _password_config(), transport=transport
+        ).create_collection(payload)
+
+    assert failure.value.error_type == "invalid_ab_payload"
+    assert failure.value.failed_step == "collect_existing_resources"
+    assert transport.calls == []
+
+
+def test_token_client_cannot_collect_without_a_write_request() -> None:
+    """Issue #217 AC2: only the verified password capability may collect."""
+    transport = _collect_transport()
+
+    with pytest.raises(Stage1Error) as failure:
+        create_auto_bangumi_submit_client(
+            _token_config(), transport=transport
+        ).create_collection(_collect_payload())
+
+    assert failure.value.error_type == "ab_submit_unsupported"
+    assert failure.value.failed_step == "collect_existing_resources"
+    assert transport.calls == []

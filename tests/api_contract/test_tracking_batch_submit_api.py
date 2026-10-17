@@ -38,7 +38,11 @@ from storage_engine.controllers.storage_config import (
     load_storage_config,
 )
 from storage_engine.controllers.tracking_repository import load_tracking_record
-from tests.api_contract.ab_write_envelopes import SOURCE_DERIVED_SUBSCRIBE_ENVELOPE
+from tests.api_contract.ab_write_envelopes import (
+    SOURCE_DERIVED_COLLECT_ENVELOPE,
+    SOURCE_DERIVED_COLLECT_REJECTED_ENVELOPE,
+    SOURCE_DERIVED_SUBSCRIBE_ENVELOPE,
+)
 from tracking_engine.controllers.submit import classify_external_submit_result
 from tracking_engine.models.operation import (
     TRACKING_OPERATION_STATE_FAILED,
@@ -384,6 +388,100 @@ def test_batch_applies_one_mode_to_every_entry(
         # A one-time batch never claims a controlled external subscription.
         assert (stored.external_mapping is None) == (mode == "DOWNLOAD_EXISTING")
     assert len(calls) == 2
+
+
+class _OneTimeBatchAbOpener:
+    """The verified 3.1.18 surface for a one-time batch, one collect per entry.
+
+    Only the socket is replaced: the real payload builder, the real 3.1.18
+    adapter (login, exact-version gate, exact-200 write envelope) and the real
+    persistence all run for every batch entry.
+    """
+
+    def __init__(self, collect_results: list[tuple[int, bytes]]) -> None:
+        self._results = list(collect_results)
+        self.calls: list[str] = []
+        self.collect_bodies: list[Any] = []
+
+    def exchange(self, method: str, endpoint: str, headers: Any, body: Any, **kwargs: Any):
+        path = urlsplit(endpoint).path
+        self.calls.append(f"{method} {path}")
+        if path == "/api/v1/auth/login":
+            return 200, {}, b'{"access_token": "ab-session"}'
+        if path == "/api/v1/status":
+            return 200, {}, b'{"version": "3.1.18"}'
+        if path == "/api/v1/rss/collect":
+            self.collect_bodies.append(json.loads((body or b"{}").decode("utf-8")))
+            if len(self._results) > 1:
+                status, payload = self._results.pop(0)
+            else:
+                status, payload = self._results[0]
+            return status, {}, payload
+        if path in ("/api/v1/bangumi/get/all", "/api/v1/rss"):
+            return 200, {}, b"[]"
+        raise AssertionError(f"unexpected Auto Bangumi path: {path}")  # pragma: no cover
+
+
+def test_batch_one_time_entry_failure_never_pollutes_the_other_entries(
+    tmp_path: Path,
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #217 AC6: per-entry isolation on the one-time path.
+
+    Entry 1 is an accepted collection (已加入下载) and entry 2 is the 406
+    rejection; every entry keeps its own operation, its own mode and its own
+    verdict, no controlled external subscription is claimed for either, and not
+    a single RSS subscription is created.
+    """
+    connection, records = _seed_records(tmp_path, 2)
+    urls = _distinct_rss_urls(tmp_path, records)
+    opener = _OneTimeBatchAbOpener(
+        [
+            (200, json.dumps(SOURCE_DERIVED_COLLECT_ENVELOPE).encode("utf-8")),
+            (406, json.dumps(SOURCE_DERIVED_COLLECT_REJECTED_ENVELOPE).encode("utf-8")),
+        ]
+    )
+    monkeypatch.setattr("ab_engine.controllers.ab_http_client._exchange", opener.exchange)
+
+    response = _post(client, _batch_body(connection, records, submission_mode="DOWNLOAD_EXISTING"))
+
+    assert response.status_code == 200
+    result = response.get_json()["result"]
+    assert result["summary"] == {
+        "total": 2, "succeeded": 1, "failed": 1, "unknown": 0, "blocked": 0,
+    }
+    assert [entry["result"]["outcome"] for entry in result["items"]] == [
+        "ADDED_TO_DOWNLOAD",
+        "SUBMIT_FAILED",
+    ]
+    assert [entry["ok"] for entry in result["items"]] == [True, False]
+    # The failed entry publishes its bounded 406 diagnostics, never a raw body.
+    assert result["items"][1]["result"]["diagnostics"]["http_status"] == 406
+
+    config = _config(tmp_path)
+    stored = [load_tracking_record(config, record.tracking_id) for record in records]
+    assert [record.status for record in stored] == ["ADDED_TO_DOWNLOAD", "SUBMIT_FAILED"]
+    assert all(record.external_mapping is None for record in stored)
+    operations = [
+        load_tracking_operation(config, record.current_operation_id) for record in stored
+    ]
+    assert [operation.submission_mode for operation in operations] == [
+        "DOWNLOAD_EXISTING",
+        "DOWNLOAD_EXISTING",
+    ]
+    assert [operation.state for operation in operations] == [
+        TRACKING_OPERATION_STATE_SUCCEEDED,
+        TRACKING_OPERATION_STATE_FAILED,
+    ]
+    assert len({operation.operation_id for operation in operations}) == 2
+    # Two collections, one per entry; a one-time batch never creates an RSS.
+    assert opener.calls.count("POST /api/v1/rss/collect") == 2
+    assert "POST /api/v1/rss/subscribe" not in opener.calls
+    # Every body is the bare Bangumi model of *its own* plan, with no id.
+    assert [body["rss_link"] for body in opener.collect_bodies] == urls
+    for body in opener.collect_bodies:
+        assert set(body).isdisjoint({"id", "data", "rss"})
 
 
 def test_batch_rejects_a_per_entry_submission_mode(
