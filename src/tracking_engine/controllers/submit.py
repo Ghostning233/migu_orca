@@ -86,6 +86,10 @@ SUBMIT_FAILURE_CATEGORIES = (
     "CONNECTION",
     "AUTHENTICATION",
     "VERSION",
+    #: Issue #216: the saved connection cannot submit at all (for example an
+    #: API Token connection, or an unverified adapter).  This is a capability
+    #: fact, not a version fact: the version may be exactly the verified one.
+    "CAPABILITY",
     "DUPLICATE_SUBSCRIPTION",
     "VALIDATION",
     "REJECTED",
@@ -102,7 +106,9 @@ _FAILURE_CATEGORY_BY_ERROR_TYPE = {
     "ab_timeout_pre_write": "CONNECTION",
     "ab_auth_failed": "AUTHENTICATION",
     "ab_unsupported_version": "VERSION",
-    "ab_submit_unsupported": "VERSION",
+    # Issue #216: an unsupported submit *capability* must not be presented as a
+    # version mismatch, because the version is often exactly the verified one.
+    "ab_submit_unsupported": "CAPABILITY",
     "ab_duplicate_subscription": "DUPLICATE_SUBSCRIPTION",
     "config_error": "VALIDATION",
     "invalid_ab_payload": "VALIDATION",
@@ -315,7 +321,9 @@ _CONFIRM_REASON_BY_ERROR_TYPE = {
     "ab_timeout_pre_write": CONFIRM_REASON_CONNECTION,
     "ab_auth_failed": CONFIRM_REASON_AUTHENTICATION,
     "ab_unsupported_version": CONFIRM_REASON_VERSION,
-    "ab_submit_unsupported": CONFIRM_REASON_VERSION,
+    # Issue #216: an unsupported submit capability (for example an API Token
+    # connection) is a capability fact, never a version mismatch.
+    "ab_submit_unsupported": CONFIRM_REASON_CAPABILITY,
     "ab_management_unsupported": CONFIRM_REASON_CAPABILITY,
     "invalid_ab_response": CONFIRM_REASON_UNREADABLE,
     "ab_management_failed": CONFIRM_REASON_UNREADABLE,

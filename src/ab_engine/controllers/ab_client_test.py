@@ -52,16 +52,33 @@ def test_submit_ab_subscription_accepts_alternate_subscription_id_field() -> Non
     assert result["ab_subscription_id"] == "sub-123"
 
 
-def test_submit_ab_subscription_accepts_legacy_status_success_without_id() -> None:
-    result = submit_ab_subscription(FakeAutoBangumiClient(response={"status": True}), _payload())
+def test_submit_ab_subscription_accepts_the_verified_write_envelope_without_id() -> None:
+    """Issue #216: the real 3.1.18 write envelope has no id and no status field.
+
+    The envelope proves the write itself; ownership is established by the exact
+    read-back, so a missing id stays a clean success rather than a false failure.
+    """
+    envelope = {"msg_en": "Subscribe successfully.", "msg_zh": "订阅成功。"}
+    result = submit_ab_subscription(FakeAutoBangumiClient(response=envelope), _payload())
 
     assert result == {
         "success": True,
         "ab_subscription_id": None,
-        "ab_response": {"status": True},
+        "ab_response": envelope,
         "fallback_config": None,
         "error": None,
     }
+
+
+def test_submit_ab_subscription_fails_closed_on_an_unrecognized_success_body() -> None:
+    """The disproved ``{"status": true}`` body is neither an id nor the envelope."""
+    result = submit_ab_subscription(
+        FakeAutoBangumiClient(response={"status": True}), _payload()
+    )
+
+    assert result["success"] is False
+    assert result["ab_response"] is None
+    assert result["error"]["error_type"] == "invalid_ab_submit_result"
 
 
 def test_submit_ab_subscription_converts_controlled_failure_to_submit_result() -> None:

@@ -8,7 +8,12 @@ from typing import Any, Literal, Protocol
 from urllib.parse import quote, urlsplit
 
 from ab_engine.controllers.ab_config import AutoBangumiConfig
-from ab_engine.controllers.ab_http_client import AutoBangumiLegacyTransport, api_endpoint
+from ab_engine.controllers.ab_http_client import (
+    AutoBangumiLegacyTransport,
+    AutoBangumiWriteResponse,
+    api_endpoint,
+    write_failure,
+)
 from ab_engine.models.management import (
     AutoBangumiCapabilities,
     ExternalRss,
@@ -178,7 +183,7 @@ class Legacy31ManagementClient:
                 raise Stage1Error("ab_unsupported_version", "当前 Auto Bangumi 版本暂不受支持", "ab_management")
             if method in {"POST", "PATCH"}:
                 headers = {**headers, "Content-Type": "application/json"}
-            return _action_response(self._request(method, path, headers, payload))
+            return _action_response(self._write_request(method, path, headers, payload))
         finally:
             self._token = None
 
@@ -198,7 +203,7 @@ class Legacy31ManagementClient:
                 raise Stage1Error("ab_unsupported_version", "当前 Auto Bangumi 版本暂不受支持", "ab_management")
             if method == "PATCH":
                 headers = {**headers, "Content-Type": "application/json"}
-            response = self._request(method, path, headers, payload)
+            response = self._write_request(method, path, headers, payload)
             return _action_response(response)
         finally:
             self._token = None
@@ -239,27 +244,63 @@ class Legacy31ManagementClient:
         headers: Mapping[str, str],
         payload: Any = None,
     ) -> Any:
-        """One request whose top-level shape is validated by its own endpoint.
+        """One read whose top-level shape is validated by its own endpoint.
 
         This is only for the verified 3.1.18 list endpoints, which answer with a
         bare JSON array; the shape is still checked by ``_items`` immediately
         after, so nothing becomes shape-agnostic (issue #182).
         """
-        timeout = self._timeout
-        if self._deadline is not None:
-            remaining = self._deadline - self._monotonic()
-            if remaining <= 0:
-                raise Stage1Error(
-                    "ab_timeout", "Auto Bangumi HTTP 请求超时", "ab_management",
-                    {"category": "timeout"},
-                )
-            timeout = min(timeout, remaining)
+        timeout = self._attempt_timeout()
         try:
             return self._transport.request_json(method, api_endpoint(self._config.base_url, path), headers, payload, timeout=timeout)
         except Stage1Error:
             raise
         except Exception as exc:
             raise Stage1Error("ab_management_failed", "Auto Bangumi 管理请求失败", "ab_management", {"reason": exc.__class__.__name__}) from exc
+
+    def _write_request(
+        self,
+        method: Literal["GET", "POST", "PATCH", "DELETE"],
+        path: str,
+        headers: Mapping[str, str],
+        payload: Any = None,
+    ) -> AutoBangumiWriteResponse:
+        """One write returned as its exact HTTP status plus validated body.
+
+        The transport never decides success from a range of 2xx statuses and the
+        3.1.18 write endpoints send no ``status`` field, so the exact status
+        travels with the body and ``_action_response`` classifies it (issue #216).
+        """
+        timeout = self._attempt_timeout()
+        try:
+            return self._transport.write_json(
+                method,
+                api_endpoint(self._config.base_url, path),
+                headers,
+                payload,
+                timeout=timeout,
+                step="ab_management",
+            )
+        except Stage1Error:
+            raise
+        except Exception as exc:
+            raise Stage1Error("ab_management_failed", "Auto Bangumi 管理请求失败", "ab_management", {"reason": exc.__class__.__name__}) from exc
+
+    def _attempt_timeout(self) -> float:
+        """One request's share of the endpoint budget (issue #183).
+
+        A multi-request read shares one absolute deadline, so a sub-request gets
+        only the time actually left instead of a fresh per-request timeout.
+        """
+        if self._deadline is None:
+            return self._timeout
+        remaining = self._deadline - self._monotonic()
+        if remaining <= 0:
+            raise Stage1Error(
+                "ab_timeout", "Auto Bangumi HTTP 请求超时", "ab_management",
+                {"category": "timeout"},
+            )
+        return min(self._timeout, remaining)
 
 
 def create_legacy_31_management_client(
@@ -439,28 +480,21 @@ def _request_url(value: Any) -> str:
     return _url(value)
 
 
-def _action_response(response: Mapping[str, Any]) -> dict[str, Any]:
-    """Keep action results bounded and reject malformed upstream responses."""
-    if not isinstance(response, Mapping) or len(response) > 32:
+def _action_response(response: AutoBangumiWriteResponse) -> dict[str, Any]:
+    """Classify one management write by its exact HTTP status (issue #216).
+
+    Auto Bangumi 3.1.18 answers an accepted action with an exact ``200`` whose
+    body is ``{"msg_en": ..., "msg_zh": ...}``; the body carries no ``status``
+    field at all, so the status code is the only accepted-action evidence.  A
+    ``401``/``403`` is an authentication failure, a ``406`` (and every other
+    non-200) is a definite write failure, so nothing can be read as accepted
+    from an unknown or malformed body.
+    """
+    if not isinstance(response, AutoBangumiWriteResponse):
         raise Stage1Error("invalid_ab_response", "Auto Bangumi 管理响应无效", "ab_management")
-    result: dict[str, Any] = {}
-    for key, value in response.items():
-        if not isinstance(key, str) or len(key) > 64:
-            raise Stage1Error("invalid_ab_response", "Auto Bangumi 管理响应无效", "ab_management")
-        if key.lower() in {"token", "access_token", "cookie", "password", "authorization"}:
-            continue
-        if isinstance(value, (str, int, float, bool)) or value is None:
-            result[key] = value
-    # The coordinator consumes a bounded transport classification, never the
-    # upstream body.  Auto Bangumi 3.1.18 signals accepted actions with
-    # ``status: true`` rather than an HTTP status field.
-    if response.get("status") is True:
-        result["status_code"] = 200
-    elif response.get("status") is False:
-        result["status_code"] = 400
-    else:
-        result["status_code"] = 502
-    return result
+    if response.status_code != 200:
+        raise write_failure(response, step="ab_management")
+    return {"status_code": 200}
 
 
 def _text(value: Any, field: str, *, required: bool = False) -> str:

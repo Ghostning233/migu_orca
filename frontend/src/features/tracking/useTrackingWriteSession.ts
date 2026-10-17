@@ -512,7 +512,11 @@ const SUBMIT_OUTCOMES = [
 ] as const satisfies readonly TrackingSubmitResult['outcome'][]
 
 const WRITE_FAILURE_CATEGORIES = [
-  'CONNECTION', 'AUTHENTICATION', 'VERSION', 'DUPLICATE_SUBSCRIPTION',
+  'CONNECTION', 'AUTHENTICATION', 'VERSION',
+  // Issue #216: the saved connection cannot submit at all (for example an API
+  // Token connection). It is a capability fact, never a version mismatch.
+  'CAPABILITY',
+  'DUPLICATE_SUBSCRIPTION',
   'VALIDATION', 'REJECTED', 'OUTCOME_UNKNOWN',
 ] as const
 
@@ -544,6 +548,11 @@ const WRITE_FAILURE_PRESENTATIONS: Readonly<Record<WriteFailureCategory, WriteFa
   VERSION: {
     title: 'Auto Bangumi 版本不受支持',
     message: '当前 Auto Bangumi 版本不在已验证的 3.1.18 能力范围内。请前往设置确认版本后重试；本次未创建外部订阅。',
+    channel: 'dialog',
+  },
+  CAPABILITY: {
+    title: '当前连接不支持创建订阅',
+    message: '保存的连接类型当前不支持创建外部订阅（例如 API Token 模式）。请前往设置改用已验证的账号密码连接后重试；本次未创建外部订阅。',
     channel: 'dialog',
   },
   DUPLICATE_SUBSCRIPTION: {

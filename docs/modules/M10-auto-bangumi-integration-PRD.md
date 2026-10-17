@@ -102,7 +102,7 @@ uv run migu-orca "番剧名" --action accept --submit-ab --ab-config config/user
 ## 6. 已实现契约
 
 1. 账号密码 adapter 以 form POST `/api/v1/auth/login` 登录，将返回 token 保持为单次 client Cookie；只读探测使用 `/api/v1/status`。
-2. AutoBangumi 3.1.18 payload 由已接受 Request 纯函数映射为 `{data: Bangumi, rss: RSSItem}`，`status=true` 即成功，外部订阅 ID 可为空；不可无损表达的筛选规则会明确拒绝。
+2. AutoBangumi 3.1.18 payload 由已接受 Request 纯函数映射为 `{data: Bangumi, rss: RSSItem}`；写入成功以**精确 HTTP 200 且响应体为 `{msg_en, msg_zh}` 写信封**判断（写响应不含 `status`，判据见 #216），外部订阅 ID 由精确回查确定且可为空；不可无损表达的筛选规则会明确拒绝。
 3. `api_token` adapter 仅用 Bearer 执行已验证的只读探测；在缺少逐版本写契约时 fail closed，绝不套用 3.1 payload。
 4. AB client 暴露 `create_subscription(payload)`。
 5. 所有 client 结果通过 `submit_ab_subscription(...)` 归一化为稳定 submit result envelope。
@@ -116,7 +116,7 @@ uv run migu-orca "番剧名" --action accept --submit-ab --ab-config config/user
 | Q-M10-01 | AB 是否提供稳定 API？ | 是 | 3.1.18 实机 OpenAPI 已确认；其他版本按 adapter 能力 fail closed |
 | Q-M10-02 | AB 创建订阅需要哪些真实字段？ | 是 | Stage 24 对齐 3.1.18 `{data: Bangumi, rss: RSSItem}` |
 | Q-M10-03 | AB 认证方式是否只需 token？ | 是 | 否；3.1.18 默认账号密码登录/Cookie，新版兼容 API Token/Bearer |
-| Q-M10-04 | 创建订阅后如何确认成功？ | 是 | 3.1.18 使用 `status=true`，外部订阅 ID 可选；其他 adapter 独立定义 |
+| Q-M10-04 | 创建订阅后如何确认成功？ | 是 | 3.1.18 使用精确 HTTP 200 ＋ `{msg_en, msg_zh}` 写信封，外部订阅 ID 由精确回查确定（可选）；其他 adapter 独立定义 |
 | Q-M10-05 | AB 降级 JSON 的 schema 如何定义？ | 否 | Stage 3 已有内部 fallback_config，后续可按真实 AB 导入能力调整 |
 | Q-M10-06 | AB 调用失败是否需要重试？ | 否 | 默认不自动重试 |
 
@@ -132,7 +132,7 @@ M10 不直接调用 qBittorrent。Auto Bangumi 创建订阅后的下载行为仍
 
 1. 旧 `endpoint + Bearer token + {title,rss_url,save_path,filter_rule}` 不再是有效提交契约。
 2. 默认 `password` adapter 接收服务根地址、用户名和密码：form 登录 `/api/v1/auth/login`，将返回 token 作为单次会话 Cookie，3.1.18 只读探测使用 `/api/v1/status`。
-3. 3.1.18 写入使用 `/api/v1/rss/subscribe` 与 `{data: Bangumi, rss: RSSItem}`；`status=true` 表示成功，外部订阅 ID 可为空。
+3. 3.1.18 写入使用 `/api/v1/rss/subscribe` 与 `{data: Bangumi, rss: RSSItem}`；精确 HTTP 200 ＋ `{msg_en, msg_zh}` 信封表示成功（写响应不含 `status`），外部订阅 ID 由精确回查确定且可为空。
 4. `api_token` adapter 使用 Bearer Header，但只有明确版本/契约证明后才允许写入；未知版本只能报告连接能力，不能猜测 payload。后续写兼容工作登记为 backlog BL-022，未满足触发条件前继续 fail closed。
 5. 单个、批量、retry/recover 复用同一 adapter/payload/result seam，并保持 Stage 20 不重复提交边界。
 6. 自动化只使用 fake transport；真实实例只允许只读烟雾，写入必须由用户在 Web UI 显式确认。

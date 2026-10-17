@@ -8,6 +8,7 @@ import ssl
 import time
 from collections.abc import Callable, Mapping
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
@@ -17,18 +18,30 @@ from ab_engine.controllers.ab_config import AutoBangumiConfig
 from shared.errors import Stage1Error
 
 
+@dataclass(frozen=True, slots=True)
+class AutoBangumiWriteResponse:
+    """One Auto Bangumi write exchange exactly as the transport observed it.
+
+    ``status_code`` is the exact HTTP status of the response, and ``payload`` is
+    its body already decoded according to the endpoint contract: for an exact
+    ``200`` that is the verified 3.1.18 write envelope — a top-level JSON object
+    whose ``msg_en``/``msg_zh`` are strings (issue #216).  For any other status
+    it is the best-effort decoded object, or ``{}`` when no usable body arrived,
+    so a caller that can distinguish a documented business rejection (an equal
+    subscription already exists) may do so without ever trusting that body as a
+    success.
+
+    Both facts travel together: the success criterion is *this* status plus this
+    validated body, never a range of 2xx codes and never an upstream ``status``
+    field (which the real 3.1.18 write endpoints do not send).
+    """
+
+    status_code: int
+    payload: dict[str, Any]
+
+
 class AutoBangumiHttpTransport(Protocol):
     """Transport boundary used by the API Token compatibility adapter."""
-
-    def post_json(
-        self,
-        endpoint: str,
-        headers: Mapping[str, str],
-        payload: dict[str, Any],
-        *,
-        timeout: float,
-    ) -> dict[str, Any]:
-        """POST a JSON payload and return the decoded response object."""
 
     def request_json(
         self,
@@ -43,6 +56,18 @@ class AutoBangumiHttpTransport(Protocol):
 
         The decoded top-level shape is intentionally not constrained here: the
         endpoint that knows its contract validates it (issue #182)."""
+
+    def write_json(
+        self,
+        method: Literal["GET", "POST", "PATCH", "DELETE"],
+        endpoint: str,
+        headers: Mapping[str, str],
+        payload: Any | None = None,
+        *,
+        timeout: float,
+        step: str = "create_ab_subscription",
+    ) -> AutoBangumiWriteResponse:
+        """Perform one write and return its exact status plus decoded body."""
 
 
 class AutoBangumiLegacyTransport(Protocol):
@@ -62,15 +87,17 @@ class AutoBangumiLegacyTransport(Protocol):
         The decoded top-level shape is intentionally not constrained here: the
         endpoint that knows its contract validates it (issue #182)."""
 
-    def post_json_same_origin(
+    def write_json(
         self,
+        method: Literal["GET", "POST", "PATCH", "DELETE"],
         endpoint: str,
         headers: Mapping[str, str],
-        payload: dict[str, Any],
+        payload: Any | None = None,
         *,
         timeout: float,
-    ) -> dict[str, Any]:
-        """POST a JSON request without exposing session credentials."""
+        step: str = "create_ab_subscription",
+    ) -> AutoBangumiWriteResponse:
+        """Perform one same-origin write without exposing session credentials."""
 
 
 class UrlopenAutoBangumiHttpTransport:
@@ -86,21 +113,6 @@ class UrlopenAutoBangumiHttpTransport:
     Redirects are never followed: a 3xx is an error, so a session Cookie can
     never leave the configured origin.
     """
-
-    def post_json(
-        self,
-        endpoint: str,
-        headers: Mapping[str, str],
-        payload: dict[str, Any],
-        *,
-        timeout: float,
-    ) -> dict[str, Any]:
-        body = json.dumps(deepcopy(payload), ensure_ascii=False).encode("utf-8")
-        status, _headers, raw = _exchange(
-            "POST", endpoint, headers, body, timeout=timeout, step="create_ab_subscription"
-        )
-        _raise_for_status(status, step="create_ab_subscription")
-        return _decode_object(raw, step="create_ab_subscription")
 
     def request_json(
         self,
@@ -119,20 +131,37 @@ class UrlopenAutoBangumiHttpTransport:
         _raise_for_status(_status, step="probe_ab_connection")
         return _decode_json(raw, step="probe_ab_connection")
 
-    def post_json_same_origin(
+    def write_json(
         self,
+        method: Literal["GET", "POST", "PATCH", "DELETE"],
         endpoint: str,
         headers: Mapping[str, str],
-        payload: dict[str, Any],
+        payload: Any | None = None,
         *,
         timeout: float,
-    ) -> dict[str, Any]:
-        body = json.dumps(deepcopy(payload), ensure_ascii=False).encode("utf-8")
+        step: str = "create_ab_subscription",
+    ) -> AutoBangumiWriteResponse:
+        """Perform one same-origin Auto Bangumi write (issue #216).
+
+        The exchange returns the exact HTTP status together with the body that
+        the write contract validates, and a non-2xx status does **not** raise:
+        the endpoint that knows its contract classifies it (an equal
+        subscription already exists, authentication failed, a business
+        rejection).  No redirect is ever followed, so a session Cookie can never
+        leave the configured origin.
+        """
+        request_headers = dict(headers)
+        body = _encode_write_payload(request_headers, payload)
         status, _headers, raw = _exchange(
-            "POST", endpoint, headers, body, timeout=timeout, step="create_ab_subscription"
+            method,
+            endpoint,
+            request_headers,
+            body,
+            timeout=timeout,
+            step=step,
+            inspect_error_body=True,
         )
-        _raise_for_status(status, step="create_ab_subscription")
-        return _decode_object(raw, step="create_ab_subscription")
+        return _write_response(status, raw, step=step)
 
 
 class AutoBangumiHttpClient:
@@ -266,7 +295,8 @@ class LegacyAutoBangumi31Client:
         # checked here, so a bad connection / credential / version is a definite,
         # safely-retryable failure instead of an ambiguous external outcome.
         self._pre_write_check()
-        response = self._post_json(
+        response = self._write_json(
+            "POST",
             api_endpoint(self._config.base_url, "/api/v1/rss/subscribe"),
             {
                 "Accept": "application/json",
@@ -275,9 +305,12 @@ class LegacyAutoBangumi31Client:
             },
             payload,
         )
-        if response.get("status") is True:
-            return deepcopy(response)
-        if _looks_like_duplicate_subscription(response):
+        if response.status_code == 200:
+            # The transport proved the exact 200 and the verified 3.1.18 write
+            # envelope ``{"msg_en": str, "msg_zh": str}``; there is no ``status``
+            # field to look for and no id to require (issue #216).
+            return deepcopy(response.payload)
+        if _looks_like_duplicate_subscription(response.payload):
             # A distinguishable business rejection: an equal subscription already
             # exists upstream.  Only the category is derived here — the upstream
             # text is never returned, logged or persisted.
@@ -285,14 +318,9 @@ class LegacyAutoBangumi31Client:
                 "ab_duplicate_subscription",
                 "Auto Bangumi 中已存在相同订阅",
                 "create_ab_subscription",
-                upstream_diagnostics(response),
+                write_diagnostics(response),
             )
-        raise Stage1Error(
-            "ab_submit_failed",
-            "Auto Bangumi 提交失败",
-            "create_ab_subscription",
-            upstream_diagnostics(response),
-        )
+        raise write_failure(response, step="create_ab_subscription")
 
     def _pre_write_check(self) -> None:
         """Authenticate and verify the exact supported version before writing.
@@ -374,15 +402,16 @@ class LegacyAutoBangumi31Client:
             )
         return response
 
-    def _post_json(
+    def _write_json(
         self,
+        method: Literal["GET", "POST", "PATCH", "DELETE"],
         endpoint: str,
         headers: Mapping[str, str],
-        payload: dict[str, Any],
-    ) -> dict[str, Any]:
+        payload: Any | None = None,
+    ) -> AutoBangumiWriteResponse:
         try:
-            return self._transport.post_json_same_origin(
-                endpoint, headers, deepcopy(payload), timeout=self._timeout
+            return self._transport.write_json(
+                method, endpoint, headers, deepcopy(payload), timeout=self._timeout
             )
         except Stage1Error:
             raise
@@ -455,6 +484,11 @@ _MAX_RESPONSE_HEADER_BYTES = 65536
 _MAX_RESPONSE_BODY_BYTES = 8 * 1024 * 1024
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
+#: The complete verified 3.1.18 write envelope (issue #216).  There is no
+#: ``status`` field: the real ``u_response`` helper answers every write with
+#: exactly these two message strings, and the HTTP status carries the result.
+_WRITE_ENVELOPE_FIELDS = ("msg_en", "msg_zh")
+
 
 class _Deadline:
     """One absolute wall-clock deadline shared by every phase of a request."""
@@ -484,6 +518,7 @@ def _exchange(
     *,
     timeout: float,
     step: str,
+    inspect_error_body: bool = False,
     monotonic: Callable[[], float] = time.monotonic,
 ) -> tuple[int, dict[str, str], bytes]:
     """Perform exactly one HTTP/1.1 exchange under a single absolute deadline.
@@ -491,6 +526,13 @@ def _exchange(
     Connect, request send, response headers and response body each use only the
     remaining time, and the connection is always closed before returning. No
     redirect is ever followed.
+
+    A non-2xx status is classified from the header block before its body, so a
+    stalled rejection body can never turn a proven authentication/HTTP failure
+    into an unproven timeout (issue review).  A write exchange sets
+    ``inspect_error_body`` because a documented business rejection — an equal
+    subscription already exists — is only visible in that body (issue #216);
+    the body gets a short sub-budget and its absence never changes the status.
     """
     parsed = urlsplit(endpoint)
     scheme = parsed.scheme.lower()
@@ -508,18 +550,121 @@ def _exchange(
         request_bytes = _request_bytes(method, target, parsed, headers, body)
         _send_bounded(connection, request_bytes, deadline, step)
         status, response_headers, buffered = _read_headers(connection, deadline, step)
-        # The status is decided by the header block: a non-2xx is classified
-        # before the body, so a stalled rejection body can never turn a proven
-        # authentication/HTTP failure into an unproven timeout (issue review).
-        _raise_for_status(status, step=step)
-        payload = _read_body(
-            connection, deadline, response_headers, status=status, method=method,
-            buffered=buffered, step=step,
-        )
+        accepted = 200 <= status < 300
+        if not accepted and not inspect_error_body:
+            _raise_for_status(status, step=step)
+        body_deadline = deadline if accepted else _error_body_deadline(deadline, monotonic)
+        try:
+            payload = _read_body(
+                connection, body_deadline, response_headers, status=status, method=method,
+                buffered=buffered, step=step,
+            )
+        except Stage1Error:
+            if accepted:
+                raise
+            # The status line already proves the rejection; an unreadable error
+            # body only costs the extra diagnostic detail.
+            payload = b""
     finally:
         with contextlib.suppress(OSError):
             connection.close()
     return status, response_headers, payload
+
+
+#: A rejected write still returns its bounded body when it arrives quickly, so
+#: callers can tell one documented business rejection from another.  The wait is
+#: deliberately short: the status already decided the exchange, and the body is
+#: only extra detail (issue #216).
+_ERROR_BODY_BUDGET_SECONDS = 1.0
+
+
+def _error_body_deadline(deadline: _Deadline, monotonic: Callable[[], float]) -> _Deadline:
+    """A short sub-budget for one rejected write's optional diagnostic body."""
+    return _Deadline(min(deadline.remaining(), _ERROR_BODY_BUDGET_SECONDS), monotonic)
+
+
+def _encode_write_payload(headers: dict[str, str], payload: Any | None) -> bytes | None:
+    """Encode one write body as JSON, the only verified 3.1.18 write encoding.
+
+    ``headers`` is the caller's private copy, matching the read seam: a write
+    with a body declares its own ``Content-Type``.
+    """
+    if payload is None:
+        return None
+    headers.setdefault("Content-Type", "application/json")
+    return json.dumps(deepcopy(payload), ensure_ascii=False).encode("utf-8")
+
+
+def _write_response(status: int, raw: bytes, *, step: str) -> AutoBangumiWriteResponse:
+    """Validate one write exchange into its exact status plus decoded body.
+
+    An exact ``200`` must carry the verified 3.1.18 write envelope; 201/204/3xx
+    and every other status keep their body as bounded diagnostics only, so no
+    caller can read success out of them (issue #216).
+    """
+    if status == 200:
+        return AutoBangumiWriteResponse(200, _write_envelope(raw, step=step))
+    return AutoBangumiWriteResponse(status, _decode_error_object(raw))
+
+
+def _write_envelope(raw: bytes, *, step: str) -> dict[str, Any]:
+    """The verified 3.1.18 write envelope: an object with two string messages."""
+    payload = _decode_object(raw, step=step)
+    if not all(isinstance(payload.get(field), str) for field in _WRITE_ENVELOPE_FIELDS):
+        raise Stage1Error(
+            "invalid_ab_response",
+            "Auto Bangumi 写响应缺少成功字段",
+            step,
+            {"fields": list(_WRITE_ENVELOPE_FIELDS)},
+        )
+    return payload
+
+
+
+def _decode_error_object(raw: bytes) -> dict[str, Any]:
+    """Best-effort bounded JSON object of a rejected write; never a verdict."""
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def write_failure(response: AutoBangumiWriteResponse, *, step: str) -> Stage1Error:
+    """The stable failure for one write that was not an exact verified 200.
+
+    ``401``/``403`` prove the credential was rejected; every other status is a
+    failed write.  Only bounded, already-sanitized upstream diagnostics travel
+    with it (issue #101), never the raw body.
+    """
+    if response.status_code in (401, 403):
+        return Stage1Error(
+            "ab_auth_failed",
+            "Auto Bangumi 认证失败",
+            step,
+            {"status_code": response.status_code},
+        )
+    return Stage1Error(
+        "ab_submit_failed",
+        "Auto Bangumi HTTP 提交失败",
+        step,
+        write_diagnostics(response),
+    )
+
+
+def write_diagnostics(response: AutoBangumiWriteResponse) -> dict[str, Any]:
+    """Bounded diagnostics of one write response, including its exact status.
+
+    ``status_code`` is the key the engine classifiers read (submit outcome and
+    the management coordinator) and ``http_status`` the one the public
+    diagnostics DTO publishes (issue #101); both carry the same exact status, and
+    ``msg_zh``/``msg_en`` are the already sanitized, bounded upstream reasons.
+    """
+    diagnostics = upstream_diagnostics({**response.payload, "status_code": response.status_code})
+    diagnostics["status_code"] = response.status_code
+    return diagnostics
 
 
 def _open_connection(scheme: str, host: str, port: int, deadline: _Deadline, step: str) -> Any:
@@ -907,8 +1052,11 @@ def _required_payload_string(value: Any, field: str) -> str:
 
 
 #: Conservative markers for "this subscription already exists" in the public
-#: message fields Auto Bangumi can return.  Only a boolean ever escapes this
-#: check: the upstream text is never returned, logged or persisted (issue #86).
+#: message fields Auto Bangumi can return.  The verified 3.1.18 write envelope
+#: uses ``msg_zh``/``msg_en`` (issue #216); the shorter historical aliases are
+#: kept because already-adapted shapes may still carry them.  Only a boolean ever
+#: escapes this check: the upstream text is never returned, logged or persisted
+#: (issue #86).
 _DUPLICATE_SUBSCRIPTION_MARKERS = (
     "已存在",
     "已经存在",
@@ -973,7 +1121,7 @@ def upstream_diagnostics(response: Any) -> dict[str, Any]:
 
 
 def _looks_like_duplicate_subscription(response: Mapping[str, Any]) -> bool:
-    for field in ("msg", "message", "detail", "error"):
+    for field in ("msg_zh", "msg_en", "msg", "message", "detail", "error"):
         value = response.get(field)
         if not isinstance(value, str):
             continue

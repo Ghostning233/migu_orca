@@ -47,7 +47,7 @@ class RecordingTransport:
             return {"version": "3.1.18"}
         return []
 
-    def post_json_same_origin(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    def write_json(self, *args: Any, **kwargs: Any) -> Any:
         raise AssertionError("the read-only factory must never build a write transport")
 
 
@@ -94,7 +94,7 @@ def test_default_transport_is_chosen_inside_the_factory(monkeypatch: pytest.Monk
                 return {"access_token": "session-secret"}
             return {"version": "3.1.18"}
 
-        def post_json_same_origin(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        def write_json(self, *args: Any, **kwargs: Any) -> Any:
             raise AssertionError("the read-only factory must never build a write transport")
 
     monkeypatch.setattr(
@@ -224,7 +224,7 @@ def test_monotonic_is_forwarded_so_one_deadline_still_bounds_every_sub_request()
                 return {"version": "3.1.18"}
             return []
 
-        def post_json_same_origin(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        def write_json(self, *args: Any, **kwargs: Any) -> Any:
             raise AssertionError("the read-only factory must never build a write transport")
 
     client = create_management_client(

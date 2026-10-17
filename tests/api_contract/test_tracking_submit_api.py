@@ -45,10 +45,15 @@ from storage_engine.controllers.tracking_repository import (
     compare_and_swap_tracking_record,
     load_tracking_record,
 )
-from tracking_engine.controllers.submit import classify_external_submit_result
-from tracking_engine.models.operation import (
-    TRACKING_OPERATION_STATE_FAILED,
-    TRACKING_OPERATION_STATE_SUCCEEDED,
+from tests.api_contract.ab_write_envelopes import (
+    RECORDED_SUBSCRIBE_FEED_FAILED_ENVELOPE,
+    RECORDED_SUBSCRIBE_FEED_FAILED_STATUS,
+    RECORDED_SUBSCRIBE_SERVER_ERROR_BODY,
+    RECORDED_SUBSCRIBE_SERVER_ERROR_STATUS,
+    SOURCE_DERIVED_SUBSCRIBE_ENVELOPE,
+)
+from tracking_engine.controllers.submit import (
+    SUBMIT_SUCCEEDED_MESSAGE,
 )
 from tracking_engine.models.tracking import (
     TRACKING_AUDIT_SUBMIT_STARTED,
@@ -134,24 +139,28 @@ def _submit_body(record: TrackingRecord, **overrides: Any) -> dict[str, Any]:
     return body
 
 
-def _patch_ab_factory(monkeypatch: pytest.MonkeyPatch, client: FakeAutoBangumiClient):
-    state: dict[str, Any] = {"result": None}
+def _patch_ab_factory(
+    monkeypatch: pytest.MonkeyPatch,
+    client: FakeAutoBangumiClient,
+    *,
+    readback: str = "match",
+):
+    """Wire the AB write seam plus one *explicit* read-back fixture.
+
+    ``readback`` is stated by every test instead of being derived from the write
+    result: a snapshot computed from the write classification could only confirm
+    its own conclusion (issue #216 AC5).
+    """
 
     def submit_one(_request: dict[str, Any], _config: Any) -> dict[str, Any]:
-        try:
-            client.create_subscription({"fixture": True})
-        except Exception as exc:  # a pre-write/definite failure still gates read-back
-            state["result"] = {
-                "success": False,
-                "error": {"error_type": getattr(exc, "error_type", "ab_submit_failed")},
-            }
-            raise
-        result = {"success": True, "ab_subscription_id": "fake-ab-subscription", "error": None}
-        state["result"] = result
-        return result
+        # A configured Stage1Error propagates to the service's safety boundary;
+        # a real write returns the verified 3.1.18 write envelope, which carries
+        # no id at all, so the read-back is what binds the external object.
+        client.create_subscription({"fixture": True})
+        return {"success": True, "ab_subscription_id": "fake-ab-subscription", "error": None}
 
     monkeypatch.setattr("apps.migu_orca_web.tracking_submission_service.compose_tracking_submit_one", lambda: submit_one)
-    _patch_readback(monkeypatch, state)
+    _patch_readback(monkeypatch, mode=readback)
     return client
 
 
@@ -168,7 +177,7 @@ def test_submit_success_persists_active_and_dto(
     request = _accepted_request(tmp_path)
     record = _seed_tracking(tmp_path, request)
     fake = FakeAutoBangumiClient()
-    _patch_ab_factory(monkeypatch, fake)
+    _patch_ab_factory(monkeypatch, fake, readback="match")
 
     response = client.post(
         f"/api/v1/tracking/items/{record.tracking_id}/submit",
@@ -207,7 +216,7 @@ def test_submit_changed_plan_confirm_adopts_latest_and_submits(
     request = _accepted_request(tmp_path)
     record = _seed_tracking(tmp_path, request)
     _save_modified_request(tmp_path, "request-1", selected_subtitle_group="Loli")
-    _patch_ab_factory(monkeypatch, FakeAutoBangumiClient())
+    _patch_ab_factory(monkeypatch, FakeAutoBangumiClient(), readback="match")
 
     response = client.post(
         f"/api/v1/tracking/items/{record.tracking_id}/submit",
@@ -244,7 +253,7 @@ def test_submit_blocking_issue_returns_needs_reconfirm_without_ab_call(
     record = _seed_tracking(tmp_path, request)
     _save_modified_request(tmp_path, "request-1", selected_subtitle_group="")
     fake = FakeAutoBangumiClient()
-    _patch_ab_factory(monkeypatch, fake)
+    _patch_ab_factory(monkeypatch, fake, readback="empty")
 
     response = client.post(
         f"/api/v1/tracking/items/{record.tracking_id}/submit",
@@ -275,7 +284,7 @@ def test_submit_definite_external_failure_returns_submit_failed(
             {"status_code": 401},
         )
     )
-    _patch_ab_factory(monkeypatch, fake)
+    _patch_ab_factory(monkeypatch, fake, readback="empty")
 
     response = client.post(
         f"/api/v1/tracking/items/{record.tracking_id}/submit",
@@ -307,7 +316,7 @@ def test_submit_unknown_external_outcome_returns_verifying_external(
             {"category": "timeout"},
         )
     )
-    _patch_ab_factory(monkeypatch, fake)
+    _patch_ab_factory(monkeypatch, fake, readback="unreadable")
 
     response = client.post(
         f"/api/v1/tracking/items/{record.tracking_id}/submit",
@@ -347,7 +356,7 @@ def test_submit_publishes_a_stable_failure_category(
     fake = FakeAutoBangumiClient(
         error=Stage1Error(error_type, "Auto Bangumi 提交失败", "create_ab_subscription")
     )
-    _patch_ab_factory(monkeypatch, fake)
+    _patch_ab_factory(monkeypatch, fake, readback="empty")
 
     response = client.post(
         f"/api/v1/tracking/items/{record.tracking_id}/submit",
@@ -520,7 +529,7 @@ def test_submit_same_key_replay_reuses_operation_without_second_external_call(
     request = _accepted_request(tmp_path)
     record = _seed_tracking(tmp_path, request)
     fake = FakeAutoBangumiClient()
-    _patch_ab_factory(monkeypatch, fake)
+    _patch_ab_factory(monkeypatch, fake, readback="match")
 
     url = f"/api/v1/tracking/items/{record.tracking_id}/submit"
     first = client.post(url, json=_submit_body(record))
@@ -542,36 +551,26 @@ FIXTURE_RSS_URL = "https://example.invalid/rss/frieren-moe.xml"
 
 def _patch_readback(
     monkeypatch: pytest.MonkeyPatch,
-    state: dict[str, Any],
     *,
+    mode: str,
     rss_url: str = FIXTURE_RSS_URL,
     external_id: str = "fake-ab-subscription",
-    mode: str = "auto",
 ) -> None:
-    """Inject an exact read-back that follows the write result (issue #97).
+    """Inject one explicit read-back snapshot (issues #97/#182/#216).
 
-    A successful write reads back the exact RSS + owning subscription; a failed
-    write reads back nothing, which the server must treat as a definite failure.
+    ``match`` proves the exact RSS + owning subscription, ``empty`` is a legal
+    empty snapshot and ``unreadable`` is a failed read.  The snapshot never
+    follows the write result: a read-back that derived itself from the write
+    classification could only confirm its own conclusion (issue #216 AC5).
     """
+    if mode not in {"match", "empty", "unreadable"}:
+        raise ValueError(f"unknown read-back mode: {mode}")
 
     def read_snapshot(deadline=None) -> Any:
         if mode == "unreadable":
             return None
         if mode == "empty":
             return (None, [], [])
-        if mode == "always_match":
-            return (
-                None,
-                [ExternalSubscription(external_id, "葬送的芙莉莲", 1, "喵萌", rss_urls=(rss_url,))],
-                [ExternalRss("rss-1", "芙莉莲", rss_url)],
-            )
-        classification = classify_external_submit_result(state.get("result"))
-        if classification != TRACKING_OPERATION_STATE_SUCCEEDED:
-            # A definite failure confirms there is no object; an unresolved write
-            # cannot be read at all, so it stays unresolved (issue #97 AC 5/6).
-            if classification == TRACKING_OPERATION_STATE_FAILED:
-                return (None, [], [])
-            return None
         return (
             None,
             [ExternalSubscription(external_id, "葬送的芙莉莲", 1, "喵萌", rss_urls=(rss_url,))],
@@ -605,7 +604,7 @@ def test_submit_non_success_write_confirmed_by_readback_is_active_with_warning(
         monkeypatch,
         {"success": False, "error": {"error_type": "ab_submit_failed"}, "error_message": "upstream"},
     )
-    _patch_readback(monkeypatch, {}, mode="always_match", external_id="sub-readback")
+    _patch_readback(monkeypatch, mode="match", external_id="sub-readback")
 
     response = client.post(
         f"/api/v1/tracking/items/{record.tracking_id}/submit", json=_submit_body(record)
@@ -636,7 +635,7 @@ def test_submit_success_body_without_a_readback_object_stays_pending(
     request = _accepted_request(tmp_path)
     record = _seed_tracking(tmp_path, request)
     _patch_result(monkeypatch, {"success": True, "ab_subscription_id": "claimed-by-body"})
-    _patch_readback(monkeypatch, {}, mode="empty")
+    _patch_readback(monkeypatch, mode="empty")
 
     response = client.post(
         f"/api/v1/tracking/items/{record.tracking_id}/submit", json=_submit_body(record)
@@ -662,7 +661,7 @@ def test_submit_proven_write_failure_without_a_readback_object_is_submit_failed(
         monkeypatch,
         {"success": False, "error": {"error_type": "ab_auth_failed", "details": {"status_code": 401}}},
     )
-    _patch_readback(monkeypatch, {}, mode="empty")
+    _patch_readback(monkeypatch, mode="empty")
 
     response = client.post(
         f"/api/v1/tracking/items/{record.tracking_id}/submit", json=_submit_body(record)
@@ -683,7 +682,7 @@ def test_submit_success_body_with_an_unreadable_readback_stays_unresolved(
     request = _accepted_request(tmp_path)
     record = _seed_tracking(tmp_path, request)
     _patch_result(monkeypatch, {"success": True, "ab_subscription_id": "claimed-by-body"})
-    _patch_readback(monkeypatch, {}, mode="unreadable")
+    _patch_readback(monkeypatch, mode="unreadable")
 
     response = client.post(
         f"/api/v1/tracking/items/{record.tracking_id}/submit", json=_submit_body(record)
@@ -719,7 +718,7 @@ def test_submit_without_valid_resources_is_refused_before_any_external_call(
         "apps.migu_orca_web.tracking_submission_service.compose_tracking_submit_one",
         lambda: submit_one,
     )
-    _patch_readback(monkeypatch, {}, mode="always_match")
+    _patch_readback(monkeypatch, mode="match")
 
     response = client.post(
         f"/api/v1/tracking/items/{record.tracking_id}/submit", json=_submit_body(record)
@@ -750,7 +749,7 @@ def test_submit_records_the_operation_level_submission_mode(
     """AC 1: the chosen mode is an operation fact, never a local plan field."""
     request = _accepted_request(tmp_path)
     record = _seed_tracking(tmp_path, request)
-    _patch_ab_factory(monkeypatch, FakeAutoBangumiClient())
+    _patch_ab_factory(monkeypatch, FakeAutoBangumiClient(), readback="match")
     overrides = {"submission_mode": body_mode} if body_mode else {}
 
     response = client.post(
@@ -772,7 +771,7 @@ def test_submit_rejects_an_unknown_submission_mode(
 ) -> None:
     request = _accepted_request(tmp_path)
     record = _seed_tracking(tmp_path, request)
-    _patch_ab_factory(monkeypatch, FakeAutoBangumiClient())
+    _patch_ab_factory(monkeypatch, FakeAutoBangumiClient(), readback="empty")
 
     response = client.post(
         f"/api/v1/tracking/items/{record.tracking_id}/submit",
@@ -866,7 +865,7 @@ def test_download_existing_fails_closed_without_a_verified_endpoint(
     """The unverified default seam converges on 提交失败 instead of a 400."""
     request = _accepted_request(tmp_path)
     record = _seed_tracking(tmp_path, request)
-    _patch_ab_factory(monkeypatch, FakeAutoBangumiClient())
+    _patch_ab_factory(monkeypatch, FakeAutoBangumiClient(), readback="empty")
 
     response = client.post(
         f"/api/v1/tracking/items/{record.tracking_id}/submit",
@@ -885,8 +884,15 @@ class _BareArrayAbOpener:
     the real service returns (issue #182).
     """
 
-    def __init__(self, rss_url: str) -> None:
+    def __init__(
+        self, rss_url: str, *, write_status: int = 200, write_body: bytes | None = None
+    ) -> None:
         self.rss_url = rss_url
+        #: The raw write response.  It defaults to the verified 3.1.18 envelope
+        #: (issue #216); a test may serve a recorded rejection or the disproved
+        #: legacy body instead.
+        self.write_status = write_status
+        self.write_body = write_body or json.dumps(SOURCE_DERIVED_SUBSCRIBE_ENVELOPE).encode("utf-8")
         self.calls: list[str] = []
 
     def exchange(
@@ -911,10 +917,96 @@ class _BareArrayAbOpener:
                 "aggregate": False, "parser": "rss", "enabled": True,
             }]).encode("utf-8")
         elif path == "/api/v1/rss/subscribe":
-            body = b'{"status": true}'
+            body = self.write_body
         else:  # pragma: no cover - the fixture must stay exhaustive
             raise AssertionError(f"unexpected Auto Bangumi path: {path}")
-        return 200, {}, body
+        status = self.write_status if path == "/api/v1/rss/subscribe" else 200
+        return status, {}, body
+
+
+@pytest.mark.parametrize(
+    ("write_status", "write_body"),
+    [
+        # Recorded on the real 3.1.18 instance: the feed download failed, the
+        # write was rejected, and the subscription still existed afterwards.
+        (
+            RECORDED_SUBSCRIBE_FEED_FAILED_STATUS,
+            json.dumps(RECORDED_SUBSCRIBE_FEED_FAILED_ENVELOPE).encode("utf-8"),
+        ),
+        # Recorded too: a 500 with no body at all.  Neither may become a
+        # "nothing was created" verdict.
+        (RECORDED_SUBSCRIBE_SERVER_ERROR_STATUS, RECORDED_SUBSCRIBE_SERVER_ERROR_BODY),
+    ],
+)
+def test_submit_confirms_a_rejected_write_whose_object_really_exists(
+    tmp_path: Path,
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+    write_status: int,
+    write_body: bytes,
+) -> None:
+    """Recorded real behavior: a rejected write is not proof of no object.
+
+    The real write adapter, decoder, read-back and persistence run; only the
+    socket is replaced, and the write answers with a recorded 3.1.18 rejection
+    while the subscription is really there.  The exact read-back must confirm it
+    as 追番中 with the unconfirmed-write note — never as a retryable failure that
+    would invite a duplicate subscription (ADR-0001 / issues #97, #182, #216).
+    """
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    stored_request = load_request_snapshot(_config(tmp_path), request["request_id"])
+    rss_url = stored_request["confirmable_config"]["selected_rss_url"]
+    opener = _BareArrayAbOpener(rss_url, write_status=write_status, write_body=write_body)
+    monkeypatch.setattr("ab_engine.controllers.ab_http_client._exchange", opener.exchange)
+
+    response = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/submit", json=_submit_body(record)
+    )
+
+    assert response.status_code == 200
+    result = response.get_json()["result"]
+    assert result["tracking"]["status"] == TRACKING_STATUS_ACTIVE
+    stored = load_tracking_record(_config(tmp_path), record.tracking_id)
+    assert stored.external_mapping is not None
+    assert stored.external_mapping["subscription_id"] == "42"
+    messages = [str(event.get("safe_message") or "") for event in stored.audit_events]
+    assert any("写响应未确认" in message for message in messages), messages
+    assert "提交失败" not in messages, messages
+
+
+def test_submit_never_reads_success_out_of_the_disproved_status_field(
+    tmp_path: Path,
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #216 AC1/AC3: the legacy ``{"status": true}`` body is not a success.
+
+    The real adapter, decoder, read-back and persistence all run; only the socket
+    is replaced, and the write answers the disproved assumption.  The exact
+    read-back may still prove the subscription exists, but the recorded copy must
+    be the unconfirmed-write warning — never the clean success that only the
+    verified ``200`` envelope earns.
+    """
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    stored_request = load_request_snapshot(_config(tmp_path), request["request_id"])
+    rss_url = stored_request["confirmable_config"]["selected_rss_url"]
+    opener = _BareArrayAbOpener(rss_url, write_body=b'{"status": true}')
+    monkeypatch.setattr("ab_engine.controllers.ab_http_client._exchange", opener.exchange)
+
+    response = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/submit", json=_submit_body(record)
+    )
+
+    assert response.status_code == 200
+    stored = load_tracking_record(_config(tmp_path), record.tracking_id)
+    assert stored.status == TRACKING_STATUS_ACTIVE
+    assert stored.external_mapping is not None
+    assert stored.external_mapping["subscription_id"] == "42"
+    messages = [str(event.get("safe_message") or "") for event in stored.audit_events]
+    assert any("写响应未确认" in message for message in messages), messages
+    assert SUBMIT_SUCCEEDED_MESSAGE not in messages, messages
 
 
 def test_submit_confirms_through_the_real_http_decoder_and_persists_active(
@@ -949,6 +1041,13 @@ def test_submit_confirms_through_the_real_http_decoder_and_persists_active(
     assert opener.calls.count("POST /api/v1/rss/subscribe") == 1
     assert "GET /api/v1/bangumi/get/all" in opener.calls
     assert "GET /api/v1/rss" in opener.calls
+    # Issue #216: the exact verified 200 envelope is a *clean* success.  An
+    # unreadable write body would still confirm through the exact read-back,
+    # only with the resource warning, so the recorded copy is asserted too.
+    assert any(
+        str(event.get("safe_message") or "") == SUBMIT_SUCCEEDED_MESSAGE
+        for event in stored.audit_events
+    ), stored.audit_events
     body_text = response.get_data(as_text=True)
     assert "ab-session" not in body_text
     assert "example.invalid" not in body_text

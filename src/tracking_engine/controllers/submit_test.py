@@ -50,7 +50,8 @@ from tracking_engine.models.tracking import (
         (TRACKING_STATUS_SUBMIT_FAILED, "ab_timeout_pre_write", "CONNECTION"),
         (TRACKING_STATUS_SUBMIT_FAILED, "ab_auth_failed", "AUTHENTICATION"),
         (TRACKING_STATUS_SUBMIT_FAILED, "ab_unsupported_version", "VERSION"),
-        (TRACKING_STATUS_SUBMIT_FAILED, "ab_submit_unsupported", "VERSION"),
+        # Issue #216: an unsupported submit capability is not a version mismatch.
+        (TRACKING_STATUS_SUBMIT_FAILED, "ab_submit_unsupported", "CAPABILITY"),
         (TRACKING_STATUS_SUBMIT_FAILED, "ab_duplicate_subscription", "DUPLICATE_SUBSCRIPTION"),
         (TRACKING_STATUS_SUBMIT_FAILED, "config_error", "VALIDATION"),
         (TRACKING_STATUS_SUBMIT_FAILED, "invalid_ab_payload", "VALIDATION"),

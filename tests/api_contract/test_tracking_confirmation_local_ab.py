@@ -27,7 +27,9 @@ from storage_engine.controllers.autobangumi_config_repository import (
 from storage_engine.controllers.operation_repository import load_tracking_operation
 from storage_engine.controllers.storage_config import load_storage_config
 from storage_engine.controllers.tracking_repository import load_tracking_record
+from tests.api_contract.ab_write_envelopes import SOURCE_DERIVED_SUBSCRIBE_ENVELOPE
 from tests.api_contract.test_tracking_submit_api import _accepted_request
+from tracking_engine.controllers.submit import SUBMIT_SUCCEEDED_MESSAGE
 from tracking_engine.models.tracking import (
     TRACKING_ORIGIN_SAVE_CONFIRM,
     TRACKING_STATUS_ACTIVE,
@@ -133,7 +135,7 @@ class _Handler(BaseHTTPRequestHandler):
                     self.state.rss_url = url
             if self.state.drop_write:
                 return self._drop()
-            return self._reply(200, {"status": True})
+            return self._reply(200, SOURCE_DERIVED_SUBSCRIBE_ENVELOPE)
         return self._reply(404, {"detail": "not found"})
 
     def do_GET(self) -> None:
@@ -229,6 +231,12 @@ def test_bare_array_readback_confirms_and_persists_success(
     assert stored.external_mapping["subscription_id"] == "42"
     assert stored.external_mapping["connection_ref"] == body["connection_ref"]
     assert load_tracking_operation(_cfg(tmp_path), stored.current_operation_id).state == "SUCCEEDED"
+    # Issue #216: the real 3.1.18 write envelope is a clean success, not a
+    # write whose body had to be downgraded to the read-back warning.
+    assert any(
+        str(event.get("safe_message") or "") == SUBMIT_SUCCEEDED_MESSAGE
+        for event in stored.audit_events
+    ), stored.audit_events
     # One write, and the exact RSS identity was the only evidence used.
     subscribe_calls, list_requests = ab.state.snapshot()
     assert subscribe_calls == 1

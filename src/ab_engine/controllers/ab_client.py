@@ -64,11 +64,19 @@ def submit_ab_subscription(
 
 
 def _subscription_id(ab_response: dict[str, Any]) -> str | None:
+    """Return the optional external id of one already-verified write response.
+
+    The verified 3.1.18 write envelope is ``{"msg_en": ..., "msg_zh": ...}`` and
+    carries no id at all (issue #216), so a missing id is normal: the exact
+    read-back is what binds the external object (issues #97/#182).  Anything
+    that is neither an id nor that envelope stays a fail-closed result, so an
+    unrecognized upstream body is never reported as a clean success.
+    """
     for field in ("id", "subscription_id", "ab_subscription_id"):
         value = ab_response.get(field)
         if isinstance(value, str) and value.strip():
             return value
-    if ab_response.get("status") is True:
+    if all(isinstance(ab_response.get(field), str) for field in _VERIFIED_WRITE_ENVELOPE_FIELDS):
         return None
     raise Stage1Error(
         "invalid_ab_submit_result",
@@ -76,3 +84,8 @@ def _subscription_id(ab_response: dict[str, Any]) -> str | None:
         "submit_ab_subscription",
         {"fields": ["id", "subscription_id", "ab_subscription_id"]},
     )
+
+
+#: The verified 3.1.18 write envelope (issue #216): two message strings and no
+#: ``status`` field.  It proves the write itself, never an external identity.
+_VERIFIED_WRITE_ENVELOPE_FIELDS = ("msg_en", "msg_zh")
