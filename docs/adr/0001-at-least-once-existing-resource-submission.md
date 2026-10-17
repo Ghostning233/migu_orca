@@ -9,8 +9,8 @@ Auto Bangumi 3.1.18 无法返回逐个 torrent 的添加结果或提供幂等操
 这次接受调用的是 Auto Bangumi 3.1.18 的 `POST /api/v1/rss/collect`，请求体是**裸 `Bangumi` 模型**（不套 `data` 包装体，也不是 `{data, rss}` 订阅体），只在 **password 模式 ＋ 精确 3.1.18** 下发起，且 payload **不携带 `id`**。由此产生的上游副作用是明确的：
 
 - **不创建 RSS 订阅**：该端点走 `SeasonCollector.collect_season`，与 `/rss/subscribe` 的 `add_rss` 无关。
-- **可能写入一条 Bangumi 规则**：成功时上游执行 `eps_collect = True`，并 `if engine.bangumi.update(bangumi): engine.bangumi.add(bangumi)`（`module/manager/collector.py:27-30`）。payload 无 `id` 时 `update` 返回 False，随后 `add` 按 `title_raw` 去重且其返回值被忽略（`module/database/bangumi.py:16-24`），所以**既有同名规则不会被更新**，重复名称也不会新增第二条。
-- **后台补收集不由 MiGuOrca 控制**：`eps_collect` 之后的资源收集沿用 Auto Bangumi 自身的既有配置；MiGuOrca 不接管、不追踪，也不据此宣称任何下载结果。
+- **不新增也不更新 Bangumi 规则**：上游成功分支是 `if engine.bangumi.update(bangumi): engine.bangumi.add(bangumi)`（`module/manager/collector.py:28-30`）。payload 不携带 `id` 时，`update` 因 `session.get(Bangumi, None)` 取不到行而返回 False（`module/database/bangumi.py:37-46`），因此 **`add` 不会被调用**：既不会新增同名规则，也不会更新既有规则。`add` 的 `title_raw` 去重只在本产品**不使用的**带 `id` 更新路径上才有意义。（依据固定 tag `3.1.18` 源码；本票真机 smoke 只取得 406，未观察到 200 分支的运行期行为。）
+- **后续补收集不由 MiGuOrca 控制**：成功时上游会置 `eps_collect = True` 并把本次 torrent 记入其自身数据库（`engine.torrent.add_all`，`collector.py:27-30`）。由于没有落 Bangumi 规则行，规则级的补收集不会把本次当作一条规则收纳。MiGuOrca 不接管、不追踪，也不据此宣称任何下载结果。
 - **筛选规则不静默改写**：上游对整个 `filter` 执行 `.replace(",", "|")`，因此最终表达式含 ASCII 逗号时 MiGuOrca 直接拒绝提交并零外部写。
 
 HTTP 200 只是「已加入下载」的本地判据，不代表逐个 torrent 的结果；406 等拒绝同样不被解读为「什么都没发生」。

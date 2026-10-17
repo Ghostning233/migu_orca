@@ -14,12 +14,14 @@ payloads or URLs.
 import json
 from pathlib import Path
 from typing import Any
+from urllib.error import URLError
 from urllib.parse import urlsplit
 
 import pytest
 from flask.testing import FlaskClient
 
 from ab_engine.controllers.ab_client import FakeAutoBangumiClient
+from ab_engine.controllers.subscription_payload import build_legacy_31_collection_payload
 from ab_engine.models.management import ExternalRss, ExternalSubscription
 from apps.migu_orca_web.api_contract import TrackingSubmitResultDTO
 from apps.migu_orca_web.tracking_handoff import ensure_confirmed_request_tracking
@@ -867,9 +869,15 @@ def test_download_existing_makes_no_write_without_a_reachable_connection(
 ) -> None:
     """An unreachable saved connection fails closed before any external write.
 
-    No transport is patched here: the real adapter has to resolve
-    ``http://ab.invalid``, which cannot succeed, so nothing is ever written.
+    The socket layer is replaced by one deterministic refused connection (rather
+    than relying on ``ab.invalid`` name resolution), so the real adapter still
+    validates the payload, runs its pre-write check and classifies the failure.
     """
+
+    def _refused(*_args: Any, **_kwargs: Any) -> Any:
+        raise URLError("connection refused")
+
+    monkeypatch.setattr("ab_engine.controllers.ab_http_client._exchange", _refused)
     request = _accepted_request(tmp_path)
     record = _seed_tracking(tmp_path, request)
     _patch_ab_factory(monkeypatch, FakeAutoBangumiClient(), readback="empty")
@@ -937,22 +945,18 @@ def test_download_existing_verified_200_becomes_added_to_download(
     assert opener.calls.count("POST /api/v1/rss/collect") == 1
     # A one-time request never creates an RSS subscription and never reads back.
     assert "POST /api/v1/rss/subscribe" not in opener.calls
-    assert [body for body in opener.collect_bodies] == [
-        {
-            "official_title": opener.collect_bodies[0]["official_title"],
-            "title_raw": opener.collect_bodies[0]["title_raw"],
-            "season": 1,
-            "group_name": opener.collect_bodies[0]["group_name"],
-            "filter": opener.collect_bodies[0]["filter"],
-            "rss_link": opener.rss_url,
-            "save_path": opener.collect_bodies[0]["save_path"],
-            "poster_link": None,
-        }
-    ]
-    assert set(opener.collect_bodies[0]) == {
+    # The wire body is exactly what the production builder produces for the
+    # stored plan: the bare Bangumi model with no id, no wrapper and the plan's
+    # own exact RSS identity.
+    stored_request = load_request_snapshot(_config(tmp_path), request["request_id"])
+    expected = build_legacy_31_collection_payload(stored_request)
+    assert opener.collect_bodies == [expected]
+    assert set(expected) == {
         "official_title", "title_raw", "season", "group_name", "filter",
         "rss_link", "save_path", "poster_link",
     }
+    assert expected["rss_link"] == stored_request["confirmable_config"]["selected_rss_url"]
+    assert "id" not in expected and "data" not in expected and "rss" not in expected
     stored = load_tracking_record(_config(tmp_path), record.tracking_id)
     assert stored.status == "ADDED_TO_DOWNLOAD"
     assert stored.external_mapping is None
@@ -1113,12 +1117,16 @@ def test_download_existing_same_key_replay_never_calls_ab_again(
     first = client.post(url, json=body)
     assert first.status_code == 200
     assert first.get_json()["result"]["tracking"]["status"] == "ADDED_TO_DOWNLOAD"
+    # Issue #217: the public outcome of a one-time acceptance is never ACTIVE.
+    assert first.get_json()["result"]["outcome"] == "ADDED_TO_DOWNLOAD"
     assert opener.calls.count("POST /api/v1/rss/collect") == 1
 
     replay = client.post(url, json=body)
     assert replay.status_code == 200
     replay_result = replay.get_json()["result"]
     assert replay_result["tracking"]["status"] == "ADDED_TO_DOWNLOAD"
+    # A same-key replay answers with the *same* one-time outcome, not ACTIVE.
+    assert replay_result["outcome"] == "ADDED_TO_DOWNLOAD"
     assert replay_result["operation_id"] == first.get_json()["result"]["operation_id"]
     # The terminal replay reuses the operation and never touches Auto Bangumi.
     assert opener.calls.count("POST /api/v1/rss/collect") == 1

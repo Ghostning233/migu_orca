@@ -602,7 +602,6 @@ def _run_saved_tracking_submission(
             start_statuses=start_statuses,
             submit_one=submit_one,
             persist_ab_result=persist_ab_result,
-            submission_mode=submission_mode,
             now=now,
         )
 
@@ -801,7 +800,19 @@ def _replay_terminal_outcome(
     timestamp: str,
 ) -> dict[str, Any]:
     """Replay a same-key terminal operation's public outcome (no external call)."""
-    outcome = tracking_status_for_operation_state(operation.state)
+    # Issue #217: a one-time "download existing resources" success is
+    # 已加入下载, never ACTIVE.  The replay reads the persisted operation mode (the
+    # same key must always answer with the same public outcome), and it also
+    # reconciles a record left mid-flight by a crash to that same status.
+    one_time_success = (
+        operation.submission_mode == TRACKING_SUBMISSION_MODE_DOWNLOAD_EXISTING
+        and operation.state == TRACKING_OPERATION_STATE_SUCCEEDED
+    )
+    outcome = (
+        TRACKING_STATUS_ADDED_TO_DOWNLOAD
+        if one_time_success
+        else tracking_status_for_operation_state(operation.state)
+    )
     reconciled = record
     if record.status == TRACKING_STATUS_SUBMITTING and record.status != outcome:
         # A crash between the record-final write and the operation-terminal
@@ -812,7 +823,11 @@ def _replay_terminal_outcome(
             audit_action=_REPLAY_AUDIT_ACTION[operation.state],
             audit_actor=TRACKING_AUDIT_ACTOR_SYSTEM,
             operation_id=operation.operation_id,
-            safe_message=_REPLAY_SAFE_MESSAGE[operation.state],
+            safe_message=(
+                ADDED_TO_DOWNLOAD_MESSAGE
+                if one_time_success
+                else _REPLAY_SAFE_MESSAGE[operation.state]
+            ),
             now=timestamp,
         )
         try:

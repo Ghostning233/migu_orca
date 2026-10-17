@@ -1810,6 +1810,12 @@ interface TrackingBatchOutcome {
   readonly entries: readonly TrackingBatchEntryOutcome[]
   readonly succeeded: number
   readonly failed: number
+  /**
+   * Issue #217: how many of the successes were one-time "download existing
+   * resources" acceptances.  They create no external subscription, so the batch
+   * summary must not claim one was created.
+   */
+  readonly oneTimeSucceeded: number
   /** Entries still unresolved: they keep their selection and must be recovered. */
   readonly unresolved: readonly string[]
 }
@@ -1833,16 +1839,24 @@ function projectBatchOutcome(result: {
   const unresolved: string[] = []
   let succeeded = 0
   let failed = 0
+  let oneTimeSucceeded = 0
   for (const item of result.items ?? []) {
     const trackingId = typeof item.tracking_id === 'string' ? item.tracking_id : ''
     if (!trackingId) continue
     const outcome = item.result?.outcome
-    const isSuccess = item.ok === true && outcome === 'ACTIVE'
+    // Issue #217: a batch entry may be a one-time "download existing resources"
+    // acceptance.  It is a success even though it creates no external
+    // subscription, so it must never be reported as a failure.
+    const isSuccess = item.ok === true
+      && (outcome === 'ACTIVE' || outcome === 'ADDED_TO_DOWNLOAD')
     if (isSuccess) {
       succeeded += 1
+      if (outcome === 'ADDED_TO_DOWNLOAD') oneTimeSucceeded += 1
       entries.push({
         trackingId, ok: true, failureCategory: null, errorType: null,
-        message: '提交成功：已在 Auto Bangumi 创建外部订阅。',
+        message: outcome === 'ADDED_TO_DOWNLOAD'
+          ? '已加入下载：Auto Bangumi 已接受本次下载现有资源的请求，不代表资源已下载完成。'
+          : '提交成功：已在 Auto Bangumi 创建外部订阅。',
       })
       continue
     }
@@ -1868,7 +1882,7 @@ function projectBatchOutcome(result: {
       message: '提交明确失败，尚未创建外部订阅。',
     })
   }
-  return { entries, succeeded, failed, unresolved }
+  return { entries, succeeded, failed, oneTimeSucceeded, unresolved }
 }
 
 /** Keep only the entries that still need the user's attention. */
@@ -3488,13 +3502,15 @@ function createBatchFamily(core: BatchFamilyCore) {
     core.batchLoading.value = false
     const effects: TrackingWriteEffect[] = [core.recheck(null, true)]
     if (outcome.succeeded) {
+      // Issue #217: a one-time batch creates no external subscription, so the
+      // summary never claims one was created.
+      const subscriptions = outcome.succeeded - outcome.oneTimeSucceeded
+      const message = subscriptions
+        ? `已在 Auto Bangumi 创建 ${subscriptions} 条外部订阅。`
+        : `已加入下载 ${outcome.oneTimeSucceeded} 条；本次未创建外部订阅，也不代表资源已下载完成。`
       effects.unshift({
         kind: 'notify',
-        feedback: {
-          channel: 'success',
-          title: '批量提交完成',
-          message: `已在 Auto Bangumi 创建 ${outcome.succeeded} 条外部订阅。`,
-        },
+        feedback: { channel: 'success', title: '批量提交完成', message },
       })
     }
     return effects

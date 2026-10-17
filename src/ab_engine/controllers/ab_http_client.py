@@ -136,34 +136,6 @@ class UrlopenAutoBangumiHttpTransport:
         _raise_for_status(_status, step="probe_ab_connection")
         return _decode_json(raw, step="probe_ab_connection")
 
-    def post_json_same_origin(
-        self,
-        endpoint: str,
-        headers: Mapping[str, str],
-        payload: dict[str, Any],
-        *,
-        timeout: float,
-    ) -> dict[str, Any]:
-        """The historical POST seam, kept for the merged #217 collect contract.
-
-        It predates :meth:`write_json` and exists only because the already-merged
-        ``tests/api_contract/test_tracking_collect_contract_source_derived.py``
-        pins this name as its single transport seam (that file belongs to #217
-        and is not edited here).  It applies the *same* verified criterion — exact
-        ``200`` plus the write envelope — and returns the decoded object, so it
-        can never accept a 2xx range or an upstream ``status`` field as success.
-        Production writes go through ``write_json`` (issue #216 AC2).
-        """
-        response = self.write_json("POST", endpoint, headers, payload, timeout=timeout)
-        if response.status_code != 200:
-            # Its historical contract is a status-only classification: the #101
-            # bounded message diagnostics belong to the subscription write seam
-            # (``write_json`` + ``create_subscription``), and the merged #217
-            # collect contract keeps every upstream message text inside the
-            # adapter, so this wrapper must not surface it either.
-            raise _status_only_failure(response.status_code, step="create_ab_subscription")
-        return response.payload
-
     def write_json(
         self,
         method: Literal["GET", "POST", "PATCH", "DELETE"],
@@ -252,7 +224,7 @@ class AutoBangumiHttpClient:
             )
         raise Stage1Error(
             "ab_submit_unsupported",
-            "当前 Auto Bangumi 版本暂不支持“下载现有资源”",
+            "当前 Auto Bangumi 认证模式暂不支持“下载现有资源”",
             "collect_existing_resources",
         )
 
@@ -430,6 +402,7 @@ class LegacyAutoBangumi31Client:
                 "Cookie": self._session_cookie(),
             },
             payload,
+            step="collect_existing_resources",
         )
         if response.status_code == 200:
             # The transport proved both facts: the exact 200 and the verified
@@ -536,10 +509,12 @@ class LegacyAutoBangumi31Client:
         endpoint: str,
         headers: Mapping[str, str],
         payload: Any | None = None,
+        *,
+        step: str = "create_ab_subscription",
     ) -> AutoBangumiWriteResponse:
         try:
             return self._transport.write_json(
-                method, endpoint, headers, deepcopy(payload), timeout=self._timeout
+                method, endpoint, headers, deepcopy(payload), timeout=self._timeout, step=step
             )
         except Stage1Error:
             raise
@@ -772,19 +747,6 @@ def _decode_error_object(raw: bytes) -> dict[str, Any]:
     except (json.JSONDecodeError, UnicodeDecodeError):
         return {}
     return value if isinstance(value, dict) else {}
-
-
-def _status_only_failure(status_code: int, *, step: str) -> Stage1Error:
-    """The historical status-only write failure, without upstream message text."""
-    if status_code in (401, 403):
-        return Stage1Error(
-            "ab_auth_failed", "Auto Bangumi 认证失败", step,
-            {"status_code": status_code, "http_status": status_code},
-        )
-    return Stage1Error(
-        "ab_submit_failed", "Auto Bangumi HTTP 提交失败", step,
-        {"status_code": status_code, "http_status": status_code},
-    )
 
 
 def write_failure(response: AutoBangumiWriteResponse, *, step: str) -> Stage1Error:

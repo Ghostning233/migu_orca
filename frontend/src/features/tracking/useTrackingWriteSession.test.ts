@@ -2025,6 +2025,40 @@ describe('batch selection rules (issue #87)', () => {
     expect(writes.batchLoading.value).toBe(false)
   })
 
+  it('counts a one-time acceptance as a success and never claims a subscription', () => {
+    const writes = session()
+    writes.toggleBatchRow('download')
+    writes.toggleBatchRow('failed')
+    writes.beginBatchSubmit({ items: [], mode: null }, { connection: CONNECTION })
+    const effects = writes.finishBatchSubmit({
+      items: [
+        { tracking_id: 'download', ok: true, error_type: null, result: { outcome: 'ADDED_TO_DOWNLOAD', failure_category: null } },
+        { tracking_id: 'failed', ok: false, error_type: null, result: { outcome: 'SUBMIT_FAILED', failure_category: 'REJECTED' } },
+      ],
+    } as never)
+    const outcome = writes.batchOutcome.value!
+    expect(outcome.succeeded).toBe(1)
+    expect(outcome.failed).toBe(1)
+    expect(outcome.oneTimeSucceeded).toBe(1)
+    const byId = Object.fromEntries(outcome.entries.map((entry) => [entry.trackingId, entry]))
+    expect(byId.download).toEqual({
+      trackingId: 'download', ok: true, failureCategory: null, errorType: null,
+      message: '已加入下载：Auto Bangumi 已接受本次下载现有资源的请求，不代表资源已下载完成。',
+    })
+    expect(byId.failed!.message).toBe('提交明确失败，尚未创建外部订阅。')
+    // The one-time success leaves the selection like any other success.
+    expect(writes.batchSelection.value.selected).toEqual(['failed'])
+    expect(writes.batchNotice.value).toBe('本次批量提交：成功 1 条，失败 1 条。')
+    expect(effects).toContainEqual({
+      kind: 'notify',
+      feedback: {
+        channel: 'success',
+        title: '批量提交完成',
+        message: '已加入下载 1 条；本次未创建外部订阅，也不代表资源已下载完成。',
+      },
+    })
+  })
+
   it('lists only the selected plans the local pre-check refuses', () => {
     const writes = session()
     const submittable = batchItem({ tracking_id: 'tracking-a' })

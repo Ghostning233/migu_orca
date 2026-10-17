@@ -508,7 +508,7 @@ MiKan Web 的公共请求不接受 `mikan_config` 或 `source`；搜索配置统
 | 成功判定 | **HTTP 200 且响应为顶层 JSON 对象且 `msg_en`/`msg_zh` 均为字符串**；响应体**没有 `status` 字段**（上游 `response.py:7-14` 的 `u_response` 把 `ResponseModel.status` 折进 HTTP 状态码，只回两个消息字段）。非对象、非法 JSON、缺字段、**201/204/3xx** 与任何其他状态一律失败（由 #216 的精确 200 ＋ 写信封通道在 transport 层强制，见 §7.2） |
 | 失败 | HTTP **406，双语义**：过滤后无匹配 **或** 下载器添加失败/重复；上游对两者返回同一条文案（`collector.py:37-46`），客户端**不可区分**，因此不得把 406 猜成成功 |
 | 其他状态 | 未登录 401（实测未登录 `GET /api/v1/status` 返回 `401 {"detail":"Unauthorized"}`，与 collect 共用 `get_current_user`）、403、请求体校验 422（实例 `openapi.json` 只声明 200 与 422） |
-| 副作用 | 成功后**写入或尝试写入一条 AB Bangumi 规则**（`collector.py:27-30`），**不创建 RSS 订阅**（对比 `/rss/subscribe`）。因 payload 无 `id`，`update` 返回 False 后走 `add`；`add` 按 `title_raw` 去重且其返回值被忽略（`backend/src/module/database/bangumi.py:16-24`）⇒ **不更新既有规则**。`eps_collect=True` 之后的补收集由 AB 自身既有配置决定 |
+| 副作用 | **不创建 RSS 订阅**（对比 `/rss/subscribe`）。成功分支为 `if engine.bangumi.update(bangumi): engine.bangumi.add(bangumi)`（`collector.py:28-30`）；payload 不带 `id` 时 `update` 取不到行并返回 False（`backend/src/module/database/bangumi.py:37-46`），因此 **`add` 不会被调用** ⇒ **既不新增也不更新任何 Bangumi 规则**；`add` 的 `title_raw` 去重只在带 `id` 的更新路径上才有意义。成功时上游仍会把本次 torrent 记入其自身数据库并置 `eps_collect=True`（`collector.py:27-30`） |
 | filter 逗号 | 上游对整个 filter 执行 `.replace(",", "|")`（`collector.py:20`）：`a{1,3}` 会变成 `a{1|3}`，编译可能仍通过但语义已变。MiGuOrca 侧在 `build_legacy_31_collection_payload`（`src/ab_engine/controllers/subscription_payload.py`）对最终 filter 做 ASCII 逗号守卫，命中即 `ab_filter_unsupported` 且零外部写，**不做静默改写** |
 
 ### 7.1 证据来源
@@ -519,7 +519,7 @@ MiKan Web 的公共请求不接受 `mikan_config` 或 `source`；搜索配置统
   `$ref #/components/schemas/Body_subscribe_api_v1_rss_subscribe_post`。
 - 上游 tag `3.1.18`（`EstrellaXD/Auto_Bangumi`）：`backend/src/module/api/rss.py:185-191`、
   `backend/src/module/manager/collector.py:11-46`、`backend/src/module/api/response.py:7-14`、
-  `backend/src/module/database/bangumi.py:16-24`。
+  `backend/src/module/database/bangumi.py:16-24,37-46`、`backend/src/module/searcher/request_contents.py:15-38`。
 - 端点与凭据只存本地 gitignored 位置（`.migu_orca/ab-test-instance.md` / `MIGU_ORCA_TEST_AB_*`），
   不入库；本节与相关契约测试不记录端点值、账号或凭据。
 - 契约测试：`tests/api_contract/test_tracking_collect_contract_source_derived.py` 以
@@ -541,10 +541,14 @@ MiKan Web 的公共请求不接受 `mikan_config` 或 `source`；搜索配置统
   默认实现改为 `tracking_submit_adapter.collect_existing_resources`（真实调用）；HTTP 200
   （契约满足）→ `ADDED_TO_DOWNLOAD`，406 与其他状态／超时／断连 → `SUBMIT_FAILED`，**不把 406
   猜成成功**、无网络自动重发、不建 RSS、不建受控 mapping、不直连 qB、不写回查。
-- **幂等与恢复**：同 `idempotency_key` 的终态重放复用原 operation，零外部调用；恢复不读取外部
-  规则、不据「规则存在」宣称下载成功，也不自动重跑 collect；只有用户显式 retry 才以新 key
-  创建新 operation（重试沿用请求声明的提交方式）。
-- **文档**：ADR-0001 已补「AB 侧副作用（#217）」小节（不建 RSS、按 `title_raw` 去重、无 `id`
-  不更新既有规则、后台补收集受既有配置控制、筛选逗号不静默改写）。
-- **真机写 smoke**：见 issue #217 的验收评论（406 与 200 两条路径、可清理的合成番目、收尾
-  复原到基线）；端点与凭据不入库。
+- **幂等与恢复**：同 `idempotency_key` 的终态重放复用原 operation、零外部调用，并按该 operation
+  持久化的提交方式回答**同一**公开结果（一次性成功重放同样是 `ADDED_TO_DOWNLOAD`，绝不回成
+  `ACTIVE`）；恢复不读取外部规则、不据「规则存在」宣称下载成功（一次性 operation 的
+  `VERIFY_EXTERNAL` 一律 `needs_manual` 且不写受控 mapping），也不自动重跑 collect；只有用户
+  显式 retry 才以新 key 创建新 operation，并沿用请求声明的提交方式。
+- **文档**：ADR-0001 已补「AB 侧副作用（#217）」小节（不建 RSS、无 `id` 时 `add` 不会被调用
+  故不新增/不更新规则、后续补收集不由 MiGuOrca 控制、筛选逗号不静默改写）。
+- **真机写 smoke（进行中）**：406 已在真机取得**两种语义**（被过滤空；下载器已存在/拒绝），
+  两次都零副作用（规则 37 条 / RSS 69 条 / 无残留规则，提交前后一致）；200 需要实例下载器
+  真实入队一个新条目（候选最小约 214 MiB 的条目已在下载器中、275 MiB 的也被拒绝），尚未取得，
+  待用户决策后再补。端点与凭据不入库。

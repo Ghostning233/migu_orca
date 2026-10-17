@@ -95,6 +95,7 @@ from tracking_engine.models.operation import (
     TRACKING_OPERATION_STATE_IN_PROGRESS,
     TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
     TRACKING_OPERATION_STATE_SUCCEEDED,
+    TRACKING_SUBMISSION_MODE_DOWNLOAD_EXISTING,
     TrackingOperation,
     transition_tracking_operation,
 )
@@ -156,6 +157,20 @@ def _verify_external(
     try:
         capabilities, subscriptions, rss_items = read.snapshot
         operation_kind = _load_current_operation(config, record)
+        if (
+            operation_kind is not None
+            and operation_kind.submission_mode == TRACKING_SUBMISSION_MODE_DOWNLOAD_EXISTING
+        ):
+            # Issue #217 AC5: a one-time collection creates no controlled
+            # external subscription, so "an equal subscription already exists
+            # upstream" proves nothing about this request.  External verification
+            # must never read a pre-existing object as this operation's success
+            # and must never write a controlled mapping.
+            return _verification_needs_manual(
+                config, record=record, request=request,
+                checked_revision=checked_revision, timestamp=timestamp,
+                reason=CONFIRM_REASON_CAPABILITY,
+            )
         capability_ok = (capabilities.probe_status == "VERIFIED"
                          and capabilities.subscription_list == "SUPPORTED"
                          and capabilities.external_verify == "SUPPORTED")
