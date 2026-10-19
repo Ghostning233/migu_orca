@@ -21,6 +21,7 @@ from typing import Any
 import pytest
 from playwright.sync_api import Page, expect
 
+from tests.browser.saved_tracking_fixtures import _status_groups, _summary
 from tests.browser.visual_manifest import (
     CONTENT_MAX,
     PIXEL_GATE_RULING,
@@ -76,7 +77,18 @@ CONNECTION_SUMMARY_BODY = json.dumps(
     },
     ensure_ascii=False,
 )
-TRACKING_BODY = json.dumps({"ok": True, "result": {"items": []}}, ensure_ascii=False)
+TRACKING_BODY = json.dumps(
+    {
+        "ok": True,
+        "result": {
+            "items": [],
+            "summary": _summary(0),
+            "status_groups": _status_groups(),
+            "warnings": [],
+        },
+    },
+    ensure_ascii=False,
+)
 
 SHELL_ROUTES = {
     "add": "/app/add",

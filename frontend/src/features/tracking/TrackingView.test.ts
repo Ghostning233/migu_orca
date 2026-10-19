@@ -500,6 +500,29 @@ describe('TrackingView risk-confirmed resubmission (issue #184)', () => {
     expect(wrapper.find('.confirm-dialog-message').text()).toContain('重复订阅')
     expect(resubmitCalls()).toHaveLength(1)
 
+    // The read-only phase has settled: the cards still show the server's
+    // pre-write projection (处理中 has no card), so any later change can only
+    // come from the settled write's own authoritative count refresh.
+    expect(wrapper.findAll('.tracking-status-card').map((card) => card.text())).toEqual([
+      '待处理0', '追番中0', '需处理0', '已停用0',
+    ])
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/v1/settings/autobangumi') {
+        return {
+          configured: true, credential_present: true,
+          connection_ref: '11111111-1111-4111-8111-111111111111',
+          configuration_revision: 3, connection_status: 'CONFIGURED', capabilities: null,
+        } as never
+      }
+      if (path === '/api/v1/tracking/items/{tracking_id}') return pendingDetail() as never
+      return {
+        items: [pendingRow()],
+        summary: { ...defaultSummary, active: 1 },
+        status_groups: statusGroups({ ACTIVE: 1 }),
+        warnings: [],
+      } as never
+    })
+
     await wrapper.find('.confirm-dialog .primary-button').trigger('click')
     await flushPromises()
 
@@ -513,13 +536,12 @@ describe('TrackingView risk-confirmed resubmission (issue #184)', () => {
       connection_ref: '11111111-1111-4111-8111-111111111111',
     })
     expect(wrapper.find('#tracking-submit-result').text()).toContain('提交成功')
-    // Issue #224 A5: a settled write re-reads the server projection, because the
-    // returned row alone cannot move a category count.  (The initial mount read
-    // is the first call; the settled write adds at least one more.)
-    const listReads = apiGet.mock.calls.filter(
-      ([path]) => path === '/api/v1/tracking/items',
-    )
-    expect(listReads.length).toBeGreaterThanOrEqual(2)
+    // Issue #224 A5: the settled write re-read the authoritative projection, so
+    // 追番中 now states the new category.  Without that read the four cards
+    // would still render the pre-write (all-zero) projection.
+    expect(wrapper.findAll('.tracking-status-card').map((card) => card.text())).toEqual([
+      '待处理0', '追番中1', '需处理0', '已停用0',
+    ])
   })
 
   it('cancelling the risk confirmation sends no second request at all', async () => {

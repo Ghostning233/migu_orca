@@ -26,6 +26,7 @@ from plan_engine.controllers.data_sources import StaticFixtureDataSource
 from plan_engine.controllers.plan_generation import build_plan
 from shared.models import EntryRequest
 from tests.browser.conftest import preview_result_json, set_storage_preferences
+from tests.browser.saved_tracking_fixtures import _status_groups, _summary
 from tests.browser.visual_support import prepare_canvas, require_dist
 
 SINGLE_QUERY = "葬送的芙莉莲"
@@ -82,7 +83,18 @@ CONNECTION_SUMMARY_BODY = json.dumps(
     ensure_ascii=False,
 )
 
-TRACKING_ITEMS_BODY = json.dumps({"ok": True, "result": {"items": []}}, ensure_ascii=False)
+TRACKING_ITEMS_BODY = json.dumps(
+    {
+        "ok": True,
+        "result": {
+            "items": [],
+            "summary": _summary(0),
+            "status_groups": _status_groups(),
+            "warnings": [],
+        },
+    },
+    ensure_ascii=False,
+)
 
 
 def candidate_search_envelope(query: str, candidates: list[dict[str, Any]]) -> str:

@@ -17,6 +17,19 @@ from tests.browser.test_app_workbench import (
 pytestmark = pytest.mark.browser
 
 
+def _empty_tracking_list() -> dict:
+    """Issue #224 A7: an empty tracking list still publishes counts and groups."""
+    return {
+        "items": [],
+        "summary": {
+            "total": 0, "pending": 0, "processing": 0, "active": 0,
+            "added_to_download": 0, "inactive": 0, "needs_attention": 0, "unreadable": 0,
+        },
+        "status_groups": _status_groups_for([]),
+        "warnings": [],
+    }
+
+
 def _envelope(result: object) -> str:
     return json.dumps({"ok": True, "result": result})
 
@@ -77,7 +90,7 @@ def test_global_status_state_matrix(page: Page, live_server_url: str, connection
                 "configuration_revision": 3, "connection_status": connection_status,
             }))
         elif "/tracking/items" in request.url:
-            route.fulfill(status=200, content_type="application/json", body=_envelope({"items": []}))
+            route.fulfill(status=200, content_type="application/json", body=_envelope(_empty_tracking_list()))
         else:
             route.continue_()
 
@@ -103,7 +116,7 @@ def test_profile_switch_uses_new_query_and_failure_never_fabricates_zero(page: P
                     "items": [{"status": "PENDING_SUBMIT"}, {"status": "SUBMIT_FAILED"}],
                 }))
             else:
-                route.fulfill(status=200, content_type="application/json", body=_envelope({"items": []}))
+                route.fulfill(status=200, content_type="application/json", body=_envelope(_empty_tracking_list()))
         else:
             route.continue_()
 
@@ -125,7 +138,7 @@ def test_profile_switch_uses_new_query_and_failure_never_fabricates_zero(page: P
 def test_list_failure_keeps_badge_unknown(page: Page, live_server_url: str) -> None:
     def handle(route, request):
         if "/tracking/items" in request.url:
-            route.fulfill(status=503, content_type="application/json", body=_envelope({"items": []}))
+            route.fulfill(status=503, content_type="application/json", body=_envelope(_empty_tracking_list()))
         else:
             route.continue_()
 
@@ -173,7 +186,7 @@ def test_profile_change_while_app_is_mounted_invalidates_held_old_list(page: Pag
             else:
                 nonlocal a_calls
                 if "profile-a" not in request.url:
-                    route.fulfill(status=200, content_type="application/json", body=_envelope({"items": []}))
+                    route.fulfill(status=200, content_type="application/json", body=_envelope(_empty_tracking_list()))
                 elif a_calls == 0:
                     a_calls += 1
                     route.fulfill(status=200, content_type="application/json", body=_envelope({
@@ -268,7 +281,7 @@ def test_settings_test_save_delete_refreshes_global_state(page: Page, live_serve
                 "success": True, "summary": {"reachable": True}, "error": None,
             }))
         elif "/tracking/items" in request.url:
-            route.fulfill(status=200, content_type="application/json", body=_envelope({"items": []}))
+            route.fulfill(status=200, content_type="application/json", body=_envelope(_empty_tracking_list()))
         else:
             route.continue_()
 
@@ -304,9 +317,9 @@ def test_badge_failure_then_successful_zero_hides(page: Page, live_server_url: s
         if "/tracking/items" in request.url:
             if failed:
                 failed = False
-                route.fulfill(status=503, content_type="application/json", body=_envelope({"items": []}))
+                route.fulfill(status=503, content_type="application/json", body=_envelope(_empty_tracking_list()))
             else:
-                route.fulfill(status=200, content_type="application/json", body=_envelope({"items": []}))
+                route.fulfill(status=200, content_type="application/json", body=_envelope(_empty_tracking_list()))
         else:
             route.continue_()
 
@@ -335,7 +348,7 @@ def test_held_old_summary_cannot_overwrite_new_configuration(page: Page, live_se
                     "configuration_revision": 2, "connection_status": "VERIFIED",
                 }))
         elif "/tracking/items" in request.url:
-            route.fulfill(status=200, content_type="application/json", body=_envelope({"items": []}))
+            route.fulfill(status=200, content_type="application/json", body=_envelope(_empty_tracking_list()))
         else:
             route.continue_()
 

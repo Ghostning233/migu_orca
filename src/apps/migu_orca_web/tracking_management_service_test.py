@@ -750,3 +750,48 @@ def test_failed_modify_never_touches_the_local_plan(tmp_path: Path) -> None:
     } or result["outcome"] == "OUTCOME_UNKNOWN"
     assert load_request_snapshot(config, "req-local") == request
     assert load_tracking_record(config, record.tracking_id).request_id == "req-local"
+
+
+def test_retired_external_only_record_refuses_every_management_write(tmp_path: Path) -> None:
+    """Issue #224 A4 / ADR-0005: the read-only archive accepts no management write.
+
+    The local state matrix is the shared policy the UI projection also reads, so
+    a management request against a retired ``EXTERNAL_ONLY`` record is refused
+    before any external read or write.
+    """
+    config = load_storage_config(tmp_path / "storage")
+    record, _created = ensure_tracking_record(
+        config,
+        create_external_tracking_record(
+            adapter="legacy_3_1", object_kind="subscription", external_id="sub-history",
+            subscription_id="sub-history", rss_ids=("7",), title="History", season=1,
+        ),
+    )
+    assert record.status == "EXTERNAL_ONLY"
+    client, calls = _FakeClient(), []
+
+    for operation, scope, extra in (
+        ("MODIFY", "SUBSCRIPTION", {"patch": {"title": "Changed"}}),
+        ("SET_ENABLED", "SUBSCRIPTION", {"enabled": False}),
+        ("DELETE_EXTERNAL", "SUBSCRIPTION", {}),
+        ("REFRESH_RSS", "ASSOCIATED_RSS", {}),
+    ):
+        with pytest.raises(Stage1Error) as refused:
+            run_tracking_management(
+                config,
+                tracking_id=record.tracking_id,
+                expected_revision=record.revision,
+                idempotency_key=f"key-{operation.lower()}",
+                confirm=True,
+                operation=operation,
+                target_scope=scope,
+                management_client=client,
+                write=lambda target, payload: calls.append((target, payload)),
+                **extra,
+            )
+        assert refused.value.error_type == "tracking_management_state_conflict"
+
+    # Nothing was written, and the external boundary was never read.
+    assert calls == []
+    assert client.reads == 0
+    assert load_tracking_record(config, record.tracking_id).status == "EXTERNAL_ONLY"

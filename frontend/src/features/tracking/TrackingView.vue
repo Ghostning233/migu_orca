@@ -153,6 +153,9 @@ const clearBatchSelection = writes.clearBatchSelection
 // response started before a write must never overwrite it, and a list refresh
 // must never discard a write result.
 let listSequence = 0
+// Counts-only refreshes have their own generation: a settled write must not
+// invalidate (and so permanently leave loading) a list read the user started.
+let countsSequence = 0
 let writeGeneration = 0
 let syncSequence = 0
 let syncController: AbortController | null = null
@@ -288,6 +291,8 @@ function syncSelection(forceAbsentCheck = false): void {
 
 async function loadList(silent = false): Promise<void> {
   const sequence = ++listSequence
+  // A full read supersedes a counts-only refresh still in flight.
+  countsSequence += 1
   const generation = writeGeneration
   if (!silent) loading.value = true
   failed.value = false
@@ -483,13 +488,13 @@ async function recheckAfterAction(trackingId: string | null, refreshList: boolea
  * error state.
  */
 async function refreshServerCounts(): Promise<void> {
-  const sequence = ++listSequence
+  const sequence = ++countsSequence
   const generation = writeGeneration
   try {
     const result = await api.get<ListResult>('/api/v1/tracking/items', {
       query: { ...storageQuery(), sort: 'updated_at' },
     })
-    if (sequence !== listSequence || generation !== writeGeneration) return
+    if (sequence !== countsSequence || generation !== writeGeneration) return
     listSummary.value = result?.summary ?? null
     listStatusGroups.value = result?.status_groups ?? null
   } catch {
