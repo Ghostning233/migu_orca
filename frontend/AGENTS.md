@@ -35,7 +35,7 @@
 - 结果待确认时保留同一意图的原 key/revision/body，不能用回查后的新 revision 改写重放绑定；
   409 先回查并重新确认，结构化确定拒绝不当作结果待确认，管理成功仅看 SUCCEEDED。
 - AUTO/人工恢复是本地操作；只有 VERIFY_EXTERNAL 恢复分支携带 AB 临时配置，且只读。
-  本地复核不因未连接 AB 而禁用。外部删除单条、显式 danger 确认、无 file 请求字段。
+  本地复核不因未连接 AB 而禁用。删除方案默认仅删本地（外部订阅继续运行），勾选时才连带删外部，显式 danger 确认，无 file 请求字段；独立「只删外部」入口已退役，未决记录的放弃跟踪见根 AGENTS 的例外登记。
   Stage 39 的 VERIFY_EXTERNAL 仅携带绑定原 operation 的配置引用，由服务端解析，不能改绑。
 - 对话框复用 ConfirmDialog；焦点 trap 锚点在 Teleport 根，退出恢复焦点。
   CheckboxRow 的 id 只落到原生 input。状态需中文文本/aria-live，不仅用颜色表达。
