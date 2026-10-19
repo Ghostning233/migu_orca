@@ -22,7 +22,7 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import set_storage_preferences
-from tests.browser.saved_tracking_fixtures import _item, _summary
+from tests.browser.saved_tracking_fixtures import _item, _status_groups_for, _summary
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REF = "11111111-1111-4111-8111-111111111111"
@@ -109,7 +109,7 @@ def _install(
             return
         if request.method == "GET" and path == "/tracking/items":
             route.fulfill(json={"ok": True, "result": {
-                "items": [item], "summary": _summary(1, processing=1), "warnings": [],
+                "items": [item], "summary": _summary(1, processing=1), "status_groups": _status_groups_for([item]), "warnings": [],
             }})
             return
         if request.method == "GET" and path.startswith("/tracking/items/"):

@@ -55,6 +55,10 @@ def _seed(tmp_path: Path):
         adapter="legacy_3_1", object_kind="subscription", external_id="sub-1",
         subscription_id="sub-1", rss_ids=("7",), title="Test", season=1,
     )
+    # Issue #224 A4: EXTERNAL_ONLY is retired read-only history, so a record the
+    # management write path may act on is a normal ACTIVE record carrying the
+    # same external mapping.
+    record = replace(record, status=TRACKING_STATUS_ACTIVE)
     stored, _ = ensure_tracking_record(config, record)
     return config, stored
 
@@ -93,6 +97,9 @@ def _seed_with_local_plan(tmp_path: Path):
         request_id="req-local",
         origin="SAVE_CONFIRM",
         tracking_id=tracking_id_for_request("req-local"),
+        # Issue #224 A4: a manageable record is ACTIVE, never the retired
+        # read-only EXTERNAL_ONLY archive.
+        status=TRACKING_STATUS_ACTIVE,
     )
     stored, _ = ensure_tracking_record(config, record)
     return config, stored, request

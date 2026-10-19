@@ -244,7 +244,7 @@ JSON 损坏不阻塞健康列表，只增加 `unreadable` 计数与固定 warnin
 
 | 端点 | 请求字段 | 成功 `result`（白名单） | 业务失败示例 |
 | --- | --- | --- | --- |
-| GET `/api/v1/tracking/items` | `storage_dir?`、`q?`、`status_group?`（`PENDING`/`PROCESSING`/`ACTIVE`/`ATTENTION`/`INACTIVE`）、`sort?`（`updated_at`/`title`/`status`） | `{"items": [<TrackingItemDTO>], "summary": {total, pending, processing, active, needs_attention, unreadable}, "warnings": []}` | 非法枚举 → `data_validation_errors`；`invalid_storage_dir` |
+| GET `/api/v1/tracking/items` | `storage_dir?`、`q?`、`status_group?`（`PENDING`/`PROCESSING`/`ACTIVE`/`ATTENTION`/`INACTIVE`）、`sort?`（`updated_at`/`title`/`status`） | `{"items": [<TrackingItemDTO>], "summary": {total, pending, processing, active, added_to_download, inactive, needs_attention, unreadable}, "status_groups": [{group, label, count, has_overview_card}], "warnings": []}`（issue #224 A7：`status_groups` 恒发五组，空列表与零计数组也发布；`count` 不受 `q`/`status_group` 影响；「仅外部」历史档案只出现在「全部」且不参与任何组计数） | 非法枚举 → `data_validation_errors`；`invalid_storage_dir` |
 | POST `/api/v1/tracking/sync`（US-233） | `ab_config`（request-scoped）、`confirm=true`、`storage_dir?` | `{sync_status, checked_at, capabilities, summary, warnings[], items: [<TrackingItemDTO>]}`；详情 external_mapping 仅返回安全状态摘要，不返回外部 ID/RSS ID | `confirm` 非 true/多余字段 → `data_validation_errors`；`invalid_storage_dir`；`config_error` |
 | GET `/api/v1/tracking/items/<tracking_id>` | `tracking_id`（路径）、`storage_dir?` | `{...summary 字段, origin, batch_id?, created_at, updated_at?, last_synced_at?, safe_info?, current_operation?, revalidation_issues: [], external_mapping?, audit_events[]（最近 20 条）, warnings}` | 缺失 → `tracking_not_found`（404）；路径片段 → `invalid_tracking_id`；损坏 → `storage_json_error` |
 | POST `/api/v1/tracking/items/<tracking_id>/revalidate`（US-224） | `tracking_id`（路径）、`expected_revision`（必填）、`storage_dir?` | `{tracking_id, ready, checked_revision, next_revision, checked_at, next_status, issues[], tracking}`（业务复核失败仍 HTTP 200：`ready=false`、`next_status=NEEDS_RECONFIRM` + 固定 §11.5 issue code） | 缺 `expected_revision`/多余字段（如 `ab_config`）→ `data_validation_errors`；`expected_revision` 过期 → `tracking_revision_conflict`（409）；非可复核状态 → `tracking_state_conflict`（409）；缺失 → `tracking_not_found`（404）；路径片段 → `invalid_tracking_id` |
@@ -405,7 +405,9 @@ issues、外部安全映射摘要和最近 20 条审计事件；绝不回显完�
   （`TrackingItemDetailView`，operationId `getTrackingItemDetail`）。读模型
   `apps/migu_orca_web/tracking_read_service.py` 先运行历史回填协调器再读
   `list_tracking_records`/`load_tracking_record`；列表支持 `q`/`status_group`/`sort`（固定枚举）
-  与 `summary` 计数（`total/pending/processing/active/needs_attention/unreadable`），单条损坏
+  与 `summary` 计数（`total/pending/processing/active/added_to_download/inactive/needs_attention/unreadable`）
+  及列表级 `status_groups` 元数据（五组 `group/label/count/has_overview_card`，覆盖空列表与零计数组，
+  前端不再持有组标签表；见 issue #224），单条损坏
   JSON 只增 `unreadable` 计数 + 固定 warning，不阻塞健康列表。`tracking_serializers.py` 负责
   白名单：free-text 标题/字幕组复用 `_safe_label`，`poster_path` 只允许同源 opaque 代理路径，
   `available_actions` 由服务端按 tracking status 计算（只返回当前可执行动作，无 disabled 假动作），

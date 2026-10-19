@@ -44,3 +44,28 @@ def _status_groups(*, pending=0, processing=0, active=0, attention=0, inactive=0
         {"group": "ATTENTION", "label": "需处理", "count": attention, "has_overview_card": True},
         {"group": "INACTIVE", "label": "已停用", "count": inactive, "has_overview_card": True},
     ]
+
+
+def _status_groups_for(items):
+    """Derive the group metadata from the same mock rows (issue #224 A7).
+
+    The real list endpoint always publishes all five groups, so a browser mock
+    that omitted them would describe a response the server never returns — and
+    the page would render no cards at all.  Counts come from the fixture rows'
+    ``status_group``; the retired read-only ``EXTERNAL_ONLY`` archive never joins
+    a count.
+    """
+    counts = {"PENDING": 0, "PROCESSING": 0, "ACTIVE": 0, "ATTENTION": 0, "INACTIVE": 0}
+    for item in items or []:
+        if not isinstance(item, dict) or item.get("status") == "EXTERNAL_ONLY":
+            continue
+        group = item.get("status_group")
+        if group in counts:
+            counts[group] += 1
+    return _status_groups(
+        pending=counts["PENDING"],
+        processing=counts["PROCESSING"],
+        active=counts["ACTIVE"],
+        attention=counts["ATTENTION"],
+        inactive=counts["INACTIVE"],
+    )

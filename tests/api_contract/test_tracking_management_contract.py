@@ -102,7 +102,7 @@ def test_public_action_and_management_status_are_enumerated() -> None:
         TrackingManagementResultDTO(action="MODIFY", management_status="NOT_A_STATUS",
                                     needs_manual=False, safe_message="x",
                                     tracking={"tracking_id": "trk", "status": "ACTIVE",
-                                              "status_label": "正在追番", "status_group": "ACTIVE", "revision": 1})
+                                              "status_label": "追番中", "status_group": "ACTIVE", "revision": 1})
 
 
 def test_modify_patch_is_strictly_discriminated_by_scope() -> None:

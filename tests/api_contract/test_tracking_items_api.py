@@ -413,6 +413,38 @@ def test_external_only_history_is_read_only_and_only_visible_in_all(
     ).get_json()["result"]
     assert [entry["tracking_id"] for entry in searched["items"]] == [record.tracking_id]
 
+    # The archive is loadable through the detail route too (AC3) with its real
+    # label and no management action; the opaque external id never leaves.
+    detail_response = client.get(
+        f"/api/v1/tracking/items/{record.tracking_id}",
+        query_string={"storage_dir": "storage"},
+    )
+    assert detail_response.status_code == 200
+    detail = detail_response.get_json()["result"]
+    assert detail["status"] == TRACKING_STATUS_EXTERNAL_ONLY
+    assert detail["status_label"] == "仅外部"
+    assert detail["status_group"] == "INACTIVE"
+    assert detail["available_actions"] == []
+    assert detail["safe_info"] is None
+    detail_text = detail_response.get_data(as_text=True)
+    for forbidden in ("sub-history-1", "legacy_3_1", str(tmp_path)):
+        assert forbidden not in detail_text
+    list_text = client.get(
+        "/api/v1/tracking/items", query_string={"storage_dir": "storage"}
+    ).get_data(as_text=True)
+    assert "sub-history-1" not in list_text
+
+
+def test_published_group_enum_matches_the_engine_order() -> None:
+    """Issue #224 A7: the DTO can never quietly drift from the engine order."""
+    from typing import get_args
+
+    from apps.migu_orca_web.api_contract import TrackingStatusGroupDTO
+    from tracking_engine.models.tracking import TRACKING_STATUS_GROUP_ORDER
+
+    annotation = TrackingStatusGroupDTO.model_fields["group"].annotation
+    assert get_args(annotation) == TRACKING_STATUS_GROUP_ORDER
+
 
 
 def test_tracking_list_q_and_status_group_and_sort(

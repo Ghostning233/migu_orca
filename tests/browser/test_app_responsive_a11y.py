@@ -9,6 +9,7 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import set_storage_preferences
+from tests.browser.saved_tracking_fixtures import _status_groups_for
 from tests.browser.screen_support import wait_for_screen_scroll
 from tests.browser.test_app_batch_workbench import (
     _batch_item,
@@ -96,8 +97,10 @@ def _mock_tracking_list(page: Page, items: list[dict[str, Any]]) -> None:
                     "result": {
                         "items": items,
                         "summary": {
+                            # Self-consistent with status_groups below: the two
+                            # rows are one 追番中 and one 需处理.
                             "total": len(items), "pending": 0, "processing": 0,
-                            "active": len(items), "inactive": 0, "needs_attention": len(items),
+                            "active": 1, "inactive": 0, "needs_attention": 1,
                             "unreadable": 0,
                         },
                         # Issue #224 A7: the four cards render from this
@@ -537,7 +540,7 @@ class TestReducedMotionAndFeedback:
         held[0].fulfill(
             status=200,
             content_type="application/json",
-            body=json.dumps({"ok": True, "result": {"items": [], "summary": {}, "warnings": []}}),
+            body=json.dumps({"ok": True, "result": {"items": [], "summary": {}, "status_groups": _status_groups_for([]), "warnings": []}}),
         )
         page.wait_for_selector(".empty-state")
 
@@ -561,13 +564,13 @@ class TestReducedMotionAndFeedback:
         held[0].fulfill(
             status=200,
             content_type="application/json",
-            body=json.dumps({"ok": True, "result": {"items": [], "summary": {}, "warnings": []}}),
+            body=json.dumps({"ok": True, "result": {"items": [], "summary": {}, "status_groups": _status_groups_for([]), "warnings": []}}),
         )
         for route in held[1:]:
             route.fulfill(
                 status=200,
                 content_type="application/json",
-                body=json.dumps({"ok": True, "result": {"items": [], "summary": {}, "warnings": []}}),
+                body=json.dumps({"ok": True, "result": {"items": [], "summary": {}, "status_groups": _status_groups_for([]), "warnings": []}}),
             )
         expect(refresh).to_be_enabled()
 

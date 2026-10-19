@@ -19,7 +19,7 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import set_storage_preferences
-from tests.browser.saved_tracking_fixtures import _item, _summary
+from tests.browser.saved_tracking_fixtures import _item, _status_groups_for, _summary
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REF = "11111111-1111-4111-8111-111111111111"
@@ -88,7 +88,7 @@ def _install(page: Page, item: dict[str, Any], check_result: dict[str, Any]) -> 
             return
         if request.method == "GET" and path == "/tracking/items":
             route.fulfill(json={"ok": True, "result": {
-                "items": [state["item"]], "summary": _summary(1, processing=1), "warnings": [],
+                "items": [state["item"]], "summary": _summary(1, processing=1), "status_groups": _status_groups_for([state["item"]]), "warnings": [],
             }})
             return
         if request.method == "GET" and path.startswith("/tracking/items/"):
@@ -229,7 +229,7 @@ def _install_journey(
         if request.method == "GET" and path == "/tracking/items":
             rows = list(state["items"].values())
             route.fulfill(json={"ok": True, "result": {
-                "items": rows, "summary": _summary(len(rows), pending=len(rows)), "warnings": [],
+                "items": rows, "summary": _summary(len(rows), pending=len(rows)), "status_groups": _status_groups_for(rows), "warnings": [],
             }})
             return
         if request.method == "GET" and path.startswith("/tracking/items/"):

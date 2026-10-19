@@ -9,6 +9,7 @@ import pytest
 from playwright.sync_api import Page
 
 from tests.browser.conftest import set_storage_preferences
+from tests.browser.saved_tracking_fixtures import _status_groups_for
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -112,6 +113,7 @@ def _mock_tracking(page: Page, items: list[dict[str, Any]]) -> None:
                             "total": len(items), "pending": len(items), "processing": 0,
                             "active": 0, "inactive": 0, "needs_attention": 0, "unreadable": 0,
                         },
+                        "status_groups": _status_groups_for(items),
                         "warnings": [],
                     },
                 },

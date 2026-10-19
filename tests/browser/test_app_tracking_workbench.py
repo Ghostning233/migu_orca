@@ -21,7 +21,7 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import set_storage_preferences
-from tests.browser.saved_tracking_fixtures import _summary
+from tests.browser.saved_tracking_fixtures import _status_groups_for, _summary
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -110,9 +110,11 @@ def _mock_workbench(page: Page, items: list[dict[str, Any]]) -> None:
                     "result": {
                         "items": items,
                         "summary": {
+                            # Group counts sum to this total (追番中 is active +
+                            # added_to_download), so the fixture is self-consistent.
                             "total": 9,
-                            "pending": 4,
-                            "processing": 2,
+                            "pending": 3,
+                            "processing": 1,
                             "active": 2,
                             "inactive": 1,
                             "needs_attention": 1,
@@ -122,8 +124,8 @@ def _mock_workbench(page: Page, items: list[dict[str, Any]]) -> None:
                         # Issue #224 A2/A7: four server-owned cards; 追番中 is
                         # 追番中 + 已加入下载 and 处理中 has no card.
                         "status_groups": [
-                            {"group": "PENDING", "label": "待处理", "count": 4, "has_overview_card": True},
-                            {"group": "PROCESSING", "label": "处理中", "count": 2, "has_overview_card": False},
+                            {"group": "PENDING", "label": "待处理", "count": 3, "has_overview_card": True},
+                            {"group": "PROCESSING", "label": "处理中", "count": 1, "has_overview_card": False},
                             {"group": "ACTIVE", "label": "追番中", "count": 3, "has_overview_card": True},
                             {"group": "ATTENTION", "label": "需处理", "count": 1, "has_overview_card": True},
                             {"group": "INACTIVE", "label": "已停用", "count": 1, "has_overview_card": True},
@@ -178,7 +180,7 @@ class TestTrackingWorkbench:
         cards = page.locator(".tracking-status-card")
         assert cards.count() == 4
         assert ["".join(text.split()) for text in cards.all_inner_texts()] == [
-            "待处理4", "追番中3", "需处理1", "已停用1",
+            "待处理3", "追番中3", "需处理1", "已停用1",
         ]
         # The count moved to the list bottom and states the whole-library total.
         assert "共 9 部" in page.locator(".tracking-list-count").inner_text()
@@ -342,7 +344,7 @@ class TestPendingPlanEditing:
                 }})
                 return
             if request.method == "GET" and path == "/tracking/items":
-                route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1, pending=1), "warnings": []}})
+                route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1, pending=1), "status_groups": _status_groups_for([item]), "warnings": []}})
                 return
             if request.method == "GET" and path == "/tracking/items/tracking-a":
                 route.fulfill(json={"ok": True, "result": {**item, "origin": "single", "batch_id": None,
@@ -427,7 +429,7 @@ class TestActivePlanApply:
                 }})
                 return
             if request.method == "GET" and path == "/tracking/items":
-                route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1, active=1), "warnings": []}})
+                route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1, active=1), "status_groups": _status_groups_for([item]), "warnings": []}})
                 return
             if request.method == "GET" and path == "/tracking/items/tracking-a":
                 route.fulfill(json={"ok": True, "result": {
@@ -515,7 +517,7 @@ class TestPlanDelete:
             if request.method == "GET" and path == "/tracking/items":
                 items = [] if state["deleted"] else [item]
                 route.fulfill(json={"ok": True, "result": {
-                    "items": items, "summary": _summary(len(items), active=len(items)), "warnings": [],
+                    "items": items, "summary": _summary(len(items), active=len(items)), "status_groups": _status_groups_for(items), "warnings": [],
                 }})
                 return
             if request.method == "GET" and path == "/tracking/items/tracking-a":
@@ -583,7 +585,7 @@ class TestPlanDelete:
                 }})
                 return
             if request.method == "GET" and path == "/tracking/items":
-                route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1, active=1), "warnings": []}})
+                route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1, active=1), "status_groups": _status_groups_for([item]), "warnings": []}})
                 return
             if request.method == "GET" and path == "/tracking/items/tracking-a":
                 route.fulfill(json={"ok": True, "result": {
@@ -645,7 +647,7 @@ class TestPlanReuse:
                 }})
                 return
             if request.method == "GET" and path == "/tracking/items":
-                route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1, pending=1), "warnings": []}})
+                route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1, pending=1), "status_groups": _status_groups_for([item]), "warnings": []}})
                 return
             if request.method == "GET" and path == "/tracking/items/tracking-a":
                 route.fulfill(json={"ok": True, "result": {
@@ -699,7 +701,7 @@ class TestPlanReuse:
             if request.method == "GET" and path == "/tracking/items":
                 items = [] if state["deleted"] else [item]
                 route.fulfill(json={"ok": True, "result": {
-                    "items": items, "summary": _summary(len(items), needs_attention=len(items)), "warnings": [],
+                    "items": items, "summary": _summary(len(items), needs_attention=len(items)), "status_groups": _status_groups_for(items), "warnings": [],
                 }})
                 return
             if request.method == "GET" and path == "/tracking/items/tracking-a":
@@ -778,6 +780,7 @@ class TestSubmissionModeLabels:
                 route.fulfill(json={"ok": True, "result": {
                     "items": [pending, active],
                     "summary": _summary(2, pending=1, active=1),
+                    "status_groups": _status_groups_for([pending, active]),
                     "warnings": [],
                 }})
                 return

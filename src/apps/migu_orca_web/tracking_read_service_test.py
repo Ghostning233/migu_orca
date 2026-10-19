@@ -96,9 +96,9 @@ def test_available_actions_expose_stage31_management_actions() -> None:
     assert [item["code"] for item in tracking_available_actions(TRACKING_STATUS_DISABLED, mapping)] == [
         "SET_ENABLED", "DELETE_EXTERNAL",
     ]
-    assert [item["code"] for item in tracking_available_actions(TRACKING_STATUS_EXTERNAL_ONLY, mapping)] == [
-        "MODIFY", "SET_ENABLED", "REFRESH_RSS", "DELETE_EXTERNAL",
-    ]
+    # Issue #224 A4: the retired read-only archive offers no management action in
+    # the projection either — the write policy and the read model agree.
+    assert tracking_available_actions(TRACKING_STATUS_EXTERNAL_ONLY, mapping) == []
 
 
 def test_available_action_objects_are_strict_shape() -> None:

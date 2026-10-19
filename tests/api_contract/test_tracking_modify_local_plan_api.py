@@ -119,6 +119,9 @@ def _seed(tmp_path: Path):
         request_id="req-local",
         origin="SAVE_CONFIRM",
         tracking_id=tracking_id_for_request("req-local"),
+        # Issue #224 A4: a manageable record is ACTIVE, never the retired
+        # read-only EXTERNAL_ONLY archive.
+        status="ACTIVE",
     )
     stored, _created = ensure_tracking_record(config, record)
     assert stored.external_mapping is not None

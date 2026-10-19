@@ -6,6 +6,7 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import preview_result_json
+from tests.browser.saved_tracking_fixtures import _status_groups_for
 from tests.browser.test_app_workbench import (
     _candidate,
     _candidate_result_json,
@@ -49,7 +50,8 @@ def test_badge_counts_items_only_and_hides_zero(page: Page, live_server_url: str
         elif "/tracking/items" in request.url:
             route.fulfill(status=200, content_type="application/json", body=_envelope({
                 "items": [{"status": "PENDING_SUBMIT"}, {"status": "SUBMIT_FAILED"}, {"status": "DONE"}],
-                "summary": {"pending": 0}, "warnings": [],
+                "summary": {"pending": 0}, "status_groups": _status_groups_for([]), "warnings": [],
+
             }))
         else:
             route.continue_()

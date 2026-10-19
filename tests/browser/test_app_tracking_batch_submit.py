@@ -23,7 +23,7 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import set_storage_preferences
-from tests.browser.saved_tracking_fixtures import _item, _summary
+from tests.browser.saved_tracking_fixtures import _item, _status_groups_for, _summary
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REF = "11111111-1111-4111-8111-111111111111"
@@ -114,6 +114,7 @@ def _install(page: Page, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "result": {
                         "items": state["items"],
                         "summary": _summary(len(state["items"]), pending=2, processing=1),
+                        "status_groups": _status_groups_for(state["items"]),
                         "warnings": [],
                     },
                 }

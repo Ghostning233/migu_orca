@@ -197,7 +197,9 @@ def classify_backfill(evidence: RequestBackfillEvidence) -> BackfillDecision:
                 origin=_origin_for(evidence, ab_present=True),
                 batch_id=batch_id,
                 extra_queue_source_count=extra_count,
-                safe_message="历史 Auto Bangumi 结果已确认成功，记录为正在追番",
+                # Issue #224 A1: the backfill audit text uses the one status
+                # vocabulary, so it can never re-introduce「正在追番」.
+                safe_message="历史 Auto Bangumi 结果已确认成功，记录为追番中",
             )
         return _decision(
             request_id,

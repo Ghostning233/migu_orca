@@ -201,6 +201,10 @@ def test_ab_success_with_accepted_request_becomes_active() -> None:
 
     assert decision.status == TRACKING_STATUS_ACTIVE
     assert decision.origin == TRACKING_ORIGIN_MIGRATED_AB_RESULT
+    # Issue #224 A1: the migration's own audit text uses the one vocabulary, so
+    # a backfilled record never re-introduces「正在追番」into the activity log.
+    assert "追番中" in decision.safe_message
+    assert "正在追番" not in decision.safe_message
 
 
 def test_ab_success_with_missing_request_becomes_recovery_required() -> None:

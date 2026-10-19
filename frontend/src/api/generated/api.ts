@@ -5372,11 +5372,11 @@ export interface operations {
                              * TrackingItemListSummaryDTO
                              * @description Safe summary counts for the tracking list (§11.2).
                              *
-                             *     ``inactive`` counts the DISABLED group; ``processing`` stays a transient
-                             *     per-row state that the page never renders as its own overview category.
-                             *     ``active`` counts 追番中 only and ``added_to_download`` counts 已加入下载
-                             *     separately, so the 追番中 overview card reads ``active + added_to_download``
-                             *     (issue #224 A2).
+                             *     ``inactive`` counts the 已停用 card group (``DISABLED`` rows); ``processing``
+                             *     stays a transient per-row state that the page never renders as its own
+                             *     overview category.  ``active`` counts 追番中 only and ``added_to_download``
+                             *     counts 已加入下载 separately, so the 追番中 overview card reads
+                             *     ``active + added_to_download`` (issue #224 A2).
                              *
                              *     Issue #224 A4: a retired read-only ``EXTERNAL_ONLY`` archive is never
                              *     counted in any group field — it only appears in ``total`` (全部).

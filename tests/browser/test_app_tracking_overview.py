@@ -72,9 +72,16 @@ def _detail(item: dict[str, Any], *, audit_events: int = 1) -> dict[str, Any]:
     }
 
 
-def _open(page: Page, live_server_url: str, storage_dir, items: list[dict[str, Any]], *, audits: int = 1) -> list[dict[str, Any]]:
+def _open(
+    page: Page, live_server_url: str, storage_dir, items: list[dict[str, Any]],
+    *, audits: int = 1, total: int | None = None,
+) -> list[dict[str, Any]]:
     """Mock the tracking list/detail DTOs; the returned list is mutable so a
-    test can reload the same page with a different number of records."""
+    test can reload the same page with a different number of records.
+
+    ``total`` lets a test claim more records than the rows it returns, which is
+    exactly the "server count, partial rows" case the bottom count must state.
+    """
     live_items = list(items)
 
     def handler(route: Any, request: Any) -> None:
@@ -101,7 +108,7 @@ def _open(page: Page, live_server_url: str, storage_dir, items: list[dict[str, A
                     "result": {
                         "items": live_items,
                         "summary": {
-                            "total": len(live_items),
+                            "total": total if total is not None else len(live_items),
                             "pending": 0,
                             "processing": 0,
                             "active": len(live_items),
@@ -146,25 +153,40 @@ def _wait_for_loaded_detail(page: Page) -> None:
 def test_overview_cards_keep_the_server_count_and_clear_the_search(
     page: Page, live_server_url: str, storage_dir
 ) -> None:
-    """Issue #224 A2/A5: four cards, authoritative numbers, search cleared."""
+    """Issue #224 A2/A5: four cards, authoritative numbers, search cleared.
+
+    The server claims 9 records while returning 5 rows, and the four card
+    numbers differ from ``summary.total``.  That keeps the assertions honest:
+    a frontend recount of loaded rows, or a card that reads ``summary.total``,
+    would fail instead of accidentally matching the mock.
+    """
     items = [_item(index) for index in range(5)]
     page.set_viewport_size({"width": 1440, "height": 900})
-    _open(page, live_server_url, storage_dir, items)
+    _open(page, live_server_url, storage_dir, items, total=9)
 
     cards = page.locator(".tracking-status-card")
     assert cards.count() == 4
     assert ["".join(text.split()) for text in cards.all_inner_texts()] == [
         "待处理0", "追番中5", "需处理0", "已停用0",
     ]
-    # 全部 without a search: the bottom count is the whole-library total.
-    assert page.locator(".tracking-list-count").inner_text() == "共 5 部"
+    # 全部 without a search: the bottom number is the server total, not a recount.
+    assert page.locator(".tracking-list-count").inner_text() == "共 9 部"
 
-    # Clicking 追番中 leaves the row count equal to the card number.
+    # Every card's number equals the rows it reveals without a search condition.
+    expected = {
+        "pending": ("待处理", 0), "active": ("追番中", 5),
+        "attention": ("需处理", 0), "inactive": ("已停用", 0),
+    }
+    for group, (_label, count) in expected.items():
+        card = page.locator(f"#tracking-overview-{group}")
+        card.click()
+        assert card.get_attribute("aria-pressed") == "true"
+        expect(page.locator(".tracking-list-item")).to_have_count(count)
+        assert page.locator(".tracking-list-count").inner_text() == f"共 {count} 部"
+
+    # 追番中: a search narrows only the rows; the card number stays authoritative.
     page.locator("#tracking-overview-active").click()
     expect(page.locator(".tracking-list-item")).to_have_count(5)
-    assert page.locator(".tracking-list-count").inner_text() == "共 5 部"
-
-    # A search narrows only the rows; the card number stays authoritative.
     page.fill("#tracking-search", "04")
     expect(page.locator(".tracking-list-item")).to_have_count(1)
     assert page.locator(".tracking-list-count").inner_text() == "筛选出 1 部 · 共 5 部"
@@ -174,6 +196,7 @@ def test_overview_cards_keep_the_server_count_and_clear_the_search(
     expect(page.locator("#tracking-search")).to_have_value("")
     expect(page.locator(".tracking-list-item")).to_have_count(0)
     assert page.locator(".tracking-list-count").inner_text() == "共 0 部"
+    assert page.locator("#tracking-overview-inactive").get_attribute("aria-pressed") == "true"
 
 
 def test_long_list_scrolls_inside_while_overview_and_inspector_stay_put(

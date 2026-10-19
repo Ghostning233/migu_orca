@@ -11,7 +11,6 @@ from ab_engine.models.management import AutoBangumiCapabilities
 from tracking_engine.models.tracking import (
     TRACKING_STATUS_ACTIVE,
     TRACKING_STATUS_DISABLED,
-    TRACKING_STATUS_EXTERNAL_ONLY,
 )
 
 MANAGEMENT_ACTIONS = frozenset({"MODIFY", "SET_ENABLED", "DELETE_EXTERNAL", "REFRESH_RSS"})
@@ -29,9 +28,10 @@ _CAPABILITY_FIELDS = {
 
 _ACTIONS_BY_STATUS: dict[str, frozenset[str]] = {
     TRACKING_STATUS_ACTIVE: MANAGEMENT_ACTIONS,
-    # A synced external-only record has a durable mapping and can use the same
-    # bounded management endpoints as an active local record.
-    TRACKING_STATUS_EXTERNAL_ONLY: MANAGEMENT_ACTIONS,
+    # Issue #224 A4 / ADR-0005: ``EXTERNAL_ONLY`` is retired read-only history.
+    # MiGuOrca never adopted that external object, so it offers no management
+    # action — this table is the one policy the read projection and the write
+    # path share, which keeps the UI and the API from disagreeing.
     # Disabled subscriptions may only be re-enabled or permanently removed.
     TRACKING_STATUS_DISABLED: frozenset({"SET_ENABLED", "DELETE_EXTERNAL"}),
 }

@@ -209,17 +209,29 @@ const overviewCards = computed(() => statusGroups.value.filter((group) => group.
 const filteredItems = computed(() => sortTrackingItems(filterTrackingItems(items.value, {
   query: searchTerm.value, statusGroup: statusFilter.value,
 })))
-/** The authoritative count of the selected category, or of 全部 without one. */
-const categoryTotal = computed(() => {
-  const selected = statusGroups.value.find((group) => group.group === statusFilter.value)
-  return selected ? selected.count : overview.value.total
+/** True only while a real search term is narrowing the list (trimmed). */
+const hasSearch = computed(() => searchTerm.value.trim() !== '')
+/**
+ * The authoritative count of the selected category, or of 全部 without one.
+ *
+ * `null` means the server did not publish the selected group (an older or
+ * malformed projection), so the page states the filtered number alone instead
+ * of relabelling the whole-library total as the category count.
+ */
+const categoryTotal = computed<number | null>(() => {
+  if (!statusFilter.value) return overview.value.total
+  return statusGroups.value.find((group) => group.group === statusFilter.value)?.count ?? null
 })
 /** Issue #224 A5: 共 N 部; with a search 筛选出 M 部 · 共 N 部. */
-const listCountText = computed(() => (
-  searchTerm.value
-    ? `筛选出 ${filteredItems.value.length} 部 · 共 ${categoryTotal.value} 部`
-    : `共 ${categoryTotal.value} 部`
-))
+const listCountText = computed(() => {
+  const total = categoryTotal.value
+  if (hasSearch.value) {
+    return total === null
+      ? `筛选出 ${filteredItems.value.length} 部`
+      : `筛选出 ${filteredItems.value.length} 部 · 共 ${total} 部`
+  }
+  return total === null ? '共 — 部' : `共 ${total} 部`
+})
 const statusFilterOptions = computed(() => [
   { value: '', label: '全部状态' },
   ...statusGroups.value.map((group) => ({ value: group.group, label: group.label })),
@@ -419,6 +431,9 @@ async function syncTracking(): Promise<void> {
       // recounted from the rows — a sync can add, update or retire records and
       // the four counts must match the list again right after it.
       await loadList(true)
+      // A connection reset (or a newer sync intent) during that read owns the
+      // page now: never restore the old summary or its success message.
+      if (sequence !== syncSequence) return
       // Issue #88: strangers in Auto Bangumi are counted, never imported.
       syncMessage.value = result.summary.ignored
         ? `同步完成：检查 ${result.summary.checked} 条，新增 ${result.summary.created} 条，更新 ${result.summary.updated} 条；忽略 ${result.summary.ignored} 条不属于 MiGuOrca 管理的外部订阅。`
@@ -455,6 +470,31 @@ async function recheckAfterAction(trackingId: string | null, refreshList: boolea
   if (refreshList) await loadList(true)
   if (!trackingId || selectedTrackingId.value !== trackingId) return
   await inspector.value?.reload()
+}
+
+/**
+ * Re-read only the authoritative counts after a settled write (issue #224 A5).
+ *
+ * The write response carries the row, not the projection, so a status change
+ * would otherwise leave the four card numbers on the previous category.  The
+ * converged row is deliberately kept: this refresh never replaces the list, it
+ * only re-states the server's whole-library summary and group metadata.  A
+ * failure is silent — a count refresh must never turn a healthy list into an
+ * error state.
+ */
+async function refreshServerCounts(): Promise<void> {
+  const sequence = ++listSequence
+  const generation = writeGeneration
+  try {
+    const result = await api.get<ListResult>('/api/v1/tracking/items', {
+      query: { ...storageQuery(), sort: 'updated_at' },
+    })
+    if (sequence !== listSequence || generation !== writeGeneration) return
+    listSummary.value = result?.summary ?? null
+    listStatusGroups.value = result?.status_groups ?? null
+  } catch {
+    // Leave the last authoritative projection in place.
+  }
 }
 
 /** A fixed verdict the session produced, mapped to its one page-level channel. */
@@ -521,6 +561,9 @@ async function runWriteEffects(effects: readonly TrackingWriteEffect[]): Promise
   for (const effect of effects) {
     if (effect.kind === 'recheck') {
       await recheckAfterAction(effect.trackingId, effect.refreshList)
+      // Issue #224 A5: a converged row never moves a category count by itself,
+      // so the settled write re-reads the server projection as well.
+      if (!effect.refreshList) await refreshServerCounts()
       continue
     }
     if (effect.kind === 'confirmResubmitRisk') {
@@ -1034,7 +1077,7 @@ onBeforeUnmount(() => {
           <label for="tracking-status-filter">状态筛选</label>
           <BaseSelect id="tracking-status-filter" v-model="statusFilter" label="状态筛选"
             :options="statusFilterOptions" />
-          <BaseButton v-if="searchTerm || statusFilter" variant="secondary" @click="clearFilters">清除筛选</BaseButton>
+          <BaseButton v-if="hasSearch || statusFilter" variant="secondary" @click="clearFilters">清除筛选</BaseButton>
         </div>
         <div v-if="loading" class="tracking-list-state"><LoadingState message="正在读取追番列表…" /></div>
         <ErrorState v-else-if="failed" title="追番列表读取失败" message="暂时无法读取本地追番列表，请稍后重试。" retry-label="重试读取" @retry="loadList()" />
@@ -1088,7 +1131,7 @@ onBeforeUnmount(() => {
         <p v-if="selectedHidden" class="tracking-selection-note" role="status">当前选择被筛选条件隐藏，未自动切换记录。</p>
         <!-- Issue #224 A5: the count lives at the list bottom; N stays the
              server's whole-library category count and never a frontend recount. -->
-        <p class="tracking-list-count" role="status">{{ listCountText }}</p>
+        <p v-if="!loading && !failed" class="tracking-list-count" role="status">{{ listCountText }}</p>
       </PanelSection>
 
       <aside class="tracking-inspector" aria-labelledby="tracking-inspector-heading">

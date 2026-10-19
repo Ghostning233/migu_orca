@@ -106,9 +106,13 @@ def list_tracking_items(
         warnings.append(TRACKING_LIST_UNREADABLE_WARNING)
 
     requests_by_id = _requests_by_id(list_request_snapshots_tolerant(config))
+    # One projection pass feeds both the summary and the published group
+    # metadata, so the two can never disagree (issue #224 A5/A7).
+    group_counts, added_to_download = _group_counts(healthy_records)
     summary = _summary_counts(
-        healthy_records,
-        added_to_download=_count_added_to_download(healthy_records),
+        total=len(healthy_records),
+        group_counts=group_counts,
+        added_to_download=added_to_download,
         unreadable=unreadable,
     )
     visible = _filter_records(healthy_records, q=q, status_group=status_group)
@@ -120,7 +124,7 @@ def list_tracking_items(
         valid_count = _request_valid_resource_count(request)
         items.append(
             {
-                **_product_summary_fields(record, valid_resource_count=valid_count),
+                **tracking_summary_fields(record, valid_resource_count=valid_count),
                 "submission_mode": _submission_mode_for(config, record),
             }
         )
@@ -131,7 +135,7 @@ def list_tracking_items(
         # Issue #224 A7: list-level group metadata, so the client renders
         # server-owned labels and authoritative counts — including for an empty
         # list and for zero-count groups — and keeps no label table of its own.
-        "status_groups": _status_group_metadata(healthy_records),
+        "status_groups": _status_group_metadata(group_counts),
         "warnings": warnings,
     }
 
@@ -185,7 +189,7 @@ def build_tracking_detail(
         else:
             warnings.append(TRACKING_DETAIL_OPERATION_UNAVAILABLE_WARNING)
 
-    base = _product_summary_fields(record, valid_resource_count=valid_count)
+    base = tracking_summary_fields(record, valid_resource_count=valid_count)
     return {
         **base,
         "submission_mode": _submission_mode_for(config, record),
@@ -241,21 +245,21 @@ def _submission_mode_for(config: StorageConfig, record: TrackingRecord) -> str |
 
 
 def _summary_counts(
-    records: list[TrackingRecord],
     *,
+    total: int,
+    group_counts: dict[str, int],
     added_to_download: int,
     unreadable: int,
 ) -> dict[str, int]:
     """Whole-library, card-aligned counts for the list summary (issue #224).
 
-    Every count is derived from the same group projection the ``status_groups``
-    metadata publishes, so the two can never disagree.  ``EXTERNAL_ONLY`` is
-    excluded from every group count (A4) but still counted in ``total`` because
-    全部 keeps it visible.
+    Every count is derived from the same single group projection the
+    ``status_groups`` metadata publishes, so the two can never disagree.
+    ``EXTERNAL_ONLY`` is excluded from every group count (A4) but still counted
+    in ``total`` because 全部 keeps it visible.
     """
-    group_counts = _status_group_counts(records)
     return {
-        "total": len(records),
+        "total": total,
         "pending": group_counts[TRACKING_STATUS_GROUP_PENDING],
         "processing": group_counts[TRACKING_STATUS_GROUP_PROCESSING],
         # 追番中 + 已加入下载 are one card; the two raw views stay separate so a
@@ -268,62 +272,41 @@ def _summary_counts(
     }
 
 
-def _status_group_counts(records: list[TrackingRecord]) -> dict[str, int]:
-    """Count every status group once, excluding the retired read-only state.
+def _group_counts(records: list[TrackingRecord]) -> tuple[dict[str, int], int]:
+    """Count every status group once in a single pass (issue #224 A4/A7).
 
-    Issue #224 A4: ``EXTERNAL_ONLY`` archives stay loadable but never join a
-    card count.  ADR-0005 retired the state's product semantics, so counting it
-    in 已停用 would misstate a historical fact as a MiGuOrca retirement.
+    ``EXTERNAL_ONLY`` archives stay loadable but never join a card count.
+    ADR-0005 retired the state's product semantics, so counting it in 已停用
+    would misstate a historical fact as a MiGuOrca retirement.  The second value
+    is the 已加入下载 count, which the 追番中 card folds into its own group.
     """
     counts = {group: 0 for group in TRACKING_STATUS_GROUP_ORDER}
+    added_to_download = 0
     for record in records:
         if record.status == TRACKING_STATUS_EXTERNAL_ONLY:
             continue
         counts[tracking_status_group(record.status)] += 1
-    return counts
+        if record.status == TRACKING_STATUS_ADDED_TO_DOWNLOAD:
+            added_to_download += 1
+    return counts, added_to_download
 
 
-def _count_added_to_download(records: list[TrackingRecord]) -> int:
-    return sum(
-        1 for record in records if record.status == TRACKING_STATUS_ADDED_TO_DOWNLOAD
-    )
-
-
-def _status_group_metadata(records: list[TrackingRecord]) -> list[dict[str, Any]]:
+def _status_group_metadata(group_counts: dict[str, int]) -> list[dict[str, Any]]:
     """Publish the five-group vocabulary with authoritative counts (#224 A7).
 
     The list is always complete: an empty list still publishes all five groups
     with ``count`` 0, so the client can render the four cards without inventing
     a label or a zero itself.
     """
-    counts = _status_group_counts(records)
     return [
         {
             "group": group,
             "label": TRACKING_STATUS_GROUP_LABELS[group],
-            "count": counts[group],
+            "count": group_counts[group],
             "has_overview_card": group in TRACKING_OVERVIEW_CARD_GROUPS,
         }
         for group in TRACKING_STATUS_GROUP_ORDER
     ]
-
-
-def _product_summary_fields(
-    record: TrackingRecord,
-    *,
-    valid_resource_count: int,
-) -> dict[str, Any]:
-    """Serialize one safe summary plus the product rules for retired states.
-
-    The serializer stays the generic projection; the retired read-only
-    ``EXTERNAL_ONLY`` state is a product decision (ADR-0005, issue #224 A4), so
-    it keeps its real label but is offered no management action.  The page-level
-    删除追番方案 / 复制并重新添加 entries are not part of ``available_actions``.
-    """
-    fields = tracking_summary_fields(record, valid_resource_count=valid_resource_count)
-    if record.status == TRACKING_STATUS_EXTERNAL_ONLY:
-        fields["available_actions"] = []
-    return fields
 
 
 def _filter_records(

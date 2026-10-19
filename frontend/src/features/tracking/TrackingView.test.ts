@@ -377,7 +377,12 @@ async function mountPending() {
       return { configured: true, credential_present: true, connection_ref: '11111111-1111-4111-8111-111111111111', configuration_revision: 3, connection_status: 'CONFIGURED', capabilities: null } as never
     }
     if (path === '/api/v1/tracking/items/{tracking_id}') return pendingDetail() as never
-    return { items: [pendingRow()], summary: { ...defaultSummary, pending: 0, processing: 1 }, warnings: [] } as never
+    return {
+      items: [pendingRow()],
+      summary: { ...defaultSummary, pending: 0, processing: 1 },
+      status_groups: statusGroups({ PROCESSING: 1 }),
+      warnings: [],
+    } as never
   })
   const wrapper = mount(TrackingView, {
     attachTo: document.body, global: { plugins: [createPinia(), router], stubs: { Teleport: true } },
@@ -508,6 +513,13 @@ describe('TrackingView risk-confirmed resubmission (issue #184)', () => {
       connection_ref: '11111111-1111-4111-8111-111111111111',
     })
     expect(wrapper.find('#tracking-submit-result').text()).toContain('提交成功')
+    // Issue #224 A5: a settled write re-reads the server projection, because the
+    // returned row alone cannot move a category count.  (The initial mount read
+    // is the first call; the settled write adds at least one more.)
+    const listReads = apiGet.mock.calls.filter(
+      ([path]) => path === '/api/v1/tracking/items',
+    )
+    expect(listReads.length).toBeGreaterThanOrEqual(2)
   })
 
   it('cancelling the risk confirmation sends no second request at all', async () => {

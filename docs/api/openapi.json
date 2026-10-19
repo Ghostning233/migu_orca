@@ -11017,7 +11017,7 @@
                         },
                         "summary": {
                           "additionalProperties": false,
-                          "description": "Safe summary counts for the tracking list (§11.2).\n\n``inactive`` counts the DISABLED group; ``processing`` stays a transient\nper-row state that the page never renders as its own overview category.\n``active`` counts 追番中 only and ``added_to_download`` counts 已加入下载\nseparately, so the 追番中 overview card reads ``active + added_to_download``\n(issue #224 A2).\n\nIssue #224 A4: a retired read-only ``EXTERNAL_ONLY`` archive is never\ncounted in any group field — it only appears in ``total`` (全部).",
+                          "description": "Safe summary counts for the tracking list (§11.2).\n\n``inactive`` counts the 已停用 card group (``DISABLED`` rows); ``processing``\nstays a transient per-row state that the page never renders as its own\noverview category.  ``active`` counts 追番中 only and ``added_to_download``\ncounts 已加入下载 separately, so the 追番中 overview card reads\n``active + added_to_download`` (issue #224 A2).\n\nIssue #224 A4: a retired read-only ``EXTERNAL_ONLY`` archive is never\ncounted in any group field — it only appears in ``total`` (全部).",
                           "properties": {
                             "total": {
                               "title": "Total",

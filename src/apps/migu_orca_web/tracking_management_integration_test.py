@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +12,10 @@ from apps.migu_orca_web.routes_tracking import _management_writer
 from apps.migu_orca_web.tracking_management_service import run_tracking_management
 from storage_engine.controllers.storage_config import load_storage_config
 from storage_engine.controllers.tracking_repository import ensure_tracking_record, load_tracking_record
-from tracking_engine.models.tracking import create_external_tracking_record
+from tracking_engine.models.tracking import (
+    TRACKING_STATUS_ACTIVE,
+    create_external_tracking_record,
+)
 
 #: The verified 3.1.18 write envelope (issue #216): two message strings, no
 #: ``status`` field, and the exact 200 carries the accepted-action result.  The
@@ -20,6 +24,16 @@ from tracking_engine.models.tracking import create_external_tracking_record
 WRITE_ACCEPTED = AutoBangumiWriteResponse(
     200, {"msg_en": "Delete RSS successfully.", "msg_zh": "删除 RSS 成功。"}
 )
+
+
+def _managed_record(**kwargs: Any) -> Any:
+    """A manageable ACTIVE record carrying the external mapping.
+
+    Issue #224 A4 / ADR-0005: ``EXTERNAL_ONLY`` is retired read-only history, so
+    the management write path is exercised against a normal ACTIVE record with
+    the same durable mapping.
+    """
+    return replace(create_external_tracking_record(**kwargs), status=TRACKING_STATUS_ACTIVE)
 
 
 class _OfflineTransport:
@@ -63,7 +77,7 @@ def _rss() -> dict[str, Any]:
 def test_real_adapter_writer_and_coordinator_complete_modify_readback(tmp_path: Path) -> None:
     """Exercise adapter -> route writer -> coordinator without mocking it."""
     config = load_storage_config(tmp_path / "storage")
-    record, _ = ensure_tracking_record(config, create_external_tracking_record(
+    record, _ = ensure_tracking_record(config, _managed_record(
         adapter="legacy_3_1", object_kind="subscription", external_id="sub-1",
         subscription_id="sub-1", rss_ids=("7",), title="Test", season=1,
     ))
@@ -98,7 +112,7 @@ def test_real_adapter_writer_and_coordinator_complete_modify_readback(tmp_path: 
 
 def test_real_adapter_writer_and_coordinator_complete_rss_modify_readback(tmp_path: Path) -> None:
     config = load_storage_config(tmp_path / "storage")
-    record, _ = ensure_tracking_record(config, create_external_tracking_record(
+    record, _ = ensure_tracking_record(config, _managed_record(
         adapter="legacy_3_1", object_kind="subscription", external_id="sub-1",
         subscription_id="sub-1", rss_ids=("7",), title="Test", season=1,
     ))
@@ -132,7 +146,7 @@ def test_real_adapter_writer_and_coordinator_complete_rss_modify_readback(tmp_pa
 
 def test_real_delete_readback_requires_list_absence_not_deleted_flag(tmp_path: Path) -> None:
     config = load_storage_config(tmp_path / "storage")
-    record, _ = ensure_tracking_record(config, create_external_tracking_record(
+    record, _ = ensure_tracking_record(config, _managed_record(
         adapter="legacy_3_1", object_kind="subscription", external_id="sub-1",
         subscription_id="sub-1", rss_ids=("7",), title="Test", season=1,
     ))
