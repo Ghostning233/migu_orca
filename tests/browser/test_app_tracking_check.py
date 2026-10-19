@@ -98,7 +98,7 @@ def _install(page: Page, item: dict[str, Any], check_result: dict[str, Any]) -> 
             posts.append(request.post_data_json or {})
             result = dict(check_result)
             if result.get("outcome") in ("ACTIVE", "DISABLED"):
-                state["item"] = {**state["item"], "status": "ACTIVE", "status_label": "正在追番",
+                state["item"] = {**state["item"], "status": "ACTIVE", "status_label": "追番中",
                                  "status_group": "ACTIVE", "revision": state["item"]["revision"] + 1}
             route.fulfill(json={"ok": True, "result": {
                 "tracking_id": "tracking-a", "action": "VERIFY_EXTERNAL",
@@ -172,7 +172,7 @@ class TestPendingSubmissionCheck:
         page.wait_for_selector("#tracking-check-result", timeout=10_000)
 
         expect(page.locator("#tracking-check-result")).to_contain_text("已确认订阅存在")
-        expect(page.locator(".tracking-list-panel")).to_contain_text("正在追番")
+        expect(page.locator(".tracking-list-panel")).to_contain_text("追番中")
         assert len(posts) == 1
         _assert_read_only_check_body(posts[0])
 
@@ -264,7 +264,7 @@ def _install_journey(
             }
             if result.get("outcome") in ("ACTIVE", "DISABLED"):
                 state["items"][tracking_id] = {
-                    **item, "status": "ACTIVE", "status_label": "正在追番",
+                    **item, "status": "ACTIVE", "status_label": "追番中",
                     "status_group": "ACTIVE", "revision": item["revision"] + 1,
                 }
             route.fulfill(json={"ok": True, "result": {
@@ -322,7 +322,7 @@ class TestPendingSubmissionJourney:
 
         page.locator("#tracking-check").click()
         expect(page.locator("#tracking-check-result")).to_contain_text("已确认订阅存在")
-        expect(page.locator(".tracking-list-panel")).to_contain_text("正在追番")
+        expect(page.locator(".tracking-list-panel")).to_contain_text("追番中")
         assert len(calls["check"]) == 2
 
     def test_a_confirmed_check_releases_the_pending_submit_intent(

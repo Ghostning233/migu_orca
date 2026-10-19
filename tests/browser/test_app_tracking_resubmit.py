@@ -130,7 +130,7 @@ def _install(
             if body.get("confirm") is True:
                 calls["write"].append(body)
                 item.update({
-                    "status": "ACTIVE", "status_label": "正在追番", "status_group": "ACTIVE",
+                    "status": "ACTIVE", "status_label": "追番中", "status_group": "ACTIVE",
                     "revision": item["revision"] + 1,
                     "current_operation": {**item["current_operation"], "operation_id": "op-resubmit",
                                           "state": "SUCCEEDED"},
@@ -150,7 +150,7 @@ def _install(
                 # The read-only phase proved the object: the record converges
                 # without any write-family request.
                 item.update({
-                    "status": "ACTIVE", "status_label": "正在追番", "status_group": "ACTIVE",
+                    "status": "ACTIVE", "status_label": "追番中", "status_group": "ACTIVE",
                     "revision": item["revision"] + 1,
                 })
             route.fulfill(json={"ok": True, "result": {
@@ -248,7 +248,7 @@ class TestRiskConfirmedResubmission:
             "expected_revision", "confirm", "previous_operation_id", "connection_ref", "storage_dir",
         }, body
         # One new operation, traceable to the pending one, and the list converged.
-        expect(page.locator(".tracking-list-panel")).to_contain_text("正在追番")
+        expect(page.locator(".tracking-list-panel")).to_contain_text("追番中")
         for forbidden in ("secret-password", "token", "ab_config"):
             assert forbidden not in page.content().lower()
 
@@ -304,7 +304,7 @@ class TestRiskConfirmedResubmission:
         page.wait_for_selector("#tracking-resubmit-result", timeout=10_000)
 
         expect(page.locator("#tracking-resubmit-result")).to_contain_text("已确认订阅存在")
-        expect(page.locator(".tracking-list-panel")).to_contain_text("正在追番")
+        expect(page.locator(".tracking-list-panel")).to_contain_text("追番中")
         expect(page.locator(".confirm-dialog")).to_have_count(0)
         assert calls["write"] == []
         assert len(calls["offer"]) == 1

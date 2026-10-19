@@ -28,6 +28,7 @@ import {
   probeStatusLabel,
   projectCapabilitySummary,
   projectRevalidateIssues,
+  projectStatusGroups,
   projectTrackingOverview,
   sortTrackingItems,
   type CapabilityResult,
@@ -77,35 +78,56 @@ function action(overrides: Partial<ItemAction> = {}): ItemAction {
 }
 
 describe('tracking projection (US-304)', () => {
-  it('projects the overview from the server summary, never from loaded rows', () => {
+  it('keeps the overview total authoritative and never recounts loaded rows', () => {
     const result = projectTrackingOverview({
       total: 7, pending: 2, processing: 1, active: 3, added_to_download: 1,
       inactive: 1, needs_attention: 0, unreadable: 1,
     })
     expect(result.total).toBe(7)
-    // Issue #99: 已加入下载 is the fifth fixed overview category, counted
-    // separately from 追番中 by the server.
-    expect(result.byGroup).toEqual({
-      PENDING: 2, ACTIVE: 3, INACTIVE: 1, ADDED_TO_DOWNLOAD: 1, ATTENTION: 0,
-    })
     expect(result.unreadable).toBe(1)
   })
 
   it('fails closed to zero for a missing or malformed summary', () => {
-    expect(projectTrackingOverview(null)).toEqual({
-      total: 0,
-      byGroup: { PENDING: 0, ACTIVE: 0, INACTIVE: 0, ADDED_TO_DOWNLOAD: 0, ATTENTION: 0 },
-      unreadable: 0,
-    })
+    expect(projectTrackingOverview(null)).toEqual({ total: 0, unreadable: 0 })
     const malformed = projectTrackingOverview({
       total: -1, pending: 'x', active: Number.NaN, inactive: null, needs_attention: 2,
       processing: 0, unreadable: undefined,
     } as never)
     expect(malformed.total).toBe(0)
-    expect(malformed.byGroup).toEqual({
-      PENDING: 0, ACTIVE: 0, INACTIVE: 0, ADDED_TO_DOWNLOAD: 0, ATTENTION: 2,
-    })
     expect(malformed.unreadable).toBe(0)
+  })
+
+  it('reads group labels, counts and card membership from server metadata (#224 A7)', () => {
+    const groups = projectStatusGroups([
+      { group: 'PENDING', label: '待处理', count: 4, has_overview_card: true },
+      { group: 'PROCESSING', label: '处理中', count: 2, has_overview_card: false },
+      { group: 'ACTIVE', label: '追番中', count: 3, has_overview_card: true },
+      { group: 'ATTENTION', label: '需处理', count: 1, has_overview_card: true },
+      { group: 'INACTIVE', label: '已停用', count: 1, has_overview_card: true },
+    ])
+    // Server order is preserved and exactly four groups render as cards.
+    expect(groups.map((entry) => entry.label)).toEqual([
+      '待处理', '处理中', '追番中', '需处理', '已停用',
+    ])
+    expect(groups.filter((entry) => entry.isCard).map((entry) => entry.group)).toEqual([
+      'PENDING', 'ACTIVE', 'ATTENTION', 'INACTIVE',
+    ])
+    expect(groups[2]!.count).toBe(3)
+  })
+
+  it('fails closed on malformed group metadata instead of inventing labels', () => {
+    expect(projectStatusGroups(null)).toEqual([])
+    expect(projectStatusGroups([])).toEqual([])
+    expect(projectStatusGroups([
+      { group: 'BOGUS', label: '伪造', count: 1, has_overview_card: true },
+      { group: 'ACTIVE', label: '', count: 1, has_overview_card: true },
+      { group: 'ATTENTION', label: '需处理', count: -3, has_overview_card: 'yes' },
+      { group: 'ATTENTION', label: '重复', count: 9, has_overview_card: true },
+    ] as never)).toEqual([
+      // Unknown group + empty label are dropped; the first valid entry wins for
+      // a duplicated group, the count clamps to 0 and the card flag is strict.
+      { group: 'ATTENTION', label: '需处理', count: 0, isCard: false },
+    ])
   })
 
   it('formats a usable updated-at label and fails closed on bad values', () => {
@@ -120,6 +142,24 @@ describe('tracking projection (US-304)', () => {
     expect(filterTrackingItems(rows, { query: '喵萌' })).toHaveLength(1)
     expect(filterTrackingItems(rows, { statusGroup: 'ATTENTION' })[0]?.tracking_id).toBe('tracking-2')
     expect(filterTrackingItems(rows, { query: 'tracking-1' })).toHaveLength(0)
+  })
+
+  it('keeps a retired EXTERNAL_ONLY archive out of every group filter (#224 A4)', () => {
+    const rows = [
+      item(),
+      item({
+        tracking_id: 'tracking-archive', title: '历史归档番', status: 'EXTERNAL_ONLY',
+        status_label: '仅外部', status_group: 'INACTIVE',
+      }),
+    ]
+    // 全部 (no group filter) still shows the historical record with its real label.
+    expect(filterTrackingItems(rows, {})).toHaveLength(2)
+    expect(filterTrackingItems(rows, {}).map((row) => row.status_label)).toContain('仅外部')
+    // No card/group filter may return it, even though it maps to INACTIVE.
+    expect(filterTrackingItems(rows, { statusGroup: 'INACTIVE' })).toHaveLength(0)
+    // A plain search still runs over 全部, so the archive stays findable by name.
+    expect(filterTrackingItems(rows, { query: '葬送' })).toHaveLength(1)
+    expect(filterTrackingItems(rows, { query: '归档' })[0]?.tracking_id).toBe('tracking-archive')
   })
 
   it('sorts parsed timestamps and keeps invalid/tied server order', () => {

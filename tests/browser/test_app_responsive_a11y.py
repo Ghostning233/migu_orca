@@ -100,6 +100,15 @@ def _mock_tracking_list(page: Page, items: list[dict[str, Any]]) -> None:
                             "active": len(items), "inactive": 0, "needs_attention": len(items),
                             "unreadable": 0,
                         },
+                        # Issue #224 A7: the four cards render from this
+                        # server-owned metadata, never from a client label table.
+                        "status_groups": [
+                            {"group": "PENDING", "label": "待处理", "count": 0, "has_overview_card": True},
+                            {"group": "PROCESSING", "label": "处理中", "count": 0, "has_overview_card": False},
+                            {"group": "ACTIVE", "label": "追番中", "count": 1, "has_overview_card": True},
+                            {"group": "ATTENTION", "label": "需处理", "count": 1, "has_overview_card": True},
+                            {"group": "INACTIVE", "label": "已停用", "count": 0, "has_overview_card": True},
+                        ],
                         "warnings": [],
                     },
                 },
@@ -188,10 +197,10 @@ class TestCrossFeatureResponsive:
         expect(rows).to_have_count(2)
         expect(rows.nth(0)).to_contain_text("追番中")
         expect(rows.nth(1)).to_contain_text("提交失败")
-        # The status overview states every overview category in text as well.
-        # Issue #85: four fixed categories; PROCESSING stays a per-row state.
+        # The status overview states every card category in text as well.
+        # Issue #224: four fixed categories; PROCESSING stays a per-row state.
         overview = page.locator("#tracking-status-heading").locator("..")
-        for label in ("待提交", "追番中", "已停用", "需处理"):
+        for label in ("待处理", "追番中", "已停用", "需处理"):
             expect(overview).to_contain_text(label)
         # The decorative color bar is hidden from assistive tech: the text label
         # is the state signal, not the color.

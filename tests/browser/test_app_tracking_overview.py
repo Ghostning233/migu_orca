@@ -110,6 +110,15 @@ def _open(page: Page, live_server_url: str, storage_dir, items: list[dict[str, A
                             "added_to_download": 0,
                             "unreadable": 0,
                         },
+                        # Issue #224 A7: the list also publishes the group
+                        # vocabulary, so the four cards render from the server.
+                        "status_groups": [
+                            {"group": "PENDING", "label": "待处理", "count": 0, "has_overview_card": True},
+                            {"group": "PROCESSING", "label": "处理中", "count": 0, "has_overview_card": False},
+                            {"group": "ACTIVE", "label": "追番中", "count": len(live_items), "has_overview_card": True},
+                            {"group": "ATTENTION", "label": "需处理", "count": 0, "has_overview_card": True},
+                            {"group": "INACTIVE", "label": "已停用", "count": 0, "has_overview_card": True},
+                        ],
                         "warnings": [],
                     },
                 },
@@ -133,6 +142,39 @@ def _wait_for_loaded_detail(page: Page) -> None:
     detail response has been rendered.
     """
     expect(page.locator(".tracking-inspector-summary")).to_contain_text("总集数")
+
+def test_overview_cards_keep_the_server_count_and_clear_the_search(
+    page: Page, live_server_url: str, storage_dir
+) -> None:
+    """Issue #224 A2/A5: four cards, authoritative numbers, search cleared."""
+    items = [_item(index) for index in range(5)]
+    page.set_viewport_size({"width": 1440, "height": 900})
+    _open(page, live_server_url, storage_dir, items)
+
+    cards = page.locator(".tracking-status-card")
+    assert cards.count() == 4
+    assert ["".join(text.split()) for text in cards.all_inner_texts()] == [
+        "待处理0", "追番中5", "需处理0", "已停用0",
+    ]
+    # 全部 without a search: the bottom count is the whole-library total.
+    assert page.locator(".tracking-list-count").inner_text() == "共 5 部"
+
+    # Clicking 追番中 leaves the row count equal to the card number.
+    page.locator("#tracking-overview-active").click()
+    expect(page.locator(".tracking-list-item")).to_have_count(5)
+    assert page.locator(".tracking-list-count").inner_text() == "共 5 部"
+
+    # A search narrows only the rows; the card number stays authoritative.
+    page.fill("#tracking-search", "04")
+    expect(page.locator(".tracking-list-item")).to_have_count(1)
+    assert page.locator(".tracking-list-count").inner_text() == "筛选出 1 部 · 共 5 部"
+
+    # Clicking another card clears the search box (the user's decision).
+    page.locator("#tracking-overview-inactive").click()
+    expect(page.locator("#tracking-search")).to_have_value("")
+    expect(page.locator(".tracking-list-item")).to_have_count(0)
+    assert page.locator(".tracking-list-count").inner_text() == "共 0 部"
+
 
 def test_long_list_scrolls_inside_while_overview_and_inspector_stay_put(
     page: Page, live_server_url: str, storage_dir

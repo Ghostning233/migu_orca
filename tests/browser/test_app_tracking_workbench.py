@@ -119,6 +119,15 @@ def _mock_workbench(page: Page, items: list[dict[str, Any]]) -> None:
                             "added_to_download": 1,
                             "unreadable": 1,
                         },
+                        # Issue #224 A2/A7: four server-owned cards; 追番中 is
+                        # 追番中 + 已加入下载 and 处理中 has no card.
+                        "status_groups": [
+                            {"group": "PENDING", "label": "待处理", "count": 4, "has_overview_card": True},
+                            {"group": "PROCESSING", "label": "处理中", "count": 2, "has_overview_card": False},
+                            {"group": "ACTIVE", "label": "追番中", "count": 3, "has_overview_card": True},
+                            {"group": "ATTENTION", "label": "需处理", "count": 1, "has_overview_card": True},
+                            {"group": "INACTIVE", "label": "已停用", "count": 1, "has_overview_card": True},
+                        ],
                         "warnings": [],
                     },
                 },
@@ -164,14 +173,16 @@ class TestTrackingWorkbench:
         assert "我的追番" in header.inner_text()
         assert "管理待提交任务和正在运行的追番" in header.inner_text()
 
-        # Issue #99: five fixed categories with the server's authoritative
-        # counts; the summary claims 9 records although only two rows are loaded.
+        # Issue #224: four server-owned cards with the authoritative counts; the
+        # summary claims 9 records although only two rows are loaded.
         cards = page.locator(".tracking-status-card")
-        assert cards.count() == 5
+        assert cards.count() == 4
         assert ["".join(text.split()) for text in cards.all_inner_texts()] == [
-            "待提交4", "追番中2", "已停用1", "已加入下载1", "需处理1",
+            "待处理4", "追番中3", "需处理1", "已停用1",
         ]
-        assert "共 9 条追番记录" in page.locator(".tracking-status-total").inner_text()
+        # The count moved to the list bottom and states the whole-library total.
+        assert "共 9 部" in page.locator(".tracking-list-count").inner_text()
+        assert "正在追番" not in page.content()
 
         rows = page.locator(".tracking-list-item")
         assert rows.count() == 2
@@ -263,8 +274,8 @@ class TestTrackingWorkbench:
             page, live_server_url, storage_dir, [_item("tracking-frieren", "葬送的芙莉莲")]
         )
 
-        # The overview total and the list count are announced, not colour-only.
-        assert page.locator(".tracking-status-total").get_attribute("role") == "status"
+        # The list count is announced, not colour-only.
+        assert page.locator(".tracking-list-count").get_attribute("role") == "status"
         assert page.locator("#tracking-list-container").get_attribute("aria-label") == "追番记录列表"
 
         # A row is a real button and can be selected with the keyboard.

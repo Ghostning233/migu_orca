@@ -41,24 +41,25 @@ export const TRACKING_STATUS_GROUPS = [
 export type TrackingStatusGroup = (typeof TRACKING_STATUS_GROUPS)[number]
 
 /**
- * Overview cards (issue #85). PROCESSING is a transient per-row state and
- * deliberately has no category of its own — those rows stay visible in the list
- * and inside the server total.
+ * Issue #224 A4: a retired, read-only state kept only for historical archives.
+ * It shows its real label but joins no overview card and no group filter.
  */
-/**
- * Issue #99: the overview is fixed at five categories. 已加入下载 is not a status
- * group of its own — it is counted separately from 追番中 — so this list is its
- * own union rather than the server's status groups.
- */
-export const TRACKING_OVERVIEW_GROUPS = [
-  'PENDING', 'ACTIVE', 'INACTIVE', 'ADDED_TO_DOWNLOAD', 'ATTENTION',
-] as const
+export const TRACKING_EXTERNAL_ONLY_STATUS = 'EXTERNAL_ONLY'
 
-export type TrackingOverviewGroup = (typeof TRACKING_OVERVIEW_GROUPS)[number]
+/** Server-published group metadata (issue #224 A7). */
+export type TrackingStatusGroupMeta = TrackingListResult['status_groups'][number]
+
+/** One renderable status group: server-owned label plus authoritative count. */
+export interface TrackingStatusGroupView {
+  group: TrackingStatusGroup
+  label: string
+  count: number
+  /** True for the four groups 状态总览 renders as cards; PROCESSING never is. */
+  isCard: boolean
+}
 
 export interface TrackingOverview {
   total: number
-  byGroup: Record<TrackingOverviewGroup, number>
   unreadable: number
 }
 
@@ -135,26 +136,50 @@ function isKnownScope(value: unknown): value is TrackingScope {
 }
 
 /**
- * Project the overview strictly from the server summary (issue #85).
+ * Project the list total strictly from the server summary (issue #85).
  *
- * The page never rebuilds the server state machine: counts come from the
- * authoritative projection, and any missing or malformed value renders 0
- * instead of being guessed from whichever rows happen to be loaded/filtered.
+ * The page never rebuilds the server state machine: the total comes from the
+ * authoritative projection, and a missing or malformed value renders 0 instead
+ * of being guessed from whichever rows happen to be loaded/filtered.
  */
 export function projectTrackingOverview(
   summary: TrackingListSummary | null | undefined,
 ): TrackingOverview {
   return {
     total: _safeCount(summary?.total),
-    byGroup: {
-      PENDING: _safeCount(summary?.pending),
-      ACTIVE: _safeCount(summary?.active),
-      INACTIVE: _safeCount(summary?.inactive),
-      ADDED_TO_DOWNLOAD: _safeCount(summary?.added_to_download),
-      ATTENTION: _safeCount(summary?.needs_attention),
-    },
     unreadable: _safeCount(summary?.unreadable),
   }
+}
+
+/**
+ * Project the server-owned status-group metadata (issue #224 A7).
+ *
+ * The server publishes every group — including zero-count groups on an empty
+ * list — together with the labels and the four card memberships, so this module
+ * owns no label table and no card list. An entry with an unknown group or no
+ * usable label is dropped instead of being rendered with an invented name; a
+ * duplicated group keeps its first server entry so the order stays the server's.
+ */
+export function projectStatusGroups(
+  groups: readonly TrackingStatusGroupMeta[] | null | undefined,
+): TrackingStatusGroupView[] {
+  if (!Array.isArray(groups)) return []
+  const views: TrackingStatusGroupView[] = []
+  const seen = new Set<TrackingStatusGroup>()
+  for (const entry of groups) {
+    const candidate = entry as Partial<TrackingStatusGroupMeta> | null
+    if (!candidate || !isKnownStatusGroup(candidate.group)) continue
+    const label = typeof candidate.label === 'string' ? candidate.label.trim() : ''
+    if (!label || seen.has(candidate.group)) continue
+    seen.add(candidate.group)
+    views.push({
+      group: candidate.group,
+      label,
+      count: _safeCount(candidate.count),
+      isCard: candidate.has_overview_card === true,
+    })
+  }
+  return views
 }
 
 /**
@@ -199,7 +224,13 @@ export function filterTrackingItems(
     const matchesQuery = !query || [item.title, item.subtitle_group]
       .filter((value): value is string => typeof value === 'string')
       .some((value) => value.toLocaleLowerCase('zh-CN').includes(query))
-    const matchesGroup = !group || (isKnownStatusGroup(item.status_group) && item.status_group === group)
+    // Issue #224 A4: the retired read-only archive stays visible in 全部 only,
+    // so a group/card filter never returns it even though it maps to INACTIVE.
+    const matchesGroup = !group || (
+      isKnownStatusGroup(item.status_group)
+      && item.status_group === group
+      && item.status !== TRACKING_EXTERNAL_ONLY_STATUS
+    )
     return matchesQuery && matchesGroup
   })
 }

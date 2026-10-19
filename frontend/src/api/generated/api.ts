@@ -5254,6 +5254,14 @@ export interface operations {
                      *           "needs_attention": 1,
                      *           "unreadable": 1
                      *         },
+                     *         "status_groups": [
+                     *           {
+                     *             "group": "示例",
+                     *             "label": "示例",
+                     *             "count": 1,
+                     *             "has_overview_card": true
+                     *           }
+                     *         ],
                      *         "warnings": []
                      *       }
                      *     }
@@ -5366,6 +5374,12 @@ export interface operations {
                              *
                              *     ``inactive`` counts the DISABLED group; ``processing`` stays a transient
                              *     per-row state that the page never renders as its own overview category.
+                             *     ``active`` counts 追番中 only and ``added_to_download`` counts 已加入下载
+                             *     separately, so the 追番中 overview card reads ``active + added_to_download``
+                             *     (issue #224 A2).
+                             *
+                             *     Issue #224 A4: a retired read-only ``EXTERNAL_ONLY`` archive is never
+                             *     counted in any group field — it only appears in ``total`` (全部).
                              */
                             summary: {
                                 /** Total */
@@ -5388,6 +5402,20 @@ export interface operations {
                                 /** Unreadable */
                                 unreadable: number;
                             };
+                            /** Status Groups */
+                            status_groups: {
+                                /**
+                                 * Group
+                                 * @enum {string}
+                                 */
+                                group: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
+                                /** Label */
+                                label: string;
+                                /** Count */
+                                count: number;
+                                /** Has Overview Card */
+                                has_overview_card: boolean;
+                            }[];
                             /** Warnings */
                             warnings?: string[];
                         };

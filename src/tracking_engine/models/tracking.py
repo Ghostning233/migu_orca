@@ -119,8 +119,9 @@ TRACKING_STATUS_GROUP_ACTIVE = "ACTIVE"
 TRACKING_STATUS_GROUP_ATTENTION = "ATTENTION"
 TRACKING_STATUS_GROUP_INACTIVE = "INACTIVE"
 
-#: Backend status -> user status group.  ``EXTERNAL_ONLY`` is grouped only for
-#: schema completeness; B-C owns its display semantics.
+#: Backend status -> user status group.  ``EXTERNAL_ONLY`` keeps its group for
+#: schema completeness only (issue #224 A4): the retired read-only state is
+#: never counted in an overview card and never matches a group filter.
 TRACKING_STATUS_GROUPS: dict[str, str] = {
     TRACKING_STATUS_PENDING_SUBMIT: TRACKING_STATUS_GROUP_PENDING,
     TRACKING_STATUS_REVALIDATING: TRACKING_STATUS_GROUP_PROCESSING,
@@ -133,9 +134,33 @@ TRACKING_STATUS_GROUPS: dict[str, str] = {
     TRACKING_STATUS_RECOVERY_REQUIRED: TRACKING_STATUS_GROUP_ATTENTION,
     TRACKING_STATUS_UNKNOWN: TRACKING_STATUS_GROUP_ATTENTION,
     TRACKING_STATUS_DISABLED: TRACKING_STATUS_GROUP_INACTIVE,
-    TRACKING_STATUS_EXTERNAL_DELETED: TRACKING_STATUS_GROUP_INACTIVE,
+    # Issue #224 A3: a detected external delete is a fact that needs the user's
+    # attention — it is not a MiGuOrca-initiated retirement.
+    TRACKING_STATUS_EXTERNAL_DELETED: TRACKING_STATUS_GROUP_ATTENTION,
     TRACKING_STATUS_EXTERNAL_ONLY: TRACKING_STATUS_GROUP_INACTIVE,
 }
+
+#: Display order of the five status groups in the list-level metadata (issue
+#: #224 A7).  It is a fixed order, not a private UI detail, so the client can
+#: render server order without owning a table of its own.
+TRACKING_STATUS_GROUP_ORDER: tuple[str, ...] = (
+    TRACKING_STATUS_GROUP_PENDING,
+    TRACKING_STATUS_GROUP_PROCESSING,
+    TRACKING_STATUS_GROUP_ACTIVE,
+    TRACKING_STATUS_GROUP_ATTENTION,
+    TRACKING_STATUS_GROUP_INACTIVE,
+)
+
+#: The four groups 状态总览 renders as cards (issue #224 A2).  ``PROCESSING`` is
+#: a transient per-row state and deliberately has no card.
+TRACKING_OVERVIEW_CARD_GROUPS: frozenset[str] = frozenset(
+    {
+        TRACKING_STATUS_GROUP_PENDING,
+        TRACKING_STATUS_GROUP_ACTIVE,
+        TRACKING_STATUS_GROUP_ATTENTION,
+        TRACKING_STATUS_GROUP_INACTIVE,
+    }
+)
 
 #: Chinese display labels for every accepted backend status (§8.2).
 TRACKING_STATUS_LABELS: dict[str, str] = {
@@ -144,24 +169,28 @@ TRACKING_STATUS_LABELS: dict[str, str] = {
     TRACKING_STATUS_NEEDS_RECONFIRM: "待重新确认",
     TRACKING_STATUS_SUBMITTING: "提交中",
     TRACKING_STATUS_VERIFYING_EXTERNAL: "核验外部结果中",
-    TRACKING_STATUS_ACTIVE: "正在追番",
+    TRACKING_STATUS_ACTIVE: "追番中",
     TRACKING_STATUS_ADDED_TO_DOWNLOAD: "已加入下载",
     TRACKING_STATUS_SUBMIT_FAILED: "提交失败",
     TRACKING_STATUS_RECOVERY_REQUIRED: "需要恢复",
     TRACKING_STATUS_UNKNOWN: "状态未知",
     TRACKING_STATUS_DISABLED: "已停用",
     TRACKING_STATUS_EXTERNAL_DELETED: "外部已删除",
+    # Issue #224 A4: retirement is a product decision, so a historical archive
+    # keeps its real label instead of being disguised as 已停用.
     TRACKING_STATUS_EXTERNAL_ONLY: "仅外部",
 }
 
-#: Chinese display labels for the user status groups (§8.2).
+#: Chinese display labels for the user status groups (§8.2).  The four card
+#: groups use exactly the vocabulary confirmed in ``CONTEXT.md`` (issue #224).
 TRACKING_STATUS_GROUP_LABELS: dict[str, str] = {
     TRACKING_STATUS_GROUP_PENDING: "待处理",
     TRACKING_STATUS_GROUP_PROCESSING: "处理中",
-    TRACKING_STATUS_GROUP_ACTIVE: "正在追番",
-    TRACKING_STATUS_GROUP_ATTENTION: "需要处理",
-    TRACKING_STATUS_GROUP_INACTIVE: "已停用/已删除",
+    TRACKING_STATUS_GROUP_ACTIVE: "追番中",
+    TRACKING_STATUS_GROUP_ATTENTION: "需处理",
+    TRACKING_STATUS_GROUP_INACTIVE: "已停用",
 }
+
 
 # -- audit actors & actions --------------------------------------------------
 TRACKING_AUDIT_ACTOR_SYSTEM = "SYSTEM"
@@ -1016,8 +1045,10 @@ __all__ = [
     "TRACKING_STATUS_GROUP_ATTENTION",
     "TRACKING_STATUS_GROUP_INACTIVE",
     "TRACKING_STATUS_GROUP_LABELS",
+    "TRACKING_STATUS_GROUP_ORDER",
     "TRACKING_STATUS_GROUP_PENDING",
     "TRACKING_STATUS_GROUP_PROCESSING",
+    "TRACKING_OVERVIEW_CARD_GROUPS",
     "TRACKING_STATUS_ACTIVE",
     "TRACKING_STATUS_ADDED_TO_DOWNLOAD",
     "TRACKING_STATUS_DISABLED",

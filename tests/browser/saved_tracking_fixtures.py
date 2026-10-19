@@ -29,3 +29,18 @@ def _summary(total=1, **counts):
         "inactive": 0, "needs_attention": 0, "added_to_download": 0,
         "unreadable": 0, **counts,
     }
+
+
+def _status_groups(*, pending=0, processing=0, active=0, attention=0, inactive=0):
+    """Issue #224 A7: the server-owned group metadata the list publishes.
+
+    ``active`` is the whole 追番中 card (追番中 + 已加入下载); ``processing`` has
+    no card.  The list endpoint always publishes all five entries.
+    """
+    return [
+        {"group": "PENDING", "label": "待处理", "count": pending, "has_overview_card": True},
+        {"group": "PROCESSING", "label": "处理中", "count": processing, "has_overview_card": False},
+        {"group": "ACTIVE", "label": "追番中", "count": active, "has_overview_card": True},
+        {"group": "ATTENTION", "label": "需处理", "count": attention, "has_overview_card": True},
+        {"group": "INACTIVE", "label": "已停用", "count": inactive, "has_overview_card": True},
+    ]
