@@ -28,24 +28,30 @@ _CAPABILITY_FIELDS = {
 }
 
 #: Publicly advertised management actions per status.  The API projection and
-#: the normal management writes both read this table.
+#: the normal management writes both read this table.  Issue #228 (T5a) retired
+#: the standalone "删除 Auto Bangumi 外部对象" entry, so ``DELETE_EXTERNAL`` is
+#: advertised for no status at all; it survives only in
+#: :data:`_INTERNAL_ONLY_ACTIONS` for the composite plan-delete leg.
 _ACTIONS_BY_STATUS: dict[str, frozenset[str]] = {
-    TRACKING_STATUS_ACTIVE: MANAGEMENT_ACTIONS,
+    TRACKING_STATUS_ACTIVE: frozenset({"MODIFY", "SET_ENABLED", "REFRESH_RSS"}),
     # Issue #224 A4 / ADR-0005: ``EXTERNAL_ONLY`` is retired read-only history.
     # MiGuOrca never adopted that external object, so it offers no management
     # action — this table is the one policy the read projection and the write
     # path share, which keeps the UI and the API from disagreeing.
-    # Disabled subscriptions may only be re-enabled or permanently removed.
-    TRACKING_STATUS_DISABLED: frozenset({"SET_ENABLED", "DELETE_EXTERNAL"}),
+    # Disabled subscriptions may only be re-enabled.
+    TRACKING_STATUS_DISABLED: frozenset({"SET_ENABLED"}),
 }
 
 #: Internal-only capability that is never advertised, but that the plan-delete
 #: chain still needs.  Issue #218 exception (a) lets "删除追番方案 + 同时删除受控
-#: 外部订阅" remove the mapped Auto Bangumi object; A4 must not turn that into an
-#: orphan this product can never clean up.  This stays scoped to the single
-#: internal leg: the public projection, the public management endpoints and the
-#: other three actions remain refused for the retired state.
-_RETIRED_STATE_INTERNAL_ACTIONS: dict[str, frozenset[str]] = {
+#: 外部订阅" remove the mapped Auto Bangumi object for any mapped status; #228
+#: retires only the *public* entry, so this leg keeps exactly
+#: ``DELETE_EXTERNAL`` and nothing else.  The public projection, the public
+#: management endpoints and the other actions remain refused, and A4 must not
+#: turn the retired state into an orphan this product can never clean up.
+_INTERNAL_ONLY_ACTIONS: dict[str, frozenset[str]] = {
+    TRACKING_STATUS_ACTIVE: frozenset({"DELETE_EXTERNAL"}),
+    TRACKING_STATUS_DISABLED: frozenset({"DELETE_EXTERNAL"}),
     TRACKING_STATUS_EXTERNAL_ONLY: frozenset({"DELETE_EXTERNAL"}),
 }
 
@@ -58,12 +64,12 @@ def management_actions_for_status(
     """Return the management actions permitted for ``status``.
 
     ``include_internal`` is only for the internal plan-delete external leg; it
-    adds the retired-state capability above and never widens the public
-    projection (the serializer calls this without the flag).
+    adds :data:`_INTERNAL_ONLY_ACTIONS` and never widens the public projection
+    (the serializer calls this without the flag).
     """
     actions = _ACTIONS_BY_STATUS.get(status, frozenset())
     if include_internal:
-        return actions | _RETIRED_STATE_INTERNAL_ACTIONS.get(status, frozenset())
+        return actions | _INTERNAL_ONLY_ACTIONS.get(status, frozenset())
     return actions
 
 

@@ -44,12 +44,8 @@ def _pending_item(operation_state: str = "OUTCOME_UNKNOWN", revision: int = 4) -
         "status_group": "PROCESSING",
         "submission_mode": "CONTINUE_TRACKING",
         "revision": revision,
-        "available_actions": [
-            {
-                "code": "RECOVER_AUTO", "label": "自动恢复", "style": "SECONDARY",
-                "requires_confirmation": False, "target_scopes": [],
-            },
-        ],
+        # Issue #228: the read-only verification is a page flow, not a projected action.
+        "available_actions": [],
         "current_operation": {
             "operation_id": "op-submit", "operation": "SUBMIT", "state": operation_state,
             "attempt": 1, "external_result_id": None, "error_type": None,

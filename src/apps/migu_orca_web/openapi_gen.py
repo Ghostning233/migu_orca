@@ -90,7 +90,6 @@ from apps.migu_orca_web.schemas import (
     SavedTrackingPlanDeleteInput,
     SavedTrackingSubmitInput,
     TrackingCheckPayload,
-    TrackingDeleteExternalPayload,
     TrackingFilterRulePatch,
     TrackingModifyPayload,
     TrackingRecoverPayload,
@@ -101,6 +100,7 @@ from apps.migu_orca_web.schemas import (
     TrackingSetEnabledPayload,
     TrackingSubscriptionPatch,
     TrackingSyncPayload,
+    _TrackingManagementBasePayload,
 )
 from shared.management_contract import (
     MANAGEMENT_ERROR_MESSAGES,
@@ -842,7 +842,7 @@ def _tracking_modify_body() -> dict[str, Any]:
     the generated client depend on it).
     """
     common = _request_body_node(
-        TrackingDeleteExternalPayload, drop=frozenset({"tracking_id"})
+        _TrackingManagementBasePayload, drop=frozenset({"tracking_id"})
     )
 
     def branch(scope: str, patch: dict[str, Any], local_plan: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1106,7 +1106,6 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         ),
     },
     "POST /api/v1/tracking/items/<path:tracking_id>/set-enabled": _management_endpoint("setTrackingItemEnabled", "启用或停用外部追番方案", TrackingSetEnabledPayload),
-    "POST /api/v1/tracking/items/<path:tracking_id>/delete-external": _management_endpoint("deleteExternalTrackingItem", "删除外部追番方案（保留本地数据）", TrackingDeleteExternalPayload),
     "POST /api/v1/tracking/items/<path:tracking_id>/refresh": _management_endpoint("refreshTrackingRss", "立即刷新资源", TrackingRefreshRssPayload),
     "GET /api/v1/requests": {
         "operationId": "listRequests",
@@ -1697,8 +1696,8 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     },
     "POST /api/v1/tracking/items/<path:tracking_id>/recover": {
         "operationId": "recoverTrackingItem",
-        "summary": "恢复统一追番记录（AUTO 纯本地或人工核验）",
-        "description": "US-330：恢复追番记录；AUTO/人工动作纯本地，VERIFY_EXTERNAL 仅使用已保存连接的 connection_ref + configuration_revision 执行 3.1.18 只读核验。",
+        "summary": "只读核验未决追番记录（VERIFY_EXTERNAL）",
+        "description": "US-226 / issue #228：未决追番记录的唯一恢复动作是只读外部核验；它只用已保存连接的 connection_ref + configuration_revision 对 3.1.18 做一次只读比对，不创建、修改或删除任何 Auto Bangumi 对象。旧的 AUTO／标记成功／标记失败已退役。",
         "requestBody": _rb(
             TrackingRecoverPayload,
             overlay={
@@ -1707,10 +1706,10 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                         'description': '客户端最后观察到的追番记录 revision（revision-aware 恢复）。',
                     },
                     'action': {
-                        'description': '恢复动作：AUTO=纯本地；VERIFY_EXTERNAL=只读外部核验（需 saved connection generation）；MARK_SUCCEEDED/MARK_FAILED=人工核验（需 confirm=true）。',
+                        'description': '恢复动作：仅 VERIFY_EXTERNAL（只读外部核验，必须携带已保存连接 generation）。',
                     },
                     'confirm': {
-                        'description': '人工动作必须为 true；AUTO 忽略该字段。',
+                        'description': '只读核验不需要确认，该字段仅为兼容保留，服务端不读取。',
                     },
                     'storage_dir': {
                         'description': '存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。',
@@ -1725,10 +1724,15 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "data_validation_errors": "请求参数校验失败",
                 "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
                 "invalid_tracking_id": "tracking_id 包含不合法字符或路径片段",
-                "tracking_confirmation_required": "人工恢复必须显式确认核验结果",
+                # The public endpoint binds before it verifies: a missing or
+                # changed operation/record revision/connection generation is
+                # reported as one bounded refusal.
+                "tracking_connection_mismatch": "历史操作未绑定当前连接，不能进行外部核验",
             },
             "404": {"tracking_not_found": "未找到该追番记录"},
             "409": {
+                # Only reachable in the race between the binding pre-check and
+                # the service-level guards.
                 "tracking_revision_conflict": "追番记录版本已变化，请刷新后重试",
                 "tracking_state_conflict": "当前追番记录状态不允许恢复",
             },

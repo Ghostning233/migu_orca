@@ -53,7 +53,6 @@ const EXPECTED_OPERATION_IDS = [
   'syncTrackingItems',
   'modifyTrackingItem',
   'setTrackingItemEnabled',
-  'deleteExternalTrackingItem',
   'refreshTrackingRss',
 ] as const
 
@@ -98,7 +97,6 @@ describe('generated API client (US-198)', () => {
       | 'syncTrackingItems'
       | 'modifyTrackingItem'
       | 'setTrackingItemEnabled'
-      | 'deleteExternalTrackingItem'
       | 'refreshTrackingRss'
     >()
   })
@@ -136,7 +134,6 @@ describe('generated API client (US-198)', () => {
       | '/api/v1/tracking/items/{tracking_id}/recover'
       | '/api/v1/tracking/items/{tracking_id}/modify'
       | '/api/v1/tracking/items/{tracking_id}/set-enabled'
-      | '/api/v1/tracking/items/{tracking_id}/delete-external'
       | '/api/v1/tracking/items/{tracking_id}/refresh'
       | '/api/v1/tracking/sync'
     >()
@@ -174,6 +171,8 @@ describe('generated API client (US-198)', () => {
   })
 
   it('has a non-empty expected operation set (guards the fixture)', () => {
-    expect(EXPECTED_OPERATION_IDS).toHaveLength(38)
+    // Issue #228 retired ``deleteExternalTrackingItem``, so the fixture and the
+    // generated document both hold 37 operations.
+    expect(EXPECTED_OPERATION_IDS).toHaveLength(37)
   })
 })

@@ -6,7 +6,6 @@ import pytest
 from playwright.sync_api import expect
 
 from tests.browser.saved_tracking_fixtures import (
-    _delete_detail,
     _detail_payload,
     _item,
     _management_actions,
@@ -119,26 +118,13 @@ def test_settings_draft_test_save_locks_and_tracking_summary_is_non_sensitive(pa
         ("MODIFY", "#tracking-modify-subscription-submit", "modify"),
         ("SET_ENABLED", "#tracking-set-enabled-submit", "enabled"),
         ("REFRESH_RSS", "#tracking-refresh-rss-submit", "refresh"),
-        ("DELETE_EXTERNAL", "#tracking-delete-external-submit", "delete"),
     ],
 )
 def test_saved_management_actions_send_only_bound_connection_fields(page, live_server_url, action, selector, setup):
     """Each management action is reached from the saved connection with no credential snapshot."""
     ref = "11111111-1111-4111-8111-111111111111"
     captured: list[dict] = []
-    actions = (
-        _modify_actions()
-        + _management_actions("ACTIVE")
-        + [
-            {
-                "code": "DELETE_EXTERNAL",
-                "label": "删除外部订阅",
-                "style": "DANGER",
-                "requires_confirmation": True,
-                "target_scopes": ["ASSOCIATED_RSS"],
-            }
-        ]
-    )
+    actions = _modify_actions() + _management_actions("ACTIVE")
     detail = {
         "ok": True,
         "result": {
@@ -158,9 +144,6 @@ def test_saved_management_actions_send_only_bound_connection_fields(page, live_s
             "warnings": [],
         },
     }
-    if action == "DELETE_EXTERNAL":
-        detail = _delete_detail(1)
-
     def handler(route, request):
         path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
         if request.method == "GET" and path.startswith("/settings/autobangumi"):
@@ -261,8 +244,6 @@ def test_saved_management_actions_send_only_bound_connection_fields(page, live_s
         # Issue #89: enable/disable always addresses the controlled external
         # anime subscription, so there is no scope choice to make.
         assert page.locator("#tracking-set-enabled-scope-SUBSCRIPTION").count() == 0
-    elif setup == "delete":
-        page.locator("#tracking-delete-external-scope-ASSOCIATED_RSS").check()
     page.locator(selector).click()
     page.wait_for_selector(".confirm-dialog", timeout=10_000)
     # Cancelling the impact confirmation sends zero requests.
@@ -278,12 +259,6 @@ def test_saved_management_actions_send_only_bound_connection_fields(page, live_s
     assert body["connection_ref"] == ref
     assert body["configuration_revision"] == 3
     assert "ab_config" not in body and "password" not in str(body)
-    if action == "DELETE_EXTERNAL":
-        assert body["confirm"] is True
-        assert body["expected_revision"] == 1
-        assert body["idempotency_key"]
-        assert "file" not in body
-        expect(page.locator("#tracking-delete-external-result")).to_be_visible()
 
 
 @pytest.mark.browser
@@ -513,7 +488,7 @@ def test_saved_verify_external_preserves_unknown_source_lock(page, live_server_u
     assert not any(
         endpoint in path
         for path in writes
-        for endpoint in ("/submit", "/retry", "/modify", "/set-enabled", "/refresh", "/delete-external")
+        for endpoint in ("/submit", "/retry", "/modify", "/set-enabled", "/refresh")
     )
     assert secret not in page.locator("body").inner_text()
     assert secret not in page.url
@@ -818,26 +793,14 @@ def test_saved_submit_and_retry_use_one_explicit_generation(page, live_server_ur
 
 
 @pytest.mark.browser
-def test_local_recovery_needs_no_saved_probe_and_has_no_standalone_revalidate(page, live_server_url):
-    """Issue #86: local recovery stays connection-free, and the standalone
-    "本地方案复核" action is no longer a user action at all."""
+def test_recovery_entry_is_the_read_only_verification_only(page, live_server_url):
+    """Issue #228: the retired local recovery entries are gone from the page.
+
+    Without a saved connection the panel still explains why the read-only
+    verification is unavailable and offers no action at all; the removed
+    standalone revalidation is not rendered anywhere either.
+    """
     item = _recovery_item("tracking-a", "本地恢复", revision=4)
-    item["available_actions"] = [
-        {
-            "code": "RECOVER_AUTO",
-            "label": "自动恢复",
-            "style": "SECONDARY",
-            "requires_confirmation": False,
-            "target_scopes": [],
-        },
-        {
-            "code": "REVALIDATE",
-            "label": "本地复核",
-            "style": "SECONDARY",
-            "requires_confirmation": False,
-            "target_scopes": [],
-        },
-    ]
     detail = {"ok": True, "result": _detail_payload(item)}
     calls: list[tuple[str, dict]] = []
 
@@ -863,42 +826,27 @@ def test_local_recovery_needs_no_saved_probe_and_has_no_standalone_revalidate(pa
         if request.method == "GET" and path == "/tracking/items/tracking-a":
             route.fulfill(json=detail)
             return
-        if request.method == "POST" and path.endswith("/revalidate"):
-            calls.append(("revalidate", request.post_data_json or {}))
-            route.fulfill(json={"ok": True, "result": {"ready": True, "next_status": "PENDING_SUBMIT", "issues": []}})
-            return
-        if request.method == "POST" and path.endswith("/recover"):
-            calls.append(("recover", request.post_data_json or {}))
-            route.fulfill(
-                json={
-                    "ok": True,
-                    "result": {
-                        "tracking_id": "tracking-a",
-                        "action": "AUTO",
-                        "outcome": "ACTIVE",
-                        "checked_revision": 4,
-                        "next_revision": 5,
-                        "needs_manual": False,
-                        "tracking": item,
-                    },
-                }
-            )
-            return
         if request.method == "POST":
-            raise AssertionError(f"unexpected external call: {path}")
+            calls.append((path, request.post_data_json or {}))
+            route.fulfill(json={"ok": True, "result": {}})
+            return
         route.continue_()
 
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
-    page.wait_for_selector("#tracking-recover-auto")
-    # Unconfigured Auto Bangumi never blocks the purely local recovery...
-    expect(page.locator("#tracking-recover-auto")).to_be_enabled()
-    # ...and the removed standalone revalidation is not rendered anywhere.
+    page.wait_for_selector("#tracking-recovery-heading")
+    expect(page.locator("#tracking-recovery-heading")).to_have_text("结果待确认")
+    # No local recovery entry survives, and the read-only verification needs the
+    # saved connection this page does not have.
+    for retired in ("#tracking-recover-auto", "#tracking-recover-succeeded", "#tracking-recover-failed"):
+        assert page.locator(retired).count() == 0
+    assert page.locator("#tracking-recover-verify").count() == 0
+    expect(page.locator("#tracking-recovery-heading").locator("..")).to_contain_text(
+        "只读外部核验需要先在页面连接 Auto Bangumi"
+    )
+    # The removed standalone revalidation is not rendered anywhere.
     assert page.locator("#tracking-revalidate").count() == 0
-
-    page.locator("#tracking-recover-auto").click()
-    page.wait_for_timeout(200)
-    assert [kind for kind, _payload in calls] == ["recover"]
+    assert calls == []
 
 
 @pytest.mark.browser
@@ -1000,7 +948,8 @@ def test_unconfigured_recovery_has_no_external_verify_or_probe(page, live_server
 
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
-    page.wait_for_selector("#tracking-recover-auto")
+    page.wait_for_selector("#tracking-recovery-heading")
+    assert page.locator("#tracking-recover-auto").count() == 0
     assert page.locator("#tracking-recover-verify").count() == 0
     assert external_calls == []
     secret = "unbound-canary"
@@ -1505,78 +1454,3 @@ def test_unknown_operation_after_configuration_change_cannot_verify(page, live_s
     page.wait_for_selector("#tracking-probe-saved")
     assert page.locator("#tracking-recover-verify").count() == 0
     assert calls == []
-
-
-@pytest.mark.browser
-@pytest.mark.parametrize("action", ["MARK_SUCCEEDED", "MARK_FAILED"])
-def test_manual_recovery_is_local_and_confirmed(page, live_server_url, action):
-    item = _recovery_item("tracking-a", "人工恢复", revision=4)
-    item["available_actions"] = [
-        {"code": action, "label": action, "style": "PRIMARY", "requires_confirmation": True, "target_scopes": []}
-    ]
-    calls: list[dict] = []
-
-    def handler(route, request):
-        path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
-        if request.method == "GET" and path == "/settings/autobangumi":
-            route.fulfill(
-                json={
-                    "ok": True,
-                    "result": {
-                        "configured": False,
-                        "credential_present": False,
-                        "connection_ref": None,
-                        "configuration_revision": 0,
-                        "connection_status": "UNCONFIGURED",
-                    },
-                }
-            )
-            return
-        if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "status_groups": _status_groups_for([item]), "warnings": []}})
-            return
-        if request.method == "GET" and path == "/tracking/items/tracking-a":
-            route.fulfill(json={"ok": True, "result": _detail_payload(item)})
-            return
-        if request.method == "POST" and path.endswith("/recover"):
-            calls.append(request.post_data_json or {})
-            route.fulfill(
-                json={
-                    "ok": True,
-                    "result": {
-                        "tracking_id": "tracking-a",
-                        "action": action,
-                        "outcome": "SUCCEEDED",
-                        "checked_revision": 4,
-                        "next_revision": 5,
-                        "needs_manual": False,
-                        "tracking": item,
-                    },
-                }
-            )
-            return
-        if request.method == "POST":
-            raise AssertionError(path)
-        route.continue_()
-
-    page.route("**/api/v1/**", handler)
-    page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
-    selector = f"#tracking-recover-{'succeeded' if action == 'MARK_SUCCEEDED' else 'failed'}"
-    page.wait_for_selector(selector)
-    # Issue #169 AC4: the renamed recovery heading must stay a single line, so the
-    # copy change introduces no layout change in the panel it titles.
-    heading = page.locator("#tracking-recovery-heading")
-    expect(heading).to_have_text("结果待确认恢复")
-    metrics = heading.evaluate(
-        """(el) => {
-            const style = getComputedStyle(el);
-            const line = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2;
-            return { height: el.getBoundingClientRect().height, line };
-        }"""
-    )
-    assert metrics["height"] <= metrics["line"] * 1.5, metrics
-    page.locator(selector).click()
-    expect(page.locator(".confirm-dialog")).to_be_visible()
-    page.locator(".confirm-dialog .danger-button, .confirm-dialog .primary-button").last.click()
-    page.wait_for_timeout(100)
-    assert calls == [{"expected_revision": 4, "action": action, "confirm": True}]

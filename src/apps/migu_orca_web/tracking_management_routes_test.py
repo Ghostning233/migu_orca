@@ -28,11 +28,12 @@ def _payload(scope: str = "SUBSCRIPTION", **extra: Any) -> dict[str, Any]:
     [
         ("modify", "SUBSCRIPTION", {"patch": {"title": "新标题"}}, "MODIFY"),
         ("set-enabled", "SUBSCRIPTION", {"enabled": False}, "SET_ENABLED"),
-        ("delete-external", "SUBSCRIPTION", {}, "DELETE_EXTERNAL"),
+        # Issue #228 retired the standalone /delete-external route; the
+        # operation survives only inside the composite plan-delete leg.
         ("refresh", "ASSOCIATED_RSS", {}, "REFRESH_RSS"),
     ],
 )
-def test_management_flask_routes_dispatch_all_four_actions(
+def test_management_flask_routes_dispatch_the_public_actions(
     monkeypatch: pytest.MonkeyPatch,
     path: str,
     scope: str,

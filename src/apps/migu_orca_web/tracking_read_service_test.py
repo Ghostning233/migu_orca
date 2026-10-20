@@ -3,8 +3,9 @@ from __future__ import annotations
 """Unit tests for the tracking read service and serializers (US-223)."""
 
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
+from apps.migu_orca_web.api_contract import TrackingAvailableActionDTO
 from apps.migu_orca_web.tracking_read_service import (
     list_tracking_items,
 )
@@ -32,6 +33,7 @@ from tracking_engine.models.tracking import (
     TRACKING_STATUS_SUBMITTING,
     TRACKING_STATUS_UNKNOWN,
     TRACKING_STATUS_VERIFYING_EXTERNAL,
+    TRACKING_STATUSES,
     TrackingRecord,
     build_audit_event,
     create_external_tracking_record,
@@ -55,29 +57,73 @@ def _record(
     )
 
 
+#: The action codes issue #228 (T5a) retires from the public contract.  The
+#: revalidate endpoint and the internal ``DELETE_EXTERNAL`` execution chain stay
+#: (E1/E4); they are simply no longer offered as user-facing entries.
+RETIRED_PUBLIC_ACTIONS = frozenset(
+    {"REVALIDATE", "RECOVER_AUTO", "MARK_SUCCEEDED", "MARK_FAILED", "DELETE_EXTERNAL"}
+)
+
+
 def test_available_actions_for_pending_and_reconfirm() -> None:
+    # #228 E1: the submit path revalidates internally, so 重新复核 is not a
+    # separate user decision; only the submit decision itself is offered.
     assert [a["code"] for a in tracking_available_actions(TRACKING_STATUS_PENDING_SUBMIT)] == [
-        "REVALIDATE",
         "SUBMIT",
     ]
     assert [
         a["code"] for a in tracking_available_actions(TRACKING_STATUS_NEEDS_RECONFIRM)
-    ] == ["REVALIDATE", "SUBMIT"]
+    ] == ["SUBMIT"]
 
 
 def test_available_actions_for_submit_failed_is_retry_not_submit() -> None:
     codes = [a["code"] for a in tracking_available_actions(TRACKING_STATUS_SUBMIT_FAILED)]
-    assert codes == ["REVALIDATE", "RETRY"]
+    assert codes == ["RETRY"]
 
 
 def test_available_actions_for_recovery_statuses() -> None:
+    # #228 E2/E3/E5: 自动恢复/标记为成功/标记为失败 are retired.  The remaining
+    # recovery family member is the read-only external verification: a page flow
+    # (state + proven capability) that never writes, so an unresolved record
+    # projects no state-changing action at all.
     for status in (
         TRACKING_STATUS_VERIFYING_EXTERNAL,
         TRACKING_STATUS_RECOVERY_REQUIRED,
         TRACKING_STATUS_UNKNOWN,
     ):
-        codes = [a["code"] for a in tracking_available_actions(status)]
-        assert codes == ["RECOVER_AUTO", "MARK_SUCCEEDED", "MARK_FAILED"]
+        assert tracking_available_actions(status) == []
+
+
+def test_retired_action_codes_never_appear_in_any_public_projection() -> None:
+    """#228: no status/mapping may announce a retired action code again."""
+    mappings = (
+        None,
+        {"subscription_id": "opaque-sub", "rss_ids": ["opaque-rss"]},
+        {"subscription_id": "opaque-sub", "rss_ids": []},
+        {"subscription_id": "", "rss_ids": ["opaque-rss"]},
+    )
+    projected = {
+        action["code"]
+        for status in TRACKING_STATUSES
+        for mapping in mappings
+        for action in tracking_available_actions(status, mapping)
+    }
+    assert projected & RETIRED_PUBLIC_ACTIONS == set()
+
+
+def test_announced_actions_stay_inside_the_published_action_enum() -> None:
+    """The projection never emits a code the public action DTO cannot express."""
+    published = frozenset(
+        get_args(TrackingAvailableActionDTO.model_fields["code"].annotation)
+    )
+    mappings = (
+        None,
+        {"subscription_id": "opaque-sub", "rss_ids": ["opaque-rss"]},
+    )
+    for status in TRACKING_STATUSES:
+        for mapping in mappings:
+            for action in tracking_available_actions(status, mapping):
+                assert action["code"] in published
 
 
 def test_available_actions_empty_when_no_state_change_possible() -> None:
@@ -91,10 +137,12 @@ def test_available_actions_empty_when_no_state_change_possible() -> None:
 def test_available_actions_expose_stage31_management_actions() -> None:
     mapping = {"subscription_id": "opaque-sub", "rss_ids": ["opaque-rss"]}
     assert [item["code"] for item in tracking_available_actions(TRACKING_STATUS_ACTIVE, mapping)] == [
-        "MODIFY", "SET_ENABLED", "REFRESH_RSS", "DELETE_EXTERNAL",
+        "MODIFY", "SET_ENABLED", "REFRESH_RSS",
     ]
+    # #228 E4: 独立「删除 Auto Bangumi 外部对象」不再公告；内部复合删除链仍执行它
+    # （见 tests/api_contract/test_tracking_plan_delete_api.py）。
     assert [item["code"] for item in tracking_available_actions(TRACKING_STATUS_DISABLED, mapping)] == [
-        "SET_ENABLED", "DELETE_EXTERNAL",
+        "SET_ENABLED",
     ]
     # Issue #224 A4: the retired read-only archive offers no management action in
     # the projection either — the write policy and the read model agree.

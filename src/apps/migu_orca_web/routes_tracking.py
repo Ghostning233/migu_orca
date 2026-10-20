@@ -25,7 +25,6 @@ from apps.migu_orca_web.schemas import (
     SavedTrackingSubmitInput,
     SavedTrackingSyncInput,
     TrackingCheckPayload,
-    TrackingDeleteExternalPayload,
     TrackingDetailQuery,
     TrackingListQuery,
     TrackingModifyPayload,
@@ -330,15 +329,16 @@ class TrackingItemResubmitView(PostView):
     methods=["POST"],
 )
 class TrackingItemRecoverView(PostView):
-    """Resolve an unknown/incomplete unified tracking outcome (US-226).
+    """Resolve an unknown/incomplete unified tracking outcome (US-226 / #228).
 
-    ``action=AUTO`` reads only local operation / Request safe AB-result evidence
-    and never contacts an external system; ``MARK_SUCCEEDED``/``MARK_FAILED``
-    require ``confirm=true`` and write a USER audit.  The endpoint never accepts
-    an external id/URL/raw result.  A persisted recovery outcome
-    (``ACTIVE``/``SUBMIT_FAILED``/``RECOVERY_REQUIRED``) is HTTP 200; only
-    preconditions (missing record, stale revision, non-recoverable state,
-    missing manual confirmation) raise.
+    The only accepted ``action`` is ``VERIFY_EXTERNAL``: one bounded read of the
+    bound Auto Bangumi connection that never creates, modifies or deletes an
+    object.  ``AUTO``/``MARK_SUCCEEDED``/``MARK_FAILED`` are retired and rejected
+    by the request enum.  The endpoint never accepts an external id/URL/raw
+    result.  A persisted verification result
+    (``ACTIVE``/``DISABLED``/``EXTERNAL_DELETED``/``RECOVERY_REQUIRED``) is
+    HTTP 200; only preconditions (missing record, stale revision or binding,
+    insufficient capability) raise.
     """
 
     request_validator_model = TrackingRecoverPayload
@@ -409,15 +409,6 @@ class TrackingItemSetEnabledView(PostView):
         return _run_management_route(payload, "SET_ENABLED", enabled=payload.enabled)
 
 
-@class_route(api_blueprint, "/api/v1/tracking/items/<path:tracking_id>/delete-external", methods=["POST"])
-class TrackingItemDeleteExternalView(PostView):
-    request_validator_model = TrackingDeleteExternalPayload
-
-    def save(self) -> dict[str, object]:
-        assert isinstance(self.request_validator_model, TrackingDeleteExternalPayload)
-        return _run_management_route(self.request_validator_model, "DELETE_EXTERNAL")
-
-
 @class_route(api_blueprint, "/api/v1/tracking/items/<path:tracking_id>/refresh", methods=["POST"])
 class TrackingItemRefreshView(PostView):
     request_validator_model = TrackingRefreshRssPayload
@@ -430,7 +421,6 @@ class TrackingItemRefreshView(PostView):
 __all__ = [
     "TrackingItemCheckView",
     "TrackingItemDetailView",
-    "TrackingItemDeleteExternalView",
     "TrackingItemListView",
     "TrackingItemModifyView",
     "TrackingItemRefreshView",

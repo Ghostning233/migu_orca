@@ -8,15 +8,13 @@ import TrackingInspector from './TrackingInspector.vue'
 import { createCheckSession, createResubmitSession } from './trackingProjection'
 import type { CapabilityResult, TrackingCheckSession } from './trackingProjection'
 import type {
-  TrackingManagementActionCode,
-  TrackingManagementScope,
   TrackingWriteSession,
   TrackingWriteSessionSet,
 } from './useTrackingWriteSession'
 
-/** The fixed manual-conclusion notice, pinned here as characterization. */
+/** The fixed undecidable-verification notice, pinned here as characterization. */
 const RECOVERY_NEEDS_MANUAL_NOTICE =
-  '需要人工核验：请先在 Auto Bangumi 中独立核对该追番的实际状态，再选择“标记为成功”或“标记为失败”；本页不会代替你判断，也不会自动提交。'
+  '只读核验无法定论：请先在 Auto Bangumi 中独立核对该追番的实际状态。本页不会代替你判断，也不会自动提交；需要重发请使用「主动重发」，需要结束跟踪请使用删除追番方案。'
 
 /** One page-level write session of any family, as the page hands it over. */
 function sessionFixture(overrides: Partial<TrackingWriteSession> = {}): TrackingWriteSession {
@@ -32,29 +30,6 @@ function sessionFixture(overrides: Partial<TrackingWriteSession> = {}): Tracking
 /** The page's single session entry, with only the families a test provides. */
 function sessions(parts: Partial<TrackingWriteSessionSet> = {}): TrackingWriteSessionSet {
   return { submit: null, recovery: null, management: null, ...parts }
-}
-
-function managementSessionFixture(options: {
-  operation: TrackingManagementActionCode
-  targetScope: TrackingManagementScope
-  state: TrackingWriteSession['state']
-  message: string
-  needsManual?: boolean
-  trackingId?: string
-}): TrackingWriteSession {
-  return sessionFixture({
-    ...(options.trackingId === undefined ? {} : { trackingId: options.trackingId }),
-    operation: options.operation,
-    family: 'MANAGEMENT',
-    targetScope: options.targetScope,
-    state: options.state,
-    message: options.message,
-    needsManual: options.needsManual ?? false,
-    manualNotice: options.needsManual
-      ? '需要人工核验：请先在 Auto Bangumi 中独立核对该追番的实际状态，再决定是否重新发起修改；本页不会代替你判断，也不会自动重试。'
-      : null,
-    keepsIntent: options.state === 'UNKNOWN',
-  })
 }
 
 vi.mock('@/api/client', () => ({
@@ -277,12 +252,8 @@ describe('TrackingInspector explicit submission (US-310)', () => {
       code: 'REFRESH_RSS', label: '刷新关联 RSS', style: 'SECONDARY',
       requires_confirmation: false, target_scopes: ['ASSOCIATED_RSS'],
     }
-    const deleteExternal = {
-      code: 'DELETE_EXTERNAL', label: '删除外部订阅', style: 'DANGER',
-      requires_confirmation: true, target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'],
-    }
     apiGet.mockResolvedValue(
-      detail({ available_actions: [submitAction, setEnabled, refreshRss, deleteExternal] }) as never,
+      detail({ available_actions: [submitAction, setEnabled, refreshRss] }) as never,
     )
     const wrapper = await mountInspector('tracking-1', {
       connectionReady: false,
@@ -300,8 +271,8 @@ describe('TrackingInspector explicit submission (US-310)', () => {
     expect(wrapper.find('#tracking-set-enabled-submit').attributes('disabled')).toBeDefined()
     expect(wrapper.find('#tracking-refresh-rss-submit').attributes('disabled')).toBeDefined()
     expect(wrapper.find('#tracking-management-connection-required').exists()).toBe(true)
-    expect(wrapper.find('#tracking-delete-external-submit').attributes('disabled')).toBeDefined()
-    expect(wrapper.find('#tracking-delete-connection-required').exists()).toBe(true)
+    // Issue #228 retired the standalone external delete entirely.
+    expect(wrapper.find('#tracking-delete-external-submit').exists()).toBe(false)
     expect(apiPost).not.toHaveBeenCalled()
   })
 
@@ -451,77 +422,51 @@ describe('TrackingInspector explicit retry (US-311)', () => {
   })
 })
 
-const recoverAutoAction = {
-  code: 'RECOVER_AUTO', label: '自动恢复', style: 'SECONDARY',
-  requires_confirmation: false, target_scopes: [],
-}
-const markSucceededAction = {
-  code: 'MARK_SUCCEEDED', label: '标记为成功', style: 'PRIMARY',
-  requires_confirmation: true, target_scopes: [],
-}
-const markFailedAction = {
-  code: 'MARK_FAILED', label: '标记为失败', style: 'DANGER',
-  requires_confirmation: true, target_scopes: [],
-}
-const recoveryActions = [recoverAutoAction, markSucceededAction, markFailedAction]
-
-function recoverySessionFixture(overrides: Partial<TrackingWriteSession> = {}): TrackingWriteSession {
-  return sessionFixture({
-    family: 'RECOVERY',
-    operation: 'RECOVER_AUTO',
-    state: 'RECOVERY_REQUIRED',
-    needsManual: true,
-    manualNotice: RECOVERY_NEEDS_MANUAL_NOTICE,
-    keepsIntent: true,
-    message: '结果仍无法确认，保持恢复状态；未确认前不会自动提交。',
-    ...overrides,
-  })
-}
-
 async function mountRecoverable(
   props: Record<string, unknown> = {},
   detailOverrides: Record<string, unknown> = {},
 ) {
   apiGet.mockResolvedValue(detail({
-    status: 'RECOVERY_REQUIRED', status_label: '需要恢复', available_actions: recoveryActions,
+    status: 'RECOVERY_REQUIRED', status_label: '需要恢复', available_actions: [],
     ...detailOverrides,
   }) as never)
   return mountInspector('tracking-1', props)
 }
 
-describe('TrackingInspector unknown-result recovery (US-312)', () => {
+function recoverySessionFixture(overrides: Partial<TrackingWriteSession> = {}): TrackingWriteSession {
+  return sessionFixture({
+    family: 'RECOVERY',
+    operation: 'VERIFY_EXTERNAL',
+    state: 'RECOVERY_REQUIRED',
+    needsManual: true,
+    manualNotice: RECOVERY_NEEDS_MANUAL_NOTICE,
+    keepsIntent: true,
+    message: '结果仍无法确认，保持待确认状态；未确认前不会自动提交、也不会代替你判断。',
+    ...overrides,
+  })
+}
+
+describe('TrackingInspector unknown-result recovery (US-312 / issue #228)', () => {
   beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
 
-  it('projects only the server-computed local actions and needs no credential', async () => {
-    const wrapper = await mountRecoverable()
-    // AUTO/MARK are pure-local: no page session, no capability, no scope.
-    expect(wrapper.find('#tracking-recover-auto').text()).toBe('自动恢复')
-    expect(wrapper.find('#tracking-recover-succeeded').text()).toBe('标记为成功')
-    expect(wrapper.find('#tracking-recover-failed').text()).toBe('标记为失败')
-    // Read-only external verification is not offered without the live session.
-    expect(wrapper.find('#tracking-recover-verify').exists()).toBe(false)
-    expect(wrapper.text()).toContain('只读外部核验需要先在页面连接 Auto Bangumi')
+  it('offers only the read-only verification, and only with a proven capability', async () => {
+    // No page session: the read-only verification needs its saved generation.
+    const withoutSession = await mountRecoverable()
+    expect(withoutSession.find('#tracking-recover-auto').exists()).toBe(false)
+    expect(withoutSession.find('#tracking-recover-succeeded').exists()).toBe(false)
+    expect(withoutSession.find('#tracking-recover-failed').exists()).toBe(false)
+    expect(withoutSession.find('#tracking-recover-verify').exists()).toBe(false)
+    expect(withoutSession.text()).toContain('只读外部核验需要先在页面连接 Auto Bangumi')
 
-    const failedClass = wrapper.find('#tracking-recover-failed').classes()
-    expect(failedClass).toContain('danger-button')
-    await wrapper.find('#tracking-recover-auto').trigger('click')
-    await flushPromises()
-    // The inspector never performs a recovery itself.
-    expect(apiPost).not.toHaveBeenCalled()
-    const payload = wrapper.emitted('recovery-requested')?.at(-1)?.[0] as {
-      action: string; item: { revision: number; tracking_id: string }
-    }
-    expect(payload.action).toBe('RECOVER_AUTO')
-    expect(payload.item.tracking_id).toBe('tracking-1')
-    expect(payload.item.revision).toBe(2)
-  })
-
-  it('offers the read-only external verification only with a proven capability', async () => {
     const withSession = await mountRecoverable(LIVE_SESSION)
     expect(withSession.find('#tracking-recover-verify').text()).toBe('只读核验外部状态')
     await withSession.find('#tracking-recover-verify').trigger('click')
     await flushPromises()
-    expect(withSession.emitted('recovery-requested')?.at(-1)?.[0]).toMatchObject({ action: 'VERIFY_EXTERNAL' })
+    // The inspector never performs a recovery itself.
+    expect(apiPost).not.toHaveBeenCalled()
+    expect(withSession.emitted('recovery-requested')?.at(-1)?.[0]).toMatchObject({
+      action: 'VERIFY_EXTERNAL', item: { tracking_id: 'tracking-1' },
+    })
 
     for (const degraded of [
       { credentialReady: true, capabilities: capabilities({ external_verify: 'UNSUPPORTED' }) },
@@ -532,60 +477,66 @@ describe('TrackingInspector unknown-result recovery (US-312)', () => {
       apiGet.mockReset()
       const wrapper = await mountRecoverable(degraded)
       expect(wrapper.find('#tracking-recover-verify').exists()).toBe(false)
-      // The local recovery actions stay available; only the external read is gone.
-      expect(wrapper.find('#tracking-recover-auto').exists()).toBe(true)
+      // The panel still explains the missing capability instead of hiding it.
+      expect(wrapper.find('#tracking-recovery-heading').exists()).toBe(true)
+      expect(wrapper.text()).toContain('只读外部核验需要先在页面连接 Auto Bangumi')
       wrapper.unmount()
     }
   })
 
-  it('never projects an unknown or non-recovery action as a recovery', async () => {
-    const wrapper = await mountRecoverable({}, { available_actions: [
-      { ...recoverAutoAction, code: 'RECOVER_LATER' },
-      { ...recoverAutoAction, style: 'NOT_A_STYLE' },
-      { code: 'SUBMIT', label: '提交追番', style: 'PRIMARY', requires_confirmation: true, target_scopes: [] },
-    ] })
-    expect(wrapper.find('.tracking-recovery').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('RECOVER_LATER')
+  it('never projects a retired or foreign action as a recovery entry', async () => {
+    for (const retired of ['RECOVER_AUTO', 'MARK_SUCCEEDED', 'MARK_FAILED', 'REVALIDATE']) {
+      const wrapper = await mountRecoverable(LIVE_SESSION, { available_actions: [
+        { code: retired, label: retired, style: 'SECONDARY', requires_confirmation: false, target_scopes: [] },
+      ] })
+      expect(wrapper.find('#tracking-recover-auto').exists()).toBe(false)
+      expect(wrapper.find('#tracking-recover-succeeded').exists()).toBe(false)
+      expect(wrapper.find('#tracking-recover-failed').exists()).toBe(false)
+      expect(wrapper.text()).not.toContain(retired)
+      wrapper.unmount()
+    }
+    // A record the server can already decide shows no recovery panel at all.
+    const decided = await mountRecoverable(LIVE_SESSION, {
+      status: 'ACTIVE',
+      available_actions: [
+        { code: 'SUBMIT', label: '提交追番', style: 'PRIMARY', requires_confirmation: true, target_scopes: [] },
+      ],
+    })
+    expect(decided.find('.tracking-recovery').exists()).toBe(false)
     expect(apiPost).not.toHaveBeenCalled()
   })
 
-  it('renders the page recovery verdict and the manual-check notice, never the raw state', async () => {
-    const wrapper = await mountRecoverable({ sessions: sessions({ recovery: recoverySessionFixture() }) })
+  it('renders the page recovery verdict and the undecidable notice, never the raw state', async () => {
+    const wrapper = await mountRecoverable({ ...LIVE_SESSION, sessions: sessions({ recovery: recoverySessionFixture() }) })
     const result = wrapper.find('#tracking-recovery-result')
     expect(result.text()).toContain('结果仍无法确认')
     expect(result.find('#tracking-recovery-manual-notice').text()).toBe(RECOVERY_NEEDS_MANUAL_NOTICE)
-    expect(result.text()).toContain('先在 Auto Bangumi 中独立核对')
+    expect(result.text()).toContain('独立核对')
     expect(wrapper.text()).not.toContain('RECOVERY_REQUIRED')
-    expect(wrapper.text()).not.toContain('NEEDS_RECONFIRM')
 
-    // A decided verdict never shows the manual-check requirement.
-    await wrapper.setProps({ sessions: sessions({ recovery: recoverySessionFixture({ state: 'ACTIVE', needsManual: false, manualNotice: null, keepsIntent: false, message: '恢复完成：已确认该番在 Auto Bangumi 中存在外部订阅。' }) }) })
+    // A decided verdict never shows the undecidable requirement.
+    await wrapper.setProps({ sessions: sessions({ recovery: recoverySessionFixture({ state: 'ACTIVE', needsManual: false, manualNotice: null, keepsIntent: false, message: '只读核验完成：已确认该追番在 Auto Bangumi 中存在外部订阅。' }) }) })
     await flushPromises()
-    expect(wrapper.find('#tracking-recovery-result').text()).toContain('恢复完成')
+    expect(wrapper.find('#tracking-recovery-result').text()).toContain('只读核验完成')
     expect(wrapper.find('#tracking-recovery-manual-notice').exists()).toBe(false)
   })
 
-  it('locks every recovery action while the page intent is busy and never emits', async () => {
-    const busy = await mountRecoverable({ writeBusy: true })
-    for (const id of ['#tracking-recover-auto', '#tracking-recover-succeeded', '#tracking-recover-failed']) {
-      expect(busy.find(id).attributes('disabled')).toBeDefined()
-      await busy.find(id).trigger('click')
-    }
+  it('locks the verification while the page intent is busy and never emits', async () => {
+    const busy = await mountRecoverable({ ...LIVE_SESSION, writeBusy: true })
+    expect(busy.find('#tracking-recover-verify').attributes('disabled')).toBeDefined()
+    await busy.find('#tracking-recover-verify').trigger('click')
     await flushPromises()
     expect(busy.emitted('recovery-requested')).toBeUndefined()
     busy.unmount()
 
-    // In flight for this item, and while its own write is running.
+    // In flight for this item, and while its own submit write is running.
     for (const props of [
       { ...LIVE_SESSION, sessions: sessions({ recovery: recoverySessionFixture({ state: 'IN_FLIGHT', needsManual: false, manualNotice: null, keepsIntent: false }) }) },
       { ...LIVE_SESSION, sessions: sessions({ submit: writeSession({ state: 'IN_FLIGHT' }) }) },
     ]) {
       const wrapper = await mountRecoverable(props)
-      expect(wrapper.find('#tracking-recover-auto').attributes('disabled')).toBeDefined()
-      expect(wrapper.find('#tracking-recover-succeeded').attributes('disabled')).toBeDefined()
-      // The read-only external check is locked by the same page intent.
       expect(wrapper.find('#tracking-recover-verify').attributes('disabled')).toBeDefined()
-      await wrapper.find('#tracking-recover-auto').trigger('click')
+      await wrapper.find('#tracking-recover-verify').trigger('click')
       await flushPromises()
       expect(wrapper.emitted('recovery-requested')).toBeUndefined()
       wrapper.unmount()
@@ -593,97 +544,8 @@ describe('TrackingInspector unknown-result recovery (US-312)', () => {
   })
 
   it('never shows another item recovery result on this item', async () => {
-    const wrapper = await mountRecoverable({ sessions: sessions({ recovery: recoverySessionFixture({ trackingId: 'tracking-2' }) }) })
+    const wrapper = await mountRecoverable({ ...LIVE_SESSION, sessions: sessions({ recovery: recoverySessionFixture({ trackingId: 'tracking-2' }) }) })
     expect(wrapper.find('#tracking-recovery-result').exists()).toBe(false)
-  })
-})
-
-describe('TrackingInspector per-record external delete (US-315)', () => {
-  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
-
-  const deleteAction = {
-    code: 'DELETE_EXTERNAL', label: '删除外部订阅', style: 'DANGER',
-    requires_confirmation: true, target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'],
-  }
-
-  it('offers the delete from the server projection alone', async () => {
-    apiGet.mockResolvedValue(detail({ available_actions: [deleteAction] }) as never)
-
-    // No probe and no live page session is required (issue #89).
-    const wrapper = await mountInspector()
-    expect(wrapper.find('#tracking-delete-external-submit').exists()).toBe(true)
-
-    // A diagnostic "unsupported" probe never hides a projected delete either.
-    const degraded = await mountInspector('tracking-1', {
-      ...LIVE_SESSION, capabilities: capabilities({ subscription_delete: 'UNSUPPORTED' }),
-    })
-    expect(degraded.find('#tracking-delete-external-scope-SUBSCRIPTION').exists()).toBe(true)
-    expect(degraded.find('#tracking-delete-external-scope-ASSOCIATED_RSS').exists()).toBe(true)
-
-    // A record the server does not project the action for keeps it hidden.
-    apiGet.mockResolvedValue(detail() as never)
-    const unoffered = await mountInspector()
-    expect(unoffered.find('#tracking-delete-external-submit').exists()).toBe(false)
-  })
-
-  it('never projects an unknown, out-of-family or scope-less delete', async () => {
-    for (const action of [
-      { ...deleteAction, code: 'DELETE_EVERYTHING' },
-      { ...deleteAction, target_scopes: [] },
-      { ...deleteAction, target_scopes: ['EVERYTHING'] },
-      { ...deleteAction, style: 'MYSTERY' },
-    ]) {
-      apiGet.mockResolvedValue(detail({ available_actions: [action] }) as never)
-      const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
-      expect(wrapper.find('#tracking-delete-external-submit').exists()).toBe(false)
-      expect(wrapper.find('#tracking-delete-external-scope-SUBSCRIPTION').exists()).toBe(false)
-      // The rejected value is never echoed back into the DOM either.
-      expect(wrapper.text()).not.toContain('EVERYTHING')
-      expect(wrapper.text()).not.toContain('MYSTERY')
-      wrapper.unmount()
-    }
-  })
-
-  it('emits the chosen scope with the latest revision and never posts itself', async () => {
-    apiGet.mockResolvedValue(detail({
-      revision: 6, available_actions: [deleteAction],
-    }) as never)
-    const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
-    // Nothing is pre-selected, so no request can be emitted by accident.
-    await wrapper.find('#tracking-delete-external-submit').trigger('submit')
-    expect(wrapper.emitted('management-requested')).toBeUndefined()
-
-    await wrapper.find('#tracking-delete-external-scope-ASSOCIATED_RSS').setValue()
-    await wrapper.find('#tracking-delete-external-submit').trigger('submit')
-    const emitted = wrapper.emitted('management-requested') as unknown[][]
-    expect(emitted).toHaveLength(1)
-    expect(emitted[0]?.[0]).toMatchObject({
-      action: deleteAction, targetScope: 'ASSOCIATED_RSS', patch: null,
-    })
-    expect((emitted[0]?.[0] as { item: { revision: number } }).item.revision).toBe(6)
-    // The page owns the request: the inspector never sends anything itself.
-    expect(apiPost).not.toHaveBeenCalled()
-  })
-
-  it('renders this item delete result in its own panel only', async () => {
-    apiGet.mockResolvedValue(detail({ available_actions: [deleteAction] }) as never)
-    const session = managementSessionFixture({
-      operation: 'DELETE_EXTERNAL', targetScope: 'SUBSCRIPTION', state: 'SUCCEEDED',
-      message: '外部删除已完成：Auto Bangumi 已删除该外部对象；MiGuOrca 本地订阅方案、追番记录、审计记录、下载任务和已下载媒体文件均保留。',
-    })
-    const wrapper = await mountInspector('tracking-1', { ...LIVE_SESSION, sessions: sessions({ management: session }) })
-    const result = wrapper.find('#tracking-delete-external-result')
-    expect(result.text()).toContain('外部删除已完成')
-    expect(result.text()).toContain('本次目标：外部番剧订阅')
-    expect(result.text()).not.toContain('SUCCEEDED')
-    // The delete verdict never leaks into the enable/refresh panel.
-    expect(wrapper.find('#tracking-management-result').exists()).toBe(false)
-
-    const other = await mountInspector('tracking-1', {
-      ...LIVE_SESSION,
-      sessions: sessions({ management: managementSessionFixture({ operation: 'DELETE_EXTERNAL', targetScope: 'SUBSCRIPTION', state: 'SUCCEEDED', message: '外部删除已完成：Auto Bangumi 已删除该外部对象；MiGuOrca 本地订阅方案、追番记录、审计记录、下载任务和已下载媒体文件均保留。', trackingId: 'tracking-2' }) }),
-    })
-    expect(other.find('#tracking-delete-external-result').exists()).toBe(false)
   })
 })
 
@@ -1028,10 +890,8 @@ describe('pending submission check (issue #183)', () => {
       operation_id: 'operation-1', operation: 'SUBMIT', state: 'OUTCOME_UNKNOWN', attempt: 1,
       external_result_id: null, error_type: null, created_at: null, updated_at: null, completed_at: null,
     },
-    available_actions: [
-      { code: 'RECOVER_AUTO', label: '自动恢复', style: 'SECONDARY', requires_confirmation: false, target_scopes: [] },
-      { code: 'MARK_SUCCEEDED', label: '标记为成功', style: 'PRIMARY', requires_confirmation: true, target_scopes: [] },
-    ],
+    // Issue #228: an unresolved record projects no state-changing action.
+    available_actions: [],
   })
 
   it('offers the read-only 重新检查 and the risk-confirmed 重新提交, hiding the recovery panel', async () => {
@@ -1057,14 +917,14 @@ describe('pending submission check (issue #183)', () => {
         operation_id: 'operation-2', operation: 'MODIFY', state: 'OUTCOME_UNKNOWN', attempt: 1,
         external_result_id: null, error_type: null, created_at: null, updated_at: null, completed_at: null,
       },
-      available_actions: [
-        { code: 'RECOVER_AUTO', label: '自动恢复', style: 'SECONDARY', requires_confirmation: false, target_scopes: [] },
-      ],
+      available_actions: [],
     }) as never)
     const wrapper = await mountInspector()
 
     expect(wrapper.find('#tracking-recovery-heading').exists()).toBe(true)
-    expect(wrapper.find('#tracking-recovery-heading').text()).toBe('结果待确认恢复')
+    expect(wrapper.find('#tracking-recovery-heading').text()).toBe('结果待确认')
+    // No live session, so the only surviving recovery states why it is absent.
+    expect(wrapper.text()).toContain('只读外部核验需要先在页面连接 Auto Bangumi')
     expect(wrapper.find('#tracking-check').exists()).toBe(false)
   })
 
@@ -1110,9 +970,8 @@ describe('risk-confirmed resubmission (issue #184)', () => {
       operation_id: 'operation-1', operation: 'SUBMIT', state: operationState, attempt: 1,
       external_result_id: null, error_type: null, created_at: null, updated_at: null, completed_at: null,
     },
-    available_actions: [
-      { code: 'RECOVER_AUTO', label: '自动恢复', style: 'SECONDARY', requires_confirmation: false, target_scopes: [] },
-    ],
+    // Issue #228: the read-only verification is a page flow, not a projected action.
+    available_actions: [],
   })
 
   it('emits exactly one resubmit request and renders the page-level result', async () => {

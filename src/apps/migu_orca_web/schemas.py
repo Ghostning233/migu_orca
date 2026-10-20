@@ -587,12 +587,17 @@ class SavedTrackingSyncInput(BaseModel):
 
 
 class SavedTrackingRecoveryInput(BaseModel):
-    """Strict recovery handoff for a server-owned AB connection."""
+    """Strict recovery handoff for a server-owned AB connection.
+
+    Issue #228 (T5a): the local recovery family (``AUTO``/``MARK_SUCCEEDED``/
+    ``MARK_FAILED``) is retired, so only the read-only external verification is
+    accepted and it always requires the saved connection generation.
+    """
 
     model_config = ConfigDict(extra="forbid")
     tracking_id: StrictStr
     expected_revision: StrictInt = Field(ge=1)
-    action: Literal["AUTO", "MARK_SUCCEEDED", "MARK_FAILED", "VERIFY_EXTERNAL"]
+    action: Literal["VERIFY_EXTERNAL"]
     confirm: StrictBool = False
     connection_ref: UUID | None = None
     configuration_revision: StrictInt | None = Field(default=None, ge=0)
@@ -620,15 +625,9 @@ class SavedTrackingRecoveryInput(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _manual_confirmation(self) -> SavedTrackingRecoveryInput:
-        if self.action in {"MARK_SUCCEEDED", "MARK_FAILED"} and self.confirm is not True:
-            raise ValueError("confirm must be true")
-        supplied = self.model_fields_set
-        if self.action == "VERIFY_EXTERNAL":
-            if self.connection_ref is None or self.configuration_revision is None:
-                raise ValueError("VERIFY_EXTERNAL requires saved connection generation")
-        elif supplied & {"connection_ref", "configuration_revision"}:
-            raise ValueError("local recovery cannot include saved connection generation")
+    def _require_connection_generation(self) -> SavedTrackingRecoveryInput:
+        if self.connection_ref is None or self.configuration_revision is None:
+            raise ValueError("VERIFY_EXTERNAL requires saved connection generation")
         return self
 
 
@@ -832,20 +831,23 @@ class TrackingResubmitPayload(BaseModel):
 
 #: Fixed recovery-action enum accepted by
 #: ``POST /api/v1/tracking/items/{tracking_id}/recover`` (Stage 29 PRD §11.8).
-_RECOVERY_ACTION_VALUES = ("AUTO", "MARK_SUCCEEDED", "MARK_FAILED", "VERIFY_EXTERNAL")
+#: Issue #228 (T5a) retired the local recovery family, leaving the read-only
+#: external verification as the only recovery action.
+_RECOVERY_ACTION_VALUES = ("VERIFY_EXTERNAL",)
 _RECOVERY_ACTIONS = frozenset(_RECOVERY_ACTION_VALUES)
 
 
 class TrackingRecoverPayload(BaseModel):
     """Body for ``POST /api/v1/tracking/items/{tracking_id}/recover`` (US-226).
 
-    ``action`` is one of ``AUTO``/``MARK_SUCCEEDED``/``MARK_FAILED``; the two
-    manual actions require ``confirm=true`` (written as a USER audit).  ``AUTO``
-    only reads local operation/Request/AB-result evidence and never contacts an
-    external system, and it never accepts an external id/URL/raw result.
-    ``expected_revision`` is the server-observed revision the user is acting
-    on.  ``extra="forbid"`` rejects leaked fields.  ``tracking_id`` comes from
-    the URL path.
+    Since #228 the only accepted ``action`` is ``VERIFY_EXTERNAL``: a read-only
+    verification of the bound Auto Bangumi connection that never writes, and it
+    always carries the saved ``connection_ref`` + ``configuration_revision``.
+    ``AUTO``/``MARK_SUCCEEDED``/``MARK_FAILED`` were retired from the contract,
+    so an old client is rejected by the enum before anything is read.  The
+    endpoint never accepts an external id/URL/raw result.  ``expected_revision``
+    is the server-observed revision the user is acting on.  ``extra="forbid"``
+    rejects leaked fields.  ``tracking_id`` comes from the URL path.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -860,10 +862,10 @@ class TrackingRecoverPayload(BaseModel):
 
     @model_validator(mode="after")
     def _verify_external_requires_config(self) -> TrackingRecoverPayload:
-        if self.action == "VERIFY_EXTERNAL" and (self.connection_ref is None or self.configuration_revision is None):
+        # Issue #228: the read-only verification is the only recovery action and
+        # it always carries the saved connection generation.
+        if self.connection_ref is None or self.configuration_revision is None:
             raise ValueError("VERIFY_EXTERNAL requires saved connection generation")
-        if self.action != "VERIFY_EXTERNAL" and (self.connection_ref is not None or self.configuration_revision is not None):
-            raise ValueError("local recovery cannot include saved connection generation")
         return self
 
     @field_validator("tracking_id")
@@ -879,7 +881,7 @@ class TrackingRecoverPayload(BaseModel):
     def _clean_action(cls, value: str) -> str:
         action = value.strip().upper()
         if action not in _RECOVERY_ACTIONS:
-            raise ValueError("action 必须为 AUTO、MARK_SUCCEEDED 或 MARK_FAILED")
+            raise ValueError("action 必须为 VERIFY_EXTERNAL")
         return action
 
 
@@ -1038,10 +1040,6 @@ class TrackingModifyPayload(_TrackingManagementBasePayload):
 
 class TrackingSetEnabledPayload(_TrackingManagementBasePayload):
     enabled: bool
-
-
-class TrackingDeleteExternalPayload(_TrackingManagementBasePayload):
-    pass
 
 
 class TrackingRefreshRssPayload(_TrackingManagementBasePayload):

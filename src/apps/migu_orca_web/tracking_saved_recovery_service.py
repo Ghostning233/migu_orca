@@ -30,14 +30,12 @@ def run_saved_tracking_recovery(
     config_root: Path | str | None = None,
     management_client: object | None = None,
 ) -> dict[str, object]:
-    """Keep VERIFY_EXTERNAL bound to the original operation and saved generation."""
-    config = load_storage_config(_storage_dir(payload.storage_dir))
-    if payload.action != "VERIFY_EXTERNAL":
-        return run_tracking_recover(
-            config, tracking_id=payload.tracking_id, expected_revision=payload.expected_revision,
-            action=payload.action, confirm=payload.confirm,
-        )
+    """Keep the read-only verification bound to the original operation and generation.
 
+    Issue #228 narrowed the request schema to ``VERIFY_EXTERNAL``, so this is the
+    only action that reaches the service.
+    """
+    config = load_storage_config(_storage_dir(payload.storage_dir))
     record = load_tracking_record(config, payload.tracking_id)
     operation = load_tracking_operation(config, record.current_operation_id) if record.current_operation_id else None
     allowed_kinds = {TRACKING_OPERATION_KIND_SUBMIT, TRACKING_OPERATION_KIND_MODIFY,

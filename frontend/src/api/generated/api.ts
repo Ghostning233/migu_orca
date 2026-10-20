@@ -451,23 +451,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/tracking/items/{tracking_id}/delete-external": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 删除外部追番方案（保留本地数据） */
-        post: operations["deleteExternalTrackingItem"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/tracking/items/{tracking_id}/delete-plan": {
         parameters: {
             query?: never;
@@ -515,8 +498,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 恢复统一追番记录（AUTO 纯本地或人工核验）
-         * @description US-330：恢复追番记录；AUTO/人工动作纯本地，VERIFY_EXTERNAL 仅使用已保存连接的 connection_ref + configuration_revision 执行 3.1.18 只读核验。
+         * 只读核验未决追番记录（VERIFY_EXTERNAL）
+         * @description US-226 / issue #228：未决追番记录的唯一恢复动作是只读外部核验；它只用已保存连接的 connection_ref + configuration_revision 对 3.1.18 做一次只读比对，不创建、修改或删除任何 Auto Bangumi 对象。旧的 AUTO／标记成功／标记失败已退役。
          */
         post: operations["recoverTrackingItem"];
         delete?: never;
@@ -5049,7 +5032,7 @@ export interface operations {
                                              * Code
                                              * @enum {string}
                                              */
-                                            code: "REVALIDATE" | "SUBMIT" | "RETRY" | "RECOVER_AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS" | "DELETE_EXTERNAL";
+                                            code: "SUBMIT" | "RETRY" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS";
                                             /** Label */
                                             label: string;
                                             /**
@@ -5326,7 +5309,7 @@ export interface operations {
                                      * Code
                                      * @enum {string}
                                      */
-                                    code: "REVALIDATE" | "SUBMIT" | "RETRY" | "RECOVER_AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS" | "DELETE_EXTERNAL";
+                                    code: "SUBMIT" | "RETRY" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS";
                                     /** Label */
                                     label: string;
                                     /**
@@ -5916,7 +5899,7 @@ export interface operations {
                                      * Code
                                      * @enum {string}
                                      */
-                                    code: "REVALIDATE" | "SUBMIT" | "RETRY" | "RECOVER_AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS" | "DELETE_EXTERNAL";
+                                    code: "SUBMIT" | "RETRY" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS";
                                     /** Label */
                                     label: string;
                                     /**
@@ -9486,7 +9469,7 @@ export interface operations {
                                  * Code
                                  * @enum {string}
                                  */
-                                code: "REVALIDATE" | "SUBMIT" | "RETRY" | "RECOVER_AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS" | "DELETE_EXTERNAL";
+                                code: "SUBMIT" | "RETRY" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS";
                                 /** Label */
                                 label: string;
                                 /**
@@ -10189,7 +10172,7 @@ export interface operations {
                                      * Code
                                      * @enum {string}
                                      */
-                                    code: "REVALIDATE" | "SUBMIT" | "RETRY" | "RECOVER_AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS" | "DELETE_EXTERNAL";
+                                    code: "SUBMIT" | "RETRY" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS";
                                     /** Label */
                                     label: string;
                                     /**
@@ -10354,367 +10337,6 @@ export interface operations {
                      *       "ok": false,
                      *       "error_type": "storage_error",
                      *       "error_message": "写入/读取追番记录失败",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-        };
-    };
-    deleteExternalTrackingItem: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tracking_id: string;
-            };
-            cookie?: never;
-        };
-        /** @description 删除外部追番方案（保留本地数据） */
-        requestBody: {
-            content: {
-                /**
-                 * @example {
-                 *       "target_scope": "示例",
-                 *       "expected_revision": 1,
-                 *       "idempotency_key": "示例",
-                 *       "confirm": true,
-                 *       "connection_ref": "示例",
-                 *       "configuration_revision": 1
-                 *     }
-                 */
-                "application/json": {
-                    /** @enum {string} */
-                    target_scope: "SUBSCRIPTION" | "ASSOCIATED_RSS";
-                    expected_revision: number;
-                    idempotency_key: string;
-                    /** @constant */
-                    confirm: true;
-                    /** Format: uuid */
-                    connection_ref: string;
-                    configuration_revision: number;
-                    storage_dir?: string | null;
-                };
-            };
-        };
-        responses: {
-            /** @description 成功 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": true,
-                     *       "result": {
-                     *         "action": "示例",
-                     *         "management_status": "示例",
-                     *         "needs_manual": true,
-                     *         "safe_message": "示例",
-                     *         "operation_id": null,
-                     *         "tracking": {
-                     *           "tracking_id": "示例",
-                     *           "request_id": null,
-                     *           "title": null,
-                     *           "season": null,
-                     *           "subtitle_group": null,
-                     *           "poster_path": null,
-                     *           "status": "示例",
-                     *           "status_label": "示例",
-                     *           "status_group": "示例",
-                     *           "submission_mode": null,
-                     *           "available_actions": [
-                     *             {
-                     *               "code": "示例",
-                     *               "label": "示例",
-                     *               "style": "示例",
-                     *               "requires_confirmation": true,
-                     *               "target_scopes": []
-                     *             }
-                     *           ],
-                     *           "valid_resource_count": 0,
-                     *           "updated_episode": null,
-                     *           "updated_episode_status": "NOT_IMPLEMENTED",
-                     *           "total_episodes": null,
-                     *           "revision": 1,
-                     *           "updated_at": null
-                     *         },
-                     *         "operation": null
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /** @constant */
-                        ok: true;
-                        /**
-                         * TrackingManagementResultDTO
-                         * @description Safe result shared by the four Stage 31 management write routes.
-                         */
-                        result: {
-                            /**
-                             * Action
-                             * @enum {string}
-                             */
-                            action: "MODIFY" | "SET_ENABLED" | "DELETE_EXTERNAL" | "REFRESH_RSS";
-                            /**
-                             * Management Status
-                             * @enum {string}
-                             */
-                            management_status: "PREPARED" | "IN_PROGRESS" | "SUCCEEDED" | "FAILED" | "OUTCOME_UNKNOWN" | "RECOVERY_REQUIRED";
-                            /** Needs Manual */
-                            needs_manual: boolean;
-                            /** Safe Message */
-                            safe_message: string;
-                            /**
-                             * Operation Id
-                             * @default null
-                             */
-                            operation_id: string | null;
-                            /**
-                             * TrackingItemDTO
-                             * @description One unified tracking list item (Stage 29 PRD §11.2).
-                             *
-                             *     ``updated_episode`` is always null and ``updated_episode_status`` is always
-                             *     NOT_IMPLEMENTED (BL-020 out of scope — never guessed from seeds/RSS).
-                             *     ``poster_path`` may only be a same-origin opaque poster proxy route.
-                             */
-                            tracking: {
-                                /** Tracking Id */
-                                tracking_id: string;
-                                /**
-                                 * Request Id
-                                 * @default null
-                                 */
-                                request_id: string | null;
-                                /**
-                                 * Title
-                                 * @default null
-                                 */
-                                title: string | null;
-                                /**
-                                 * Season
-                                 * @default null
-                                 */
-                                season: number | null;
-                                /**
-                                 * Subtitle Group
-                                 * @default null
-                                 */
-                                subtitle_group: string | null;
-                                /**
-                                 * Poster Path
-                                 * @default null
-                                 */
-                                poster_path: string | null;
-                                /**
-                                 * Status
-                                 * @enum {string}
-                                 */
-                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY" | "ADDED_TO_DOWNLOAD";
-                                /** Status Label */
-                                status_label: string;
-                                /**
-                                 * Status Group
-                                 * @enum {string}
-                                 */
-                                status_group: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
-                                /**
-                                 * Submission Mode
-                                 * @default null
-                                 */
-                                submission_mode: ("CONTINUE_TRACKING" | "DOWNLOAD_EXISTING") | null;
-                                /** Available Actions */
-                                available_actions?: {
-                                    /**
-                                     * Code
-                                     * @enum {string}
-                                     */
-                                    code: "REVALIDATE" | "SUBMIT" | "RETRY" | "RECOVER_AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS" | "DELETE_EXTERNAL";
-                                    /** Label */
-                                    label: string;
-                                    /**
-                                     * Style
-                                     * @enum {string}
-                                     */
-                                    style: "PRIMARY" | "SECONDARY" | "DANGER";
-                                    /** Requires Confirmation */
-                                    requires_confirmation: boolean;
-                                    /** Target Scopes */
-                                    target_scopes?: ("SUBSCRIPTION" | "ASSOCIATED_RSS")[];
-                                }[];
-                                /**
-                                 * Valid Resource Count
-                                 * @default 0
-                                 */
-                                valid_resource_count: number;
-                                /**
-                                 * Updated Episode
-                                 * @default null
-                                 */
-                                updated_episode: null;
-                                /**
-                                 * Updated Episode Status
-                                 * @default NOT_IMPLEMENTED
-                                 * @constant
-                                 */
-                                updated_episode_status: "NOT_IMPLEMENTED";
-                                /**
-                                 * Total Episodes
-                                 * @default null
-                                 */
-                                total_episodes: number | null;
-                                /** Revision */
-                                revision: number;
-                                /**
-                                 * Updated At
-                                 * @default null
-                                 */
-                                updated_at: string | null;
-                            };
-                            /** @default null */
-                            operation: {
-                                /** Operation Id */
-                                operation_id: string;
-                                /**
-                                 * Operation
-                                 * @enum {string}
-                                 */
-                                operation: "SUBMIT" | "MODIFY" | "SET_ENABLED" | "DELETE_EXTERNAL" | "REFRESH_RSS";
-                                /**
-                                 * State
-                                 * @enum {string}
-                                 */
-                                state: "PREPARED" | "IN_PROGRESS" | "SUCCEEDED" | "FAILED" | "OUTCOME_UNKNOWN" | "RECOVERY_REQUIRED";
-                                /** Attempt */
-                                attempt: number;
-                                /**
-                                 * External Result Id
-                                 * @default null
-                                 */
-                                external_result_id: string | null;
-                                /**
-                                 * Error Type
-                                 * @default null
-                                 */
-                                error_type: string | null;
-                                /** Created At */
-                                created_at: string;
-                                /** Updated At */
-                                updated_at: string;
-                                /**
-                                 * Completed At
-                                 * @default null
-                                 */
-                                completed_at: string | null;
-                            } | null;
-                        };
-                    };
-                };
-            };
-            /** @description data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须为允许的相对目录 / tracking_management_confirmation_required: 管理操作必须显式确认 / tracking_management_patch_invalid: 管理操作参数无效 */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "data_validation_errors",
-                     *       "error_message": "请求参数校验失败",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-            /** @description tracking_not_found: 未找到该追番记录 */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "tracking_not_found",
-                     *       "error_message": "未找到该追番记录",
-                     *       "error_data": {
-                     *         "failed_step": "示例步骤"
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Ok
-                         * @description Always false for failures.
-                         */
-                        ok: boolean;
-                        /** Error Type */
-                        error_type: string;
-                        /** Error Message */
-                        error_message: string;
-                        /**
-                         * Error Data
-                         * @default null
-                         */
-                        error_data: {
-                            [key: string]: unknown;
-                        } | null;
-                    };
-                };
-            };
-            /** @description tracking_management_capability_unknown: 当前 Auto Bangumi 管理能力未验证 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复 */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "ok": false,
-                     *       "error_type": "tracking_management_capability_unknown",
-                     *       "error_message": "当前 Auto Bangumi 管理能力未验证",
                      *       "error_data": {
                      *         "failed_step": "示例步骤"
                      *       }
@@ -11338,14 +10960,18 @@ export interface operations {
                         ok: true;
                         /**
                          * TrackingManagementResultDTO
-                         * @description Safe result shared by the four Stage 31 management write routes.
+                         * @description Safe result shared by the Stage 31 management write routes.
+                         *
+                         *     Issue #228 (T5a) retired the standalone ``DELETE_EXTERNAL`` route, so the
+                         *     shared result no longer carries that action; the composite plan-delete flow
+                         *     returns its own documented payload.
                          */
                         result: {
                             /**
                              * Action
                              * @enum {string}
                              */
-                            action: "MODIFY" | "SET_ENABLED" | "DELETE_EXTERNAL" | "REFRESH_RSS";
+                            action: "MODIFY" | "SET_ENABLED" | "REFRESH_RSS";
                             /**
                              * Management Status
                              * @enum {string}
@@ -11419,7 +11045,7 @@ export interface operations {
                                      * Code
                                      * @enum {string}
                                      */
-                                    code: "REVALIDATE" | "SUBMIT" | "RETRY" | "RECOVER_AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS" | "DELETE_EXTERNAL";
+                                    code: "SUBMIT" | "RETRY" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS";
                                     /** Label */
                                     label: string;
                                     /**
@@ -11620,7 +11246,7 @@ export interface operations {
             };
             cookie?: never;
         };
-        /** @description 恢复统一追番记录（AUTO 纯本地或人工核验） */
+        /** @description 只读核验未决追番记录（VERIFY_EXTERNAL） */
         requestBody: {
             content: {
                 /**
@@ -11636,12 +11262,12 @@ export interface operations {
                     /** @description 客户端最后观察到的追番记录 revision（revision-aware 恢复）。 */
                     expected_revision: number;
                     /**
-                     * @description 恢复动作：AUTO=纯本地；VERIFY_EXTERNAL=只读外部核验（需 saved connection generation）；MARK_SUCCEEDED/MARK_FAILED=人工核验（需 confirm=true）。
+                     * @description 恢复动作：仅 VERIFY_EXTERNAL（只读外部核验，必须携带已保存连接 generation）。
                      * @enum {string}
                      */
-                    action: "AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "VERIFY_EXTERNAL";
+                    action: "VERIFY_EXTERNAL";
                     /**
-                     * @description 人工动作必须为 true；AUTO 忽略该字段。
+                     * @description 只读核验不需要确认，该字段仅为兼容保留，服务端不读取。
                      * @default false
                      */
                     confirm?: boolean;
@@ -11665,7 +11291,7 @@ export interface operations {
                      *       "ok": true,
                      *       "result": {
                      *         "tracking_id": "示例",
-                     *         "action": "示例",
+                     *         "action": "VERIFY_EXTERNAL",
                      *         "outcome": "示例",
                      *         "checked_revision": 1,
                      *         "next_revision": 1,
@@ -11710,31 +11336,32 @@ export interface operations {
                          * TrackingRecoverResultDTO
                          * @description Result of ``POST /api/v1/tracking/items/{tracking_id}/recover`` (US-226).
                          *
-                         *     A persisted recovery result is HTTP 200: ``action`` echoes the requested
-                         *     action (``AUTO``/``MARK_SUCCEEDED``/``MARK_FAILED``) and ``outcome`` is the
-                         *     record's final status (``ACTIVE``/``SUBMIT_FAILED``/``RECOVERY_REQUIRED``).
-                         *     ``checked_revision`` is the revision the client acted on; ``next_revision``
-                         *     is the record's revision after the outcome persisted (unchanged when an
-                         *     ``AUTO`` recovery finds no new evidence on an already-``RECOVERY_REQUIRED``
-                         *     record).  ``operation_id`` is set when the record references a submit
-                         *     operation.  ``needs_manual`` is True when an ``AUTO`` recovery could not
-                         *     resolve the outcome from local evidence and only a manual action can
-                         *     progress.  ``tracking`` is the safe summary of the persisted record so the
-                         *     client can update the list item without a second read.
+                         *     A persisted recovery result is HTTP 200.  Issue #228 (T5a) left the
+                         *     read-only external verification as the only recovery action, so ``action``
+                         *     is always ``VERIFY_EXTERNAL`` and ``outcome`` is the record's status after
+                         *     the read — ``ACTIVE``, ``DISABLED``, ``EXTERNAL_DELETED`` (a pending delete
+                         *     is confirmed) or ``RECOVERY_REQUIRED`` (still undecided).  ``checked_revision`` is the revision the client
+                         *     acted on; ``next_revision`` is the record's revision after the outcome
+                         *     persisted (unchanged when the verification proves nothing new on an
+                         *     already-``RECOVERY_REQUIRED`` record).  ``operation_id`` is set when the
+                         *     record references a submit operation.  ``needs_manual`` is True when the
+                         *     verification could not decide the outcome from the proven read.  ``tracking``
+                         *     is the safe summary of the persisted record so the client can update the
+                         *     list item without a second read.
                          */
                         result: {
                             /** Tracking Id */
                             tracking_id: string;
                             /**
                              * Action
-                             * @enum {string}
+                             * @constant
                              */
-                            action: "AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "VERIFY_EXTERNAL";
+                            action: "VERIFY_EXTERNAL";
                             /**
                              * Outcome
                              * @enum {string}
                              */
-                            outcome: "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED";
+                            outcome: "ACTIVE" | "DISABLED" | "EXTERNAL_DELETED" | "RECOVERY_REQUIRED";
                             /** Checked Revision */
                             checked_revision: number;
                             /** Next Revision */
@@ -11815,7 +11442,7 @@ export interface operations {
                                      * Code
                                      * @enum {string}
                                      */
-                                    code: "REVALIDATE" | "SUBMIT" | "RETRY" | "RECOVER_AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS" | "DELETE_EXTERNAL";
+                                    code: "SUBMIT" | "RETRY" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS";
                                     /** Label */
                                     label: string;
                                     /**
@@ -11861,7 +11488,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / invalid_tracking_id: tracking_id 包含不合法字符或路径片段 / tracking_confirmation_required: 人工恢复必须显式确认核验结果 */
+            /** @description data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / invalid_tracking_id: tracking_id 包含不合法字符或路径片段 / tracking_connection_mismatch: 历史操作未绑定当前连接，不能进行外部核验 */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12095,14 +11722,18 @@ export interface operations {
                         ok: true;
                         /**
                          * TrackingManagementResultDTO
-                         * @description Safe result shared by the four Stage 31 management write routes.
+                         * @description Safe result shared by the Stage 31 management write routes.
+                         *
+                         *     Issue #228 (T5a) retired the standalone ``DELETE_EXTERNAL`` route, so the
+                         *     shared result no longer carries that action; the composite plan-delete flow
+                         *     returns its own documented payload.
                          */
                         result: {
                             /**
                              * Action
                              * @enum {string}
                              */
-                            action: "MODIFY" | "SET_ENABLED" | "DELETE_EXTERNAL" | "REFRESH_RSS";
+                            action: "MODIFY" | "SET_ENABLED" | "REFRESH_RSS";
                             /**
                              * Management Status
                              * @enum {string}
@@ -12176,7 +11807,7 @@ export interface operations {
                                      * Code
                                      * @enum {string}
                                      */
-                                    code: "REVALIDATE" | "SUBMIT" | "RETRY" | "RECOVER_AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS" | "DELETE_EXTERNAL";
+                                    code: "SUBMIT" | "RETRY" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS";
                                     /** Label */
                                     label: string;
                                     /**
@@ -12669,7 +12300,7 @@ export interface operations {
                                      * Code
                                      * @enum {string}
                                      */
-                                    code: "REVALIDATE" | "SUBMIT" | "RETRY" | "RECOVER_AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS" | "DELETE_EXTERNAL";
+                                    code: "SUBMIT" | "RETRY" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS";
                                     /** Label */
                                     label: string;
                                     /**
@@ -13119,7 +12750,7 @@ export interface operations {
                                      * Code
                                      * @enum {string}
                                      */
-                                    code: "REVALIDATE" | "SUBMIT" | "RETRY" | "RECOVER_AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS" | "DELETE_EXTERNAL";
+                                    code: "SUBMIT" | "RETRY" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS";
                                     /** Label */
                                     label: string;
                                     /**
@@ -13504,7 +13135,7 @@ export interface operations {
                                      * Code
                                      * @enum {string}
                                      */
-                                    code: "REVALIDATE" | "SUBMIT" | "RETRY" | "RECOVER_AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS" | "DELETE_EXTERNAL";
+                                    code: "SUBMIT" | "RETRY" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS";
                                     /** Label */
                                     label: string;
                                     /**
@@ -13786,14 +13417,18 @@ export interface operations {
                         ok: true;
                         /**
                          * TrackingManagementResultDTO
-                         * @description Safe result shared by the four Stage 31 management write routes.
+                         * @description Safe result shared by the Stage 31 management write routes.
+                         *
+                         *     Issue #228 (T5a) retired the standalone ``DELETE_EXTERNAL`` route, so the
+                         *     shared result no longer carries that action; the composite plan-delete flow
+                         *     returns its own documented payload.
                          */
                         result: {
                             /**
                              * Action
                              * @enum {string}
                              */
-                            action: "MODIFY" | "SET_ENABLED" | "DELETE_EXTERNAL" | "REFRESH_RSS";
+                            action: "MODIFY" | "SET_ENABLED" | "REFRESH_RSS";
                             /**
                              * Management Status
                              * @enum {string}
@@ -13867,7 +13502,7 @@ export interface operations {
                                      * Code
                                      * @enum {string}
                                      */
-                                    code: "REVALIDATE" | "SUBMIT" | "RETRY" | "RECOVER_AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS" | "DELETE_EXTERNAL";
+                                    code: "SUBMIT" | "RETRY" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS";
                                     /** Label */
                                     label: string;
                                     /**
@@ -14317,7 +13952,7 @@ export interface operations {
                                      * Code
                                      * @enum {string}
                                      */
-                                    code: "REVALIDATE" | "SUBMIT" | "RETRY" | "RECOVER_AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS" | "DELETE_EXTERNAL";
+                                    code: "SUBMIT" | "RETRY" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS";
                                     /** Label */
                                     label: string;
                                     /**

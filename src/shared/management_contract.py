@@ -51,7 +51,6 @@ MANAGEMENT_ACTION_CONTRACTS: Final = {
     for item in (
         ManagementActionContract("MODIFY", "modify", MANAGEMENT_SCOPES),
         ManagementActionContract("SET_ENABLED", "set-enabled", MANAGEMENT_SCOPES),
-        ManagementActionContract("DELETE_EXTERNAL", "delete-external", MANAGEMENT_SCOPES),
         ManagementActionContract("REFRESH_RSS", "refresh", ("ASSOCIATED_RSS",)),
     )
 }

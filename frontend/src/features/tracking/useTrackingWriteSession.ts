@@ -2,8 +2,8 @@
  * The one local session of a tracking external write (issue #168).
  *
  * Every external write this page can send — 提交/重试 (``SUBMIT``/``RETRY``),
- * 结果恢复 (``RECOVER_*``) and 外部管理 (``MODIFY``/``SET_ENABLED``/
- * ``REFRESH_RSS``/``DELETE_EXTERNAL``) — is *one* concept: a local session for
+ * 只读核验 (``VERIFY_EXTERNAL``) and 外部管理 (``MODIFY``/``SET_ENABLED``/
+ * ``REFRESH_RSS``) — is *one* concept: a local session for
  * one write operation.  The module owns that session:
  *
  * - the **operation kind** and the target scope it may address;
@@ -44,6 +44,7 @@ import {
   createResubmitConfirmationBody,
   createResubmitSession,
   executableTrackingActions,
+  isRecoverableStatus,
   projectCheckResult,
   projectResubmitOffer,
   projectRevalidateIssues,
@@ -67,7 +68,6 @@ import {
 import {
   managementPatchPresent,
   type SavedConnectionGeneration,
-  type TrackingDeleteExternalBody,
   type TrackingManagementResult,
   type TrackingModifyBody,
   type TrackingRefreshRssBody,
@@ -111,14 +111,10 @@ type TrackingWriteFamily = 'SUBMIT' | 'RECOVERY' | 'MANAGEMENT'
 const TRACKING_WRITE_ACTIONS = {
   SUBMIT: { family: 'SUBMIT', endpoint: '/api/v1/tracking/items/{tracking_id}/submit' },
   RETRY: { family: 'SUBMIT', endpoint: '/api/v1/tracking/items/{tracking_id}/retry' },
-  RECOVER_AUTO: { family: 'RECOVERY', endpoint: '/api/v1/tracking/items/{tracking_id}/recover' },
-  MARK_SUCCEEDED: { family: 'RECOVERY', endpoint: '/api/v1/tracking/items/{tracking_id}/recover' },
-  MARK_FAILED: { family: 'RECOVERY', endpoint: '/api/v1/tracking/items/{tracking_id}/recover' },
   VERIFY_EXTERNAL: { family: 'RECOVERY', endpoint: '/api/v1/tracking/items/{tracking_id}/recover' },
   MODIFY: { family: 'MANAGEMENT', endpoint: '/api/v1/tracking/items/{tracking_id}/modify' },
   SET_ENABLED: { family: 'MANAGEMENT', endpoint: '/api/v1/tracking/items/{tracking_id}/set-enabled' },
   REFRESH_RSS: { family: 'MANAGEMENT', endpoint: '/api/v1/tracking/items/{tracking_id}/refresh' },
-  DELETE_EXTERNAL: { family: 'MANAGEMENT', endpoint: '/api/v1/tracking/items/{tracking_id}/delete-external' },
 } as const satisfies Record<string, { readonly family: TrackingWriteFamily; readonly endpoint: ApiPath }>
 
 type TrackingWriteOperation = keyof typeof TRACKING_WRITE_ACTIONS
@@ -195,7 +191,7 @@ export function isTrackingManagementScope(value: unknown): value is TrackingMana
  */
 type TrackingWriteState =
   | 'IN_FLIGHT'
-  | 'ACTIVE' | 'ADDED_TO_DOWNLOAD' | 'SUBMIT_FAILED' | 'NEEDS_RECONFIRM'
+  | 'ACTIVE' | 'DISABLED' | 'EXTERNAL_DELETED' | 'ADDED_TO_DOWNLOAD' | 'SUBMIT_FAILED' | 'NEEDS_RECONFIRM'
   | 'VERIFYING_EXTERNAL' | 'RECOVERY_REQUIRED'
   | 'SUCCEEDED' | 'FAILED'
   | 'CONFLICT' | 'REJECTED' | 'UNKNOWN'
@@ -693,38 +689,19 @@ function createTrackingActionIntent(
 // ---------------------------------------------------------------------------
 
 /**
- * One recovery action's whole family wiring, declared once (issue #193).
+ * The one recovery action's whole family wiring, declared once (issue #193).
  *
  * ``body`` is the request body value the recover endpoint accepts and
- * ``confirmation`` is the impact confirmation the page must answer first (or
- * ``null`` when the click alone confirms it), so an action's body value and its
- * copy can never be declared in two places that drift apart.
+ * ``confirmation`` is the impact confirmation the page must answer first, so an
+ * action's body value and its copy can never be declared in two places that
+ * drift apart.
  *
- * A manual conclusion is a user assertion about the external world, so it is
- * always confirmed a second time and the confirmation tells the user to check
- * Auto Bangumi first. ``VERIFY_EXTERNAL`` is confirmed too because it spends the
- * page credential on one external read. ``RECOVER_AUTO`` contacts nothing, so it
- * needs no confirmation at all.
+ * Issue #228 (T5a) retired 自动恢复/标记为成功/标记为失败: reading the bound Auto
+ * Bangumi connection is the only recovery this page still offers, and it is
+ * confirmed because it spends the page credential on one external read.  It
+ * never writes upstream.
  */
 const RECOVERY_ACTION_SPECS = {
-  RECOVER_AUTO: { body: 'AUTO', confirmation: null },
-  MARK_SUCCEEDED: {
-    body: 'MARK_SUCCEEDED',
-    confirmation: {
-      title: '标记为提交成功',
-      message: '请先在 Auto Bangumi 中独立核对该追番的实际状态。标记为成功只更新 MiGuOrca 本地追番状态，不会创建、修改或删除任何外部订阅，是否继续？',
-      confirmLabel: '确认标记成功',
-    },
-  },
-  MARK_FAILED: {
-    body: 'MARK_FAILED',
-    confirmation: {
-      title: '标记为提交失败',
-      message: '请先在 Auto Bangumi 中独立核对该追番的实际状态。标记为失败只更新 MiGuOrca 本地追番状态，不会删除任何外部订阅，是否继续？',
-      confirmLabel: '确认标记失败',
-      danger: true,
-    },
-  },
   VERIFY_EXTERNAL: {
     body: 'VERIFY_EXTERNAL',
     confirmation: {
@@ -742,7 +719,6 @@ function isRecoveryActionCode(value: unknown): value is TrackingRecoveryActionCo
   return isOperationOfFamily('RECOVERY', value)
 }
 
-/** Null for ``RECOVER_AUTO``: the local recovery is confirmed by its click alone. */
 function recoveryConfirmation(
   action: TrackingRecoveryActionCode,
 ): TrackingWriteConfirmation | null {
@@ -757,11 +733,10 @@ interface TrackingRecoveryIntent {
 /**
  * Build the one recovery request body for a validated action.
  *
- * ``VERIFY_EXTERNAL`` is the only credential-bearing recovery and returns null
- * without the page session, so it can never be sent credential-free; the two
- * manual conclusions are the only bodies that carry ``confirm: true``; ``AUTO``
- * is explicitly credential-free and confirmation-free. The body shape itself
- * cannot express an external id, URL, raw response or free-text note.
+ * ``VERIFY_EXTERNAL`` is the only recovery left and the only credential-bearing
+ * one: it returns null without the page session's saved connection generation,
+ * so it can never be sent credential-free.  The body shape itself cannot express
+ * an external id, URL, raw response or free-text note.
  */
 function createTrackingRecoverBody(
   action: TrackingRecoveryActionCode,
@@ -770,21 +745,12 @@ function createTrackingRecoverBody(
   storageDir?: string,
 ): TrackingRecoverBody | null {
   const storage = storageDir ? { storage_dir: storageDir } : {}
-  if (action === 'VERIFY_EXTERNAL') {
-    if (!connection) return null
-    return {
-      expected_revision: expectedRevision,
-      action: RECOVERY_ACTION_SPECS[action].body,
-      connection_ref: connection.connection_ref,
-      configuration_revision: connection.configuration_revision,
-      ...storage,
-    }
-  }
-  const manual = action === 'MARK_SUCCEEDED' || action === 'MARK_FAILED'
+  if (action !== 'VERIFY_EXTERNAL' || !connection) return null
   return {
     expected_revision: expectedRevision,
     action: RECOVERY_ACTION_SPECS[action].body,
-    ...(manual ? { confirm: true as const } : {}),
+    connection_ref: connection.connection_ref,
+    configuration_revision: connection.configuration_revision,
     ...storage,
   }
 }
@@ -792,45 +758,41 @@ function createTrackingRecoverBody(
 /**
  * Validate one recovery action against the current server-observed record.
  *
- * The three local actions must be in the server's projected action list, so a
- * stale or hand-made action can never be sent. ``VERIFY_EXTERNAL`` is accepted
- * only for a record the server says is recoverable (``RECOVER_AUTO`` is the
- * server's marker for exactly those statuses) and only with a proven
- * ``external_verify`` capability from the live page session.
+ * Only the read-only verification exists now.  It is accepted only for a record
+ * whose exact status is unresolved and only with a proven ``external_verify``
+ * capability from the live page session, so a stale or hand-made action can
+ * never be sent — and it never writes upstream.
  */
 function createTrackingRecoveryIntent(
   item: TrackingItem,
   action: TrackingRecoveryActionCode,
   capabilities?: CapabilityResult | null,
 ): TrackingRecoveryIntent | null {
-  if (!isRecoveryActionCode(action)) return null
+  if (!isRecoveryActionCode(action) || action !== 'VERIFY_EXTERNAL') return null
   if (!Number.isInteger(item.revision) || item.revision < 1) return null
-  const offered = executableTrackingActions(item).map((candidate) => candidate.code)
-  if (action === 'VERIFY_EXTERNAL') {
-    if (!offered.includes('RECOVER_AUTO') || !canVerifyExternally(capabilities)) return null
-  } else if (!offered.includes(action)) {
-    return null
-  }
+  if (!isRecoverableStatus(item.status)) return null
+  if (!canVerifyExternally(capabilities)) return null
   return { action, expectedRevision: item.revision }
 }
 
 const RECOVERY_OUTCOMES = [
-  'ACTIVE', 'SUBMIT_FAILED', 'RECOVERY_REQUIRED',
+  'ACTIVE', 'DISABLED', 'EXTERNAL_DELETED', 'RECOVERY_REQUIRED',
 ] as const satisfies readonly TrackingRecoverResult['outcome'][]
 
 const RECOVERY_MESSAGES: Record<RecoveryWriteState, string> = {
-  IN_FLIGHT: '正在恢复该追番的结果，请稍候…',
-  ACTIVE: '恢复完成：已确认该追番在 Auto Bangumi 中存在外部订阅。',
-  SUBMIT_FAILED: '恢复完成：已确认本次未创建外部订阅，可在确认后显式重试提交。',
-  RECOVERY_REQUIRED: '结果仍无法确认，保持恢复状态；未确认前不会自动提交。',
-  CONFLICT: '追番记录已变化或当前状态不允许恢复，本次未执行恢复；正在刷新最新详情，请重新确认。',
-  REJECTED: '服务端明确拒绝了本次恢复请求，本次未执行任何外部操作；正在刷新最新详情，请重新确认。',
-  UNKNOWN: '恢复结果待确认，正在只读回查；未确认前不会自动重发。',
+  IN_FLIGHT: '正在只读核验该追番的外部状态，请稍候…',
+  ACTIVE: '只读核验完成：已确认该追番在 Auto Bangumi 中存在外部订阅。',
+  DISABLED: '只读核验完成：该追番在 Auto Bangumi 中已停用，本地记录保持追番中并标记为已停用。',
+  EXTERNAL_DELETED: '只读核验完成：该追番的外部订阅已确认不存在，本地记录标记为外部已删除。',
+  RECOVERY_REQUIRED: '结果仍无法确认，保持待确认状态；未确认前不会自动提交、也不会代替你判断。',
+  CONFLICT: '追番记录已变化或当前状态不允许核验，本次未执行核验；正在刷新最新详情，请重新确认。',
+  REJECTED: '服务端明确拒绝了本次核验请求，本次未读取任何外部对象；正在刷新最新详情，请重新确认。',
+  UNKNOWN: '核验结果待确认，正在只读回查；未确认前不会自动重发。',
 }
 
-/** Shown whenever a recovery could not be concluded without a human verdict. */
+/** Shown whenever a verification could not be concluded without a human verdict. */
 const RECOVERY_NEEDS_MANUAL_NOTICE =
-  '需要人工核验：请先在 Auto Bangumi 中独立核对该追番的实际状态，再选择“标记为成功”或“标记为失败”；本页不会代替你判断，也不会自动提交。'
+  '只读核验无法定论：请先在 Auto Bangumi 中独立核对该追番的实际状态。本页不会代替你判断，也不会自动提交；需要重发请使用「主动重发」，需要结束跟踪请使用删除追番方案。'
 
 // ---------------------------------------------------------------------------
 // Management family (US-313, US-314, US-315).
@@ -902,12 +864,6 @@ type TrackingManagementIntent =
   | (TrackingManagementIntentBase & {
       readonly action: 'REFRESH_RSS'
       readonly targetScope: 'ASSOCIATED_RSS'
-      readonly patch: null
-      readonly enabled: null
-    })
-  | (TrackingManagementIntentBase & {
-      readonly action: 'DELETE_EXTERNAL'
-      readonly targetScope: TrackingManagementScope
       readonly patch: null
       readonly enabled: null
     })
@@ -1000,32 +956,6 @@ function createTrackingRefreshRssIntent(item: TrackingItem): TrackingManagementI
 }
 
 /**
- * Validate one per-record external delete against the server's own projection.
- *
- * The scope is the user's explicit choice (which external object disappears) and
- * is re-validated here: the server must still offer ``DELETE_EXTERNAL`` for that
- * very scope at this revision and the live session must still prove the matching
- * delete capability, so neither a stale form nor a hand-made request can become
- * a delete.  There is no patch and no direction: a delete removes one object.
- */
-function createTrackingDeleteExternalIntent(
-  item: TrackingItem,
-  targetScope: TrackingManagementScope,
-): TrackingManagementIntent | null {
-  if (!validRevision(item)) return null
-  if (!projectTrackingActionScopes(item, 'DELETE_EXTERNAL', targetScope).length) return null
-  return {
-    action: 'DELETE_EXTERNAL',
-    targetScope,
-    patch: null,
-    enabled: null,
-    expectedRevision: item.revision,
-    confirm: true,
-    idempotencyKey: makeOpaqueKey(),
-  }
-}
-
-/**
  * Build one intent for whichever management action the user requested.
  *
  * This is the page's single entry point: an action the page does not send yields
@@ -1042,7 +972,6 @@ function createTrackingManagementActionIntent(
   if (action === 'MODIFY') return createTrackingModifyIntent(item, action, targetScope, patch, localPlan)
   if (action === 'SET_ENABLED') return createTrackingSetEnabledIntent(item, targetScope)
   if (action === 'REFRESH_RSS') return createTrackingRefreshRssIntent(item)
-  if (action === 'DELETE_EXTERNAL') return createTrackingDeleteExternalIntent(item, targetScope)
   return null
 }
 
@@ -1076,7 +1005,7 @@ function createTrackingManagementBody(
   intent: TrackingManagementIntent,
   connection: SavedConnectionGeneration | null | undefined,
   storageDir?: string,
-): TrackingModifyBody | TrackingSetEnabledBody | TrackingRefreshRssBody | TrackingDeleteExternalBody | null {
+): TrackingModifyBody | TrackingSetEnabledBody | TrackingRefreshRssBody | null {
   if (!connection || !connection.connection_ref || connection.configuration_revision === undefined) return null
   const common = {
     expected_revision: intent.expectedRevision,
@@ -1091,11 +1020,6 @@ function createTrackingManagementBody(
   }
   if (intent.action === 'REFRESH_RSS') {
     return { ...common, target_scope: 'ASSOCIATED_RSS' }
-  }
-  if (intent.action === 'DELETE_EXTERNAL') {
-    // The generated shape has no ``file`` field at all, so this body can only
-    // ever ask Auto Bangumi to drop the external object.
-    return { ...common, target_scope: intent.targetScope }
   }
   if (intent.targetScope === 'SUBSCRIPTION') {
     if (!managementPatchPresent('SUBSCRIPTION', intent.patch)) return null
@@ -1174,13 +1098,6 @@ const MANAGEMENT_CONFLICT_ACTION_MESSAGES: Partial<
     tracking_management_patch_invalid:
       '本次刷新请求未通过服务端校验，未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
   },
-  DELETE_EXTERNAL: {
-    // The one delete conflict whose generic wording would misdescribe it: the
-    // target the user chose simply does not exist any more, so nothing was
-    // deleted and there is nothing to re-confirm.
-    tracking_target_missing:
-      '该记录当前没有对应的外部对象，本次未删除任何外部对象；正在刷新最新详情。',
-  },
 }
 
 /** Fixed next step for one documented management conflict; unknown types fail closed. */
@@ -1257,21 +1174,6 @@ const SET_ENABLED_CONFIRMATIONS = {
 } as const satisfies Record<TrackingManagementScope, Record<EnableDirection, TrackingWriteConfirmation>>
 
 /**
- * The external delete confirmation (US-315).
- *
- * It is the only danger-styled management dialog, and it names every local
- * record that survives: the request has no ``file`` field, so the delete can only
- * remove the external object and never the downloaded media.  ``danger`` makes
- * the dialog announce and style the confirm button as destructive.
- */
-const DELETE_EXTERNAL_CONFIRMATION: TrackingWriteConfirmation = {
-  title: '删除 Auto Bangumi 外部对象',
-  message: '将在 Auto Bangumi 中删除该追番对应的外部对象；只影响 Auto Bangumi 外部对象，MiGuOrca 本地订阅方案、追番记录、审计记录、下载任务和已下载媒体文件都会保留，本操作也不会删除任何媒体文件。是否继续？',
-  confirmLabel: '确认删除外部对象',
-  danger: true,
-}
-
-/**
  * The refresh confirmation says explicitly that only this record's own RSS is
  * refreshed: there is no global refresh behind this button.
  */
@@ -1332,17 +1234,6 @@ const MANAGEMENT_ACTION_SPECS = {
       UNKNOWN: '关联 RSS 刷新结果待确认，正在只读回查；未确认完成前不会自动重试。',
     },
     confirmation: (): TrackingWriteConfirmation => REFRESH_RSS_CONFIRMATION,
-  },
-  DELETE_EXTERNAL: {
-    messages: {
-      IN_FLIGHT: '正在提交外部删除，请稍候…',
-      SUCCEEDED: '外部删除已完成：Auto Bangumi 已删除该外部对象；MiGuOrca 本地订阅方案、追番记录、审计记录、下载任务和已下载媒体文件均保留。',
-      FAILED: '外部删除明确失败，Auto Bangumi 未删除该外部对象；本地方案与已下载媒体未受影响，可核对后重新发起。',
-      CONFLICT: '追番记录已变化或当前状态不允许本次删除，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
-      REJECTED: '服务端明确拒绝了本次删除请求，本次未删除 Auto Bangumi 外部对象；正在刷新最新详情，请重新确认。',
-      UNKNOWN: '外部删除结果待确认，正在只读回查；未确认删除前不会自动重试，本地方案与已下载媒体未受影响。',
-    },
-    confirmation: (): TrackingWriteConfirmation => DELETE_EXTERNAL_CONFIRMATION,
   },
 } as const satisfies Record<TrackingManagementActionCode, {
   readonly messages: Record<ManagementWriteState, string>
@@ -2783,7 +2674,7 @@ function createRecoveryFamily(core: RecoveryFamilyCore) {
     core.recoverySession.value = session
     // A decided recovery settles the record: every unresolved write intent it
     // was recovering from is released.
-    if (session.state === 'ACTIVE' || session.state === 'SUBMIT_FAILED') core.releaseFor(trackingId)
+    if (session.state === 'ACTIVE' || session.state === 'DISABLED' || session.state === 'EXTERNAL_DELETED') core.releaseFor(trackingId)
     return [core.recheck(trackingId, false)]
   }
 
@@ -2814,8 +2705,9 @@ function createRecoveryFamily(core: RecoveryFamilyCore) {
 }
 
 /**
- * The management family (US-313, US-314, US-315): 修改 / 启停 / 立即刷新 /
- * 删除外部对象, each routed by the validated intent's own declaration.
+ * The management family (US-313, US-314): 修改 / 启停 / 立即刷新, each routed by
+ * the validated intent's own declaration.  Issue #228 retired the standalone
+ * 删除外部对象 entry; the composite plan-delete flow owns that operation now.
  */
 /**
  * The shared state the management family uses, and nothing else.

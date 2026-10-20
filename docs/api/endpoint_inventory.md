@@ -93,7 +93,6 @@
 | POST | `/api/v1/tracking/items/<path:tracking_id>/recover` | `migu_orca_web_api.TrackingItemRecoverView` | TrackingItemRecoverView |
 | POST | `/api/v1/tracking/items/<path:tracking_id>/modify` | `migu_orca_web_api.TrackingItemModifyView` | TrackingItemModifyView |
 | POST | `/api/v1/tracking/items/<path:tracking_id>/set-enabled` | `migu_orca_web_api.TrackingItemSetEnabledView` | TrackingItemSetEnabledView |
-| POST | `/api/v1/tracking/items/<path:tracking_id>/delete-external` | `migu_orca_web_api.TrackingItemDeleteExternalView` | TrackingItemDeleteExternalView |
 | POST | `/api/v1/tracking/items/<path:tracking_id>/refresh` | `migu_orca_web_api.TrackingItemRefreshView` | TrackingItemRefreshView |
 
 ## 2.1 端点生命周期（US-247，机器核对基线）
@@ -134,7 +133,6 @@
 | POST | `/api/v1/tracking/items/<path:tracking_id>/delete-plan` | PRIMARY | 删除追番方案（可选同时删除受控外部订阅） | Request + TrackingRecord + operation |
 | POST | `/api/v1/tracking/items/<path:tracking_id>/modify` | PRIMARY | 外部方案修改 | TrackingRecord + operation |
 | POST | `/api/v1/tracking/items/<path:tracking_id>/set-enabled` | PRIMARY | 外部方案启停 | TrackingRecord + operation |
-| POST | `/api/v1/tracking/items/<path:tracking_id>/delete-external` | PRIMARY | 外部删除并保留本地数据 | TrackingRecord + operation |
 | POST | `/api/v1/tracking/items/<path:tracking_id>/refresh` | PRIMARY | 关联 RSS 刷新 | TrackingRecord + operation |
 | POST | `/api/v1/tracking/items/<path:tracking_id>/check` | PRIMARY | 结果待确认提交的有界只读确认（已保存连接，只读） | TrackingRecord + operation |
 | POST | `/api/v1/tracking/items/<path:tracking_id>/resubmit` | RECOVERY | 结果待确认提交的风险确认单条主动重新提交（先只读检查，确认后才新建 operation） | TrackingRecord + operation |
@@ -239,8 +237,9 @@ JSON 损坏不阻塞健康列表，只增加 `unreadable` 计数与固定 warnin
 不接收 `ab_config`/连接/capability 配置，只接受 `expected_revision`（revision-aware）。submit
 （US-225）与 retry（US-226）是唯一会访问 Auto Bangumi 的端点族：`confirm` 必须严格为 true，
 `ab_config` 只在单次请求内存中存在，外部调用前先持久化 `SUBMITTING` + operation `IN_PROGRESS`
-作为持久化边界。retry 只允许 `SUBMIT_FAILED`；recover（US-226）的 `AUTO` 只读本地证据、绝不访问
-外部，人工动作必须 `confirm=true` 并写 USER 审计。
+作为持久化边界。retry 只允许 `SUBMIT_FAILED`；recover（US-226 / issue #228）只剩只读核验
+`VERIFY_EXTERNAL`：它只读已保存连接的外部状态、绝不写入外部系统，结果用 SYSTEM 审计落盘；
+`AUTO`／`MARK_SUCCEEDED`／`MARK_FAILED` 已退役。
 
 | 端点 | 请求字段 | 成功 `result`（白名单） | 业务失败示例 |
 | --- | --- | --- | --- |
@@ -252,10 +251,9 @@ JSON 损坏不阻塞健康列表，只增加 `unreadable` 计数与固定 warnin
 | POST `/api/v1/tracking/items/<tracking_id>/delete-plan`（issue #92） | `tracking_id`（路径）、`confirm`（必须严格 `true`）、`delete_external`（默认 `false`；仅用户显式勾选为 `true`）、`idempotency_key`、`connection_ref`、`configuration_revision`、`storage_dir?` | `{tracking_id, outcome, external_deleted}`（`DELETED`：本地方案与追番记录已删除，勾选时外部对象已先删除；`EXTERNAL_FAILED`/`EXTERNAL_UNKNOWN`：本地一律保留） | `confirm=false` → `tracking_confirmation_required`（400）；进行中或存在未决外部操作 → `tracking_state_conflict`（409）；缺失记录 → `tracking_not_found`（404）；载荷非法 → `data_validation_errors` |
 | POST `/api/v1/tracking/batch-submit`（issue #87） | `items`（1～36 条，每条 `tracking_id`/`expected_revision`/`idempotency_key`，不得指向同一记录）、`confirm`（必须严格 `true`）、`connection_ref`、`configuration_revision`、`storage_dir?` | `{items: [{tracking_id, ok, error_type?, result?}], summary: {total, succeeded, failed, unknown, blocked}}`（逐条独立业务结果；被接受时整体 HTTP 200） | 载荷非法/条目重复超限 → `data_validation_errors`（400）；单条预条件失败只影响该条（`error_type` 为稳定码，其余条目继续） |
 | POST `/api/v1/tracking/items/<tracking_id>/retry`（US-226） | `tracking_id`（路径）、`expected_revision`（必填）、`idempotency_key`（必填）、`confirm`（必须严格 `true`）、`ab_config`（request-scoped，必填）、`storage_dir?` | `{tracking_id, outcome, checked_revision, next_revision, checked_at, operation_id?, issues[], tracking}`（复用统一提交服务，`outcome` ∈ `ACTIVE`/`SUBMIT_FAILED`/`VERIFYING_EXTERNAL`/`RECOVERY_REQUIRED`/`NEEDS_RECONFIRM`） | 非 `SUBMIT_FAILED` → `tracking_state_conflict`（409，`VERIFYING_EXTERNAL`/`RECOVERY_REQUIRED` 必须先 recover）；`confirm=false` → `tracking_confirmation_required`（400）；其余与 submit 相同（`tracking_revision_conflict`/`tracking_idempotency_conflict`/`tracking_operation_in_progress`） |
-| POST `/api/v1/tracking/items/<tracking_id>/recover`（US-226） | `tracking_id`（路径）、`expected_revision`（必填）、`action`（`AUTO`/`MARK_SUCCEEDED`/`MARK_FAILED`）、`confirm`（人工动作必须严格 `true`）、`storage_dir?` | `{tracking_id, action, outcome, checked_revision, next_revision, checked_at, operation_id?, needs_manual, tracking}`（已落盘恢复结果 HTTP 200，`outcome` ∈ `ACTIVE`/`SUBMIT_FAILED`/`RECOVERY_REQUIRED`；`needs_manual=true` 表示 AUTO 无明确本地证据，只能人工核验） | `action` 非法 → `data_validation_errors`；人工动作未确认 → `tracking_confirmation_required`（400）；非可恢复状态 → `tracking_state_conflict`（409）；`expected_revision` 过期 → `tracking_revision_conflict`（409）；缺失 → `tracking_not_found`（404） |
+| POST `/api/v1/tracking/items/<tracking_id>/recover`（US-226 / issue #228） | `tracking_id`（路径）、`expected_revision`（必填）、`action`（仅 `VERIFY_EXTERNAL`）、`connection_ref` + `configuration_revision`（必填，已保存连接 generation）、`storage_dir?` | `{tracking_id, action=VERIFY_EXTERNAL, outcome, checked_revision, next_revision, checked_at, operation_id?, needs_manual, verification_reason?, tracking}`（已落盘只读核验结果 HTTP 200，`outcome` ∈ `ACTIVE`/`DISABLED`/`EXTERNAL_DELETED`/`RECOVERY_REQUIRED`（核验后记录的精确状态）；`needs_manual=true` 表示只读核验无法定论） | 退役动作（`AUTO`/`MARK_SUCCEEDED`/`MARK_FAILED`）或未知动作 → `data_validation_errors`（400）；无未决 operation／非可恢复状态／过期 revision／绑定变化统一 → `tracking_connection_mismatch`（400，公开端点先做绑定校验）；缺失 → `tracking_not_found`（404） |
 | POST `/api/v1/tracking/items/<tracking_id>/modify`（US-245） | `target_scope`、`expected_revision`、`idempotency_key`、`confirm=true`、request-scoped `ab_config`、`patch`（仅订阅方案或关联 RSS 白名单字段） | `{action, management_status, needs_manual, safe_message, operation_id?, tracking, operation?}`；不返回外部 ID、URL、patch 或凭据 | 非法字段/空 patch → `data_validation_errors`；revision/幂等/进行中冲突 → 409；外部结果待确认 → `needs_manual=true` |
 | POST `/api/v1/tracking/items/<tracking_id>/set-enabled`（US-245） | `target_scope`、`enabled`、`expected_revision`、`idempotency_key`、`confirm=true`、request-scoped `ab_config` | 同管理安全结果 DTO；关联 RSS 仅作用于本记录映射集合 | 业务结果待确认保留 `RECOVERY_REQUIRED`，禁止盲重试 |
-| POST `/api/v1/tracking/items/<tracking_id>/delete-external`（US-245） | `target_scope`、`expected_revision`、`idempotency_key`、`confirm=true`、request-scoped `ab_config`（无 `file` 字段） | 同管理安全结果 DTO；本地 Request/追番记录/媒体保留 | 不接受 `file`/外部 ID；删除结果待确认 → 409/安全恢复状态 |
 | POST `/api/v1/tracking/items/<tracking_id>/refresh`（US-245） | `target_scope=ASSOCIATED_RSS`、`expected_revision`、`idempotency_key`、`confirm=true`、request-scoped `ab_config` | 同管理安全结果 DTO；只处理映射 RSS | 不接受 `refresh/all` 或任意 method/path；结果待确认需人工恢复 |
 
 `revalidate` 的 `issues[]`（`TrackingRevalidationIssueDTO`，固定 §11.5 枚举）字段：
@@ -354,20 +352,20 @@ issues、外部安全映射摘要和最近 20 条审计事件；绝不回显完�
   profile 错误仍走普通失败 envelope。
 - US-226：新增 `POST /api/v1/tracking/items/{tracking_id}/retry`（`TrackingItemRetryView`，
   operationId `retryTrackingItem`）与 `POST /api/v1/tracking/items/{tracking_id}/recover`
-  （`TrackingItemRecoverView`，operationId `recoverTrackingItem`）。recover 支持 AUTO、人工确认及
-  request-scoped `VERIFY_EXTERNAL` 只读核验；retry 请求 shape 与 submit
-  相同，但只允许从 `SUBMIT_FAILED` 开始（`VERIFYING_EXTERNAL`/`RECOVERY_REQUIRED` 必须先
-  recover，不能盲重试 D29-07）；复用 `run_tracking_submit` 的完整可靠序列（新键 bind 新
-  operation、SUBMITTING 预写、单次外部调用、结果分类）。recover 的 `AUTO` 由
-  `apps/migu_orca_web/tracking_recovery_service.run_tracking_recover` 编排：只读取本地
-  operation 终态与 Request 脱敏 AB result（纯分类在
-  `tracking_engine/controllers/recover.classify_auto_recovery`），无明确证据时
-  `VERIFYING_EXTERNAL`/`UNKNOWN` → `RECOVERY_REQUIRED`（`needs_manual=true`）或保持
-  `RECOVERY_REQUIRED`；明确成功/失败 → `ACTIVE`/`SUBMIT_FAILED`。
-  `MARK_SUCCEEDED`/`MARK_FAILED` 必须 `confirm=true` 并写 USER 审计，且不接受外部
-  ID/URL/原始结果。恢复会把 `IN_PROGRESS` operation 终态化到匹配状态。DTO
-  `TrackingRecoverResultDTO`（`tracking_id`/`action`/`outcome`/`checked_revision`/
-  `next_revision`/`checked_at`/`operation_id?`/`needs_manual`/`tracking`）。
+  （`TrackingItemRecoverView`，operationId `recoverTrackingItem`）。recover 自 issue #228
+  只剩 `VERIFY_EXTERNAL` 一种动作（只读核验，必须携带已保存连接的 `connection_ref` +
+  `configuration_revision`；`action` 的请求枚举只有这一个值）；`AUTO`／`MARK_SUCCEEDED`／
+  `MARK_FAILED` 已从请求契约删除，旧客户端在 schema 层即被拒（`data_validation_errors`）。
+  retry 请求 shape 与 submit 相同，但只允许从 `SUBMIT_FAILED` 开始
+  （`VERIFYING_EXTERNAL`/`RECOVERY_REQUIRED` 必须先 recover，不能盲重试 D29-07）；复用
+  `run_tracking_submit` 的完整可靠序列（新键 bind 新 operation、SUBMITTING 预写、单次外部调用、
+  结果分类）。只读核验由 `apps/migu_orca_web/tracking_recovery_service.run_tracking_recover`
+  编排：按 operation 类型分别核验，写操作把 `IN_PROGRESS` operation 终态化到匹配状态；它从不
+  写入外部系统，也不接受外部 ID/URL/原始结果。DTO `TrackingRecoverResultDTO`
+  （`tracking_id`/`action=VERIFY_EXTERNAL`/`outcome`/`checked_revision`/`next_revision`/
+  `checked_at`/`operation_id?`/`needs_manual`/`verification_reason?`/`tracking`），其中
+  `outcome` 是核验后记录的精确状态：`ACTIVE`／`DISABLED`／`EXTERNAL_DELETED`（待确认的删除
+  已证实生效）／`RECOVERY_REQUIRED`（仍无法定论）。
 - US-225：新增 `POST /api/v1/tracking/items/{tracking_id}/submit`
   （`TrackingItemSubmitView`，operationId `submitTrackingItem`）。统一可靠提交流程由
   `apps/migu_orca_web/tracking_submission_service.run_tracking_submit` 编排：先跑

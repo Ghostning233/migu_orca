@@ -40,16 +40,8 @@ def _pending_item(revision: int = 4) -> dict[str, Any]:
         "status_group": "PROCESSING",
         "submission_mode": "CONTINUE_TRACKING",
         "revision": revision,
-        "available_actions": [
-            {
-                "code": "RECOVER_AUTO", "label": "自动恢复", "style": "SECONDARY",
-                "requires_confirmation": False, "target_scopes": [],
-            },
-            {
-                "code": "MARK_SUCCEEDED", "label": "标记为成功", "style": "PRIMARY",
-                "requires_confirmation": True, "target_scopes": [],
-            },
-        ],
+        # Issue #228 retired the local recovery actions from the projection.
+        "available_actions": [],
     }
 
 
@@ -152,11 +144,11 @@ class TestPendingSubmissionCheck:
         assert len(posts) == 1, posts
         _assert_read_only_check_body(posts[0])
 
-        # Issue #181: no standalone recovery panel and no manual verdicts here.
+        # Issue #181 / #228: the pending-check flow owns the next step, so no
+        # recovery panel and no retired recovery entry may render here.
         expect(page.locator("#tracking-recovery-heading")).to_have_count(0)
+        expect(page.locator("#tracking-recover-verify")).to_have_count(0)
         expect(page.locator("#tracking-recover-auto")).to_have_count(0)
-        expect(page.locator("#tracking-recover-succeeded")).to_have_count(0)
-        expect(page.locator("body")).not_to_contain_text("结果待确认恢复")
 
         # Nothing sensitive leaks, and no history/state is written for the check.
         for forbidden in (REF, "auto-bangumi", "token"):

@@ -26,10 +26,7 @@ from tracking_engine.models.tracking import (
     TRACKING_STATUS_LABELS,
     TRACKING_STATUS_NEEDS_RECONFIRM,
     TRACKING_STATUS_PENDING_SUBMIT,
-    TRACKING_STATUS_RECOVERY_REQUIRED,
     TRACKING_STATUS_SUBMIT_FAILED,
-    TRACKING_STATUS_UNKNOWN,
-    TRACKING_STATUS_VERIFYING_EXTERNAL,
     TrackingRecord,
     tracking_status_group,
 )
@@ -37,10 +34,11 @@ from tracking_engine.models.tracking import (
 #: Strict same-origin opaque poster route the record may reference.
 _POSTER_PATH_RE = re.compile(r"^/api/v1/mikan/posters/[A-Za-z0-9_.-]+$")
 
-#: Action styles (Stage 29 PRD §11.4).
+#: Action styles (Stage 29 PRD §11.4).  ``DANGER`` is still a legal public style,
+#: but #228 retired the only DANGER-class action from this projection, so no
+#: constant is kept for a style nothing here emits.
 _STYLE_PRIMARY = "PRIMARY"
 _STYLE_SECONDARY = "SECONDARY"
-_STYLE_DANGER = "DANGER"
 
 
 def tracking_available_actions(
@@ -48,38 +46,32 @@ def tracking_available_actions(
 ) -> list[dict[str, Any]]:
     """Return the currently-executable action objects for ``status``.
 
-    Only actions the unified submit/retry/recover endpoints can actually
-    execute for the state are returned (Stage 29 PRD §8.2/§11.4).  The
-    frontend must never infer these itself; a state with no executable action
+    Only actions the unified submit/retry/management endpoints can actually
+    execute for the state are returned (Stage 29 PRD §8.2/§11.4).  The frontend
+    must never infer these itself; a state with no executable action
     (``REVALIDATING``/``SUBMITTING``/``ACTIVE`` and the B-C reserved inactive
     states) returns an empty list.
+
+    Issue #228 (T5a) retired five entries from this projection: ``REVALIDATE``
+    (the submit path revalidates internally), ``RECOVER_AUTO``,
+    ``MARK_SUCCEEDED`` and ``MARK_FAILED`` (the recovery family converges on the
+    read-only external verification), and the standalone ``DELETE_EXTERNAL``
+    (its public endpoint is gone; only the internal "delete the plan + its
+    controlled external subscription" leg still executes the operation).
+
+    An unresolved record therefore projects no *state-changing* action: the one
+    remaining recovery-family member, ``VERIFY_EXTERNAL``, is a read-only page
+    flow (state + proven capability), not a projected action, and it never
+    writes.  ``PENDING_SUBMIT``/``NEEDS_RECONFIRM``/``SUBMIT_FAILED`` keep their
+    single submit decision.
     """
     actions: list[dict[str, Any]] = []
+    announced = management_actions_for_status(status)
     if status in {TRACKING_STATUS_PENDING_SUBMIT, TRACKING_STATUS_NEEDS_RECONFIRM}:
-        actions.append(
-            _action("REVALIDATE", "重新复核", _STYLE_SECONDARY, requires_confirmation=False)
-        )
         actions.append(_action("SUBMIT", "提交追番", _STYLE_PRIMARY, requires_confirmation=True))
     elif status == TRACKING_STATUS_SUBMIT_FAILED:
-        actions.append(
-            _action("REVALIDATE", "重新复核", _STYLE_SECONDARY, requires_confirmation=False)
-        )
         actions.append(_action("RETRY", "重试提交", _STYLE_PRIMARY, requires_confirmation=True))
-    elif status in {
-        TRACKING_STATUS_VERIFYING_EXTERNAL,
-        TRACKING_STATUS_RECOVERY_REQUIRED,
-        TRACKING_STATUS_UNKNOWN,
-    }:
-        actions.append(
-            _action("RECOVER_AUTO", "自动恢复", _STYLE_SECONDARY, requires_confirmation=False)
-        )
-        actions.append(
-            _action("MARK_SUCCEEDED", "标记为成功", _STYLE_PRIMARY, requires_confirmation=True)
-        )
-        actions.append(
-            _action("MARK_FAILED", "标记为失败", _STYLE_DANGER, requires_confirmation=True)
-        )
-    elif management_actions_for_status(status):
+    elif announced:
         scopes = _available_target_scopes(mapping)
         # The mapping contains two independent target kinds.  Never advertise
         # an RSS refresh against a subscription merely because that
@@ -87,14 +79,13 @@ def tracking_available_actions(
         scopes_by_action = {
             "MODIFY": {"SUBSCRIPTION", "ASSOCIATED_RSS"},
             "SET_ENABLED": {"SUBSCRIPTION", "ASSOCIATED_RSS"},
-            "DELETE_EXTERNAL": {"SUBSCRIPTION", "ASSOCIATED_RSS"},
             "REFRESH_RSS": {"ASSOCIATED_RSS"},
         }
-        if "MODIFY" in management_actions_for_status(status):
+        if "MODIFY" in announced:
             target_scopes = [scope for scope in scopes if scope in scopes_by_action["MODIFY"]]
             if target_scopes:
                 actions.append(_action("MODIFY", "修改外部订阅", _STYLE_SECONDARY, requires_confirmation=True, target_scopes=target_scopes))
-        if "SET_ENABLED" in management_actions_for_status(status):
+        if "SET_ENABLED" in announced:
             target_scopes = [scope for scope in scopes if scope in scopes_by_action["SET_ENABLED"]]
             if target_scopes:
                 actions.append(_action(
@@ -102,16 +93,13 @@ def tracking_available_actions(
                     _STYLE_PRIMARY if status == TRACKING_STATUS_DISABLED else _STYLE_SECONDARY,
                     requires_confirmation=True, target_scopes=target_scopes,
                 ))
-        if "REFRESH_RSS" in management_actions_for_status(status):
+        if "REFRESH_RSS" in announced:
             target_scopes = [scope for scope in scopes if scope in scopes_by_action["REFRESH_RSS"]]
             if target_scopes:
                 actions.append(_action("REFRESH_RSS", "立即刷新资源", _STYLE_SECONDARY, requires_confirmation=True, target_scopes=target_scopes))
-        if "DELETE_EXTERNAL" in management_actions_for_status(status):
-            target_scopes = [scope for scope in scopes if scope in scopes_by_action["DELETE_EXTERNAL"]]
-            if target_scopes:
-                actions.append(_action("DELETE_EXTERNAL", "删除外部订阅", _STYLE_DANGER, requires_confirmation=True, target_scopes=target_scopes))
-    # REVALIDATING / SUBMITTING / EXTERNAL_DELETED / EXTERNAL_ONLY have no
-    # currently-executable state-changing action.
+    # REVALIDATING / SUBMITTING / VERIFYING_EXTERNAL / RECOVERY_REQUIRED /
+    # UNKNOWN / EXTERNAL_DELETED / EXTERNAL_ONLY project no announceable
+    # state-changing action (#228).
     return actions
 
 

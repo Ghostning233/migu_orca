@@ -274,8 +274,9 @@ def test_tracking_list_returns_safe_summaries_and_actions(
     assert pending["updated_episode_status"] == "NOT_IMPLEMENTED"
     assert pending["total_episodes"] is None
     assert pending["revision"] == 1
+    # #228 E1: the standalone 重新复核 entry is retired; the submit path
+    # revalidates internally, so only the submit decision is projected.
     assert [action["code"] for action in pending["available_actions"]] == [
-        "REVALIDATE",
         "SUBMIT",
     ]
 
@@ -287,7 +288,6 @@ def test_tracking_list_returns_safe_summaries_and_actions(
     failed = result["items"][0]
     assert failed["status"] == "SUBMIT_FAILED"
     assert [action["code"] for action in failed["available_actions"]] == [
-        "REVALIDATE",
         "RETRY",
     ]
 
