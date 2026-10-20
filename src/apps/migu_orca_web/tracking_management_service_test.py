@@ -8,7 +8,11 @@ import pytest
 import apps.migu_orca_web.tracking_management_service as management_service
 from ab_engine.models.management import AutoBangumiCapabilities, ExternalRss, ExternalSubscription
 from apps.migu_orca_web.save_confirm_service import compute_request_fingerprint
-from apps.migu_orca_web.tracking_management_service import recover_tracking_management, run_tracking_management
+from apps.migu_orca_web.tracking_management_service import (
+    management_writer,
+    recover_tracking_management,
+    run_tracking_management,
+)
 from shared.errors import Stage1Error
 from storage_engine.controllers.operation_repository import load_tracking_operation
 from storage_engine.controllers.request_repository import (
@@ -35,6 +39,8 @@ from tracking_engine.models.tracking import (
 class _FakeClient:
     def __init__(self) -> None:
         self.reads = 0
+        self.deleted: list[str] = []
+        self.subscriptions = [ExternalSubscription("sub-1", "Test", 1, "Group")]
         self.capabilities = AutoBangumiCapabilities(
             probe_status="VERIFIED", version="3.1.18", adapter="legacy_3_1",
             subscription_list="SUPPORTED", subscription_detail="SUPPORTED",
@@ -46,7 +52,12 @@ class _FakeClient:
 
     def read_snapshot(self, *, deadline=None):
         self.reads += 1
-        return self.capabilities, [ExternalSubscription("sub-1", "Test", 1, "Group")], [ExternalRss("7", "Feed", "https://rss.invalid")]
+        return self.capabilities, list(self.subscriptions), [ExternalRss("7", "Feed", "https://rss.invalid")]
+
+    def delete_subscription(self, ident: str):
+        self.deleted.append(ident)
+        self.subscriptions = [item for item in self.subscriptions if item.external_id != ident]
+        return {"status_code": 200}
 
 
 def _seed(tmp_path: Path):
@@ -55,6 +66,10 @@ def _seed(tmp_path: Path):
         adapter="legacy_3_1", object_kind="subscription", external_id="sub-1",
         subscription_id="sub-1", rss_ids=("7",), title="Test", season=1,
     )
+    # Issue #224 A4: EXTERNAL_ONLY is retired read-only history, so a record the
+    # management write path may act on is a normal ACTIVE record carrying the
+    # same external mapping.
+    record = replace(record, status=TRACKING_STATUS_ACTIVE)
     stored, _ = ensure_tracking_record(config, record)
     return config, stored
 
@@ -93,6 +108,9 @@ def _seed_with_local_plan(tmp_path: Path):
         request_id="req-local",
         origin="SAVE_CONFIRM",
         tracking_id=tracking_id_for_request("req-local"),
+        # Issue #224 A4: a manageable record is ACTIVE, never the retired
+        # read-only EXTERNAL_ONLY archive.
+        status=TRACKING_STATUS_ACTIVE,
     )
     stored, _ = ensure_tracking_record(config, record)
     return config, stored, request
@@ -743,3 +761,109 @@ def test_failed_modify_never_touches_the_local_plan(tmp_path: Path) -> None:
     } or result["outcome"] == "OUTCOME_UNKNOWN"
     assert load_request_snapshot(config, "req-local") == request
     assert load_tracking_record(config, record.tracking_id).request_id == "req-local"
+
+
+def test_retired_external_only_record_refuses_every_management_write(tmp_path: Path) -> None:
+    """Issue #224 A4 / ADR-0005: the read-only archive accepts no management write.
+
+    The local state matrix is the shared policy the UI projection also reads, so
+    a management request against a retired ``EXTERNAL_ONLY`` record is refused
+    before any external read or write.
+    """
+    config = load_storage_config(tmp_path / "storage")
+    record, _created = ensure_tracking_record(
+        config,
+        create_external_tracking_record(
+            adapter="legacy_3_1", object_kind="subscription", external_id="sub-history",
+            subscription_id="sub-history", rss_ids=("7",), title="History", season=1,
+        ),
+    )
+    assert record.status == "EXTERNAL_ONLY"
+    client, calls = _FakeClient(), []
+
+    for operation, scope, extra in (
+        ("MODIFY", "SUBSCRIPTION", {"patch": {"title": "Changed"}}),
+        ("SET_ENABLED", "SUBSCRIPTION", {"enabled": False}),
+        ("DELETE_EXTERNAL", "SUBSCRIPTION", {}),
+        ("REFRESH_RSS", "ASSOCIATED_RSS", {}),
+    ):
+        with pytest.raises(Stage1Error) as refused:
+            run_tracking_management(
+                config,
+                tracking_id=record.tracking_id,
+                expected_revision=record.revision,
+                idempotency_key=f"key-{operation.lower()}",
+                confirm=True,
+                operation=operation,
+                target_scope=scope,
+                management_client=client,
+                write=lambda target, payload: calls.append((target, payload)),
+                **extra,
+            )
+        assert refused.value.error_type == "tracking_management_state_conflict"
+
+    # Nothing was written, and the external boundary was never read.
+    assert calls == []
+    assert client.reads == 0
+    assert load_tracking_record(config, record.tracking_id).status == "EXTERNAL_ONLY"
+
+
+def test_retired_record_keeps_only_the_internal_plan_delete_leg(tmp_path: Path) -> None:
+    """Issue #218 exception (a) + #224 A4: the plan-delete external leg survives.
+
+    The public projection offers no management action for a retired record, but
+    "删除追番方案 + 同时删除受控外部订阅" must still be able to remove the mapped
+    Auto Bangumi object — otherwise deleting the local plan would leave an
+    orphan this product can never clean up.  The opt-in is scoped to that one
+    action: the other three management writes stay refused even with it.
+    """
+    config = load_storage_config(tmp_path / "storage")
+    record, _created = ensure_tracking_record(
+        config,
+        create_external_tracking_record(
+            adapter="legacy_3_1", object_kind="subscription", external_id="sub-1",
+            subscription_id="sub-1", title="History", season=1,
+        ),
+    )
+    assert record.status == "EXTERNAL_ONLY"
+    client = _FakeClient()
+
+    result = run_tracking_management(
+        config,
+        tracking_id=record.tracking_id,
+        expected_revision=record.revision,
+        idempotency_key="key-internal-plan-delete",
+        confirm=True,
+        operation="DELETE_EXTERNAL",
+        target_scope="SUBSCRIPTION",
+        management_client=client,
+        write=management_writer(client, "DELETE_EXTERNAL"),
+        internal_plan_delete=True,
+    )
+
+    assert result["management_status"] == "SUCCEEDED"
+    assert client.deleted == ["sub-1"]
+    # The record is gone from the external snapshot, so the delete read-back passed.
+    assert load_tracking_record(config, record.tracking_id).status == "EXTERNAL_DELETED"
+
+    # The same opt-in never re-opens the other three actions.
+    for operation, scope, extra in (
+        ("MODIFY", "SUBSCRIPTION", {"patch": {"title": "Changed"}}),
+        ("SET_ENABLED", "SUBSCRIPTION", {"enabled": False}),
+        ("REFRESH_RSS", "ASSOCIATED_RSS", {}),
+    ):
+        with pytest.raises(Stage1Error) as refused:
+            run_tracking_management(
+                config,
+                tracking_id=record.tracking_id,
+                expected_revision=record.revision,
+                idempotency_key=f"key-internal-{operation.lower()}",
+                confirm=True,
+                operation=operation,
+                target_scope=scope,
+                management_client=client,
+                write=lambda target, payload: None,
+                internal_plan_delete=True,
+                **extra,
+            )
+        assert refused.value.error_type == "tracking_management_state_conflict"

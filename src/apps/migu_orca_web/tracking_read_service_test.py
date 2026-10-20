@@ -34,6 +34,7 @@ from tracking_engine.models.tracking import (
     TRACKING_STATUS_VERIFYING_EXTERNAL,
     TrackingRecord,
     build_audit_event,
+    create_external_tracking_record,
     create_tracking_record,
 )
 
@@ -95,9 +96,9 @@ def test_available_actions_expose_stage31_management_actions() -> None:
     assert [item["code"] for item in tracking_available_actions(TRACKING_STATUS_DISABLED, mapping)] == [
         "SET_ENABLED", "DELETE_EXTERNAL",
     ]
-    assert [item["code"] for item in tracking_available_actions(TRACKING_STATUS_EXTERNAL_ONLY, mapping)] == [
-        "MODIFY", "SET_ENABLED", "REFRESH_RSS", "DELETE_EXTERNAL",
-    ]
+    # Issue #224 A4: the retired read-only archive offers no management action in
+    # the projection either — the write policy and the read model agree.
+    assert tracking_available_actions(TRACKING_STATUS_EXTERNAL_ONLY, mapping) == []
 
 
 def test_available_action_objects_are_strict_shape() -> None:
@@ -190,6 +191,41 @@ def test_list_tracking_items_defaults_and_summary(tmp_path: Path) -> None:
     assert payload["summary"]["pending"] == 1
     assert payload["summary"]["active"] == 1
     assert payload["summary"]["unreadable"] == 0
+    # Issue #224 A7: the service publishes the whole group vocabulary, including
+    # the transient 处理中 group that has no overview card.
+    assert payload["status_groups"] == [
+        {"group": "PENDING", "label": "待处理", "count": 1, "has_overview_card": True},
+        {"group": "PROCESSING", "label": "处理中", "count": 0, "has_overview_card": False},
+        {"group": "ACTIVE", "label": "追番中", "count": 1, "has_overview_card": True},
+        {"group": "ATTENTION", "label": "需处理", "count": 0, "has_overview_card": True},
+        {"group": "INACTIVE", "label": "已停用", "count": 0, "has_overview_card": True},
+    ]
     # Default updated_at sort is newest first, but both timestamps are identical
     # here so the tie-break is the deterministic tracking_id.
     assert len(payload["items"]) == 2
+
+
+def test_list_tracking_items_keeps_external_only_history_read_only(tmp_path: Path) -> None:
+    """Issue #224 A4: real label, no card count, no filter hit, no action."""
+    config = load_storage_config(tmp_path / "storage")
+    record = create_external_tracking_record(
+        adapter="legacy_3_1",
+        object_kind="subscription",
+        external_id="sub-history-1",
+        subscription_id="sub-history-1",
+        title="历史外部订阅",
+        season=1,
+    )
+    ensure_tracking_record(config, record)
+
+    payload = list_tracking_items(config)
+    assert payload["summary"]["total"] == 1
+    assert payload["summary"]["inactive"] == 0
+    groups = {entry["group"]: entry for entry in payload["status_groups"]}
+    assert groups["INACTIVE"]["count"] == 0
+    item = payload["items"][0]
+    assert item["tracking_id"] == record.tracking_id
+    assert item["status_label"] == "仅外部"
+    assert item["status_group"] == "INACTIVE"
+    assert item["available_actions"] == []
+    assert list_tracking_items(config, status_group="INACTIVE")["items"] == []

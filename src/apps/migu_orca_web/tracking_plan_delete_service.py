@@ -139,7 +139,14 @@ def _delete_external(
     payload: SavedTrackingPlanDeleteInput,
     record: TrackingRecord,
 ) -> str:
-    """Run the reliable external delete; return its management status."""
+    """Run the reliable external delete; return its management status.
+
+    ``internal_plan_delete=True`` is the one opt-in that keeps
+    ``DELETE_EXTERNAL`` executable for a retired read-only record without
+    advertising any management action for it (issue #224 A4 + #218 exception
+    (a)).  Without it, deleting the local plan of such a record would leave its
+    Auto Bangumi object behind with no remaining path to clean it up.
+    """
     management = SavedTrackingManagementInput(
         tracking_id=payload.tracking_id,
         target_scope="SUBSCRIPTION",
@@ -152,7 +159,7 @@ def _delete_external(
         configuration_revision=payload.configuration_revision,
         storage_dir=payload.storage_dir,
     )
-    result = run_saved_tracking_management(management)
+    result = run_saved_tracking_management(management, internal_plan_delete=True)
     status = result.get("management_status")
     return status if isinstance(status, str) else "OUTCOME_UNKNOWN"
 

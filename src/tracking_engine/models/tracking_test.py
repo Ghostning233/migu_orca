@@ -21,16 +21,23 @@ from tracking_engine.models.tracking import (
     TRACKING_AUDIT_TRACKING_CREATED,
     TRACKING_ORIGIN_EXTERNAL_SYNC,
     TRACKING_ORIGIN_SAVE_CONFIRM,
+    TRACKING_OVERVIEW_CARD_GROUPS,
     TRACKING_SCHEMA_VERSION,
     TRACKING_STATUS_ACTIVE,
+    TRACKING_STATUS_EXTERNAL_DELETED,
+    TRACKING_STATUS_EXTERNAL_ONLY,
     TRACKING_STATUS_GROUP_ACTIVE,
+    TRACKING_STATUS_GROUP_ATTENTION,
+    TRACKING_STATUS_GROUP_INACTIVE,
     TRACKING_STATUS_GROUP_LABELS,
+    TRACKING_STATUS_GROUP_ORDER,
     TRACKING_STATUS_GROUP_PENDING,
     TRACKING_STATUS_GROUP_PROCESSING,
     TRACKING_STATUS_GROUPS,
     TRACKING_STATUS_LABELS,
     TRACKING_STATUS_PENDING_SUBMIT,
     TRACKING_STATUS_REVALIDATING,
+    TRACKING_STATUSES,
     TrackingRecord,
     append_audit_event,
     build_audit_event,
@@ -354,6 +361,45 @@ def test_status_groups_and_labels_cover_every_status() -> None:
     assert TRACKING_STATUS_GROUP_LABELS[TRACKING_STATUS_GROUP_PENDING] == "待处理"
     with pytest.raises(ValueError):
         tracking_status_group("NOT_A_STATUS")
+
+
+def test_status_vocabulary_and_card_groups_follow_issue_224() -> None:
+    """#224 A1/A3: one vocabulary, and a detected external delete needs attention."""
+    assert TRACKING_STATUS_LABELS[TRACKING_STATUS_ACTIVE] == "追番中"
+    assert "正在追番" not in TRACKING_STATUS_LABELS.values()
+    assert "正在追番" not in TRACKING_STATUS_GROUP_LABELS.values()
+    # 外部已删除 is a detected fact, not a MiGuOrca operation: it needs attention.
+    assert tracking_status_group(TRACKING_STATUS_EXTERNAL_DELETED) == TRACKING_STATUS_GROUP_ATTENTION
+    assert TRACKING_STATUS_GROUP_LABELS == {
+        TRACKING_STATUS_GROUP_PENDING: "待处理",
+        TRACKING_STATUS_GROUP_PROCESSING: "处理中",
+        TRACKING_STATUS_GROUP_ACTIVE: "追番中",
+        TRACKING_STATUS_GROUP_ATTENTION: "需处理",
+        TRACKING_STATUS_GROUP_INACTIVE: "已停用",
+    }
+    assert TRACKING_STATUS_GROUP_ORDER == (
+        TRACKING_STATUS_GROUP_PENDING,
+        TRACKING_STATUS_GROUP_PROCESSING,
+        TRACKING_STATUS_GROUP_ACTIVE,
+        TRACKING_STATUS_GROUP_ATTENTION,
+        TRACKING_STATUS_GROUP_INACTIVE,
+    )
+    assert set(TRACKING_STATUS_GROUP_ORDER) == set(TRACKING_STATUS_GROUP_LABELS)
+    # Exactly four groups render as cards; 处理中 stays a transient per-row state.
+    assert frozenset(
+        {
+            TRACKING_STATUS_GROUP_PENDING,
+            TRACKING_STATUS_GROUP_ACTIVE,
+            TRACKING_STATUS_GROUP_ATTENTION,
+            TRACKING_STATUS_GROUP_INACTIVE,
+        }
+    ) == TRACKING_OVERVIEW_CARD_GROUPS
+    assert TRACKING_STATUS_GROUP_PROCESSING not in TRACKING_OVERVIEW_CARD_GROUPS
+    # A4: retirement is a product decision — the schema value and its real label
+    # survive so a historical archive never gets renamed to 已停用.
+    assert TRACKING_STATUS_EXTERNAL_ONLY in TRACKING_STATUSES
+    assert TRACKING_STATUS_LABELS[TRACKING_STATUS_EXTERNAL_ONLY] == "仅外部"
+    assert tracking_status_group(TRACKING_STATUS_EXTERNAL_ONLY) == TRACKING_STATUS_GROUP_INACTIVE
 
 
 def test_audit_actions_are_non_empty_enum() -> None:

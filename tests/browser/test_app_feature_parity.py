@@ -8,6 +8,8 @@ from typing import Any
 import pytest
 from playwright.sync_api import Page, expect
 
+from tests.browser.saved_tracking_fixtures import _status_groups_for
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 pytestmark = pytest.mark.browser
@@ -113,6 +115,7 @@ def _mock_tracking(page: Page, request_id: str) -> None:
                             "total": 1, "pending": 0, "processing": 0,
                             "active": 1, "inactive": 0, "needs_attention": 0, "unreadable": 0,
                         },
+                        "status_groups": _status_groups_for([item]),
                         "warnings": [],
                     },
                 },

@@ -29,11 +29,24 @@ const defaultSummary = {
   total: 1, pending: 1, processing: 0, active: 0, added_to_download: 0,
   inactive: 0, needs_attention: 0, unreadable: 0,
 }
+/** Issue #224 A7: the server publishes the group vocabulary and its counts. */
+const GROUP_LABELS = {
+  PENDING: '待处理', PROCESSING: '处理中', ACTIVE: '追番中',
+  ATTENTION: '需处理', INACTIVE: '已停用',
+} as const
+const CARD_GROUPS = new Set(['PENDING', 'ACTIVE', 'ATTENTION', 'INACTIVE'])
+function statusGroups(counts: Partial<Record<keyof typeof GROUP_LABELS, number>> = { PENDING: 1 }) {
+  return (Object.keys(GROUP_LABELS) as (keyof typeof GROUP_LABELS)[]).map((group) => ({
+    group, label: GROUP_LABELS[group], count: counts[group] ?? 0,
+    has_overview_card: CARD_GROUPS.has(group),
+  }))
+}
 async function mountSaved(
   actions: unknown[] = [],
   posterPath: string | null = null,
   summary: Record<string, number> = defaultSummary,
   rows?: unknown[],
+  groups: unknown = statusGroups(),
 ) {
   const router = createRouter({ history: createMemoryHistory('/app/'), routes: [
     { path: '/tracking', component: TrackingView },
@@ -41,7 +54,7 @@ async function mountSaved(
   await router.push('/tracking'); await router.isReady()
   apiGet.mockImplementation(async (path) => path === '/api/v1/settings/autobangumi'
     ? { configured: true, credential_present: true, connection_ref: '11111111-1111-4111-8111-111111111111', configuration_revision: 3, connection_status: 'CONFIGURED', capabilities: null }
-    : { items: rows ?? [row(actions, posterPath)], summary, warnings: [] })
+    : { items: rows ?? [row(actions, posterPath)], summary, status_groups: groups, warnings: [] })
   const wrapper = mount(TrackingView, { attachTo: document.body, global: { plugins: [createPinia(), router], stubs: { Teleport: true } } })
   await flushPromises()
   return { wrapper, router }
@@ -123,20 +136,138 @@ describe('TrackingView saved connection flow', () => {
     expect(poster.find('img').exists()).toBe(false)
   })
 
-  it('presents the unified workbench with server overview counts', async () => {
+  it('renders exactly the four server-owned cards with authoritative counts (#224 A2)', async () => {
     const { wrapper } = await mountSaved([], null, {
       total: 9, pending: 4, processing: 2, active: 2, added_to_download: 1,
       inactive: 1, needs_attention: 1, unreadable: 1,
-    })
+    }, undefined, statusGroups({ PENDING: 4, PROCESSING: 2, ACTIVE: 3, ATTENTION: 1, INACTIVE: 1 }))
 
     expect(wrapper.text()).toContain('我的追番')
     expect(wrapper.text()).toContain('管理待提交任务和正在运行的追番')
     const cards = wrapper.findAll('.tracking-status-card')
-    // Issue #99: five fixed categories; 已加入下载 is counted on its own.
+    // 追番中 includes 已加入下载; 需处理 includes 外部已删除. 处理中 has no card.
     expect(cards.map((card) => card.text())).toEqual([
-      '待提交4', '追番中2', '已停用1', '已加入下载1', '需处理1',
+      '待处理4', '追番中3', '需处理1', '已停用1',
     ])
-    expect(wrapper.find('.tracking-status-total').text()).toBe('共 9 条追番记录')
+    // The single legit "正在追番" copy is gone from the whole page.
+    expect(wrapper.html()).not.toContain('正在追番')
+    expect(wrapper.find('.tracking-list-count').text()).toBe('共 9 部')
+  })
+
+  it('re-reads the authoritative card counts after a successful sync (#224 A5)', async () => {
+    const router = createRouter({ history: createMemoryHistory('/app/'), routes: [
+      { path: '/tracking', component: TrackingView },
+    ] })
+    await router.push('/tracking'); await router.isReady()
+    let listReads = 0
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/v1/settings/autobangumi') {
+        return {
+          configured: true, credential_present: true,
+          connection_ref: '11111111-1111-4111-8111-111111111111',
+          configuration_revision: 3, connection_status: 'CONFIGURED', capabilities: null,
+        }
+      }
+      listReads += 1
+      // The sync changed the record's category, so only a second server read
+      // can state the new authoritative counts.
+      return listReads === 1
+        ? {
+            items: [rowFor('a', '番 A')],
+            summary: { ...defaultSummary, total: 1, pending: 1 },
+            status_groups: statusGroups({ PENDING: 1 }), warnings: [],
+          }
+        : {
+            items: [rowFor('a', '番 A', [], 'ACTIVE')],
+            summary: { ...defaultSummary, total: 1, active: 1 },
+            status_groups: statusGroups({ ACTIVE: 1 }), warnings: [],
+          }
+    })
+    apiPost.mockImplementation(async (path) => {
+      if (path !== '/api/v1/tracking/sync') throw new Error(`unexpected POST ${path}`)
+      return {
+        sync_status: 'COMPLETE', checked_at: '2026-09-14T00:00:00Z', capabilities: caps,
+        summary: {
+          checked: 1, created: 0, updated: 1, unchanged: 0,
+          ignored: 0, failed: 0, unreadable: 0,
+        },
+        warnings: [], items: [rowFor('a', '番 A', [], 'ACTIVE')],
+      }
+    })
+    const wrapper = mount(TrackingView, {
+      attachTo: document.body,
+      global: { plugins: [createPinia(), router], stubs: { Teleport: true } },
+    })
+    await flushPromises()
+    expect(wrapper.findAll('.tracking-status-card').map((card) => card.text())).toEqual([
+      '待处理1', '追番中0', '需处理0', '已停用0',
+    ])
+
+    await wrapper.find('#tracking-sync').trigger('click')
+    await flushPromises()
+    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
+    await flushPromises()
+
+    // The rows changed category, so the page must state the re-read server
+    // projection: nothing in the sync response or the row convergence carries
+    // the card metadata, so only a second list read can explain the new counts.
+    expect(listReads).toBeGreaterThan(1)
+    expect(wrapper.findAll('.tracking-status-card').map((card) => card.text())).toEqual([
+      '待处理0', '追番中1', '需处理0', '已停用0',
+    ])
+  })
+
+  it('builds the status filter from server-provided group labels (#224 A7)', async () => {
+    const { wrapper } = await mountSaved([], null, defaultSummary, undefined, statusGroups())
+
+    const options = wrapper.find('#tracking-status-filter').findAll('option')
+      .map((option) => option.text())
+    expect(options).toEqual(['全部状态', '待处理', '处理中', '追番中', '需处理', '已停用'])
+  })
+
+  it('clicking a card clears the search box and keeps the card count authoritative (#224 A5)', async () => {
+    const rows = [
+      rowFor('a', '芙莉莲'),
+      rowFor('b', '咒术回战', [], 'ACTIVE'),
+      rowFor('c', '已加入下载番', [], 'ACTIVE'),
+      rowFor('d', '已停用番', [], 'INACTIVE'),
+      {
+        ...rowFor('e', '仅外部番', [], 'INACTIVE'),
+        status: 'EXTERNAL_ONLY',
+        status_label: '仅外部',
+      },
+    ]
+    const { wrapper } = await mountSaved(
+      [], null,
+      { ...defaultSummary, total: 5, pending: 1, active: 2, inactive: 1 },
+      rows,
+      statusGroups({ PENDING: 1, ACTIVE: 2, INACTIVE: 1 }),
+    )
+
+    // 全部 keeps the retired archive visible with its real label.
+    expect(wrapper.findAll('.tracking-list-item')).toHaveLength(5)
+    expect(wrapper.text()).toContain('仅外部')
+    expect(wrapper.find('.tracking-list-count').text()).toBe('共 5 部')
+
+    // 追番中 card: rows == server card count without a search condition.
+    await wrapper.findAll('.tracking-status-card')[1]!.trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.tracking-list-item')).toHaveLength(2)
+    expect(wrapper.find('.tracking-list-count').text()).toBe('共 2 部')
+
+    // A search narrows the rows but never the authoritative card count.
+    await wrapper.find('#tracking-search').setValue('咒术')
+    await flushPromises()
+    expect(wrapper.findAll('.tracking-list-item')).toHaveLength(1)
+    expect(wrapper.find('.tracking-list-count').text()).toBe('筛选出 1 部 · 共 2 部')
+
+    // Clicking another card clears the search box (user decision, A5).
+    await wrapper.findAll('.tracking-status-card')[3]!.trigger('click')
+    await flushPromises()
+    expect((wrapper.find('#tracking-search').element as HTMLInputElement).value).toBe('')
+    // The retired EXTERNAL_ONLY archive never joins the 已停用 card.
+    expect(wrapper.findAll('.tracking-list-item')).toHaveLength(1)
+    expect(wrapper.find('.tracking-list-count').text()).toBe('共 1 部')
   })
 
   it('shows checkboxes only in batch mode and keeps row selection separate', async () => {
@@ -246,7 +377,12 @@ async function mountPending() {
       return { configured: true, credential_present: true, connection_ref: '11111111-1111-4111-8111-111111111111', configuration_revision: 3, connection_status: 'CONFIGURED', capabilities: null } as never
     }
     if (path === '/api/v1/tracking/items/{tracking_id}') return pendingDetail() as never
-    return { items: [pendingRow()], summary: { ...defaultSummary, pending: 0, processing: 1 }, warnings: [] } as never
+    return {
+      items: [pendingRow()],
+      summary: { ...defaultSummary, pending: 0, processing: 1 },
+      status_groups: statusGroups({ PROCESSING: 1 }),
+      warnings: [],
+    } as never
   })
   const wrapper = mount(TrackingView, {
     attachTo: document.body, global: { plugins: [createPinia(), router], stubs: { Teleport: true } },
@@ -364,6 +500,29 @@ describe('TrackingView risk-confirmed resubmission (issue #184)', () => {
     expect(wrapper.find('.confirm-dialog-message').text()).toContain('重复订阅')
     expect(resubmitCalls()).toHaveLength(1)
 
+    // The read-only phase has settled: the cards still show the server's
+    // pre-write projection (处理中 has no card), so any later change can only
+    // come from the settled write's own authoritative count refresh.
+    expect(wrapper.findAll('.tracking-status-card').map((card) => card.text())).toEqual([
+      '待处理0', '追番中0', '需处理0', '已停用0',
+    ])
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/v1/settings/autobangumi') {
+        return {
+          configured: true, credential_present: true,
+          connection_ref: '11111111-1111-4111-8111-111111111111',
+          configuration_revision: 3, connection_status: 'CONFIGURED', capabilities: null,
+        } as never
+      }
+      if (path === '/api/v1/tracking/items/{tracking_id}') return pendingDetail() as never
+      return {
+        items: [pendingRow()],
+        summary: { ...defaultSummary, active: 1 },
+        status_groups: statusGroups({ ACTIVE: 1 }),
+        warnings: [],
+      } as never
+    })
+
     await wrapper.find('.confirm-dialog .primary-button').trigger('click')
     await flushPromises()
 
@@ -377,6 +536,12 @@ describe('TrackingView risk-confirmed resubmission (issue #184)', () => {
       connection_ref: '11111111-1111-4111-8111-111111111111',
     })
     expect(wrapper.find('#tracking-submit-result').text()).toContain('提交成功')
+    // Issue #224 A5: the settled write re-read the authoritative projection, so
+    // 追番中 now states the new category.  Without that read the four cards
+    // would still render the pre-write (all-zero) projection.
+    expect(wrapper.findAll('.tracking-status-card').map((card) => card.text())).toEqual([
+      '待处理0', '追番中1', '需处理0', '已停用0',
+    ])
   })
 
   it('cancelling the risk confirmation sends no second request at all', async () => {

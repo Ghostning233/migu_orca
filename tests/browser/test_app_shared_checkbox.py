@@ -20,7 +20,7 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import set_storage_preferences
-from tests.browser.saved_tracking_fixtures import _summary
+from tests.browser.saved_tracking_fixtures import _status_groups_for, _summary
 from tests.browser.screen_support import wait_for_screen_scroll
 from tests.browser.test_app_batch_workbench import (
     _compact_items,
@@ -342,7 +342,7 @@ def test_saved_plan_and_external_delete_checkboxes_use_the_shared_box(
             )
             return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1, pending=1), "warnings": []}})
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1, pending=1), "status_groups": _status_groups_for([item]), "warnings": []}})
             return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
             route.fulfill(json={"ok": True, "result": detail})

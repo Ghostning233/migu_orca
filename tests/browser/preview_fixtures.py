@@ -40,6 +40,7 @@ from tests.browser.batch_draft_visual_fixtures import (
 )
 from tests.browser.batch_visual_fixtures import batch_candidate, preview_request
 from tests.browser.conftest import issue_draft_id
+from tests.browser.saved_tracking_fixtures import _status_groups, _summary
 
 PREVIEW_BATCH_ID = f"{BATCH_ID}-preview"
 """预览批量解析返回的批次标识（与截图 fixture 同一批）。"""
@@ -205,7 +206,12 @@ class PreviewFixtureApp:
         if path == "/api/v1/settings/autobangumi" and method == "GET":
             return _json_response({"ok": True, "result": dict(_UNCONFIGURED_CONNECTION)})
         if path == "/api/v1/tracking/items" and method == "GET":
-            return _json_response({"ok": True, "result": {"items": [], "summary": None, "warnings": []}})
+            return _json_response({"ok": True, "result": {
+                "items": [],
+                "summary": _summary(0),
+                "status_groups": _status_groups(),
+                "warnings": [],
+            }})
         if path.startswith("/api/v1/mikan/posters/") and method == "GET":
             bangumi_id = path.rsplit("/", 1)[-1]
             if not bangumi_id:

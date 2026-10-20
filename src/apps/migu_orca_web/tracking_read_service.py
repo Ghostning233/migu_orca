@@ -49,10 +49,14 @@ from storage_engine.controllers.tracking_repository import (
 )
 from tracking_engine.models.operation import TRACKING_SUBMISSION_MODES_SET
 from tracking_engine.models.tracking import (
+    TRACKING_OVERVIEW_CARD_GROUPS,
     TRACKING_STATUS_ADDED_TO_DOWNLOAD,
+    TRACKING_STATUS_EXTERNAL_ONLY,
     TRACKING_STATUS_GROUP_ACTIVE,
     TRACKING_STATUS_GROUP_ATTENTION,
     TRACKING_STATUS_GROUP_INACTIVE,
+    TRACKING_STATUS_GROUP_LABELS,
+    TRACKING_STATUS_GROUP_ORDER,
     TRACKING_STATUS_GROUP_PENDING,
     TRACKING_STATUS_GROUP_PROCESSING,
     TrackingRecord,
@@ -102,7 +106,15 @@ def list_tracking_items(
         warnings.append(TRACKING_LIST_UNREADABLE_WARNING)
 
     requests_by_id = _requests_by_id(list_request_snapshots_tolerant(config))
-    summary = _summary_counts(healthy_records, unreadable)
+    # One projection pass feeds both the summary and the published group
+    # metadata, so the two can never disagree (issue #224 A5/A7).
+    group_counts, added_to_download = _group_counts(healthy_records)
+    summary = _summary_counts(
+        total=len(healthy_records),
+        group_counts=group_counts,
+        added_to_download=added_to_download,
+        unreadable=unreadable,
+    )
     visible = _filter_records(healthy_records, q=q, status_group=status_group)
     visible = _sort_records(visible, sort=sort)
 
@@ -117,7 +129,15 @@ def list_tracking_items(
             }
         )
 
-    return {"items": items, "summary": summary, "warnings": warnings}
+    return {
+        "items": items,
+        "summary": summary,
+        # Issue #224 A7: list-level group metadata, so the client renders
+        # server-owned labels and authoritative counts — including for an empty
+        # list and for zero-count groups — and keeps no label table of its own.
+        "status_groups": _status_group_metadata(group_counts),
+        "warnings": warnings,
+    }
 
 
 def build_tracking_detail(
@@ -224,34 +244,69 @@ def _submission_mode_for(config: StorageConfig, record: TrackingRecord) -> str |
     return mode if mode in TRACKING_SUBMISSION_MODES_SET else None
 
 
-def _summary_counts(records: list[TrackingRecord], unreadable: int) -> dict[str, int]:
-    counts: dict[str, int] = {
-        "total": len(records),
-        "pending": 0,
-        "processing": 0,
-        "active": 0,
-        # Issue #99: one-time acceptances are their own overview category.
-        "added_to_download": 0,
-        "inactive": 0,
-        "needs_attention": 0,
+def _summary_counts(
+    *,
+    total: int,
+    group_counts: dict[str, int],
+    added_to_download: int,
+    unreadable: int,
+) -> dict[str, int]:
+    """Whole-library, card-aligned counts for the list summary (issue #224).
+
+    Every count is derived from the same single group projection the
+    ``status_groups`` metadata publishes, so the two can never disagree.
+    ``EXTERNAL_ONLY`` is excluded from every group count (A4) but still counted
+    in ``total`` because 全部 keeps it visible.
+    """
+    return {
+        "total": total,
+        "pending": group_counts[TRACKING_STATUS_GROUP_PENDING],
+        "processing": group_counts[TRACKING_STATUS_GROUP_PROCESSING],
+        # 追番中 + 已加入下载 are one card; the two raw views stay separate so a
+        # client that still knows the older contract keeps its meaning.
+        "active": group_counts[TRACKING_STATUS_GROUP_ACTIVE] - added_to_download,
+        "added_to_download": added_to_download,
+        "inactive": group_counts[TRACKING_STATUS_GROUP_INACTIVE],
+        "needs_attention": group_counts[TRACKING_STATUS_GROUP_ATTENTION],
         "unreadable": unreadable,
     }
+
+
+def _group_counts(records: list[TrackingRecord]) -> tuple[dict[str, int], int]:
+    """Count every status group once in a single pass (issue #224 A4/A7).
+
+    ``EXTERNAL_ONLY`` archives stay loadable but never join a card count.
+    ADR-0005 retired the state's product semantics, so counting it in 已停用
+    would misstate a historical fact as a MiGuOrca retirement.  The second value
+    is the 已加入下载 count, which the 追番中 card folds into its own group.
+    """
+    counts = {group: 0 for group in TRACKING_STATUS_GROUP_ORDER}
+    added_to_download = 0
     for record in records:
-        group = tracking_status_group(record.status)
-        if group == TRACKING_STATUS_GROUP_PENDING:
-            counts["pending"] += 1
-        elif group == TRACKING_STATUS_GROUP_PROCESSING:
-            counts["processing"] += 1
-        elif group == TRACKING_STATUS_GROUP_ACTIVE:
-            if record.status == TRACKING_STATUS_ADDED_TO_DOWNLOAD:
-                counts["added_to_download"] += 1
-            else:
-                counts["active"] += 1
-        elif group == TRACKING_STATUS_GROUP_INACTIVE:
-            counts["inactive"] += 1
-        elif group == TRACKING_STATUS_GROUP_ATTENTION:
-            counts["needs_attention"] += 1
-    return counts
+        if record.status == TRACKING_STATUS_EXTERNAL_ONLY:
+            continue
+        counts[tracking_status_group(record.status)] += 1
+        if record.status == TRACKING_STATUS_ADDED_TO_DOWNLOAD:
+            added_to_download += 1
+    return counts, added_to_download
+
+
+def _status_group_metadata(group_counts: dict[str, int]) -> list[dict[str, Any]]:
+    """Publish the five-group vocabulary with authoritative counts (#224 A7).
+
+    The list is always complete: an empty list still publishes all five groups
+    with ``count`` 0, so the client can render the four cards without inventing
+    a label or a zero itself.
+    """
+    return [
+        {
+            "group": group,
+            "label": TRACKING_STATUS_GROUP_LABELS[group],
+            "count": group_counts[group],
+            "has_overview_card": group in TRACKING_OVERVIEW_CARD_GROUPS,
+        }
+        for group in TRACKING_STATUS_GROUP_ORDER
+    ]
 
 
 def _filter_records(
@@ -265,7 +320,10 @@ def _filter_records(
         filtered = [
             record
             for record in filtered
-            if tracking_status_group(record.status) == status_group
+            # Issue #224 A4: a retired archive is visible only in 全部, so no
+            # card/group filter may return it even though it maps to INACTIVE.
+            if record.status != TRACKING_STATUS_EXTERNAL_ONLY
+            and tracking_status_group(record.status) == status_group
         ]
     if q:
         needle = q.casefold()

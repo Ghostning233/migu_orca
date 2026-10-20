@@ -22,7 +22,7 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import set_storage_preferences
-from tests.browser.saved_tracking_fixtures import _item, _summary
+from tests.browser.saved_tracking_fixtures import _item, _status_groups_for, _summary
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REF = "11111111-1111-4111-8111-111111111111"
@@ -109,7 +109,7 @@ def _install(
             return
         if request.method == "GET" and path == "/tracking/items":
             route.fulfill(json={"ok": True, "result": {
-                "items": [item], "summary": _summary(1, processing=1), "warnings": [],
+                "items": [item], "summary": _summary(1, processing=1), "status_groups": _status_groups_for([item]), "warnings": [],
             }})
             return
         if request.method == "GET" and path.startswith("/tracking/items/"):
@@ -130,7 +130,7 @@ def _install(
             if body.get("confirm") is True:
                 calls["write"].append(body)
                 item.update({
-                    "status": "ACTIVE", "status_label": "正在追番", "status_group": "ACTIVE",
+                    "status": "ACTIVE", "status_label": "追番中", "status_group": "ACTIVE",
                     "revision": item["revision"] + 1,
                     "current_operation": {**item["current_operation"], "operation_id": "op-resubmit",
                                           "state": "SUCCEEDED"},
@@ -150,7 +150,7 @@ def _install(
                 # The read-only phase proved the object: the record converges
                 # without any write-family request.
                 item.update({
-                    "status": "ACTIVE", "status_label": "正在追番", "status_group": "ACTIVE",
+                    "status": "ACTIVE", "status_label": "追番中", "status_group": "ACTIVE",
                     "revision": item["revision"] + 1,
                 })
             route.fulfill(json={"ok": True, "result": {
@@ -248,7 +248,7 @@ class TestRiskConfirmedResubmission:
             "expected_revision", "confirm", "previous_operation_id", "connection_ref", "storage_dir",
         }, body
         # One new operation, traceable to the pending one, and the list converged.
-        expect(page.locator(".tracking-list-panel")).to_contain_text("正在追番")
+        expect(page.locator(".tracking-list-panel")).to_contain_text("追番中")
         for forbidden in ("secret-password", "token", "ab_config"):
             assert forbidden not in page.content().lower()
 
@@ -304,7 +304,7 @@ class TestRiskConfirmedResubmission:
         page.wait_for_selector("#tracking-resubmit-result", timeout=10_000)
 
         expect(page.locator("#tracking-resubmit-result")).to_contain_text("已确认订阅存在")
-        expect(page.locator(".tracking-list-panel")).to_contain_text("正在追番")
+        expect(page.locator(".tracking-list-panel")).to_contain_text("追番中")
         expect(page.locator(".confirm-dialog")).to_have_count(0)
         assert calls["write"] == []
         assert len(calls["offer"]) == 1

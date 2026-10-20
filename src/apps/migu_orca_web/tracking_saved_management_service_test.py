@@ -34,6 +34,7 @@ from tracking_engine.models.operation import (
     transition_tracking_operation,
 )
 from tracking_engine.models.tracking import (
+    TRACKING_STATUS_ACTIVE,
     build_audit_event,
     create_external_tracking_record,
     create_tracking_record,
@@ -118,6 +119,9 @@ def _record(tmp_path: Path, saved, *, mapping=True):
         complete = dict(record.external_mapping or {})
         complete.update(mapping)
         record = replace(record, external_mapping=complete)
+    # Issue #224 A4: EXTERNAL_ONLY is read-only history, so the management write
+    # path is exercised with a manageable ACTIVE record carrying the same mapping.
+    record = replace(record, status=TRACKING_STATUS_ACTIVE)
     return config, ensure_tracking_record(config, record)[0]
 
 

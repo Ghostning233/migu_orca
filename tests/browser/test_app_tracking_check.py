@@ -19,7 +19,7 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import set_storage_preferences
-from tests.browser.saved_tracking_fixtures import _item, _summary
+from tests.browser.saved_tracking_fixtures import _item, _status_groups_for, _summary
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REF = "11111111-1111-4111-8111-111111111111"
@@ -88,7 +88,7 @@ def _install(page: Page, item: dict[str, Any], check_result: dict[str, Any]) -> 
             return
         if request.method == "GET" and path == "/tracking/items":
             route.fulfill(json={"ok": True, "result": {
-                "items": [state["item"]], "summary": _summary(1, processing=1), "warnings": [],
+                "items": [state["item"]], "summary": _summary(1, processing=1), "status_groups": _status_groups_for([state["item"]]), "warnings": [],
             }})
             return
         if request.method == "GET" and path.startswith("/tracking/items/"):
@@ -98,7 +98,7 @@ def _install(page: Page, item: dict[str, Any], check_result: dict[str, Any]) -> 
             posts.append(request.post_data_json or {})
             result = dict(check_result)
             if result.get("outcome") in ("ACTIVE", "DISABLED"):
-                state["item"] = {**state["item"], "status": "ACTIVE", "status_label": "正在追番",
+                state["item"] = {**state["item"], "status": "ACTIVE", "status_label": "追番中",
                                  "status_group": "ACTIVE", "revision": state["item"]["revision"] + 1}
             route.fulfill(json={"ok": True, "result": {
                 "tracking_id": "tracking-a", "action": "VERIFY_EXTERNAL",
@@ -172,7 +172,7 @@ class TestPendingSubmissionCheck:
         page.wait_for_selector("#tracking-check-result", timeout=10_000)
 
         expect(page.locator("#tracking-check-result")).to_contain_text("已确认订阅存在")
-        expect(page.locator(".tracking-list-panel")).to_contain_text("正在追番")
+        expect(page.locator(".tracking-list-panel")).to_contain_text("追番中")
         assert len(posts) == 1
         _assert_read_only_check_body(posts[0])
 
@@ -229,7 +229,7 @@ def _install_journey(
         if request.method == "GET" and path == "/tracking/items":
             rows = list(state["items"].values())
             route.fulfill(json={"ok": True, "result": {
-                "items": rows, "summary": _summary(len(rows), pending=len(rows)), "warnings": [],
+                "items": rows, "summary": _summary(len(rows), pending=len(rows)), "status_groups": _status_groups_for(rows), "warnings": [],
             }})
             return
         if request.method == "GET" and path.startswith("/tracking/items/"):
@@ -264,7 +264,7 @@ def _install_journey(
             }
             if result.get("outcome") in ("ACTIVE", "DISABLED"):
                 state["items"][tracking_id] = {
-                    **item, "status": "ACTIVE", "status_label": "正在追番",
+                    **item, "status": "ACTIVE", "status_label": "追番中",
                     "status_group": "ACTIVE", "revision": item["revision"] + 1,
                 }
             route.fulfill(json={"ok": True, "result": {
@@ -322,7 +322,7 @@ class TestPendingSubmissionJourney:
 
         page.locator("#tracking-check").click()
         expect(page.locator("#tracking-check-result")).to_contain_text("已确认订阅存在")
-        expect(page.locator(".tracking-list-panel")).to_contain_text("正在追番")
+        expect(page.locator(".tracking-list-panel")).to_contain_text("追番中")
         assert len(calls["check"]) == 2
 
     def test_a_confirmed_check_releases_the_pending_submit_intent(

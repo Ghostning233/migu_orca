@@ -920,6 +920,10 @@ class TrackingItemDTO(_StrictBase):
         "ADDED_TO_DOWNLOAD",
     ]
     status_label: str
+    #: Issue #224 A3: ``EXTERNAL_DELETED`` now groups under ``ATTENTION`` (a
+    #: detected fact that needs the user), no longer under ``INACTIVE``.  A
+    #: retired read-only ``EXTERNAL_ONLY`` archive keeps its ``INACTIVE`` group
+    #: for schema compatibility but never joins a group count or a group filter.
     status_group: Literal["PENDING", "PROCESSING", "ACTIVE", "ATTENTION", "INACTIVE"]
     #: Issue #99 AC 6/7: the operation-level submission mode of the last attempt.
     #: ``None`` means "do not show a mode" — 待提交/需修改 never fabricate one, and
@@ -934,11 +938,35 @@ class TrackingItemDTO(_StrictBase):
     updated_at: str | None = None
 
 
+class TrackingStatusGroupDTO(_StrictBase):
+    """List-level status-group metadata (issue #224 A7).
+
+    Published for every list — including an empty one — so the client renders
+    server-owned labels and authoritative counts and keeps no label table of its
+    own.  ``group`` is one of the five fixed groups; ``count`` is the
+    whole-library count of that group and never depends on the ``q`` or
+    ``status_group`` filter of the same request.  ``has_overview_card`` is true
+    for exactly the four groups 状态总览 renders as cards (``PROCESSING`` is a
+    transient per-row state and has none).
+    """
+
+    group: Literal["PENDING", "PROCESSING", "ACTIVE", "ATTENTION", "INACTIVE"]
+    label: str
+    count: int
+    has_overview_card: bool
+
+
 class TrackingItemListSummaryDTO(_StrictBase):
     """Safe summary counts for the tracking list (§11.2).
 
-    ``inactive`` counts the DISABLED group; ``processing`` stays a transient
-    per-row state that the page never renders as its own overview category.
+    ``inactive`` counts the 已停用 card group (``DISABLED`` rows); ``processing``
+    stays a transient per-row state that the page never renders as its own
+    overview category.  ``active`` counts 追番中 only and ``added_to_download``
+    counts 已加入下载 separately, so the 追番中 overview card reads
+    ``active + added_to_download`` (issue #224 A2).
+
+    Issue #224 A4: a retired read-only ``EXTERNAL_ONLY`` archive is never
+    counted in any group field — it only appears in ``total`` (全部).
     """
 
     total: int
@@ -958,6 +986,8 @@ class TrackingItemListResultDTO(_StrictBase):
 
     items: list[TrackingItemDTO]
     summary: TrackingItemListSummaryDTO
+    #: Issue #224 A7: server-owned group vocabulary and counts.
+    status_groups: list[TrackingStatusGroupDTO]
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -985,6 +1015,10 @@ class TrackingDetailResultDTO(_StrictBase):
         "ADDED_TO_DOWNLOAD",
     ]
     status_label: str
+    #: Issue #224 A3: ``EXTERNAL_DELETED`` now groups under ``ATTENTION`` (a
+    #: detected fact that needs the user), no longer under ``INACTIVE``.  A
+    #: retired read-only ``EXTERNAL_ONLY`` archive keeps its ``INACTIVE`` group
+    #: for schema compatibility but never joins a group count or a group filter.
     status_group: Literal["PENDING", "PROCESSING", "ACTIVE", "ATTENTION", "INACTIVE"]
     #: Issue #99 AC 6/7: the operation-level submission mode of the last attempt.
     #: ``None`` means "do not show a mode" — 待提交/需修改 never fabricate one, and

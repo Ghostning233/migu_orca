@@ -14,6 +14,7 @@ from plan_engine.controllers.data_sources import StaticFixtureDataSource
 from plan_engine.controllers.plan_generation import build_plan
 from shared.models import EntryRequest
 from tests.browser.conftest import preview_result_json, set_storage_preferences
+from tests.browser.saved_tracking_fixtures import _status_groups, _status_groups_for
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -828,6 +829,7 @@ class TestAppWorkbenchCandidateSelectionAndDraft:
                                 "inactive": 0, "needs_attention": 0,
                                 "unreadable": 0,
                             },
+                            "status_groups": _status_groups_for([]),
                             "warnings": [],
                         },
                     },
@@ -1119,6 +1121,7 @@ class TestAppWorkbenchCandidateSelectionAndDraft:
                             "total": 1, "pending": 1, "processing": 0,
                             "active": 0, "inactive": 0, "needs_attention": 0, "unreadable": 0,
                         },
+                        "status_groups": _status_groups(pending=1),
                         "warnings": [],
                     },
                 }, ensure_ascii=False),

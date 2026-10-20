@@ -17,6 +17,7 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import set_storage_preferences
+from tests.browser.saved_tracking_fixtures import _status_groups_for
 
 pytestmark = pytest.mark.browser
 
@@ -146,6 +147,7 @@ def _open(page: Page, live_server_url: str, storage_dir, item: dict[str, Any], s
                             "added_to_download": 0,
                             "unreadable": 0,
                         },
+                        "status_groups": _status_groups_for([item]),
                         "warnings": [],
                     },
                 },

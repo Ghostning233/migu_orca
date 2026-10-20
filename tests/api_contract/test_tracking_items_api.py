@@ -49,10 +49,15 @@ from tracking_engine.models.tracking import (
     TRACKING_AUDIT_TRACKING_CREATED,
     TRACKING_ORIGIN_SAVE_CONFIRM,
     TRACKING_STATUS_ACTIVE,
+    TRACKING_STATUS_ADDED_TO_DOWNLOAD,
     TRACKING_STATUS_DISABLED,
+    TRACKING_STATUS_EXTERNAL_DELETED,
+    TRACKING_STATUS_EXTERNAL_ONLY,
     TRACKING_STATUS_PENDING_SUBMIT,
     TRACKING_STATUS_SUBMIT_FAILED,
+    TRACKING_STATUS_VERIFYING_EXTERNAL,
     TrackingRecord,
+    create_external_tracking_record,
     create_tracking_record,
     tracking_id_for_request,
     transition_record,
@@ -112,6 +117,31 @@ def _seed_record(
     return ensured
 
 
+def _seed_external_only(
+    tmp_path: Path,
+    *,
+    external_id: str = "sub-history-1",
+    title: str = "历史外部订阅",
+) -> TrackingRecord:
+    """Seed a read-only ``EXTERNAL_ONLY`` archive record (issue #224 A4).
+
+    It is built through the external-record constructor so it carries a real
+    external mapping and no local Request — exactly the historical shape.
+    """
+    config = _config(tmp_path)
+    record = create_external_tracking_record(
+        adapter="legacy_3_1",
+        object_kind="subscription",
+        external_id=external_id,
+        subscription_id=external_id,
+        title=title,
+        season=1,
+        subtitle_group="喵萌",
+    )
+    ensured, _created = ensure_tracking_record(config, record)
+    return ensured
+
+
 def _all_json_leaves(value: Any) -> Any:
     """Yield every scalar and key recursively (leak check helper)."""
     if isinstance(value, dict):
@@ -162,6 +192,8 @@ def test_tracking_list_empty(tmp_path: Path, client: FlaskClient) -> None:
     payload = response.get_json()
     assert response.status_code == 200
     assert payload["ok"] is True
+    # Issue #224 A7: the group metadata is published even for an empty list, so
+    # the client keeps no label table and still renders zero-count cards.
     assert payload["result"] == {
         "items": [],
         "summary": {
@@ -174,6 +206,13 @@ def test_tracking_list_empty(tmp_path: Path, client: FlaskClient) -> None:
             "needs_attention": 0,
             "unreadable": 0,
         },
+        "status_groups": [
+            {"group": "PENDING", "label": "待处理", "count": 0, "has_overview_card": True},
+            {"group": "PROCESSING", "label": "处理中", "count": 0, "has_overview_card": False},
+            {"group": "ACTIVE", "label": "追番中", "count": 0, "has_overview_card": True},
+            {"group": "ATTENTION", "label": "需处理", "count": 0, "has_overview_card": True},
+            {"group": "INACTIVE", "label": "已停用", "count": 0, "has_overview_card": True},
+        ],
         "warnings": [],
     }
 
@@ -273,6 +312,139 @@ def test_tracking_summary_counts_the_disabled_group(
     assert item["status_label"] == "已停用"
     assert item["status_group"] == "INACTIVE"
     assert payload["result"]["summary"]["inactive"] == 1
+
+
+def test_tracking_list_publishes_four_card_metadata_with_whole_library_counts(
+    tmp_path: Path,
+    client: FlaskClient,
+) -> None:
+    """#224 A2/A3/A5/A7: four server-owned cards over authoritative counts."""
+    _seed_record(tmp_path, "request-pending", status=TRACKING_STATUS_PENDING_SUBMIT, title="待提交番")
+    _seed_record(tmp_path, "request-active", status=TRACKING_STATUS_ACTIVE, title="追番中番")
+    _seed_record(
+        tmp_path, "request-added", status=TRACKING_STATUS_ADDED_TO_DOWNLOAD, title="已加入下载番"
+    )
+    _seed_record(tmp_path, "request-failed", status=TRACKING_STATUS_SUBMIT_FAILED, title="提交失败番")
+    _seed_record(
+        tmp_path, "request-deleted", status=TRACKING_STATUS_EXTERNAL_DELETED, title="外部已删除番"
+    )
+    _seed_record(tmp_path, "request-disabled", status=TRACKING_STATUS_DISABLED, title="已停用番")
+    _seed_record(
+        tmp_path, "request-verifying", status=TRACKING_STATUS_VERIFYING_EXTERNAL, title="核验中番"
+    )
+    _seed_external_only(tmp_path)
+
+    response = client.get("/api/v1/tracking/items", query_string={"storage_dir": "storage"})
+    assert response.status_code == 200
+    result = response.get_json()["result"]
+
+    assert result["status_groups"] == [
+        {"group": "PENDING", "label": "待处理", "count": 1, "has_overview_card": True},
+        {"group": "PROCESSING", "label": "处理中", "count": 1, "has_overview_card": False},
+        # 追番中 + 已加入下载 are one card.
+        {"group": "ACTIVE", "label": "追番中", "count": 2, "has_overview_card": True},
+        # 提交失败 + 需要恢复 + 状态未知 + 外部已删除 are one card.
+        {"group": "ATTENTION", "label": "需处理", "count": 2, "has_overview_card": True},
+        # 仅外部 is read-only history: never counted in the 已停用 card.
+        {"group": "INACTIVE", "label": "已停用", "count": 1, "has_overview_card": True},
+    ]
+    cards = [entry for entry in result["status_groups"] if entry["has_overview_card"]]
+    assert [entry["group"] for entry in cards] == ["PENDING", "ACTIVE", "ATTENTION", "INACTIVE"]
+
+    summary = result["summary"]
+    # 全部 still contains the retired read-only archive record.
+    assert summary["total"] == 8
+    assert summary["inactive"] == 1
+    assert summary["needs_attention"] == 2
+    assert summary["active"] + summary["added_to_download"] == 2
+
+    # A5: the published counts are the whole-library projection, not the query's
+    # result count.  A search or a group filter must not move them.
+    searched = client.get(
+        "/api/v1/tracking/items",
+        query_string={"storage_dir": "storage", "q": "追番中番"},
+    ).get_json()["result"]
+    assert searched["status_groups"] == result["status_groups"]
+    assert len(searched["items"]) == 1
+    filtered = client.get(
+        "/api/v1/tracking/items",
+        query_string={"storage_dir": "storage", "status_group": "ACTIVE"},
+    ).get_json()["result"]
+    assert filtered["status_groups"] == result["status_groups"]
+    assert len(filtered["items"]) == 2
+
+
+def test_external_only_history_is_read_only_and_only_visible_in_all(
+    tmp_path: Path,
+    client: FlaskClient,
+) -> None:
+    """#224 A4: real label, no card count/filter, no management actions."""
+    record = _seed_external_only(tmp_path)
+
+    all_result = client.get(
+        "/api/v1/tracking/items", query_string={"storage_dir": "storage"}
+    ).get_json()["result"]
+    item = next(
+        entry for entry in all_result["items"] if entry["tracking_id"] == record.tracking_id
+    )
+    assert item["status"] == TRACKING_STATUS_EXTERNAL_ONLY
+    assert item["status_label"] == "仅外部"
+    assert item["status_group"] == "INACTIVE"
+    # Only 删除追番方案 / 复制并重新添加 remain page-level; no management action.
+    assert item["available_actions"] == []
+    assert all_result["summary"]["inactive"] == 0
+    assert all_result["summary"]["total"] == 1
+    inactive = next(
+        entry for entry in all_result["status_groups"] if entry["group"] == "INACTIVE"
+    )
+    assert inactive["count"] == 0
+
+    # A4: it stays visible only in 全部 — no group filter may return it.
+    for group in ("PENDING", "PROCESSING", "ACTIVE", "ATTENTION", "INACTIVE"):
+        filtered = client.get(
+            "/api/v1/tracking/items",
+            query_string={"storage_dir": "storage", "status_group": group},
+        ).get_json()["result"]
+        assert filtered["items"] == []
+    # A plain search still runs over 全部, so the archive record stays findable.
+    searched = client.get(
+        "/api/v1/tracking/items",
+        query_string={"storage_dir": "storage", "q": "历史外部订阅"},
+    ).get_json()["result"]
+    assert [entry["tracking_id"] for entry in searched["items"]] == [record.tracking_id]
+
+    # The archive is loadable through the detail route too (AC3) with its real
+    # label and no management action; the opaque external id never leaves.
+    detail_response = client.get(
+        f"/api/v1/tracking/items/{record.tracking_id}",
+        query_string={"storage_dir": "storage"},
+    )
+    assert detail_response.status_code == 200
+    detail = detail_response.get_json()["result"]
+    assert detail["status"] == TRACKING_STATUS_EXTERNAL_ONLY
+    assert detail["status_label"] == "仅外部"
+    assert detail["status_group"] == "INACTIVE"
+    assert detail["available_actions"] == []
+    assert detail["safe_info"] is None
+    detail_text = detail_response.get_data(as_text=True)
+    for forbidden in ("sub-history-1", "legacy_3_1", str(tmp_path)):
+        assert forbidden not in detail_text
+    list_text = client.get(
+        "/api/v1/tracking/items", query_string={"storage_dir": "storage"}
+    ).get_data(as_text=True)
+    assert "sub-history-1" not in list_text
+
+
+def test_published_group_enum_matches_the_engine_order() -> None:
+    """Issue #224 A7: the DTO can never quietly drift from the engine order."""
+    from typing import get_args
+
+    from apps.migu_orca_web.api_contract import TrackingStatusGroupDTO
+    from tracking_engine.models.tracking import TRACKING_STATUS_GROUP_ORDER
+
+    annotation = TrackingStatusGroupDTO.model_fields["group"].annotation
+    assert get_args(annotation) == TRACKING_STATUS_GROUP_ORDER
+
 
 
 def test_tracking_list_q_and_status_group_and_sort(

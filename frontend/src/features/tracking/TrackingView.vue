@@ -25,16 +25,14 @@ import {
   formatTrackingUpdatedAt,
   probeStatusLabel,
   projectCapabilitySummary,
+  projectStatusGroups,
   projectTrackingOverview,
   sortTrackingItems,
-  TRACKING_OVERVIEW_GROUPS,
-  TRACKING_STATUS_GROUPS,
   resubmitRiskMessage,
   type TrackingAction,
   type TrackingCheckResult,
   type TrackingItem,
   type TrackingListSummary,
-  type TrackingOverviewGroup,
   type TrackingResubmitBinding,
   type TrackingResubmitResult,
   type TrackingStatusGroup,
@@ -155,6 +153,9 @@ const clearBatchSelection = writes.clearBatchSelection
 // response started before a write must never overwrite it, and a list refresh
 // must never discard a write result.
 let listSequence = 0
+// Counts-only refreshes have their own generation: a settled write must not
+// invalidate (and so permanently leave loading) a list read the user started.
+let countsSequence = 0
 let writeGeneration = 0
 let syncSequence = 0
 let syncController: AbortController | null = null
@@ -188,34 +189,59 @@ async function probeSavedConnection(): Promise<void> {
   }
 }
 
-const statusLabels: Record<TrackingStatusGroup, string> = {
-  PENDING: '待提交', PROCESSING: '处理中', ACTIVE: '追番中',
-  ATTENTION: '需处理', INACTIVE: '已停用',
-}
 /**
- * Clicking an overview card filters the list by that server status group.
- * 已加入下载 has no group of its own, so its card only reports the count.
+ * Issue #224 A2/A5: the overview is exactly the four server-published cards.
+ * Clicking one is a whole-library category entry, so it also clears the search
+ * box (the user's decision): the card number and the filtered row count then
+ * describe the same category, and a later search narrows the rows only.
  */
-function selectOverviewGroup(group: TrackingOverviewGroup): void {
-  if (group === 'ADDED_TO_DOWNLOAD') return
+function selectOverviewGroup(group: TrackingStatusGroup): void {
+  searchTerm.value = ''
   statusFilter.value = statusFilter.value === group ? '' : group
 }
 
-/** Issue #99: the five fixed overview categories, including 已加入下载. */
-const overviewLabels: Record<TrackingOverviewGroup, string> = {
-  ...statusLabels,
-  ADDED_TO_DOWNLOAD: '已加入下载',
-}
-// Issue #85: the overview is the server's authoritative count projection, not a
-// recount of whichever rows this page happens to hold or filter.
+// Issue #85/#224: the overview is the server's authoritative projection, not a
+// recount of whichever rows this page happens to hold or filter.  Both the
+// total and the group labels/counts/card membership come from the server, so
+// the page owns no label table (A7).
 const listSummary = ref<TrackingListSummary | null>(null)
+const listStatusGroups = ref<ListResult['status_groups'] | null>(null)
 const overview = computed(() => projectTrackingOverview(listSummary.value))
-const capabilitySummary = computed(() => (
-  savedState.value ? projectCapabilitySummary(savedState.value.capabilities) : []
-))
+const statusGroups = computed(() => projectStatusGroups(listStatusGroups.value))
+const overviewCards = computed(() => statusGroups.value.filter((group) => group.isCard))
 const filteredItems = computed(() => sortTrackingItems(filterTrackingItems(items.value, {
   query: searchTerm.value, statusGroup: statusFilter.value,
 })))
+/** True only while a real search term is narrowing the list (trimmed). */
+const hasSearch = computed(() => searchTerm.value.trim() !== '')
+/**
+ * The authoritative count of the selected category, or of 全部 without one.
+ *
+ * `null` means the server did not publish the selected group (an older or
+ * malformed projection), so the page states the filtered number alone instead
+ * of relabelling the whole-library total as the category count.
+ */
+const categoryTotal = computed<number | null>(() => {
+  if (!statusFilter.value) return overview.value.total
+  return statusGroups.value.find((group) => group.group === statusFilter.value)?.count ?? null
+})
+/** Issue #224 A5: 共 N 部; with a search 筛选出 M 部 · 共 N 部. */
+const listCountText = computed(() => {
+  const total = categoryTotal.value
+  if (hasSearch.value) {
+    return total === null
+      ? `筛选出 ${filteredItems.value.length} 部`
+      : `筛选出 ${filteredItems.value.length} 部 · 共 ${total} 部`
+  }
+  return total === null ? '共 — 部' : `共 ${total} 部`
+})
+const statusFilterOptions = computed(() => [
+  { value: '', label: '全部状态' },
+  ...statusGroups.value.map((group) => ({ value: group.group, label: group.label })),
+])
+const capabilitySummary = computed(() => (
+  savedState.value ? projectCapabilitySummary(savedState.value.capabilities) : []
+))
 const selectedItem = computed(() => items.value.find(
   (item) => item.tracking_id === selectedTrackingId.value,
 ) ?? null)
@@ -265,6 +291,8 @@ function syncSelection(forceAbsentCheck = false): void {
 
 async function loadList(silent = false): Promise<void> {
   const sequence = ++listSequence
+  // A full read supersedes a counts-only refresh still in flight.
+  countsSequence += 1
   const generation = writeGeneration
   if (!silent) loading.value = true
   failed.value = false
@@ -276,6 +304,7 @@ async function loadList(silent = false): Promise<void> {
     const previous = selectedTrackingId.value
     items.value = result?.items ?? []
     listSummary.value = result?.summary ?? null
+    listStatusGroups.value = result?.status_groups ?? null
     syncSelection(true)
     if (selectedTrackingId.value && selectedTrackingId.value !== previous) await focusSelection()
   } catch (error) {
@@ -402,6 +431,14 @@ async function syncTracking(): Promise<void> {
       items.value = result.items
       detailRevision.value += 1
       syncSelection(true)
+      // Issue #224 A5: the sync response carries rows only, so the authoritative
+      // total and group metadata are re-read once.  The cards are never
+      // recounted from the rows — a sync can add, update or retire records and
+      // the four counts must match the list again right after it.
+      await loadList(true)
+      // A connection reset (or a newer sync intent) during that read owns the
+      // page now: never restore the old summary or its success message.
+      if (sequence !== syncSequence) return
       // Issue #88: strangers in Auto Bangumi are counted, never imported.
       syncMessage.value = result.summary.ignored
         ? `同步完成：检查 ${result.summary.checked} 条，新增 ${result.summary.created} 条，更新 ${result.summary.updated} 条；忽略 ${result.summary.ignored} 条不属于 MiGuOrca 管理的外部订阅。`
@@ -438,6 +475,31 @@ async function recheckAfterAction(trackingId: string | null, refreshList: boolea
   if (refreshList) await loadList(true)
   if (!trackingId || selectedTrackingId.value !== trackingId) return
   await inspector.value?.reload()
+}
+
+/**
+ * Re-read only the authoritative counts after a settled write (issue #224 A5).
+ *
+ * The write response carries the row, not the projection, so a status change
+ * would otherwise leave the four card numbers on the previous category.  The
+ * converged row is deliberately kept: this refresh never replaces the list, it
+ * only re-states the server's whole-library summary and group metadata.  A
+ * failure is silent — a count refresh must never turn a healthy list into an
+ * error state.
+ */
+async function refreshServerCounts(): Promise<void> {
+  const sequence = ++countsSequence
+  const generation = writeGeneration
+  try {
+    const result = await api.get<ListResult>('/api/v1/tracking/items', {
+      query: { ...storageQuery(), sort: 'updated_at' },
+    })
+    if (sequence !== countsSequence || generation !== writeGeneration) return
+    listSummary.value = result?.summary ?? null
+    listStatusGroups.value = result?.status_groups ?? null
+  } catch {
+    // Leave the last authoritative projection in place.
+  }
 }
 
 /** A fixed verdict the session produced, mapped to its one page-level channel. */
@@ -504,6 +566,9 @@ async function runWriteEffects(effects: readonly TrackingWriteEffect[]): Promise
   for (const effect of effects) {
     if (effect.kind === 'recheck') {
       await recheckAfterAction(effect.trackingId, effect.refreshList)
+      // Issue #224 A5: a converged row never moves a category count by itself,
+      // so the settled write re-reads the server projection as well.
+      if (!effect.refreshList) await refreshServerCounts()
       continue
     }
     if (effect.kind === 'confirmResubmitRisk') {
@@ -995,32 +1060,29 @@ onBeforeUnmount(() => {
       <h2 id="tracking-status-heading">状态总览</h2>
       <div class="tracking-status-cards">
         <button
-          v-for="group in TRACKING_OVERVIEW_GROUPS"
-          :key="group"
+          v-for="group in overviewCards"
+          :key="group.group"
           type="button"
           class="tracking-status-card"
-          :id="`tracking-overview-${group.toLowerCase()}`"
-          :class="{ 'is-selected': statusFilter === group }"
-          :aria-pressed="statusFilter === group"
-          :disabled="group === 'ADDED_TO_DOWNLOAD'"
-          @click="selectOverviewGroup(group)"
+          :id="`tracking-overview-${group.group.toLowerCase()}`"
+          :class="{ 'is-selected': statusFilter === group.group }"
+          :aria-pressed="statusFilter === group.group"
+          @click="selectOverviewGroup(group.group)"
         >
-          <span>{{ overviewLabels[group] }}</span><strong>{{ overview.byGroup[group] }}</strong>
+          <span>{{ group.label }}</span><strong>{{ group.count }}</strong>
         </button>
       </div>
-      <p class="tracking-status-total" role="status">共 {{ overview.total }} 条追番记录</p>
     </section>
 
     <section class="tracking-workspace" aria-label="追番记录与追番详情">
       <PanelSection title="追番列表" class="tracking-list-panel">
-        <template #actions><span class="tracking-count" aria-live="polite">显示 {{ filteredItems.length }} / {{ items.length }}</span></template>
         <div class="tracking-filters">
           <label for="tracking-search">搜索标题或字幕组</label>
           <BaseInput id="tracking-search" v-model="searchTerm" type="search" placeholder="输入公开标题或字幕组" />
           <label for="tracking-status-filter">状态筛选</label>
           <BaseSelect id="tracking-status-filter" v-model="statusFilter" label="状态筛选"
-            :options="[{ value: '', label: '全部状态' }, ...TRACKING_STATUS_GROUPS.map((group) => ({ value: group, label: statusLabels[group] }))]" />
-          <BaseButton v-if="searchTerm || statusFilter" variant="secondary" @click="clearFilters">清除筛选</BaseButton>
+            :options="statusFilterOptions" />
+          <BaseButton v-if="hasSearch || statusFilter" variant="secondary" @click="clearFilters">清除筛选</BaseButton>
         </div>
         <div v-if="loading" class="tracking-list-state"><LoadingState message="正在读取追番列表…" /></div>
         <ErrorState v-else-if="failed" title="追番列表读取失败" message="暂时无法读取本地追番列表，请稍后重试。" retry-label="重试读取" @retry="loadList()" />
@@ -1072,6 +1134,9 @@ onBeforeUnmount(() => {
           </button>
         </div>
         <p v-if="selectedHidden" class="tracking-selection-note" role="status">当前选择被筛选条件隐藏，未自动切换记录。</p>
+        <!-- Issue #224 A5: the count lives at the list bottom; N stays the
+             server's whole-library category count and never a frontend recount. -->
+        <p v-if="!loading && !failed" class="tracking-list-count" role="status">{{ listCountText }}</p>
       </PanelSection>
 
       <aside class="tracking-inspector" aria-labelledby="tracking-inspector-heading">
@@ -1161,11 +1226,11 @@ onBeforeUnmount(() => {
 .tracking-lede { margin: 0; color: var(--color-text-muted); }
 .tracking-status-overview { display: grid; gap: var(--space-3); }
 .tracking-status-overview h2, .tracking-inspector h2 { margin: 0; font-size: 1.05rem; }
-.tracking-status-cards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-3); }
+.tracking-status-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3); }
 .tracking-status-card { display: grid; gap: .35rem; text-align: left; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text); cursor: pointer; }
 .tracking-status-card:hover, .tracking-status-card:focus-visible, .tracking-status-card.is-selected { border-color: var(--color-primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 18%, transparent); }
 .tracking-status-card strong { font-size: 1.35rem; }
-.tracking-status-total, .tracking-count { margin: 0; color: var(--color-text-muted); }
+.tracking-list-count { margin: 0; color: var(--color-text-muted); }
 .tracking-compat-notice { margin: var(--space-3) 0 0; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-subtle); color: var(--color-text-muted); }
 /* Issue 115：状态总览与导航留在外侧；列表与详情各自在固定可用高度内滚动，
  * 展开记录或操作不会拉长整页，也不会移动另一列。 */

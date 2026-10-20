@@ -151,6 +151,12 @@ def run_tracking_management(
     local_plan: Mapping[str, Any] | None = None,
     write: ManagementWriter | None = None,
     readback: Callable[[str, str, ResolvedManagementTarget], Any] | None = None,
+    #: Only the internal "删除追番方案 + 同时删除受控外部订阅" leg sets this. It
+    #: keeps ``DELETE_EXTERNAL`` executable for a retired read-only record without
+    #: advertising any management action for it (issue #224 A4 + #218 exception
+    #: (a)): otherwise deleting the local plan would leave an Auto Bangumi orphan
+    #: this product can never remove.
+    internal_plan_delete: bool = False,
     now: str | None = None,
 ) -> dict[str, Any]:
     """Prepare and start one management operation, with an at-most-once gate.
@@ -209,7 +215,12 @@ def run_tracking_management(
                 "created": False,
             }
         raise Stage1Error("tracking_management_state_conflict", "已有管理操作正在执行，请先恢复", "tracking_management")
-    if not management_action_allowed(record.status, operation, enabled=enabled):
+    if not management_action_allowed(
+        record.status,
+        operation,
+        enabled=enabled,
+        include_internal=internal_plan_delete,
+    ):
         raise Stage1Error("tracking_management_state_conflict", "当前追番状态不允许该管理操作", "tracking_management")
     if expected_revision != record.revision:
         raise Stage1Error("tracking_revision_conflict", "追番记录版本已变化，请刷新后重试", "tracking_management", {"expected_revision": expected_revision, "current_revision": record.revision})

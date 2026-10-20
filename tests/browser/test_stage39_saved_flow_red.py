@@ -13,6 +13,8 @@ from tests.browser.saved_tracking_fixtures import (
     _modify_actions,
     _probe_capabilities,
     _recovery_item,
+    _status_groups,
+    _status_groups_for,
     _summary,
 )
 
@@ -192,6 +194,7 @@ def test_saved_management_actions_send_only_bound_connection_fields(page, live_s
                             "inactive": 0, "needs_attention": 0,
                             "unreadable": 0,
                         },
+                        "status_groups": _status_groups(active=1),
                         "warnings": [],
                     },
                 }
@@ -320,6 +323,7 @@ def test_saved_sync_uses_the_saved_connection_and_sends_ref_revision(page, live_
                             "inactive": 0, "needs_attention": 0,
                             "unreadable": 0,
                         },
+                        "status_groups": _status_groups_for([item]),
                         "warnings": [],
                     },
                 }
@@ -452,6 +456,7 @@ def test_saved_verify_external_preserves_unknown_source_lock(page, live_server_u
                             "inactive": 0, "needs_attention": 1,
                             "unreadable": 0,
                         },
+                        "status_groups": _status_groups(attention=1),
                         "warnings": [],
                     },
                 }
@@ -627,7 +632,7 @@ def test_tracking_refresh_does_not_probe_or_sync_saved_connection(page, live_ser
             )
             return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [], "summary": {"total": 0}, "warnings": []}})
+            route.fulfill(json={"ok": True, "result": {"items": [], "summary": {"total": 0}, "status_groups": _status_groups_for([]), "warnings": []}})
             return
         if request.method == "POST":
             calls.append(path)
@@ -685,7 +690,7 @@ def test_tracking_capability_degrade_does_not_hide_management_actions(page, live
             )
             return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1), "warnings": []}})
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1), "status_groups": _status_groups_for([item]), "warnings": []}})
             return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
             route.fulfill(json=detail)
@@ -762,7 +767,7 @@ def test_saved_submit_and_retry_use_one_explicit_generation(page, live_server_ur
             )
             return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [body_item], "summary": {"total": 1}, "warnings": []}})
+            route.fulfill(json={"ok": True, "result": {"items": [body_item], "summary": {"total": 1}, "status_groups": _status_groups_for([body_item]), "warnings": []}})
             return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
             route.fulfill(json=detail)
@@ -853,7 +858,7 @@ def test_local_recovery_needs_no_saved_probe_and_has_no_standalone_revalidate(pa
             )
             return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1), "warnings": []}})
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1), "status_groups": _status_groups_for([item]), "warnings": []}})
             return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
             route.fulfill(json=detail)
@@ -984,7 +989,7 @@ def test_unconfigured_recovery_has_no_external_verify_or_probe(page, live_server
             )
             return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}})
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "status_groups": _status_groups_for([item]), "warnings": []}})
             return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
             route.fulfill(json=detail)
@@ -1044,7 +1049,7 @@ def test_settings_delete_requires_confirmation_and_then_tracking_degrades(page, 
             )
             return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [], "summary": {"total": 0}, "warnings": []}})
+            route.fulfill(json={"ok": True, "result": {"items": [], "summary": {"total": 0}, "status_groups": _status_groups_for([]), "warnings": []}})
             return
         route.continue_()
 
@@ -1097,7 +1102,7 @@ def test_submit_is_available_from_the_saved_connection_without_a_probe(page, liv
             )
             return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1), "warnings": []}})
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1), "status_groups": _status_groups_for([item]), "warnings": []}})
             return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
             route.fulfill(json={"ok": True, "result": _detail_payload(item)})
@@ -1148,7 +1153,7 @@ def test_management_unknown_keeps_lock_and_does_not_resend(page, live_server_url
             )
             return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}})
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "status_groups": _status_groups_for([item]), "warnings": []}})
             return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
             route.fulfill(json=detail)
@@ -1219,7 +1224,7 @@ def test_generation_switch_does_not_reuse_old_management_intent(page, live_serve
             )
             return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}})
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "status_groups": _status_groups_for([item]), "warnings": []}})
             return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
             route.fulfill(json={"ok": True, "result": _detail_payload(item)})
@@ -1270,7 +1275,7 @@ def test_management_generation_refresh_keeps_external_id_unbound(page, live_serv
             )
             return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [], "summary": {"total": 0}, "warnings": []}})
+            route.fulfill(json={"ok": True, "result": {"items": [], "summary": {"total": 0}, "status_groups": _status_groups_for([]), "warnings": []}})
             return
         if request.method == "POST":
             calls.append(path)
@@ -1320,7 +1325,7 @@ def test_submit_retry_singleflight_holds_unknown_lock_across_generation(page, li
             )
             return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}})
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "status_groups": _status_groups_for([item]), "warnings": []}})
             return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
             route.fulfill(json={"ok": True, "result": _detail_payload(item)})
@@ -1398,7 +1403,7 @@ def test_submit_unknown_lock_survives_new_generation_refresh(page, live_server_u
             )
             return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1), "warnings": []}})
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": _summary(1), "status_groups": _status_groups_for([item]), "warnings": []}})
             return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
             route.fulfill(json={"ok": True, "result": _detail_payload(item)})
@@ -1479,7 +1484,7 @@ def test_unknown_operation_after_configuration_change_cannot_verify(page, live_s
             )
             return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}})
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "status_groups": _status_groups_for([item]), "warnings": []}})
             return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
             route.fulfill(json={"ok": True, "result": _detail_payload(item)})
@@ -1528,7 +1533,7 @@ def test_manual_recovery_is_local_and_confirmed(page, live_server_url, action):
             )
             return
         if request.method == "GET" and path == "/tracking/items":
-            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "warnings": []}})
+            route.fulfill(json={"ok": True, "result": {"items": [item], "summary": {"total": 1}, "status_groups": _status_groups_for([item]), "warnings": []}})
             return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
             route.fulfill(json={"ok": True, "result": _detail_payload(item)})

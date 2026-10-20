@@ -9,6 +9,7 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import set_storage_preferences
+from tests.browser.saved_tracking_fixtures import _status_groups_for
 from tests.browser.screen_support import wait_for_screen_scroll
 from tests.browser.test_app_batch_workbench import (
     _batch_item,
@@ -96,10 +97,21 @@ def _mock_tracking_list(page: Page, items: list[dict[str, Any]]) -> None:
                     "result": {
                         "items": items,
                         "summary": {
+                            # Self-consistent with status_groups below: the two
+                            # rows are one 追番中 and one 需处理.
                             "total": len(items), "pending": 0, "processing": 0,
-                            "active": len(items), "inactive": 0, "needs_attention": len(items),
+                            "active": 1, "inactive": 0, "needs_attention": 1,
                             "unreadable": 0,
                         },
+                        # Issue #224 A7: the four cards render from this
+                        # server-owned metadata, never from a client label table.
+                        "status_groups": [
+                            {"group": "PENDING", "label": "待处理", "count": 0, "has_overview_card": True},
+                            {"group": "PROCESSING", "label": "处理中", "count": 0, "has_overview_card": False},
+                            {"group": "ACTIVE", "label": "追番中", "count": 1, "has_overview_card": True},
+                            {"group": "ATTENTION", "label": "需处理", "count": 1, "has_overview_card": True},
+                            {"group": "INACTIVE", "label": "已停用", "count": 0, "has_overview_card": True},
+                        ],
                         "warnings": [],
                     },
                 },
@@ -188,10 +200,10 @@ class TestCrossFeatureResponsive:
         expect(rows).to_have_count(2)
         expect(rows.nth(0)).to_contain_text("追番中")
         expect(rows.nth(1)).to_contain_text("提交失败")
-        # The status overview states every overview category in text as well.
-        # Issue #85: four fixed categories; PROCESSING stays a per-row state.
+        # The status overview states every card category in text as well.
+        # Issue #224: four fixed categories; PROCESSING stays a per-row state.
         overview = page.locator("#tracking-status-heading").locator("..")
-        for label in ("待提交", "追番中", "已停用", "需处理"):
+        for label in ("待处理", "追番中", "已停用", "需处理"):
             expect(overview).to_contain_text(label)
         # The decorative color bar is hidden from assistive tech: the text label
         # is the state signal, not the color.
@@ -528,7 +540,7 @@ class TestReducedMotionAndFeedback:
         held[0].fulfill(
             status=200,
             content_type="application/json",
-            body=json.dumps({"ok": True, "result": {"items": [], "summary": {}, "warnings": []}}),
+            body=json.dumps({"ok": True, "result": {"items": [], "summary": {}, "status_groups": _status_groups_for([]), "warnings": []}}),
         )
         page.wait_for_selector(".empty-state")
 
@@ -552,13 +564,13 @@ class TestReducedMotionAndFeedback:
         held[0].fulfill(
             status=200,
             content_type="application/json",
-            body=json.dumps({"ok": True, "result": {"items": [], "summary": {}, "warnings": []}}),
+            body=json.dumps({"ok": True, "result": {"items": [], "summary": {}, "status_groups": _status_groups_for([]), "warnings": []}}),
         )
         for route in held[1:]:
             route.fulfill(
                 status=200,
                 content_type="application/json",
-                body=json.dumps({"ok": True, "result": {"items": [], "summary": {}, "warnings": []}}),
+                body=json.dumps({"ok": True, "result": {"items": [], "summary": {}, "status_groups": _status_groups_for([]), "warnings": []}}),
             )
         expect(refresh).to_be_enabled()
 

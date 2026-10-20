@@ -25,6 +25,7 @@ import pytest
 from PIL import Image
 from playwright.sync_api import Page, expect
 
+from tests.browser.saved_tracking_fixtures import _status_groups, _summary
 from tests.browser.visual_manifest import CONTROLS_REGION, PIXEL_GATE_RULING
 from tests.browser.visual_support import (
     CANVAS,
@@ -50,7 +51,18 @@ CONNECTION_SUMMARY_BODY = json.dumps(
     },
     ensure_ascii=False,
 )
-TRACKING_BODY = json.dumps({"ok": True, "result": {"items": []}}, ensure_ascii=False)
+TRACKING_BODY = json.dumps(
+    {
+        "ok": True,
+        "result": {
+            "items": [],
+            "summary": _summary(0),
+            "status_groups": _status_groups(),
+            "warnings": [],
+        },
+    },
+    ensure_ascii=False,
+)
 
 _CONTRAST_SCRIPT = """
     (selector) => {

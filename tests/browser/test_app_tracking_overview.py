@@ -17,6 +17,7 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import set_storage_preferences
+from tests.browser.saved_tracking_fixtures import _status_groups_for
 
 pytestmark = pytest.mark.browser
 
@@ -41,6 +42,20 @@ def _item(index: int, *, total_episodes: int | None = None) -> dict[str, Any]:
         "total_episodes": total_episodes,
         "revision": 1,
         "updated_at": "2026-09-13T00:00:00+00:00",
+    }
+
+
+def _external_only_item() -> dict[str, Any]:
+    """A retired read-only archive: real label, no card, only in 全部 (#224 A4)."""
+    return {
+        **_item(99),
+        "tracking_id": "tracking-archive",
+        "request_id": None,
+        "title": "历史外部订阅",
+        "status": "EXTERNAL_ONLY",
+        "status_label": "仅外部",
+        "status_group": "INACTIVE",
+        "available_actions": [],
     }
 
 
@@ -72,7 +87,10 @@ def _detail(item: dict[str, Any], *, audit_events: int = 1) -> dict[str, Any]:
     }
 
 
-def _open(page: Page, live_server_url: str, storage_dir, items: list[dict[str, Any]], *, audits: int = 1) -> list[dict[str, Any]]:
+def _open(
+    page: Page, live_server_url: str, storage_dir, items: list[dict[str, Any]],
+    *, audits: int = 1,
+) -> list[dict[str, Any]]:
     """Mock the tracking list/detail DTOs; the returned list is mutable so a
     test can reload the same page with a different number of records."""
     live_items = list(items)
@@ -92,6 +110,9 @@ def _open(page: Page, live_server_url: str, storage_dir, items: list[dict[str, A
                     ),
                 )
                 return
+        _groups = {
+            entry["group"]: entry["count"] for entry in _status_groups_for(live_items)
+        }
         route.fulfill(
             status=200,
             content_type="application/json",
@@ -100,16 +121,21 @@ def _open(page: Page, live_server_url: str, storage_dir, items: list[dict[str, A
                     "ok": True,
                     "result": {
                         "items": live_items,
+                        # Issue #224 A4/A7: one derivation feeds both the
+                        # summary and the published groups, so the fixture is a
+                        # response the server could actually produce — the
+                        # retired archive is in ``items``/``total`` only.
                         "summary": {
                             "total": len(live_items),
-                            "pending": 0,
-                            "processing": 0,
-                            "active": len(live_items),
-                            "inactive": 0,
-                            "needs_attention": 0,
+                            "pending": _groups["PENDING"],
+                            "processing": _groups["PROCESSING"],
+                            "active": _groups["ACTIVE"],
+                            "inactive": _groups["INACTIVE"],
+                            "needs_attention": _groups["ATTENTION"],
                             "added_to_download": 0,
                             "unreadable": 0,
                         },
+                        "status_groups": _status_groups_for(live_items),
                         "warnings": [],
                     },
                 },
@@ -133,6 +159,60 @@ def _wait_for_loaded_detail(page: Page) -> None:
     detail response has been rendered.
     """
     expect(page.locator(".tracking-inspector-summary")).to_contain_text("总集数")
+
+def test_overview_cards_keep_the_server_count_and_clear_the_search(
+    page: Page, live_server_url: str, storage_dir
+) -> None:
+    """Issue #224 A2/A4/A5: four cards, authoritative numbers, search cleared.
+
+    The fixture is a response the server can actually produce: five 追番中 rows
+    plus one retired ``EXTERNAL_ONLY`` archive, so 全部 has 6 rows while the
+    追番中 card has 5 and 已停用 has 0.  A frontend recount of loaded rows, a card
+    that reads ``summary.total``, or a filter that lets the archive through
+    would all fail instead of accidentally matching the mock.
+    """
+    items = [*[_item(index) for index in range(5)], _external_only_item()]
+    page.set_viewport_size({"width": 1440, "height": 900})
+    _open(page, live_server_url, storage_dir, items)
+
+    cards = page.locator(".tracking-status-card")
+    assert cards.count() == 4
+    assert ["".join(text.split()) for text in cards.all_inner_texts()] == [
+        "待处理0", "追番中5", "需处理0", "已停用0",
+    ]
+    # 全部 keeps the archive visible with its real label and the server total.
+    rows = page.locator(".tracking-list-item")
+    expect(rows).to_have_count(6)
+    expect(rows.filter(has_text="仅外部")).to_have_count(1)
+    # 全部 without a search: the bottom number is the server total, not a recount.
+    assert page.locator(".tracking-list-count").inner_text() == "共 6 部"
+
+    # Every card's number equals the rows it reveals without a search condition.
+    expected = {
+        "pending": ("待处理", 0), "active": ("追番中", 5),
+        "attention": ("需处理", 0), "inactive": ("已停用", 0),
+    }
+    for group, (_label, count) in expected.items():
+        card = page.locator(f"#tracking-overview-{group}")
+        card.click()
+        assert card.get_attribute("aria-pressed") == "true"
+        expect(page.locator(".tracking-list-item")).to_have_count(count)
+        assert page.locator(".tracking-list-count").inner_text() == f"共 {count} 部"
+
+    # 追番中: a search narrows only the rows; the card number stays authoritative.
+    page.locator("#tracking-overview-active").click()
+    expect(page.locator(".tracking-list-item")).to_have_count(5)
+    page.fill("#tracking-search", "04")
+    expect(page.locator(".tracking-list-item")).to_have_count(1)
+    assert page.locator(".tracking-list-count").inner_text() == "筛选出 1 部 · 共 5 部"
+
+    # Clicking another card clears the search box (the user's decision).
+    page.locator("#tracking-overview-inactive").click()
+    expect(page.locator("#tracking-search")).to_have_value("")
+    expect(page.locator(".tracking-list-item")).to_have_count(0)
+    assert page.locator(".tracking-list-count").inner_text() == "共 0 部"
+    assert page.locator("#tracking-overview-inactive").get_attribute("aria-pressed") == "true"
+
 
 def test_long_list_scrolls_inside_while_overview_and_inspector_stay_put(
     page: Page, live_server_url: str, storage_dir

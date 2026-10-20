@@ -20,6 +20,7 @@ from typing import Any
 from PIL import Image
 from playwright.sync_api import Page
 
+from tests.browser.saved_tracking_fixtures import _status_groups, _summary
 from tests.browser.visual_manifest import (
     SHELL_ANCHOR_SELECTORS,
     SHELL_REGION,
@@ -97,7 +98,18 @@ UNCONFIGURED_CONNECTION_BODY = json.dumps(
 )
 """固定的「未配置」连接摘要：视觉/几何门禁不依赖部署端连接状态。"""
 
-EMPTY_TRACKING_ITEMS_BODY = json.dumps({"ok": True, "result": {"items": []}}, ensure_ascii=False)
+EMPTY_TRACKING_ITEMS_BODY = json.dumps(
+    {
+        "ok": True,
+        "result": {
+            "items": [],
+            "summary": _summary(0),
+            "status_groups": _status_groups(),
+            "warnings": [],
+        },
+    },
+    ensure_ascii=False,
+)
 """固定的空追番列表：待处理数量恒为 0，避免跨用例漂移。"""
 
 
