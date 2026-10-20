@@ -60,19 +60,15 @@ describe('generated contract consumer fixture (US-249)', () => {
     type TrackingResult = JsonResult<'getTrackingItemDetail'>
     expectTypeOf<TrackingResult['safe_info']>().toMatchTypeOf<object | null>()
     expectTypeOf<TrackingResult['updated_episode']>().toEqualTypeOf<null>()
+    // Issue #228 retired the five legacy action codes from the published enum.
     expectTypeOf<
       NonNullable<TrackingResult['available_actions']>[number]['code']
     >().toEqualTypeOf<
-      | 'REVALIDATE'
       | 'SUBMIT'
       | 'RETRY'
-      | 'RECOVER_AUTO'
-      | 'MARK_SUCCEEDED'
-      | 'MARK_FAILED'
       | 'MODIFY'
       | 'SET_ENABLED'
       | 'REFRESH_RSS'
-      | 'DELETE_EXTERNAL'
     >()
 
     type CapabilityResult = JsonResult<'probeSavedAutoBangumiCapabilities'>

@@ -162,7 +162,7 @@ def test_real_delete_readback_requires_list_absence_not_deleted_flag(tmp_path: P
     ), transport=transport)
     result = run_tracking_management(
         config, tracking_id=record.tracking_id, expected_revision=record.revision,
-        idempotency_key="delete-presence-readback", confirm=True, operation="DELETE_EXTERNAL",
+        idempotency_key="delete-presence-readback", confirm=True, operation="DELETE_EXTERNAL", internal_plan_delete=True,
         target_scope="SUBSCRIPTION", management_client=client, write=_management_writer(client, "DELETE_EXTERNAL"),
     )
     assert result["outcome"] == "DEFINITE_FAILURE"

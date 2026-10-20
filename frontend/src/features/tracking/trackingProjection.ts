@@ -81,9 +81,14 @@ export interface TrackingFilter {
   statusGroup?: TrackingStatusGroup | ''
 }
 
+/**
+ * The action codes this page is willing to read.  Issue #228 (T5a) retired
+ * ``REVALIDATE``/``RECOVER_AUTO``/``MARK_SUCCEEDED``/``MARK_FAILED`` and the
+ * standalone ``DELETE_EXTERNAL`` from the published enum, so the projection can
+ * no longer receive them.
+ */
 const KNOWN_ACTIONS = new Set<TrackingActionCode>([
-  'REVALIDATE', 'SUBMIT', 'RETRY', 'RECOVER_AUTO', 'MARK_SUCCEEDED',
-  'MARK_FAILED', 'MODIFY', 'SET_ENABLED', 'REFRESH_RSS', 'DELETE_EXTERNAL',
+  'SUBMIT', 'RETRY', 'MODIFY', 'SET_ENABLED', 'REFRESH_RSS',
 ])
 const KNOWN_STYLES = new Set<TrackingActionStyle>(['PRIMARY', 'SECONDARY', 'DANGER'])
 /**
@@ -110,7 +115,6 @@ export const MANAGEMENT_CAPABILITY: Partial<
   MODIFY: { SUBSCRIPTION: 'subscription_modify', ASSOCIATED_RSS: 'rss_modify' },
   SET_ENABLED: { SUBSCRIPTION: 'subscription_enable', ASSOCIATED_RSS: 'rss_enable' },
   REFRESH_RSS: { ASSOCIATED_RSS: 'rss_refresh' },
-  DELETE_EXTERNAL: { SUBSCRIPTION: 'subscription_delete', ASSOCIATED_RSS: 'rss_delete' },
 }
 
 /** Fixed Chinese labels for the two management scopes; the raw enum never renders. */
@@ -423,9 +427,24 @@ export const MODIFY_FORM_HELP =
 export const MANAGEMENT_ACTIONS_HELP =
   '启停与刷新只作用于 Auto Bangumi 中的外部对象，不修改 MiGuOrca 本地方案；每次操作都需要单独确认。'
 
-/** Fixed copy for the per-record external delete section (US-315). */
-export const DELETE_EXTERNAL_HELP =
-  '删除按当前追番逐条执行：没有勾选、批量或全局删除，也只会删除你明确选择的那一个 Auto Bangumi 外部对象；MiGuOrca 本地订阅方案、追番记录、审计记录、下载任务和已下载媒体文件都会保留，且不会删除任何媒体文件。'
+/**
+ * The record statuses only the server can settle (issue #228).
+ *
+ * These are the statuses a read-only external verification may be offered for.
+ * The set lives here — the one projection module — so the page and the write
+ * session cannot drift from each other or lose the status type.
+ */
+export const RECOVERABLE_STATUSES: ReadonlySet<TrackingItem['status']> = new Set([
+  'VERIFYING_EXTERNAL',
+  'RECOVERY_REQUIRED',
+  'UNKNOWN',
+])
+
+/** True when the record's exact status is one only the server can settle. */
+export function isRecoverableStatus(status: unknown): status is TrackingItem['status'] {
+  return typeof status === 'string'
+    && RECOVERABLE_STATUSES.has(status as TrackingItem['status'])
+}
 
 /**
  * Bounded read-only confirmation of a pending submission (issue #183).

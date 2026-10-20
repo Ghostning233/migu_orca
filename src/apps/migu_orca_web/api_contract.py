@@ -801,13 +801,19 @@ class TrackingAvailableActionDTO(_StrictBase):
     """One server-computed action (Stage 29 PRD §11.4).
 
     ``style`` is one of ``PRIMARY | SECONDARY | DANGER``; ``code`` one of the
-    fixed §11.4 candidates.  Only currently-executable actions are returned —
+    fixed candidates below.  Only currently-executable actions are returned —
     never a disabled fake action.
+
+    Issue #228 (T5a) retired five candidates from this enum: ``REVALIDATE``
+    (the submit path revalidates internally), ``RECOVER_AUTO``,
+    ``MARK_SUCCEEDED``, ``MARK_FAILED`` (the recovery family is the read-only
+    external verification, which is a page flow rather than a projected
+    state-changing action) and the standalone ``DELETE_EXTERNAL`` (its public
+    endpoint is gone; the internal plan-delete leg is not a projected action).
     """
 
     code: Literal[
-        "REVALIDATE", "SUBMIT", "RETRY", "RECOVER_AUTO", "MARK_SUCCEEDED",
-        "MARK_FAILED", "MODIFY", "SET_ENABLED", "REFRESH_RSS", "DELETE_EXTERNAL",
+        "SUBMIT", "RETRY", "MODIFY", "SET_ENABLED", "REFRESH_RSS",
     ]
     label: str
     style: Literal["PRIMARY", "SECONDARY", "DANGER"]
@@ -1184,22 +1190,23 @@ class TrackingBatchSubmitResultDTO(_StrictBase):
 class TrackingRecoverResultDTO(_StrictBase):
     """Result of ``POST /api/v1/tracking/items/{tracking_id}/recover`` (US-226).
 
-    A persisted recovery result is HTTP 200: ``action`` echoes the requested
-    action (``AUTO``/``MARK_SUCCEEDED``/``MARK_FAILED``) and ``outcome`` is the
-    record's final status (``ACTIVE``/``SUBMIT_FAILED``/``RECOVERY_REQUIRED``).
-    ``checked_revision`` is the revision the client acted on; ``next_revision``
-    is the record's revision after the outcome persisted (unchanged when an
-    ``AUTO`` recovery finds no new evidence on an already-``RECOVERY_REQUIRED``
-    record).  ``operation_id`` is set when the record references a submit
-    operation.  ``needs_manual`` is True when an ``AUTO`` recovery could not
-    resolve the outcome from local evidence and only a manual action can
-    progress.  ``tracking`` is the safe summary of the persisted record so the
-    client can update the list item without a second read.
+    A persisted recovery result is HTTP 200.  Issue #228 (T5a) left the
+    read-only external verification as the only recovery action, so ``action``
+    is always ``VERIFY_EXTERNAL`` and ``outcome`` is the record's status after
+    the read — ``ACTIVE``, ``DISABLED``, ``EXTERNAL_DELETED`` (a pending delete
+    is confirmed) or ``RECOVERY_REQUIRED`` (still undecided).  ``checked_revision`` is the revision the client
+    acted on; ``next_revision`` is the record's revision after the outcome
+    persisted (unchanged when the verification proves nothing new on an
+    already-``RECOVERY_REQUIRED`` record).  ``operation_id`` is set when the
+    record references a submit operation.  ``needs_manual`` is True when the
+    verification could not decide the outcome from the proven read.  ``tracking``
+    is the safe summary of the persisted record so the client can update the
+    list item without a second read.
     """
 
     tracking_id: str
-    action: Literal["AUTO", "MARK_SUCCEEDED", "MARK_FAILED", "VERIFY_EXTERNAL"]
-    outcome: Literal["ACTIVE", "SUBMIT_FAILED", "RECOVERY_REQUIRED"]
+    action: Literal["VERIFY_EXTERNAL"]
+    outcome: Literal["ACTIVE", "DISABLED", "EXTERNAL_DELETED", "RECOVERY_REQUIRED"]
     checked_revision: int
     next_revision: int
     checked_at: str
@@ -1328,9 +1335,14 @@ class TrackingResubmitResultDTO(_StrictBase):
 
 
 class TrackingManagementResultDTO(_StrictBase):
-    """Safe result shared by the four Stage 31 management write routes."""
+    """Safe result shared by the Stage 31 management write routes.
 
-    action: Literal["MODIFY", "SET_ENABLED", "DELETE_EXTERNAL", "REFRESH_RSS"]
+    Issue #228 (T5a) retired the standalone ``DELETE_EXTERNAL`` route, so the
+    shared result no longer carries that action; the composite plan-delete flow
+    returns its own documented payload.
+    """
+
+    action: Literal["MODIFY", "SET_ENABLED", "REFRESH_RSS"]
     management_status: Literal[
         "PREPARED", "IN_PROGRESS", "SUCCEEDED", "FAILED",
         "OUTCOME_UNKNOWN", "RECOVERY_REQUIRED",

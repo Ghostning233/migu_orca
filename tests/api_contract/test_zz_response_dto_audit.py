@@ -271,7 +271,6 @@ def _management_body(saved: Any, record: Any, **overrides: Any) -> dict[str, Any
     [
         ("modify", "SUBSCRIPTION", {"patch": {"title": "审计标题"}}),
         ("set-enabled", "SUBSCRIPTION", {"enabled": False}),
-        ("delete-external", "SUBSCRIPTION", {}),
         ("refresh", "ASSOCIATED_RSS", {}),
     ],
 )
@@ -410,7 +409,8 @@ def test_audit_hook_records_its_own_failure(
 def test_every_declared_success_endpoint_was_observed_and_valid() -> None:
     """All declared success DTOs were produced by a real response and passed."""
     audit = RESPONSE_DTO_AUDIT
-    assert len(declared_success_dtos()) == 37, (
+    # Issue #228 retired the standalone /delete-external success endpoint.
+    assert len(declared_success_dtos()) == 36, (
         "the endpoint registry changed; review the audit coverage:\n" + audit.report()
     )
     assert audit.unregistered == [], audit.report()

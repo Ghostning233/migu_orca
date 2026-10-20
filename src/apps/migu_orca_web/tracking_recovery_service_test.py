@@ -42,27 +42,17 @@ from storage_engine.controllers.tracking_repository import (
 from tracking_engine.models.operation import (
     TRACKING_OPERATION_KIND_SUBMIT,
     TRACKING_OPERATION_STATE_IN_PROGRESS,
-    TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN,
     TRACKING_OPERATION_STATE_PREPARED,
-    TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
-    TRACKING_OPERATION_STATE_SUCCEEDED,
     TrackingOperation,
     transition_tracking_operation,
 )
 from tracking_engine.models.tracking import (
-    TRACKING_AUDIT_ACTOR_USER,
-    TRACKING_AUDIT_RECOVERY_AUTO_FAILED,
-    TRACKING_AUDIT_RECOVERY_AUTO_SUCCEEDED,
-    TRACKING_AUDIT_RECOVERY_MANUAL_FAILED,
-    TRACKING_AUDIT_RECOVERY_MANUAL_SUCCEEDED,
-    TRACKING_AUDIT_RECOVERY_NEEDS_MANUAL,
     TRACKING_AUDIT_SUBMIT_OUTCOME_UNKNOWN,
     TRACKING_AUDIT_SUBMIT_STARTED,
     TRACKING_AUDIT_SUBMIT_SUCCEEDED,
     TRACKING_ORIGIN_SAVE_CONFIRM,
     TRACKING_STATUS_ACTIVE,
     TRACKING_STATUS_PENDING_SUBMIT,
-    TRACKING_STATUS_RECOVERY_REQUIRED,
     TRACKING_STATUS_SUBMIT_FAILED,
     TRACKING_STATUS_VERIFYING_EXTERNAL,
     TrackingRecord,
@@ -183,21 +173,6 @@ def _ab_success() -> dict[str, Any]:
     }
 
 
-def _ab_definite_failure() -> dict[str, Any]:
-    return {
-        "success": False,
-        "ab_subscription_id": None,
-        "ab_response": None,
-        "fallback_config": None,
-        "error": {
-            "error_type": "ab_auth_failed",
-            "error_message": "Auto Bangumi 认证失败",
-            "failed_step": "create_ab_subscription",
-            "details": {"status_code": 401},
-        },
-    }
-
-
 def _recover_kwargs(
     config: StorageConfig,
     record: TrackingRecord,
@@ -221,128 +196,24 @@ def _error_type(exc: Stage1Error) -> str:
 
 
 # ---------------------------------------------------------------------------
-# AUTO recovery
+# The recovery family converges on the read-only external verification (#228)
 # ---------------------------------------------------------------------------
 
 
-def test_auto_resolves_verifying_external_to_active_from_ab_result(
-    tmp_path: Path,
+@pytest.mark.parametrize("action", ["AUTO", "MARK_SUCCEEDED", "MARK_FAILED"])
+def test_retired_recovery_actions_are_rejected_without_any_write(
+    tmp_path: Path, action: str
 ) -> None:
+    """#228 E2/E3/E5: 自动恢复/标记成功/标记失败 are retired user actions.
+
+    The request is rejected before any state is touched: the record keeps its
+    status, revision and audit trail, the bound operation stays in flight, and
+    no new operation is created.  The read-only external verification is the
+    only recovery the executable set still accepts.
+    """
     request = _accepted_request(tmp_path)
     record = _seeded_tracking(tmp_path, request)
     _save_ab_result(tmp_path, "request-1", _ab_success())
-    verifying = _move_record(
-        tmp_path, record, TRACKING_STATUS_VERIFYING_EXTERNAL
-    )
-    config = _config(tmp_path)
-
-    result = run_tracking_recover(
-        **_recover_kwargs(config, verifying, action="AUTO")
-    )
-
-    assert result["outcome"] == TRACKING_STATUS_ACTIVE
-    assert result["needs_manual"] is False
-    assert result["next_revision"] == verifying.revision + 1
-    after = load_tracking_record(config, record.tracking_id)
-    assert after.status == TRACKING_STATUS_ACTIVE
-    assert after.audit_events[-1]["action"] == TRACKING_AUDIT_RECOVERY_AUTO_SUCCEEDED
-    assert after.audit_events[-1]["actor"] == "SYSTEM"
-
-
-def test_auto_resolves_recovery_required_to_submit_failed_from_definite_failure(
-    tmp_path: Path,
-) -> None:
-    request = _accepted_request(tmp_path)
-    record = _seeded_tracking(tmp_path, request)
-    _save_ab_result(tmp_path, "request-1", _ab_definite_failure())
-    recovery = _move_record(
-        tmp_path, record, TRACKING_STATUS_RECOVERY_REQUIRED
-    )
-    config = _config(tmp_path)
-
-    result = run_tracking_recover(
-        **_recover_kwargs(config, recovery, action="AUTO")
-    )
-
-    assert result["outcome"] == TRACKING_STATUS_SUBMIT_FAILED
-    after = load_tracking_record(config, record.tracking_id)
-    assert after.status == TRACKING_STATUS_SUBMIT_FAILED
-    assert after.audit_events[-1]["action"] == TRACKING_AUDIT_RECOVERY_AUTO_FAILED
-
-
-def test_auto_without_evidence_moves_verifying_external_to_recovery_required(
-    tmp_path: Path,
-) -> None:
-    request = _accepted_request(tmp_path)
-    record = _seeded_tracking(tmp_path, request)
-    verifying = _move_record(
-        tmp_path, record, TRACKING_STATUS_VERIFYING_EXTERNAL
-    )
-    config = _config(tmp_path)
-
-    result = run_tracking_recover(
-        **_recover_kwargs(config, verifying, action="AUTO")
-    )
-
-    assert result["outcome"] == TRACKING_STATUS_RECOVERY_REQUIRED
-    assert result["needs_manual"] is True
-    after = load_tracking_record(config, record.tracking_id)
-    assert after.status == TRACKING_STATUS_RECOVERY_REQUIRED
-    assert after.audit_events[-1]["action"] == TRACKING_AUDIT_RECOVERY_NEEDS_MANUAL
-
-
-def test_auto_without_evidence_keeps_recovery_required_without_revision_bump(
-    tmp_path: Path,
-) -> None:
-    request = _accepted_request(tmp_path)
-    record = _seeded_tracking(tmp_path, request)
-    recovery = _move_record(
-        tmp_path, record, TRACKING_STATUS_RECOVERY_REQUIRED
-    )
-    config = _config(tmp_path)
-
-    result = run_tracking_recover(
-        **_recover_kwargs(config, recovery, action="AUTO")
-    )
-
-    assert result["outcome"] == TRACKING_STATUS_RECOVERY_REQUIRED
-    assert result["needs_manual"] is True
-    assert result["next_revision"] == recovery.revision  # unchanged no-op
-    after = load_tracking_record(config, record.tracking_id)
-    assert after.status == TRACKING_STATUS_RECOVERY_REQUIRED
-    assert after.revision == recovery.revision
-    assert after.audit_events[-1]["action"] != TRACKING_AUDIT_RECOVERY_NEEDS_MANUAL
-
-
-def test_auto_resolves_in_flight_operation_and_terminalizes_succeeded(
-    tmp_path: Path,
-) -> None:
-    request = _accepted_request(tmp_path)
-    record = _seeded_tracking(tmp_path, request)
-    op = _bind_in_flight_operation(tmp_path, record)
-    _save_ab_result(tmp_path, "request-1", _ab_success())
-    verifying = _move_record(
-        tmp_path,
-        record,
-        TRACKING_STATUS_VERIFYING_EXTERNAL,
-        current_operation_id=op.operation_id,
-    )
-    config = _config(tmp_path)
-
-    result = run_tracking_recover(
-        **_recover_kwargs(config, verifying, action="AUTO")
-    )
-
-    assert result["outcome"] == TRACKING_STATUS_ACTIVE
-    operation = load_tracking_operation(config, op.operation_id)
-    assert operation.state == TRACKING_OPERATION_STATE_SUCCEEDED
-
-
-def test_auto_needs_manual_terminalizes_in_flight_operation_to_recovery_required(
-    tmp_path: Path,
-) -> None:
-    request = _accepted_request(tmp_path)
-    record = _seeded_tracking(tmp_path, request)
     op = _bind_in_flight_operation(tmp_path, record)
     verifying = _move_record(
         tmp_path,
@@ -351,56 +222,37 @@ def test_auto_needs_manual_terminalizes_in_flight_operation_to_recovery_required
         current_operation_id=op.operation_id,
     )
     config = _config(tmp_path)
+    before = load_tracking_record(config, record.tracking_id)
 
-    result = run_tracking_recover(
-        **_recover_kwargs(config, verifying, action="AUTO")
+    for confirm in (False, True):
+        with pytest.raises(Stage1Error) as excinfo:
+            run_tracking_recover(
+                **_recover_kwargs(config, verifying, action=action, confirm=confirm)
+            )
+        assert _error_type(excinfo.value) == "validation_error"
+        # The rejection names the retired action, not some unrelated field.
+        assert excinfo.value.details.get("field") == "action"
+
+    after = load_tracking_record(config, record.tracking_id)
+    assert after.status == TRACKING_STATUS_VERIFYING_EXTERNAL
+    assert after.revision == before.revision
+    assert after.audit_events == before.audit_events
+    assert after.current_operation_id == before.current_operation_id
+    assert (
+        load_tracking_operation(config, op.operation_id).state
+        == TRACKING_OPERATION_STATE_IN_PROGRESS
     )
 
-    assert result["outcome"] == TRACKING_STATUS_RECOVERY_REQUIRED
-    assert result["needs_manual"] is True
-    operation = load_tracking_operation(config, op.operation_id)
-    assert operation.state == TRACKING_OPERATION_STATE_RECOVERY_REQUIRED
 
+def test_read_only_external_verification_is_the_only_accepted_recovery_action(
+    tmp_path: Path,
+) -> None:
+    """#228 E5: VERIFY_EXTERNAL still passes the executable-action gate.
 
-def test_auto_terminal_outcome_unknown_operation_uses_ab_result(tmp_path: Path) -> None:
-    """A terminal OUTCOME_UNKNOWN op plus a persisted success resolves ACTIVE."""
-    request = _accepted_request(tmp_path)
-    record = _seeded_tracking(tmp_path, request)
-    op = _bind_in_flight_operation(tmp_path, record, key="op-key-2")
-    config = _config(tmp_path)
-    # Advance the operation to terminal OUTCOME_UNKNOWN.
-    compare_and_swap_tracking_operation(
-        config,
-        op.operation_id,
-        expected_state=TRACKING_OPERATION_STATE_IN_PROGRESS,
-        record=transition_tracking_operation(
-            op,
-            state=TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN,
-            error_type="ab_timeout",
-            now=NOW,
-        ),
-    )
-    _save_ab_result(tmp_path, "request-1", _ab_success())
-    verifying = _move_record(
-        tmp_path,
-        record,
-        TRACKING_STATUS_VERIFYING_EXTERNAL,
-        current_operation_id=op.operation_id,
-    )
-
-    result = run_tracking_recover(
-        **_recover_kwargs(config, verifying, action="AUTO")
-    )
-
-    assert result["outcome"] == TRACKING_STATUS_ACTIVE
-
-
-# ---------------------------------------------------------------------------
-# Manual recovery
-# ---------------------------------------------------------------------------
-
-
-def test_manual_mark_succeeded_requires_confirm(tmp_path: Path) -> None:
+    Without a connection the verification stops on its own configuration guard
+    (``field=ab_config``), which proves the action itself is accepted — unlike a
+    retired action, which is refused on ``field=action``.
+    """
     request = _accepted_request(tmp_path)
     record = _seeded_tracking(tmp_path, request)
     verifying = _move_record(
@@ -408,110 +260,10 @@ def test_manual_mark_succeeded_requires_confirm(tmp_path: Path) -> None:
     )
     with pytest.raises(Stage1Error) as excinfo:
         run_tracking_recover(
-            **_recover_kwargs(
-                _config(tmp_path),
-                verifying,
-                action="MARK_SUCCEEDED",
-                confirm=False,
-            )
+            **_recover_kwargs(_config(tmp_path), verifying, action="VERIFY_EXTERNAL")
         )
-    assert _error_type(excinfo.value) == "tracking_confirmation_required"
-
-
-def test_manual_mark_succeeded_writes_user_audit_and_active(tmp_path: Path) -> None:
-    request = _accepted_request(tmp_path)
-    record = _seeded_tracking(tmp_path, request)
-    verifying = _move_record(
-        tmp_path, record, TRACKING_STATUS_VERIFYING_EXTERNAL
-    )
-    config = _config(tmp_path)
-
-    result = run_tracking_recover(
-        **_recover_kwargs(
-            config,
-            verifying,
-            action="MARK_SUCCEEDED",
-            confirm=True,
-        )
-    )
-
-    assert result["outcome"] == TRACKING_STATUS_ACTIVE
-    after = load_tracking_record(config, record.tracking_id)
-    assert after.status == TRACKING_STATUS_ACTIVE
-    assert after.audit_events[-1]["action"] == TRACKING_AUDIT_RECOVERY_MANUAL_SUCCEEDED
-    assert after.audit_events[-1]["actor"] == TRACKING_AUDIT_ACTOR_USER
-
-
-def test_manual_mark_failed_resolves_recovery_required_to_submit_failed(
-    tmp_path: Path,
-) -> None:
-    request = _accepted_request(tmp_path)
-    record = _seeded_tracking(tmp_path, request)
-    recovery = _move_record(
-        tmp_path, record, TRACKING_STATUS_RECOVERY_REQUIRED
-    )
-    config = _config(tmp_path)
-
-    result = run_tracking_recover(
-        **_recover_kwargs(
-            config,
-            recovery,
-            action="MARK_FAILED",
-            confirm=True,
-        )
-    )
-
-    assert result["outcome"] == TRACKING_STATUS_SUBMIT_FAILED
-    after = load_tracking_record(config, record.tracking_id)
-    assert after.status == TRACKING_STATUS_SUBMIT_FAILED
-    assert after.audit_events[-1]["action"] == TRACKING_AUDIT_RECOVERY_MANUAL_FAILED
-    assert after.audit_events[-1]["actor"] == TRACKING_AUDIT_ACTOR_USER
-
-
-def test_manual_mark_succeeded_terminalizes_in_flight_operation(
-    tmp_path: Path,
-) -> None:
-    request = _accepted_request(tmp_path)
-    record = _seeded_tracking(tmp_path, request)
-    op = _bind_in_flight_operation(tmp_path, record)
-    verifying = _move_record(
-        tmp_path,
-        record,
-        TRACKING_STATUS_VERIFYING_EXTERNAL,
-        current_operation_id=op.operation_id,
-    )
-    config = _config(tmp_path)
-
-    result = run_tracking_recover(
-        **_recover_kwargs(
-            config,
-            verifying,
-            action="MARK_SUCCEEDED",
-            confirm=True,
-        )
-    )
-
-    assert result["outcome"] == TRACKING_STATUS_ACTIVE
-    operation = load_tracking_operation(config, op.operation_id)
-    assert operation.state == TRACKING_OPERATION_STATE_SUCCEEDED
-
-
-def test_manual_mark_failed_without_confirm_raises(tmp_path: Path) -> None:
-    request = _accepted_request(tmp_path)
-    record = _seeded_tracking(tmp_path, request)
-    recovery = _move_record(
-        tmp_path, record, TRACKING_STATUS_RECOVERY_REQUIRED
-    )
-    with pytest.raises(Stage1Error) as excinfo:
-        run_tracking_recover(
-            **_recover_kwargs(
-                _config(tmp_path),
-                recovery,
-                action="MARK_FAILED",
-                confirm=False,
-            )
-        )
-    assert _error_type(excinfo.value) == "tracking_confirmation_required"
+    assert _error_type(excinfo.value) == "validation_error"
+    assert excinfo.value.details.get("field") == "ab_config"
 
 
 # ---------------------------------------------------------------------------
@@ -546,21 +298,6 @@ def test_recover_rejects_stale_revision(tmp_path: Path) -> None:
             )
         )
     assert _error_type(excinfo.value) == "tracking_revision_conflict"
-
-
-def test_recover_rejects_unknown_action(tmp_path: Path) -> None:
-    request = _accepted_request(tmp_path)
-    record = _seeded_tracking(tmp_path, request)
-    verifying = _move_record(
-        tmp_path, record, TRACKING_STATUS_VERIFYING_EXTERNAL
-    )
-    with pytest.raises(Stage1Error) as excinfo:
-        run_tracking_recover(
-            **_recover_kwargs(
-                _config(tmp_path), verifying, action="VERIFY_EXTERNAL"
-            )
-        )
-    assert _error_type(excinfo.value) == "validation_error"
 
 
 # ---------------------------------------------------------------------------

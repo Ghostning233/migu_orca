@@ -46,10 +46,11 @@ describe('versioned frontend contract handoff (US-255)', () => {
     expectTypeOf<JsonBody<'refreshTrackingRss'>>().toMatchTypeOf<{
       target_scope: 'ASSOCIATED_RSS'
     }>()
-    expectTypeOf<JsonBody<'deleteExternalTrackingItem'>>().toHaveProperty('confirm')
     expectTypeOf<JsonBody<'submitTrackingItem'>>().toHaveProperty('idempotency_key')
     expectTypeOf<JsonBody<'retryTrackingItem'>>().toHaveProperty('expected_revision')
-    expectTypeOf<JsonBody<'recoverTrackingItem'>>().toHaveProperty('action')
+    // Issue #228: the recover body is the read-only verification only.
+    expectTypeOf<JsonBody<'recoverTrackingItem'>['action']>().toEqualTypeOf<'VERIFY_EXTERNAL'>()
+    expectTypeOf<JsonBody<'recoverTrackingItem'>>().toHaveProperty('connection_ref')
     expectTypeOf<JsonBody<'syncTrackingItems'>>().toMatchTypeOf<{ confirm: true }>()
     expectTypeOf<JsonResult<'probeSavedAutoBangumiCapabilities'>['probe_status']>().toEqualTypeOf<
       'VERIFIED' | 'PARTIAL' | 'FAILED'

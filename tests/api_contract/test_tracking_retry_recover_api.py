@@ -58,6 +58,7 @@ from tracking_engine.models.tracking import (
     TRACKING_AUDIT_SUBMIT_SUCCEEDED,
     TRACKING_ORIGIN_SAVE_CONFIRM,
     TRACKING_STATUS_ACTIVE,
+    TRACKING_STATUS_EXTERNAL_DELETED,
     TRACKING_STATUS_RECOVERY_REQUIRED,
     TRACKING_STATUS_SUBMIT_FAILED,
     TRACKING_STATUS_VERIFYING_EXTERNAL,
@@ -166,10 +167,13 @@ def _retry_body(record: TrackingRecord, **overrides: Any) -> dict[str, Any]:
 
 
 def _recover_body(record: TrackingRecord, **overrides: Any) -> dict[str, Any]:
+    """A valid read-only verification body (the only action #228 left)."""
     body: dict[str, Any] = {
         "expected_revision": record.revision,
         "storage_dir": "storage",
-        "action": "AUTO",
+        "action": "VERIFY_EXTERNAL",
+        "connection_ref": SAVED_GENERATION[0],
+        "configuration_revision": SAVED_GENERATION[1],
     }
     body.update(overrides)
     return body
@@ -334,120 +338,50 @@ def test_retry_rejects_unknown_field(
 # ---------------------------------------------------------------------------
 
 
-def test_recover_auto_resolves_active_from_persisted_result(
+@pytest.mark.parametrize("action", ["AUTO", "MARK_SUCCEEDED", "MARK_FAILED"])
+def test_retired_recovery_actions_are_rejected_without_any_write(
     tmp_path: Path,
     client: FlaskClient,
+    action: str,
 ) -> None:
-    request = _accepted_request(tmp_path)
-    record = _seed_tracking(tmp_path, request)
-    _save_ab_result(tmp_path, "request-1", _ab_success())
-    verifying = _move_record(
-        tmp_path, record, TRACKING_STATUS_VERIFYING_EXTERNAL
-    )
+    """#228 E2/E3/E5: 自动恢复/标记成功/标记失败 are retired user actions.
 
-    response = client.post(
-        f"/api/v1/tracking/items/{record.tracking_id}/recover",
-        json=_recover_body(verifying, action="AUTO"),
-    )
-
-    assert response.status_code == 200
-    result = response.get_json()["result"]
-    assert result["action"] == "AUTO"
-    assert result["outcome"] == TRACKING_STATUS_ACTIVE
-    assert result["needs_manual"] is False
-    TrackingRecoverResultDTO.model_validate(result)
-    after = load_tracking_record(_config(tmp_path), record.tracking_id)
-    assert after.status == TRACKING_STATUS_ACTIVE
-    body_text = response.get_data(as_text=True)
-    assert str(tmp_path) not in body_text
-
-
-def test_recover_auto_without_evidence_needs_manual(
-    tmp_path: Path,
-    client: FlaskClient,
-) -> None:
+    They are gone from the published request enum, so the route answers 400 and
+    touches nothing: the record keeps its status, revision and audit trail.  The
+    read-only external verification remains the only recovery action.
+    """
     request = _accepted_request(tmp_path)
     record = _seed_tracking(tmp_path, request)
     verifying = _move_record(
         tmp_path, record, TRACKING_STATUS_VERIFYING_EXTERNAL
     )
+    before = load_tracking_record(_config(tmp_path), record.tracking_id)
 
     response = client.post(
         f"/api/v1/tracking/items/{record.tracking_id}/recover",
-        json=_recover_body(verifying, action="AUTO"),
+        json=_recover_body(verifying, action=action, confirm=True),
     )
 
-    assert response.status_code == 200
-    result = response.get_json()["result"]
-    assert result["outcome"] == TRACKING_STATUS_RECOVERY_REQUIRED
-    assert result["needs_manual"] is True
-    after = load_tracking_record(_config(tmp_path), record.tracking_id)
-    assert after.status == TRACKING_STATUS_RECOVERY_REQUIRED
-
-
-def test_recover_manual_succeeded_requires_confirm(
-    tmp_path: Path,
-    client: FlaskClient,
-) -> None:
-    request = _accepted_request(tmp_path)
-    record = _seed_tracking(tmp_path, request)
-    verifying = _move_record(
-        tmp_path, record, TRACKING_STATUS_VERIFYING_EXTERNAL
-    )
-    response = client.post(
-        f"/api/v1/tracking/items/{record.tracking_id}/recover",
-        json=_recover_body(verifying, action="MARK_SUCCEEDED", confirm=False),
-    )
     assert response.status_code == 400
     assert response.get_json()["error_type"] == "data_validation_errors"
-
-
-def test_recover_manual_succeeded_confirmed_writes_user_audit(
-    tmp_path: Path,
-    client: FlaskClient,
-) -> None:
-    request = _accepted_request(tmp_path)
-    record = _seed_tracking(tmp_path, request)
-    verifying = _move_record(
-        tmp_path, record, TRACKING_STATUS_VERIFYING_EXTERNAL
-    )
-    response = client.post(
-        f"/api/v1/tracking/items/{record.tracking_id}/recover",
-        json=_recover_body(verifying, action="MARK_SUCCEEDED", confirm=True),
-    )
-    assert response.status_code == 200
-    result = response.get_json()["result"]
-    assert result["outcome"] == TRACKING_STATUS_ACTIVE
     after = load_tracking_record(_config(tmp_path), record.tracking_id)
-    assert after.status == TRACKING_STATUS_ACTIVE
-    assert after.audit_events[-1]["actor"] == "USER"
+    assert after.status == TRACKING_STATUS_VERIFYING_EXTERNAL
+    assert after.revision == before.revision
+    assert after.audit_events == before.audit_events
+    assert str(tmp_path) not in response.get_data(as_text=True)
 
 
-def test_recover_manual_failed_confirmed_resolves_recovery_required(
+def test_recover_refuses_a_non_recoverable_record(
     tmp_path: Path,
     client: FlaskClient,
 ) -> None:
-    request = _accepted_request(tmp_path)
-    record = _seed_tracking(tmp_path, request)
-    recovery = _move_record(
-        tmp_path, record, TRACKING_STATUS_RECOVERY_REQUIRED
-    )
-    response = client.post(
-        f"/api/v1/tracking/items/{record.tracking_id}/recover",
-        json=_recover_body(recovery, action="MARK_FAILED", confirm=True),
-    )
-    assert response.status_code == 200
-    result = response.get_json()["result"]
-    assert result["outcome"] == TRACKING_STATUS_SUBMIT_FAILED
-    after = load_tracking_record(_config(tmp_path), record.tracking_id)
-    assert after.status == TRACKING_STATUS_SUBMIT_FAILED
-    assert after.audit_events[-1]["actor"] == "USER"
+    """A record with no unresolved outcome is refused before any external read.
 
-
-def test_recover_rejects_active_state(
-    tmp_path: Path,
-    client: FlaskClient,
-) -> None:
+    The saved-connection path answers ``tracking_connection_mismatch`` because
+    no unresolved operation is bound; the service-level state guard answers
+    ``tracking_state_conflict`` for the same body when it is reached directly
+    (see tracking_recovery_service_test.py).  Either way nothing is written.
+    """
     request = _accepted_request(tmp_path)
     record = _seed_tracking(tmp_path, request)
     active = _move_record(
@@ -456,18 +390,23 @@ def test_recover_rejects_active_state(
         TRACKING_STATUS_ACTIVE,
         audit_action="SUBMIT_SUCCEEDED",
     )
+    before = load_tracking_record(_config(tmp_path), record.tracking_id)
     response = client.post(
         f"/api/v1/tracking/items/{record.tracking_id}/recover",
-        json=_recover_body(active, action="AUTO"),
+        json=_recover_body(active),
     )
-    assert response.status_code == 409
-    assert response.get_json()["error_type"] == "tracking_state_conflict"
+    assert response.status_code == 400
+    assert response.get_json()["error_type"] == "tracking_connection_mismatch"
+    after = load_tracking_record(_config(tmp_path), record.tracking_id)
+    assert after.status == TRACKING_STATUS_ACTIVE
+    assert after.revision == before.revision
 
 
-def test_recover_rejects_invalid_action(
+def test_recover_verify_external_requires_the_saved_connection_generation(
     tmp_path: Path,
     client: FlaskClient,
 ) -> None:
+    """The only surviving recovery action still requires its connection binding."""
     request = _accepted_request(tmp_path)
     record = _seed_tracking(tmp_path, request)
     verifying = _move_record(
@@ -475,16 +414,19 @@ def test_recover_rejects_invalid_action(
     )
     response = client.post(
         f"/api/v1/tracking/items/{record.tracking_id}/recover",
-        json=_recover_body(verifying, action="VERIFY_EXTERNAL"),
+        json=_recover_body(
+            verifying, connection_ref=None, configuration_revision=None
+        ),
     )
     assert response.status_code == 400
     assert response.get_json()["error_type"] == "data_validation_errors"
 
 
-def test_recover_rejects_stale_revision(
+def test_recover_rejects_an_unknown_action_string(
     tmp_path: Path,
     client: FlaskClient,
 ) -> None:
+    """An action outside the published enum is refused before the service runs."""
     request = _accepted_request(tmp_path)
     record = _seed_tracking(tmp_path, request)
     verifying = _move_record(
@@ -492,10 +434,40 @@ def test_recover_rejects_stale_revision(
     )
     response = client.post(
         f"/api/v1/tracking/items/{record.tracking_id}/recover",
+        json=_recover_body(verifying, action="NOT_AN_ACTION"),
+    )
+    assert response.status_code == 400
+    assert response.get_json()["error_type"] == "data_validation_errors"
+    after = load_tracking_record(_config(tmp_path), record.tracking_id)
+    assert after.status == TRACKING_STATUS_VERIFYING_EXTERNAL
+    assert after.revision == verifying.revision
+
+
+def test_recover_refuses_a_stale_revision_without_reading_externally(
+    tmp_path: Path,
+    client: FlaskClient,
+) -> None:
+    """A stale ``expected_revision`` never reaches an external read.
+
+    The saved-connection path reports the whole binding refusal
+    (``tracking_connection_mismatch``); the service-level revision guard answers
+    ``tracking_revision_conflict`` when it is reached directly.
+    """
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    verifying = _move_record(
+        tmp_path, record, TRACKING_STATUS_VERIFYING_EXTERNAL
+    )
+    before = load_tracking_record(_config(tmp_path), record.tracking_id)
+    response = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/recover",
         json=_recover_body(verifying, expected_revision=verifying.revision + 99),
     )
-    assert response.status_code == 409
-    assert response.get_json()["error_type"] == "tracking_revision_conflict"
+    assert response.status_code == 400
+    assert response.get_json()["error_type"] == "tracking_connection_mismatch"
+    after = load_tracking_record(_config(tmp_path), record.tracking_id)
+    assert after.status == TRACKING_STATUS_VERIFYING_EXTERNAL
+    assert after.revision == before.revision
 
 
 def test_recover_rejects_unknown_field(
@@ -519,7 +491,7 @@ def test_recover_does_not_accept_external_id_or_url(
     tmp_path: Path,
     client: FlaskClient,
 ) -> None:
-    """MARK_SUCCEEDED never accepts an external ID/URL/raw result (§11.8)."""
+    """The read-only verification never accepts an external ID/URL/raw result (§11.8)."""
     request = _accepted_request(tmp_path)
     record = _seed_tracking(tmp_path, request)
     verifying = _move_record(
@@ -528,7 +500,7 @@ def test_recover_does_not_accept_external_id_or_url(
     response = client.post(
         f"/api/v1/tracking/items/{record.tracking_id}/recover",
         json={
-            **_recover_body(verifying, action="MARK_SUCCEEDED", confirm=True),
+            **_recover_body(verifying),
             "external_id": "ab-123",
             "external_url": "http://auto-bangumi.local/sub/1",
         },
@@ -748,3 +720,181 @@ def test_verify_external_never_resolves_a_one_time_collection(tmp_path: Path) ->
         load_tracking_operation(config, bound.operation_id).state
         == TRACKING_OPERATION_STATE_RECOVERY_REQUIRED
     )
+
+
+def test_recover_read_only_verification_is_the_only_successful_recovery(
+    tmp_path: Path,
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#228 E5/AC4: the read-only external verification still runs end to end.
+
+    It is the only recovery action the endpoint now executes.  It stays bound to
+    the original operation and the saved generation, never creates a new
+    operation, and returns the safe §11.8 result payload.
+    """
+    from storage_engine.controllers.operation_repository import (
+        bind_tracking_operation,
+        compare_and_swap_tracking_operation,
+    )
+    from tracking_engine.models.operation import (
+        TRACKING_OPERATION_KIND_SUBMIT,
+        TRACKING_OPERATION_STATE_IN_PROGRESS,
+        TRACKING_OPERATION_STATE_PREPARED,
+        transition_tracking_operation,
+    )
+
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    config = _config(tmp_path)
+    bound, created = bind_tracking_operation(
+        config,
+        tracking_id=record.tracking_id,
+        operation=TRACKING_OPERATION_KIND_SUBMIT,
+        idempotency_key="verify-key",
+        expected_revision=record.revision,
+        request_fingerprint=record.request_fingerprint or "fingerprint",
+        connection_ref=SAVED_GENERATION[0],
+        now="2026-09-08T00:00:00+00:00",
+    )
+    assert created is True
+    compare_and_swap_tracking_operation(
+        config,
+        bound.operation_id,
+        expected_state=TRACKING_OPERATION_STATE_PREPARED,
+        record=transition_tracking_operation(
+            bound, state=TRACKING_OPERATION_STATE_IN_PROGRESS, now="2026-09-08T00:00:00+00:00"
+        ),
+    )
+    verifying = _move_record(
+        tmp_path,
+        record,
+        TRACKING_STATUS_VERIFYING_EXTERNAL,
+        current_operation_id=bound.operation_id,
+    )
+    # An exact RSS match is what makes a read-only verification decide the
+    # record, so the snapshot must carry this plan's own RSS identity.
+    stored_request = load_request_snapshot(config, request["request_id"])
+    rss_url = stored_request["confirmable_config"]["selected_rss_url"]
+    monkeypatch.setattr(
+        "apps.migu_orca_web.tracking_saved_recovery_service.create_management_client",
+        lambda *_a, **_k: _OneTimeVerifySnapshot(
+            [
+                ExternalSubscription(
+                    "ab-1", "芙莉莲", 1, "喵萌",
+                    rss_urls=(rss_url,), rss_ids=("rss-1",),
+                )
+            ],
+            [ExternalRss("rss-1", "芙莉莲", rss_url)],
+        ),
+    )
+
+    response = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/recover",
+        json={
+            **_recover_body(verifying, action="VERIFY_EXTERNAL"),
+            "connection_ref": SAVED_GENERATION[0],
+            "configuration_revision": SAVED_GENERATION[1],
+        },
+    )
+
+    assert response.status_code == 200, response.get_json()
+    result = response.get_json()["result"]
+    TrackingRecoverResultDTO.model_validate(result)
+    assert result["action"] == "VERIFY_EXTERNAL"
+    # A unique match decides the record: the payload must say so, not merely be
+    # shape-valid (an undecided verification also validates).
+    assert result["outcome"] == TRACKING_STATUS_ACTIVE
+    assert result["needs_manual"] is False
+    # A read-only verification never creates a replacement operation.
+    after = load_tracking_record(config, record.tracking_id)
+    assert after.current_operation_id == bound.operation_id
+    body_text = response.get_data(as_text=True)
+    assert "secret-token" not in body_text
+    assert str(tmp_path) not in body_text
+
+
+def test_recover_publishes_the_documented_outcome_for_a_management_operation(
+    tmp_path: Path,
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#228: both verification branches publish the same documented outcome.
+
+    Verifying an unresolved *management* write resolves the operation from the
+    read snapshot.  The result must be the published recover payload — the
+    record's status after the verification — not the internal management
+    verdict vocabulary (``SUCCESS``/``DEFINITE_FAILURE``/``OUTCOME_UNKNOWN``).
+    """
+    from dataclasses import replace as dataclass_replace
+
+    from storage_engine.controllers.operation_repository import (
+        bind_tracking_operation,
+        compare_and_swap_tracking_operation,
+    )
+    from storage_engine.controllers.tracking_repository import (
+        compare_and_swap_tracking_record,
+    )
+    from tracking_engine.models.operation import (
+        TRACKING_OPERATION_KIND_DELETE_EXTERNAL,
+        TRACKING_OPERATION_STATE_IN_PROGRESS,
+        TRACKING_OPERATION_STATE_PREPARED,
+        transition_tracking_operation,
+    )
+
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    config = _config(tmp_path)
+    mapped = dataclass_replace(record, revision=record.revision + 1, external_mapping={
+        "schema_version": 2, "adapter": "legacy_3_1",
+        "connection_ref": SAVED_GENERATION[0], "subscription_id": "ab-1", "rss_ids": [],
+        "match_reason": "EXTERNAL_ID", "external_deleted": False, "enabled": True,
+        "missing_sync_count": 0, "last_verified_at": None,
+    })
+    record = compare_and_swap_tracking_record(
+        config, record.tracking_id, base_revision=record.revision, record=mapped,
+    )
+    bound, created = bind_tracking_operation(
+        config,
+        tracking_id=record.tracking_id,
+        operation=TRACKING_OPERATION_KIND_DELETE_EXTERNAL,
+        idempotency_key="verify-management-key",
+        expected_revision=record.revision,
+        request_fingerprint=record.request_fingerprint or "fingerprint",
+        target_scope="SUBSCRIPTION",
+        expected_external_fingerprint="sha256:" + "0" * 64,
+        connection_ref=SAVED_GENERATION[0],
+        now="2026-09-08T00:00:00+00:00",
+    )
+    assert created is True
+    compare_and_swap_tracking_operation(
+        config,
+        bound.operation_id,
+        expected_state=TRACKING_OPERATION_STATE_PREPARED,
+        record=transition_tracking_operation(
+            bound, state=TRACKING_OPERATION_STATE_IN_PROGRESS, now="2026-09-08T00:00:00+00:00"
+        ),
+    )
+    verifying = _move_record(
+        tmp_path, record, TRACKING_STATUS_VERIFYING_EXTERNAL,
+        current_operation_id=bound.operation_id,
+    )
+    # The external object is gone, so the pending delete is confirmed.
+    monkeypatch.setattr(
+        "apps.migu_orca_web.tracking_saved_recovery_service.create_management_client",
+        lambda *_a, **_k: _ManagementSnapshot([]),
+    )
+
+    response = client.post(
+        f"/api/v1/tracking/items/{record.tracking_id}/recover",
+        json=_recover_body(verifying),
+    )
+
+    assert response.status_code == 200, response.get_json()
+    result = response.get_json()["result"]
+    TrackingRecoverResultDTO.model_validate(result)
+    assert result["outcome"] == TRACKING_STATUS_EXTERNAL_DELETED
+    assert result["action"] == "VERIFY_EXTERNAL"
+    assert result["needs_manual"] is False
+    stored = load_tracking_record(config, record.tracking_id)
+    assert stored.status == TRACKING_STATUS_EXTERNAL_DELETED

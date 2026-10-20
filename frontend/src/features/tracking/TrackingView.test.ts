@@ -353,9 +353,8 @@ function pendingDetail() {
     subtitle_group: '字幕组', poster_path: null, status: 'VERIFYING_EXTERNAL',
     status_label: '核验外部结果中', status_group: 'PROCESSING',
     submission_mode: 'CONTINUE_TRACKING',
-    available_actions: [
-      { code: 'RECOVER_AUTO', label: '自动恢复', style: 'SECONDARY', requires_confirmation: false, target_scopes: [] },
-    ],
+    // Issue #228: an unresolved record projects no state-changing action.
+    available_actions: [],
     valid_resource_count: 1, updated_episode: null, updated_episode_status: 'NOT_IMPLEMENTED',
     total_episodes: null, revision: 4, origin: 'single', batch_id: null,
     created_at: '2026-09-14T00:00:00Z', updated_at: '2026-09-14T00:00:00Z', last_synced_at: null,

@@ -35,8 +35,12 @@
   仍待确认才返回已证实原因 + 绑定；`confirm=true` 先校验 revision/原 operation/连接 generation
   （变化即 409，不改绑），复检后以服务端推导的新幂等键创建至多一个新 operation（`previous_operation_id`
   追溯原 operation）；原 operation/审计保留，外部写仍在执行或方案不满足前提时禁止重发。
-- revalidate/AUTO 恢复纯本地；VERIFY_EXTERNAL 才携带临时 AB 配置做能力校验的只读恢复。
-  管理写仅在精确 3.1.18 password 能力开放，read-before-write/confirm/key/revision 必须保留。
+- `/revalidate` 仍是纯本地复核端点（提交路径已内置复核，不作为独立用户动作）；恢复族自 #228 只剩
+  VERIFY_EXTERNAL（唯一携带临时 AB 配置做能力校验的只读恢复），AUTO／标记成功／标记失败已从请求契约删除。
+- `available_actions` 自 #228 起不宣告 DELETE_EXTERNAL，其独立 `/delete-external` 路由与请求体已退役；
+  只有复合「删方案 + 删外部」链仍执行它：内部矩阵 `management_actions_for_status`/
+  `management_action_allowed(include_internal=True)` 不得收窄，收窄的只是公开公告。
+- 管理写仅在精确 3.1.18 password 能力开放，read-before-write/confirm/key/revision 必须保留。
 - 删除媒体参数在 adapter 固定 file=false，不能通过客户端输入覆盖；
   关联 RSS 操作只处理已映射单条集合，不扩大到全局对象。
 - Stage 39 已交付 AB 专用部署配置 repository，与业务 storage/profile 隔离，唯一允许保存 AB

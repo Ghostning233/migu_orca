@@ -13,7 +13,6 @@ from ab_engine.controllers.ab_management_client import create_legacy_31_manageme
 from apps.migu_orca_web.api_contract import TrackingAvailableActionDTO, TrackingManagementResultDTO
 from apps.migu_orca_web.openapi_gen import generate_openapi
 from apps.migu_orca_web.schemas import (
-    TrackingDeleteExternalPayload,
     TrackingModifyPayload,
     TrackingRefreshRssPayload,
     TrackingSetEnabledPayload,
@@ -32,7 +31,9 @@ from tests.api_contract.ab_write_envelopes import (
 
 
 def test_management_contract_freezes_actions_and_guards() -> None:
-    assert set(MANAGEMENT_ACTION_CONTRACTS) == {"MODIFY", "SET_ENABLED", "DELETE_EXTERNAL", "REFRESH_RSS"}
+    # Issue #228: the standalone DELETE_EXTERNAL route is retired, so the public
+    # management contract no longer advertises it.
+    assert set(MANAGEMENT_ACTION_CONTRACTS) == {"MODIFY", "SET_ENABLED", "REFRESH_RSS"}
     assert MANAGEMENT_ACTION_CONTRACTS["REFRESH_RSS"].scopes == ("ASSOCIATED_RSS",)
     assert all(item.requires_confirmation and item.requires_capability_probe and item.read_before_write
                for item in MANAGEMENT_ACTION_CONTRACTS.values())
@@ -73,7 +74,6 @@ def test_management_payloads_are_strict_and_revision_is_not_coerced() -> None:
 @pytest.mark.parametrize("payload_model, extra", [
     (TrackingModifyPayload, {"target_scope": "SUBSCRIPTION", "patch": {"title": "x"}}),
     (TrackingSetEnabledPayload, {"target_scope": "SUBSCRIPTION", "enabled": False}),
-    (TrackingDeleteExternalPayload, {"target_scope": "SUBSCRIPTION"}),
     (TrackingRefreshRssPayload, {"target_scope": "ASSOCIATED_RSS"}),
 ])
 def test_management_success_requests_use_saved_connection_reference(monkeypatch, payload_model, extra) -> None:
@@ -94,8 +94,13 @@ def test_management_success_requests_use_saved_connection_reference(monkeypatch,
 
 
 def test_public_action_and_management_status_are_enumerated() -> None:
-    assert TrackingAvailableActionDTO(code="DELETE_EXTERNAL", label="删除外部订阅", style="DANGER",
-                                      requires_confirmation=True).code == "DELETE_EXTERNAL"
+    assert TrackingAvailableActionDTO(code="MODIFY", label="修改外部订阅", style="SECONDARY",
+                                      requires_confirmation=True).code == "MODIFY"
+    # Issue #228: the five retired codes are gone from the published enum.
+    for retired in ("REVALIDATE", "RECOVER_AUTO", "MARK_SUCCEEDED", "MARK_FAILED", "DELETE_EXTERNAL"):
+        with pytest.raises(ValidationError):
+            TrackingAvailableActionDTO(code=retired, label="x", style="SECONDARY",
+                                       requires_confirmation=False)
     with pytest.raises(ValidationError):
         TrackingAvailableActionDTO(code="NOT_AN_ACTION", label="x", style="PRIMARY", requires_confirmation=True)
     with pytest.raises(ValidationError):
@@ -258,7 +263,11 @@ def test_management_action_scopes_are_server_computed_per_action_without_mapping
     by_code = {item["code"]: item["target_scopes"] for item in actions}
     assert by_code["MODIFY"] == ["SUBSCRIPTION", "ASSOCIATED_RSS"]
     assert by_code["SET_ENABLED"] == ["SUBSCRIPTION", "ASSOCIATED_RSS"]
-    assert by_code["DELETE_EXTERNAL"] == ["SUBSCRIPTION", "ASSOCIATED_RSS"]
+    # #228 E4: the standalone 删除 Auto Bangumi 外部对象 entry is retired from the
+    # public projection (its endpoint and payload are gone too).  The internal
+    # execution chain still runs for the composite plan-delete flow; see
+    # test_tracking_plan_delete_api.py.
+    assert "DELETE_EXTERNAL" not in by_code
     assert by_code["REFRESH_RSS"] == ["ASSOCIATED_RSS"]
     assert all("opaque" not in str(item) for item in actions)
     subscription_only = tracking_available_actions("ACTIVE", {"subscription_id": "opaque-sub", "rss_ids": []})

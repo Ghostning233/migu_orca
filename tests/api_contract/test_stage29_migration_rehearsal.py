@@ -71,7 +71,7 @@ from tracking_engine.models.operation import (
     TRACKING_OPERATION_KIND_SUBMIT,
     TRACKING_OPERATION_STATE_IN_PROGRESS,
     TRACKING_OPERATION_STATE_PREPARED,
-    TRACKING_OPERATION_STATE_SUCCEEDED,
+    TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
     transition_tracking_operation,
 )
 from tracking_engine.models.tracking import (
@@ -390,9 +390,16 @@ def test_rehearsal_partial_migration_then_retry_after_repair_completes(
 # ---------------------------------------------------------------------------
 
 
-def test_rehearsal_crash_window_auto_recovery_resolves_without_external_call(
+def test_rehearsal_crash_window_is_left_to_read_only_verification(
     tmp_path: Path,
 ) -> None:
+    """Rehearsal 3 after #228 E2: a lost finalization is never auto-resolved.
+
+    ``AUTO`` (自动恢复) is retired as a user action, so the local path refuses it
+    without touching anything.  The crash window keeps its evidence and can only
+    be resolved by the read-only external verification, which this local request
+    never runs on its own.
+    """
     root = "crash"
     request = _accepted_request(tmp_path, "request-1", root=root)
     record = _ensure_tracking(tmp_path, request, root=root)
@@ -408,21 +415,23 @@ def test_rehearsal_crash_window_auto_recovery_resolves_without_external_call(
     # the process died; only the record finalization was lost.
     _save_request_ab_result(tmp_path, "request-1", root=root)
 
-    result = run_tracking_recover(
-        config=config,
-        tracking_id=record.tracking_id,
-        expected_revision=verifying.revision,
-        action="AUTO",
-        confirm=False,
-        now=NOW,
-    )
+    with pytest.raises(Stage1Error) as excinfo:
+        run_tracking_recover(
+            config=config,
+            tracking_id=record.tracking_id,
+            expected_revision=verifying.revision,
+            action="AUTO",
+            confirm=False,
+            now=NOW,
+        )
 
-    assert result["outcome"] == TRACKING_STATUS_ACTIVE
-    assert result["needs_manual"] is False
+    assert excinfo.value.error_type == "validation_error"
+    assert excinfo.value.details.get("field") == "action"
     after = load_tracking_record(config, record.tracking_id)
-    assert after.status == TRACKING_STATUS_ACTIVE
+    assert after.status == TRACKING_STATUS_VERIFYING_EXTERNAL
+    assert after.revision == verifying.revision
     operation = load_tracking_operation(config, op.operation_id)
-    assert operation.state == TRACKING_OPERATION_STATE_SUCCEEDED
+    assert operation.state == TRACKING_OPERATION_STATE_IN_PROGRESS
 
 
 def test_rehearsal_unresolved_recovery_required_cannot_be_blindly_retried(
@@ -433,31 +442,41 @@ def test_rehearsal_unresolved_recovery_required_cannot_be_blindly_retried(
     record = _ensure_tracking(tmp_path, request, root=root)
     config = _config(tmp_path, root)
     op = _bind_in_flight_operation(config, record, key="crash-key-2")
-    _move_record(
+    verifying = _move_record(
         config,
         record,
         TRACKING_STATUS_VERIFYING_EXTERNAL,
         current_operation_id=op.operation_id,
     )
-    # No local AB evidence: AUTO recovery must move it to RECOVERY_REQUIRED and
-    # ask for manual resolution — it must never auto-call the external system.
-    resolved = run_tracking_recover(
-        config=config,
-        tracking_id=record.tracking_id,
-        expected_revision=record.revision + 1,
-        action="AUTO",
-        confirm=False,
-        now=NOW,
+    # No local AB evidence: the record stays unresolved until the read-only
+    # external verification runs — it must never auto-call the external system,
+    # and the retired local recovery cannot move it either.
+    resolved = _move_record(
+        config,
+        verifying,
+        TRACKING_STATUS_RECOVERY_REQUIRED,
+        current_operation_id=op.operation_id,
     )
-    assert resolved["outcome"] == TRACKING_STATUS_RECOVERY_REQUIRED
-    assert resolved["needs_manual"] is True
+    # The retried operation itself is finished-but-unresolved, which is what a
+    # real crash window leaves behind (the retired AUTO used to persist this).
+    compare_and_swap_tracking_operation(
+        config,
+        op.operation_id,
+        expected_state=TRACKING_OPERATION_STATE_IN_PROGRESS,
+        record=transition_tracking_operation(
+            op,
+            state=TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
+            error_type="result_persist_failed",
+            now=NOW,
+        ),
+    )
 
     # A retry from RECOVERY_REQUIRED is rejected before any external call.
     with pytest.raises(Stage1Error) as excinfo:
         run_tracking_submit(
             config=config,
             tracking_id=record.tracking_id,
-            expected_revision=resolved["next_revision"],
+            expected_revision=resolved.revision,
             idempotency_key="new-retry-key",
             confirm=True,
             ab_config=_FakeAbConfig(),

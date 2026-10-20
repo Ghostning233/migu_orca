@@ -84,7 +84,13 @@ def test_scope_and_set_enabled_direction_are_strict() -> None:
     assert not management_capability_allowed(capabilities, "SET_ENABLED", "SUBSCRIPTION")
 
 
-def test_disabled_record_can_only_reenable_or_delete() -> None:
+def test_disabled_record_can_only_reenable() -> None:
+    """Issue #228 retired the standalone public DELETE_EXTERNAL entry.
+
+    The delete stays reachable only through the composite plan-delete leg, which
+    passes ``include_internal=True`` (see management_state_test.py).
+    """
     assert management_action_allowed("DISABLED", "SET_ENABLED", enabled=True)
     assert not management_action_allowed("DISABLED", "SET_ENABLED", enabled=False)
-    assert management_action_allowed("DISABLED", "DELETE_EXTERNAL")
+    assert not management_action_allowed("DISABLED", "DELETE_EXTERNAL")
+    assert management_action_allowed("DISABLED", "DELETE_EXTERNAL", include_internal=True)

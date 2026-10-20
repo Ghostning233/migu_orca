@@ -18,7 +18,6 @@ import {
   type TrackingResubmitResult,
   capabilityStateLabel,
   capabilityVersionLabel,
-  DELETE_EXTERNAL_HELP,
   executableTrackingActions,
   filterTrackingItems,
   formatSubmissionMode,
@@ -287,21 +286,20 @@ describe('submission mode display (issue #99 AC 6/7)', () => {
   it('keeps the fixed, write-only help copy of every management section', () => {
     expect(MODIFY_FORM_HELP).toContain('不读取 Auto Bangumi 的当前值')
     expect(MANAGEMENT_ACTIONS_HELP).toContain('不修改 MiGuOrca 本地方案')
-    expect(DELETE_EXTERNAL_HELP).toContain('没有勾选、批量或全局删除')
-    expect(DELETE_EXTERNAL_HELP).toContain('不会删除任何媒体文件')
   })
 })
 
-const recoverableAction: ItemAction = {
-  code: 'RECOVER_AUTO', label: '自动恢复', style: 'SECONDARY',
-  requires_confirmation: false, target_scopes: [],
-}
-
-/** A recoverable record: the check projection only needs the item's shape. */
+/**
+ * A recoverable record: the check projection only needs the item's shape.
+ *
+ * Issue #228 retired the local recovery actions, so an unresolved record
+ * projects no state-changing action at all and the read-only verification is a
+ * page flow (status + proven capability).
+ */
 function recoverableItem(overrides: Partial<TrackingItem> = {}): TrackingItem {
   return item({
     status: 'RECOVERY_REQUIRED', status_label: '需要恢复', status_group: 'ATTENTION',
-    available_actions: [recoverableAction], ...overrides,
+    available_actions: [], ...overrides,
   })
 }
 

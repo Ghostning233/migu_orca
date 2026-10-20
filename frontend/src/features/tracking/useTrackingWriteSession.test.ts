@@ -157,29 +157,24 @@ const MANAGEMENT_MESSAGES: Record<string, Record<string, string>> = {
     FAILED: '关联 RSS 刷新明确失败，Auto Bangumi 未接受本次刷新；可核对后重新发起。',
     UNKNOWN: '关联 RSS 刷新结果待确认，正在只读回查；未确认完成前不会自动重试。',
   },
-  DELETE_EXTERNAL: {
-    SUCCEEDED: '外部删除已完成：Auto Bangumi 已删除该外部对象；MiGuOrca 本地订阅方案、追番记录、审计记录、下载任务和已下载媒体文件均保留。',
-    FAILED: '外部删除明确失败，Auto Bangumi 未删除该外部对象；本地方案与已下载媒体未受影响，可核对后重新发起。',
-    REJECTED: '服务端明确拒绝了本次删除请求，本次未删除 Auto Bangumi 外部对象；正在刷新最新详情，请重新确认。',
-    UNKNOWN: '外部删除结果待确认，正在只读回查；未确认删除前不会自动重试，本地方案与已下载媒体未受影响。',
-  },
 }
 
 const RECOVERY_MESSAGES: Record<string, string> = {
-  IN_FLIGHT: '正在恢复该追番的结果，请稍候…',
-  ACTIVE: '恢复完成：已确认该追番在 Auto Bangumi 中存在外部订阅。',
-  SUBMIT_FAILED: '恢复完成：已确认本次未创建外部订阅，可在确认后显式重试提交。',
-  RECOVERY_REQUIRED: '结果仍无法确认，保持恢复状态；未确认前不会自动提交。',
-  CONFLICT: '追番记录已变化或当前状态不允许恢复，本次未执行恢复；正在刷新最新详情，请重新确认。',
-  REJECTED: '服务端明确拒绝了本次恢复请求，本次未执行任何外部操作；正在刷新最新详情，请重新确认。',
-  UNKNOWN: '恢复结果待确认，正在只读回查；未确认前不会自动重发。',
+  IN_FLIGHT: '正在只读核验该追番的外部状态，请稍候…',
+  ACTIVE: '只读核验完成：已确认该追番在 Auto Bangumi 中存在外部订阅。',
+  DISABLED: '只读核验完成：该追番在 Auto Bangumi 中已停用，本地记录保持追番中并标记为已停用。',
+  EXTERNAL_DELETED: '只读核验完成：该追番的外部订阅已确认不存在，本地记录标记为外部已删除。',
+  RECOVERY_REQUIRED: '结果仍无法确认，保持待确认状态；未确认前不会自动提交、也不会代替你判断。',
+  CONFLICT: '追番记录已变化或当前状态不允许核验，本次未执行核验；正在刷新最新详情，请重新确认。',
+  REJECTED: '服务端明确拒绝了本次核验请求，本次未读取任何外部对象；正在刷新最新详情，请重新确认。',
+  UNKNOWN: '核验结果待确认，正在只读回查；未确认前不会自动重发。',
 }
 
 const MANAGEMENT_UNBUILDABLE_MESSAGE =
   '本次管理请求缺少可安全发送的必要信息，未向 Auto Bangumi 发送任何请求；已重新读取最新详情，请重新确认后再试。'
 
 const RECOVERY_MANUAL_NOTICE =
-  '需要人工核验：请先在 Auto Bangumi 中独立核对该追番的实际状态，再选择“标记为成功”或“标记为失败”；本页不会代替你判断，也不会自动提交。'
+  '只读核验无法定论：请先在 Auto Bangumi 中独立核对该追番的实际状态。本页不会代替你判断，也不会自动提交；需要重发请使用「主动重发」，需要结束跟踪请使用删除追番方案。'
 const MANAGEMENT_CONFLICT_MESSAGES: Record<string, string> = {
   tracking_revision_conflict: '追番记录已变化，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
   tracking_idempotency_conflict: '本次管理请求标识已失效，未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
@@ -211,7 +206,7 @@ function submitResult(overrides: Record<string, unknown> = {}) {
 
 function recoverResult(overrides: Record<string, unknown> = {}) {
   return {
-    tracking_id: 'tracking-1', action: 'AUTO', outcome: 'ACTIVE', checked_revision: 3,
+    tracking_id: 'tracking-1', action: 'VERIFY_EXTERNAL', outcome: 'ACTIVE', checked_revision: 3,
     next_revision: 4, checked_at: '2026-09-13T05:00:00Z', operation_id: 'operation-1',
     needs_manual: false, tracking: recoverableItem({ revision: 4 }), ...overrides,
   } as never
@@ -695,30 +690,16 @@ describe('submission failure diagnostics (issue #101)', () => {
 // Recovery family (US-312).
 // ---------------------------------------------------------------------------
 
-const recoverAutoAction: ItemAction = {
-  code: 'RECOVER_AUTO', label: '自动恢复', style: 'SECONDARY',
-  requires_confirmation: false, target_scopes: [],
-}
-const markSucceededAction: ItemAction = {
-  code: 'MARK_SUCCEEDED', label: '标记为成功', style: 'PRIMARY',
-  requires_confirmation: true, target_scopes: [],
-}
-const markFailedAction: ItemAction = {
-  code: 'MARK_FAILED', label: '标记为失败', style: 'DANGER',
-  requires_confirmation: true, target_scopes: [],
-}
-
-/** A recoverable record: the server offers exactly the three local actions. */
+/** A recoverable record: issue #228 retired the projected recovery actions. */
 function recoverableItem(overrides: Partial<TrackingItem> = {}): TrackingItem {
   return item({
     status: 'RECOVERY_REQUIRED', status_label: '需要恢复', status_group: 'ATTENTION',
-    available_actions: [recoverAutoAction, markSucceededAction, markFailedAction],
-    ...overrides,
+    available_actions: [], ...overrides,
   })
 }
 
 function beginRecoveryWrite(
-  actionCode: 'RECOVER_AUTO' | 'MARK_SUCCEEDED' | 'MARK_FAILED' | 'VERIFY_EXTERNAL',
+  actionCode: 'VERIFY_EXTERNAL',
   options: {
     item?: Partial<TrackingItem>
     capabilities?: CapabilityResult | null
@@ -741,105 +722,91 @@ function beginRecoveryWrite(
   return { writes, started }
 }
 
-describe('tracking recovery write session (US-312)', () => {
-  it('binds every recovery action to its own request body value and copy', () => {
-    const auto = beginRecoveryWrite('RECOVER_AUTO')
-    expect(auto.started.ask).toBeNull()
-    expect(auto.started.request?.endpoint).toBe('/api/v1/tracking/items/{tracking_id}/recover')
-    expect(bodyOf(auto.started)).toEqual({ expected_revision: 3, action: 'AUTO' })
+describe('tracking recovery write session (US-312 / issue #228)', () => {
+  it('binds the read-only verification to the saved generation and its confirmation', () => {
+    const unconfirmed = beginRecoveryWrite('VERIFY_EXTERNAL', { confirmed: false })
+    expect(unconfirmed.started.ask).toBe('IMPACT')
+    const confirmation = unconfirmed.started.confirmation!
+    expect(confirmation.message).toContain('Auto Bangumi')
+    expect(confirmation.message).toContain('只读')
+    expect(confirmation.danger).toBeUndefined()
 
-    for (const [actionCode, bodyAction] of [
-      ['MARK_SUCCEEDED', 'MARK_SUCCEEDED'], ['MARK_FAILED', 'MARK_FAILED'], ['VERIFY_EXTERNAL', 'VERIFY_EXTERNAL'],
-    ] as const) {
-      const unconfirmed = beginRecoveryWrite(actionCode, { confirmed: false })
-      expect(unconfirmed.started.ask).toBe('IMPACT')
-      const confirmation = unconfirmed.started.confirmation!
-      expect(confirmation.message).toContain('Auto Bangumi')
-      const confirmed = beginRecoveryWrite(actionCode)
-      expect(bodyOf(confirmed.started)).toEqual(actionCode === 'VERIFY_EXTERNAL'
-        ? {
-            expected_revision: 3, action: bodyAction,
-            connection_ref: CONNECTION.connection_ref, configuration_revision: 3,
-          }
-        : { expected_revision: 3, action: bodyAction, confirm: true })
-      // A manual conclusion is a user assertion: it must be confirmed again and
-      // styled as a danger only for the failure verdict.
-      expect(confirmation.danger).toBe(actionCode === 'MARK_FAILED' ? true : undefined)
-      if (actionCode !== 'VERIFY_EXTERNAL') {
-        expect(confirmation.message).toContain('独立核对')
-      }
-    }
-  })
-
-  it('builds a local AUTO body and a confirm-only manual body', () => {
-    expect(bodyOf(beginRecoveryWrite('RECOVER_AUTO', { storageDir: STORAGE }).started)).toEqual({
-      expected_revision: 3, action: 'AUTO', storage_dir: STORAGE,
+    const confirmed = beginRecoveryWrite('VERIFY_EXTERNAL')
+    expect(confirmed.started.request?.endpoint).toBe('/api/v1/tracking/items/{tracking_id}/recover')
+    expect(bodyOf(confirmed.started)).toEqual({
+      expected_revision: 3, action: 'VERIFY_EXTERNAL',
+      connection_ref: CONNECTION.connection_ref, configuration_revision: 3,
     })
     // The body shape itself cannot express an external id/URL/raw result/note.
-    const serialized = JSON.stringify(beginRecoveryWrite('MARK_SUCCEEDED').started.request?.body)
+    const serialized = JSON.stringify(confirmed.started.request?.body)
     for (const leaked of ['external_id', 'external_url', 'raw', 'note', 'saved_connection']) {
       expect(serialized).not.toContain(leaked)
     }
   })
 
-  it('binds VERIFY_EXTERNAL only to the saved generation', () => {
-    const verify = beginRecoveryWrite('VERIFY_EXTERNAL')
-    expect(bodyOf(verify.started)).toEqual({
-      expected_revision: 3, action: 'VERIFY_EXTERNAL',
-      connection_ref: CONNECTION.connection_ref, configuration_revision: 3,
-    })
-    // Without the live saved generation the read-only external check is not sent.
+  it('never sends the verification without the live saved generation', () => {
     expect(beginRecoveryWrite('VERIFY_EXTERNAL', { connection: null }).started.accepted).toBe(false)
   })
 
-  it('accepts only a recovery action the server actually offers for the record', () => {
-    expect(beginRecoveryWrite('RECOVER_AUTO').started.accepted).toBe(true)
-    expect(beginRecoveryWrite('MARK_FAILED').started.accepted).toBe(true)
-    // A stale/hand-made action, a non-recoverable record and a bad revision.
-    expect(beginRecoveryWrite('RECOVER_AUTO', {
-      item: { available_actions: [markFailedAction] },
-    }).started.accepted).toBe(false)
-    expect(beginRecoveryWrite('MARK_SUCCEEDED', {
-      item: { status: 'ACTIVE', available_actions: [] },
-    }).started.accepted).toBe(false)
-    expect(beginRecoveryWrite('RECOVER_AUTO', { item: { revision: 0 } }).started.accepted).toBe(false)
-    // The read-only external verification still needs both a recoverable record
-    // and the capability the live page session proved.
+  it('accepts only an unresolved record with the proven capability', () => {
+    expect(beginRecoveryWrite('VERIFY_EXTERNAL').started.accepted).toBe(true)
+    // A record the server can already decide never gets the read-only flow.
+    const decided = ['ACTIVE', 'PENDING_SUBMIT', 'SUBMIT_FAILED', 'DISABLED', 'ADDED_TO_DOWNLOAD'] as ReadonlyArray<TrackingItem['status']>
+    for (const status of decided) {
+      expect(beginRecoveryWrite('VERIFY_EXTERNAL', { item: { status } }).started.accepted).toBe(false)
+    }
+    // A bad revision, an unproven capability and no session all fail closed.
+    expect(beginRecoveryWrite('VERIFY_EXTERNAL', { item: { revision: 0 } }).started.accepted).toBe(false)
     expect(beginRecoveryWrite('VERIFY_EXTERNAL', {
       capabilities: capabilities({ external_verify: 'UNKNOWN' }),
     }).started.accepted).toBe(false)
     expect(beginRecoveryWrite('VERIFY_EXTERNAL', { capabilities: null }).started.accepted).toBe(false)
-    expect(beginRecoveryWrite('VERIFY_EXTERNAL', {
-      item: { status: 'ACTIVE', available_actions: [] }, capabilities: capabilities(),
-    }).started.accepted).toBe(false)
+    // The retired local actions can never be sent, even as a hand-made action.
+    for (const retired of ['AUTO', 'MARK_SUCCEEDED', 'MARK_FAILED']) {
+      expect(session().beginRecovery(
+        { action: retired as never, item: recoverableItem() },
+        { confirmed: true, capabilities: capabilities(), connection: CONNECTION },
+      ).accepted).toBe(false)
+    }
   })
 
-  it('keeps the recovery state whenever the outcome is not a decided verdict', () => {
-    const auto = beginRecoveryWrite('RECOVER_AUTO')
-    auto.writes.finishRecovery(recoverResult())
-    expect(auto.writes.sessions.value.recovery).toMatchObject({ state: 'ACTIVE', needsManual: false })
-
-    const failed = beginRecoveryWrite('MARK_FAILED')
-    failed.writes.finishRecovery(recoverResult({ action: 'MARK_FAILED', outcome: 'SUBMIT_FAILED' }))
-    expect(failed.writes.sessions.value.recovery).toMatchObject({
-      state: 'SUBMIT_FAILED', needsManual: false, message: RECOVERY_MESSAGES.SUBMIT_FAILED,
+  it('projects every documented verification outcome to fixed copy', () => {
+    const active = beginRecoveryWrite('VERIFY_EXTERNAL')
+    active.writes.finishRecovery(recoverResult())
+    expect(active.writes.sessions.value.recovery).toMatchObject({
+      state: 'ACTIVE', needsManual: false, message: RECOVERY_MESSAGES.ACTIVE,
     })
 
-    const manual = beginRecoveryWrite('RECOVER_AUTO')
+    const disabled = beginRecoveryWrite('VERIFY_EXTERNAL')
+    disabled.writes.finishRecovery(recoverResult({ outcome: 'DISABLED' }))
+    expect(disabled.writes.sessions.value.recovery).toMatchObject({
+      state: 'DISABLED', needsManual: false, message: RECOVERY_MESSAGES.DISABLED,
+    })
+
+    // A confirmed pending delete is a decided verdict too.
+    const deleted = beginRecoveryWrite('VERIFY_EXTERNAL')
+    deleted.writes.finishRecovery(recoverResult({ outcome: 'EXTERNAL_DELETED' }))
+    expect(deleted.writes.sessions.value.recovery).toMatchObject({
+      state: 'EXTERNAL_DELETED', needsManual: false, keepsIntent: false,
+      message: RECOVERY_MESSAGES.EXTERNAL_DELETED,
+    })
+
+    const manual = beginRecoveryWrite('VERIFY_EXTERNAL')
     manual.writes.finishRecovery(recoverResult({ outcome: 'RECOVERY_REQUIRED', needs_manual: true }))
     expect(manual.writes.sessions.value.recovery).toMatchObject({
       state: 'RECOVERY_REQUIRED', needsManual: true, manualNotice: RECOVERY_MANUAL_NOTICE,
     })
     expect(manual.writes.sessions.value.recovery!.message).not.toContain('RECOVERY_REQUIRED')
     expect(RECOVERY_MANUAL_NOTICE).toContain('独立核对')
+    expect(RECOVERY_MANUAL_NOTICE).toContain('主动重发')
 
-    // needs_manual is the server's own verdict even without the outcome value.
+    // needs_manual is the server's own verdict even for a decided outcome.
     const flag = beginRecoveryWrite('VERIFY_EXTERNAL')
-    flag.writes.finishRecovery(recoverResult({ action: 'VERIFY_EXTERNAL', outcome: 'ACTIVE', needs_manual: true }))
+    flag.writes.finishRecovery(recoverResult({ outcome: 'ACTIVE', needs_manual: true }))
     expect(flag.writes.sessions.value.recovery).toMatchObject({ state: 'RECOVERY_REQUIRED', needsManual: true })
 
     // An outcome outside the documented enum is never read as a success.
-    for (const outcome of ['DISABLED', 'EXTERNAL_DELETED', 'SOMETHING_NEW']) {
+    for (const outcome of ['SUBMIT_FAILED', 'SOMETHING_NEW']) {
       const unknown = beginRecoveryWrite('VERIFY_EXTERNAL')
       unknown.writes.finishRecovery(recoverResult({ outcome }))
       expect(unknown.writes.sessions.value.recovery).toMatchObject({ state: 'UNKNOWN', needsManual: false })
@@ -848,12 +815,13 @@ describe('tracking recovery write session (US-312)', () => {
     }
   })
 
-  it('releases the recovery lock for every decided verdict and keeps it otherwise', () => {
+  it('releases the verification lock for every decided verdict and keeps it otherwise', () => {
     for (const [state, locked] of [
       ['UNKNOWN', true], ['RECOVERY_REQUIRED', true],
-      ['ACTIVE', false], ['SUBMIT_FAILED', false], ['CONFLICT', false], ['REJECTED', false],
+      ['ACTIVE', false], ['DISABLED', false], ['EXTERNAL_DELETED', false],
+      ['CONFLICT', false], ['REJECTED', false],
     ] as ReadonlyArray<[string, boolean]>) {
-      const writes = beginRecoveryWrite('RECOVER_AUTO').writes
+      const writes = beginRecoveryWrite('VERIFY_EXTERNAL').writes
       if (state === 'UNKNOWN') writes.finishRecovery(recoverResult({ outcome: 'SOMETHING_NEW' }))
       else if (state === 'CONFLICT') writes.failRecovery({ status: 409, httpError: true })
       else if (state === 'REJECTED') writes.failRecovery({ status: 400, httpError: true })
@@ -865,23 +833,23 @@ describe('tracking recovery write session (US-312)', () => {
     }
   })
 
-  it('releases the record\'s unresolved write intent only when a recovery concludes', () => {
+  it("releases the record's unresolved write intent only when a verification concludes", () => {
     const { writes } = inFlightSubmit()
     writes.finishSubmit(submitResult({ outcome: 'UNKNOWN' }))
     expect(writes.sessions.value.submit!.keepsIntent).toBe(true)
-    const pending = beginRecoveryWrite('RECOVER_AUTO', { writes })
+    const pending = beginRecoveryWrite('VERIFY_EXTERNAL', { writes })
     expect(pending.started.accepted).toBe(true)
     writes.finishRecovery(recoverResult({ outcome: 'SOMETHING_NEW' }))
     expect(writes.sessions.value.submit).not.toBeNull()
-    // A still-unresolved recovery keeps the write intent; the next attempt
+    // A still-unresolved verification keeps the write intent; the next attempt
     // concludes it and releases the record.
-    expect(beginRecoveryWrite('RECOVER_AUTO', { writes }).started.accepted).toBe(true)
+    expect(beginRecoveryWrite('VERIFY_EXTERNAL', { writes }).started.accepted).toBe(true)
     writes.finishRecovery(recoverResult({ outcome: 'ACTIVE' }))
     expect(writes.sessions.value.submit).toBeNull()
   })
 
-  it('treats a 409 as a released recovery and an unreadable answer as unresolved', () => {
-    const conflict = beginRecoveryWrite('RECOVER_AUTO')
+  it('treats a 409 as a released verification and an unreadable answer as unresolved', () => {
+    const conflict = beginRecoveryWrite('VERIFY_EXTERNAL')
     expect(conflict.writes.failRecovery({ status: 409, httpError: true })).toEqual([
       { kind: 'recheck', trackingId: 'tracking-1', refreshList: true },
     ])
@@ -889,11 +857,11 @@ describe('tracking recovery write session (US-312)', () => {
       state: 'CONFLICT', message: RECOVERY_MESSAGES.CONFLICT, keepsIntent: false,
     })
 
-    const unknown = beginRecoveryWrite('RECOVER_AUTO')
+    const unknown = beginRecoveryWrite('VERIFY_EXTERNAL')
     unknown.writes.failRecovery({ status: 503, httpError: true })
     expect(unknown.writes.sessions.value.recovery).toMatchObject({ state: 'UNKNOWN', keepsIntent: true })
     // A cancellation that never crossed the boundary is not a result.
-    const cancelled = beginRecoveryWrite('RECOVER_AUTO')
+    const cancelled = beginRecoveryWrite('VERIFY_EXTERNAL')
     expect(cancelled.writes.failRecovery({ status: 0, httpError: false, cancelled: true })).toEqual([])
     expect(cancelled.writes.sessions.value.recovery!.state).toBe('IN_FLIGHT')
   })
@@ -916,11 +884,6 @@ const REFRESH_ACTION: ItemAction = {
   code: 'REFRESH_RSS', label: '立即刷新资源', style: 'SECONDARY',
   requires_confirmation: true, target_scopes: ['ASSOCIATED_RSS'],
 }
-const DELETE_ACTION: ItemAction = {
-  code: 'DELETE_EXTERNAL', label: '删除外部订阅', style: 'DANGER',
-  requires_confirmation: true, target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'],
-}
-
 function managementItem(overrides: Partial<TrackingItem> = {}): TrackingItem {
   return item({ available_actions: [modifyAction], ...overrides })
 }
@@ -985,11 +948,12 @@ describe('tracking management write session (US-313, US-314, US-315)', () => {
     }), 'MODIFY', 'SUBSCRIPTION')).toEqual(['SUBSCRIPTION'])
   })
 
-  it('sends only the four management actions this page can build a request for', () => {
+  it('sends only the three management actions this page can build a request for', () => {
     expect(isSendableManagementAction('MODIFY')).toBe(true)
     expect(isSendableManagementAction('SET_ENABLED')).toBe(true)
     expect(isSendableManagementAction('REFRESH_RSS')).toBe(true)
-    expect(isSendableManagementAction('DELETE_EXTERNAL')).toBe(true)
+    // Issue #228 retired the standalone external delete from the page contract.
+    expect(isSendableManagementAction('DELETE_EXTERNAL')).toBe(false)
     for (const code of ['SUBMIT', 'RETRY', 'RECOVER_AUTO', 'REVALIDATE', 'NOT_KNOWN']) {
       expect(isSendableManagementAction(code)).toBe(false)
     }
@@ -1018,13 +982,12 @@ describe('tracking management write session (US-313, US-314, US-315)', () => {
     // A revision the server could not have issued is refused.
     expect(beginManagementWrite({ item: managementItem({ revision: 0 }) }).started.accepted).toBe(false)
     // An action or scope this page cannot send is refused.
-    expect(beginManagementWrite({ action: action({ code: 'REVALIDATE' }), patch: null }).started.accepted).toBe(false)
+    expect(beginManagementWrite({ action: action({ code: 'REVALIDATE' as never }), patch: null }).started.accepted).toBe(false)
     expect(beginManagementWrite({ targetScope: 'EVERYTHING' as never }).started.accepted).toBe(false)
   })
 
   it('binds every management action to its own generated endpoint', () => {
     const disabled = managementItem({ status: 'DISABLED', available_actions: [ENABLE_ACTION] })
-    const deleteItem = managementItem({ available_actions: [DELETE_ACTION] })
     const routes: ReadonlyArray<[ReturnType<typeof beginManagementWrite>['started'], string]> = [
       [beginManagementWrite().started, '/api/v1/tracking/items/{tracking_id}/modify'],
       [beginManagementWrite({ action: ENABLE_ACTION, item: disabled, patch: null }).started,
@@ -1033,9 +996,6 @@ describe('tracking management write session (US-313, US-314, US-315)', () => {
         action: REFRESH_ACTION, item: managementItem({ available_actions: [REFRESH_ACTION] }),
         targetScope: 'ASSOCIATED_RSS', patch: null,
       }).started, '/api/v1/tracking/items/{tracking_id}/refresh'],
-      [beginManagementWrite({
-        action: DELETE_ACTION, item: deleteItem, patch: null,
-      }).started, '/api/v1/tracking/items/{tracking_id}/delete-external'],
     ]
     for (const [started, endpoint] of routes) {
       expect(started.accepted).toBe(true)
@@ -1153,37 +1113,6 @@ describe('tracking management write session (US-313, US-314, US-315)', () => {
     }).started.accepted).toBe(false)
   })
 
-  it('deletes exactly one explicitly chosen external object of this record', () => {
-    const deleteItem = managementItem({ available_actions: [DELETE_ACTION] })
-    const deleted = beginManagementWrite({
-      action: DELETE_ACTION, item: deleteItem, targetScope: 'SUBSCRIPTION', patch: null,
-    })
-    const body = bodyOf(deleted.started)
-    expect(body).toEqual({
-      target_scope: 'SUBSCRIPTION',
-      expected_revision: 3,
-      idempotency_key: body.idempotency_key,
-      confirm: true,
-      connection_ref: CONNECTION.connection_ref,
-      configuration_revision: CONNECTION.configuration_revision,
-    })
-    // The generated delete body has no ``file`` field at all.
-    expect(Object.keys(body).sort()).toEqual(
-      ['target_scope', 'expected_revision', 'idempotency_key', 'confirm', 'connection_ref', 'configuration_revision'].sort(),
-    )
-    expect(JSON.stringify(body)).not.toContain('file')
-    // The server does not offer the delete for this record at all.
-    expect(beginManagementWrite({
-      action: DELETE_ACTION, item: managementItem(), targetScope: 'SUBSCRIPTION', patch: null,
-    }).started.accepted).toBe(false)
-    // The server offers only the subscription scope; the RSS choice is dropped.
-    expect(beginManagementWrite({
-      action: DELETE_ACTION,
-      item: managementItem({ available_actions: [{ ...DELETE_ACTION, target_scopes: ['SUBSCRIPTION'] }] }),
-      targetScope: 'ASSOCIATED_RSS', patch: null,
-    }).started.accepted).toBe(false)
-  })
-
   it('names the action, the scope and the direction in each confirmation', () => {
     const disabled = managementItem({
       status: 'DISABLED', status_label: '已停用', available_actions: [ENABLE_ACTION],
@@ -1227,25 +1156,16 @@ describe('tracking management write session (US-313, US-314, US-315)', () => {
     expect(rssModify.started.confirmation!.confirmLabel).toBe('确认修改 RSS')
   })
 
-  it('confirms the delete as a danger that keeps every local record', () => {
-    const deleted = beginManagementWrite({
-      action: DELETE_ACTION,
-      item: managementItem({ available_actions: [DELETE_ACTION] }),
-      patch: null,
-    }, { confirmed: false })
-    const copy = deleted.started.confirmation!
-    expect(copy.danger).toBe(true)
-    expect(copy.confirmLabel).toBe('确认删除外部对象')
-    expect(copy.message).toContain('不会删除任何媒体文件')
-    for (const kept of ['本地订阅方案', '追番记录', '审计记录', '下载任务', '已下载媒体文件']) {
-      expect(copy.message).toContain(kept)
-    }
-    // The other management dialogs stay non-dangerous.
+  it('keeps the remaining management dialogs non-dangerous', () => {
+    // Issue #228 retired the only danger-styled management dialog (the
+    // standalone external delete), so no management confirmation is destructive.
     const refresh = beginManagementWrite({
       action: REFRESH_ACTION, item: managementItem({ available_actions: [REFRESH_ACTION] }),
       targetScope: 'ASSOCIATED_RSS', patch: null,
     }, { confirmed: false })
     expect(refresh.started.confirmation!.danger).toBeUndefined()
+    const modify = beginManagementWrite({}, { confirmed: false })
+    expect(modify.started.confirmation!.danger).toBeUndefined()
   })
 
   it('reports the server management status as fixed Chinese copy only', () => {
@@ -1324,54 +1244,6 @@ describe('tracking management write session (US-313, US-314, US-315)', () => {
     expect(refreshed.writes.sessions.value.management!.message).toContain('未接受本次刷新')
     expect(refreshed.writes.sessions.value.management!.message).not.toContain('FAILED')
 
-    const deleted = beginManagementWrite({
-      action: DELETE_ACTION,
-      item: managementItem({ available_actions: [DELETE_ACTION] }),
-      patch: null,
-    })
-    deleted.writes.finishManagement(modifyResult({ action: 'DELETE_EXTERNAL', management_status: 'SUCCEEDED' }))
-    const deleteSession = deleted.writes.sessions.value.management!
-    expect(deleteSession).toMatchObject({ operation: 'DELETE_EXTERNAL', state: 'SUCCEEDED', needsManual: false })
-    expect(deleteSession.message).toBe(MANAGEMENT_MESSAGES.DELETE_EXTERNAL!.SUCCEEDED)
-    expect(deleteSession.message).toContain('均保留')
-    expect(deleteSession.message).not.toContain('修改')
-
-    const deleteFailed = beginManagementWrite({
-      action: DELETE_ACTION, item: managementItem({ available_actions: [DELETE_ACTION] }), patch: null,
-    })
-    deleteFailed.writes.finishManagement(modifyResult({
-      action: 'DELETE_EXTERNAL', management_status: 'FAILED',
-    }))
-    expect(deleteFailed.writes.sessions.value.management!.message).toBe(
-      MANAGEMENT_MESSAGES.DELETE_EXTERNAL!.FAILED,
-    )
-    expect(deleteFailed.writes.sessions.value.management!.message).toContain('未删除该外部对象')
-    expect(deleteFailed.writes.sessions.value.management!.message).not.toContain('修改')
-
-    // A partial or undocumented delete result stays unresolved and keeps the
-    // page's single intent instead of being read as a successful delete.
-    for (const status of ['PREPARED', 'IN_PROGRESS', 'OUTCOME_UNKNOWN', 'RECOVERY_REQUIRED']) {
-      const partial = beginManagementWrite({
-        action: DELETE_ACTION, item: managementItem({ available_actions: [DELETE_ACTION] }), patch: null,
-      })
-      partial.writes.finishManagement(modifyResult({
-        action: 'DELETE_EXTERNAL', management_status: status,
-      }))
-      const settled = partial.writes.sessions.value.management!
-      expect(settled.state).toBe('UNKNOWN')
-      expect(settled.keepsIntent).toBe(true)
-      expect(settled.message).not.toContain('已删除')
-      expect(settled.message).not.toContain(status)
-    }
-
-    // The one delete conflict whose generic wording would misdescribe it.
-    const missing = beginManagementWrite({
-      action: DELETE_ACTION, item: managementItem({ available_actions: [DELETE_ACTION] }), patch: null,
-    })
-    missing.writes.failManagement({ status: 409, httpError: true, type: 'tracking_target_missing' })
-    expect(missing.writes.sessions.value.management!.state).toBe('CONFLICT')
-    expect(missing.writes.sessions.value.management!.message).toContain('本次未删除任何外部对象')
-    expect(missing.writes.sessions.value.management!.keepsIntent).toBe(false)
   })
 
   it('treats a partial, in-flight or undocumented result as unknown for every action', () => {
@@ -1381,7 +1253,6 @@ describe('tracking management write session (US-313, US-314, US-315)', () => {
       [modifyAction, managementItem(), 'SUBSCRIPTION', { title: 'x' }, MANAGEMENT_MESSAGES.MODIFY!.UNKNOWN!],
       [ENABLE_ACTION, managementItem({ status: 'DISABLED', available_actions: [ENABLE_ACTION] }), 'SUBSCRIPTION', null, MANAGEMENT_MESSAGES.SET_ENABLED!.UNKNOWN!],
       [REFRESH_ACTION, managementItem({ available_actions: [REFRESH_ACTION] }), 'ASSOCIATED_RSS', null, MANAGEMENT_MESSAGES.REFRESH_RSS!.UNKNOWN!],
-      [DELETE_ACTION, managementItem({ available_actions: [DELETE_ACTION] }), 'SUBSCRIPTION', null, MANAGEMENT_MESSAGES.DELETE_EXTERNAL!.UNKNOWN!],
     ]
     for (const [action0, record, scope, patch, message] of cases) {
       for (const status of ['PREPARED', 'IN_PROGRESS', 'OUTCOME_UNKNOWN', 'RECOVERY_REQUIRED']) {
@@ -1429,11 +1300,9 @@ describe('tracking management write session (US-313, US-314, US-315)', () => {
         '本次启停请求未通过服务端校验，未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。'],
       [REFRESH_ACTION, managementItem({ available_actions: [REFRESH_ACTION] }), 'ASSOCIATED_RSS', null,
         '本次刷新请求未通过服务端校验，未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。'],
-      [DELETE_ACTION, managementItem({ available_actions: [DELETE_ACTION] }), 'SUBSCRIPTION', null,
-        '该记录当前没有对应的外部对象，本次未删除任何外部对象；正在刷新最新详情。'],
     ]
     for (const [action0, record, scope, patch, message] of cases) {
-      const type = action0.code === 'DELETE_EXTERNAL' ? 'tracking_target_missing' : 'tracking_management_patch_invalid'
+      const type = 'tracking_management_patch_invalid'
       const { writes } = beginManagementWrite({ action: action0, item: record, targetScope: scope, patch })
       writes.failManagement({ status: 409, httpError: true, type })
       expect(writes.sessions.value.management!.message).toBe(message)
@@ -1475,12 +1344,6 @@ describe('tracking management write session (US-313, US-314, US-315)', () => {
     enableRejected.writes.failManagement({ status: 404, httpError: true })
     expect(enableRejected.writes.sessions.value.management!.message).toContain('未改变 Auto Bangumi 的启用状态')
     expect(enableRejected.writes.sessions.value.management!.message).not.toContain('修改')
-
-    const deleteRejected = beginManagementWrite({
-      action: DELETE_ACTION, item: managementItem({ available_actions: [DELETE_ACTION] }), patch: null,
-    })
-    deleteRejected.writes.failManagement({ status: 404, httpError: true })
-    expect(deleteRejected.writes.sessions.value.management!.message).toContain('未删除 Auto Bangumi 外部对象')
   })
 
   it('converges an unbuildable request on a definite failure instead of in-flight', () => {
@@ -1673,14 +1536,14 @@ describe('single page-level intent (D38-09.4)', () => {
   })
 
   it('blocks a write while this record still has an unresolved recovery', () => {
-    const pending = beginRecoveryWrite('RECOVER_AUTO')
+    const pending = beginRecoveryWrite('VERIFY_EXTERNAL')
     pending.writes.finishRecovery(recoverResult({ outcome: 'SOMETHING_NEW' }))
     const blocked = pending.writes.beginSubmit({ item: recoverableItem(), action: action() }, {
       mode: 'CONTINUE_TRACKING', confirmed: true, connection: CONNECTION,
     })
     expect(blocked.refusal).toEqual({ trackingId: 'tracking-1', reason: 'INTENT' })
     // A recovery is still allowed for that very record.
-    expect(beginRecoveryWrite('RECOVER_AUTO', { writes: pending.writes }).started.accepted).toBe(true)
+    expect(beginRecoveryWrite('VERIFY_EXTERNAL', { writes: pending.writes }).started.accepted).toBe(true)
   })
 
   it('forgets a decided session and its notice on a hard reset', () => {
@@ -1772,9 +1635,9 @@ describe('unbuildable page session (issue #193)', () => {
       expect(started.ask).toBeNull()
     }
     expect(session().noticeFor('tracking-1')).toBe('')
-    // A recovery is unaffected: ``RECOVER_AUTO`` is local and needs no
-    // credential at all (only ``VERIFY_EXTERNAL`` spends one).
-    expect(beginRecoveryWrite('RECOVER_AUTO', { connection: null }).started.accepted).toBe(true)
+    // The read-only verification is the only recovery left and it needs the live
+    // saved generation, so a cleared session refuses it silently as well.
+    expect(beginRecoveryWrite('VERIFY_EXTERNAL', { connection: null }).started.accepted).toBe(false)
   })
 
   it('refuses a locked submit whose generation the resubmission flow dropped, sending nothing extra', () => {
@@ -2161,14 +2024,11 @@ describe('one declaration per operation (issue #193)', () => {
     }
 
     const recoveries: ReadonlyArray<[string, string, string[]]> = [
-      ['RECOVER_AUTO', 'AUTO', ['expected_revision', 'action']],
-      ['MARK_SUCCEEDED', 'MARK_SUCCEEDED', ['expected_revision', 'action', 'confirm']],
-      ['MARK_FAILED', 'MARK_FAILED', ['expected_revision', 'action', 'confirm']],
       ['VERIFY_EXTERNAL', 'VERIFY_EXTERNAL',
         ['expected_revision', 'action', 'connection_ref', 'configuration_revision']],
     ]
     for (const [code, bodyAction, bodyKeys] of recoveries) {
-      const started = beginRecoveryWrite(code as 'RECOVER_AUTO').started
+      const started = beginRecoveryWrite(code as 'VERIFY_EXTERNAL').started
       expect(started.request?.endpoint).toBe('/api/v1/tracking/items/{tracking_id}/recover')
       expect(bodyOf(started).action).toBe(bodyAction)
       expect(Object.keys(bodyOf(started)).sort()).toEqual([...bodyKeys].sort())
@@ -2183,9 +2043,6 @@ describe('one declaration per operation (issue #193)', () => {
         ['target_scope', 'enabled', 'expected_revision', 'idempotency_key', 'confirm',
           'connection_ref', 'configuration_revision']],
       ['REFRESH_RSS', REFRESH_ACTION, '/api/v1/tracking/items/{tracking_id}/refresh',
-        ['target_scope', 'expected_revision', 'idempotency_key', 'confirm',
-          'connection_ref', 'configuration_revision']],
-      ['DELETE_EXTERNAL', DELETE_ACTION, '/api/v1/tracking/items/{tracking_id}/delete-external',
         ['target_scope', 'expected_revision', 'idempotency_key', 'confirm',
           'connection_ref', 'configuration_revision']],
     ]
@@ -2221,7 +2078,7 @@ describe('one session model for every write family', () => {
   it('builds every family snapshot from the same fields and one release rule', () => {
     const submit = inFlightSubmit().writes
     submit.finishSubmit(submitResult({ outcome: 'UNKNOWN' }))
-    const pending = beginRecoveryWrite('RECOVER_AUTO')
+    const pending = beginRecoveryWrite('VERIFY_EXTERNAL')
     pending.writes.finishRecovery(recoverResult({ outcome: 'SOMETHING_NEW' }))
     const managed = beginManagementWrite()
     managed.writes.finishManagement(modifyResult({ management_status: 'PREPARED' }))
@@ -2232,7 +2089,7 @@ describe('one session model for every write family', () => {
     ]
     for (const [snapshot, family, operation] of [
       [submit.sessions.value.submit!, 'SUBMIT', 'SUBMIT'],
-      [pending.writes.sessions.value.recovery!, 'RECOVERY', 'RECOVER_AUTO'],
+      [pending.writes.sessions.value.recovery!, 'RECOVERY', 'VERIFY_EXTERNAL'],
       [managed.writes.sessions.value.management!, 'MANAGEMENT', 'MODIFY'],
     ] as ReadonlyArray<[TrackingWriteSession, string, string]>) {
       // One snapshot type: the same fields, the family derived from the action.
@@ -2248,7 +2105,7 @@ describe('one session model for every write family', () => {
   it('keeps the three families in their own slots so all three panels can render', () => {
     const { writes } = inFlightSubmit()
     writes.finishSubmit(submitResult({ outcome: 'UNKNOWN' }))
-    const pending = beginRecoveryWrite('RECOVER_AUTO', { writes })
+    const pending = beginRecoveryWrite('VERIFY_EXTERNAL', { writes })
     expect(pending.started.accepted).toBe(true)
     writes.finishRecovery(recoverResult({ outcome: 'SOMETHING_NEW' }))
     expect(writes.sessions.value.submit!.state).toBe('UNKNOWN')

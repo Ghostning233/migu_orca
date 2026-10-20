@@ -1,4 +1,4 @@
-"""Recovery orchestration for unknown/incomplete tracking outcomes (US-226).
+"""Read-only recovery orchestration for unresolved tracking outcomes (US-226).
 
 ``POST /api/v1/tracking/items/{tracking_id}/recover`` resolves a tracking
 record whose external outcome is unknown (``VERIFYING_EXTERNAL``), whose local
@@ -7,25 +7,34 @@ result could not be made durable (``RECOVERY_REQUIRED``), or whose state is
 never be blindly retried (D29-07); only an explicit recovery may move it to
 ``ACTIVE`` / ``SUBMIT_FAILED`` / ``RECOVERY_REQUIRED``.
 
+Issue #228 (T5a) retired the local recovery family: ``AUTO`` (自动恢复),
+``MARK_SUCCEEDED`` (标记为成功) and ``MARK_FAILED`` (标记为失败) are gone from
+the request contract and from this service.  **The only executable recovery
+action is ``VERIFY_EXTERNAL``**, a read-only verification against the bound
+Auto Bangumi connection.
+
 This module is the Web-service layer that
 
 1. re-runs the historical-backfill coordinator (every tracking API access does);
 2. loads the TrackingRecord and guards ``expected_revision`` (409
-   ``tracking_revision_conflict``) and the recoverable tracking status (409
-   ``tracking_state_conflict``);
-3. guards the manual actions (``MARK_SUCCEEDED``/``MARK_FAILED`` require
-   ``confirm=true`` → 400 ``tracking_confirmation_required``);
-4. gathers **local-only** evidence (the current operation's state + the
-   Request's persisted safe AB result — never an external call) and runs the
-   pure :func:`classify_auto_recovery` decision for ``AUTO``, or maps a manual
-   action to its outcome;
+   ``tracking_revision_conflict``), the recoverable tracking status (409
+   ``tracking_state_conflict``) and then ``action`` (400 ``validation_error`` on
+   ``field=action`` for anything but ``VERIFY_EXTERNAL``);
+3. binds the request to the original operation and the saved connection
+   generation, so a changed binding is refused (400 ``tracking_connection_mismatch``;
+4. performs one bounded read-only external verification (it never creates,
+   modifies or deletes an Auto Bangumi object and never accepts an external
+   id/URL/raw result);
 5. persists the resulting TrackingRecord transition (status + audit + revision
    through one CAS) and advances an in-flight operation to its matching
-   terminal state, then returns the safe §11.8 payload.
+   terminal state, then returns the safe §11.8 payload.  A read-only
+   verification resolves to ``ACTIVE``, ``DISABLED``, ``EXTERNAL_DELETED`` (a
+   pending delete is confirmed) or ``RECOVERY_REQUIRED`` (still undecided).
 
-Security: recovery never contacts Auto Bangumi, never accepts an external
-id/URL/raw result, and manual actions write ``USER`` audit events.  No file
-name, path, credential, URL, magnet or raw upstream text is ever returned.
+Security: verification never writes upstream and never accepts an external
+id/URL/raw result.  Verification outcomes are written with a ``SYSTEM`` audit
+actor; no file name, path, credential, URL, magnet or raw upstream text is ever
+returned.
 """
 
 from __future__ import annotations
@@ -66,20 +75,8 @@ from storage_engine.controllers.tracking_repository import (
 )
 from tracking_engine.controllers.recover import (
     RECOVERABLE_STATUSES,
-    RECOVERY_ACTION_AUTO,
-    RECOVERY_ACTION_MARK_FAILED,
-    RECOVERY_ACTION_MARK_SUCCEEDED,
     RECOVERY_ACTION_VERIFY_EXTERNAL,
-    RECOVERY_ACTIONS,
-    RECOVERY_AUTO_FAILED_MESSAGE,
-    RECOVERY_AUTO_SUCCEEDED_MESSAGE,
-    RECOVERY_MANUAL_FAILED_MESSAGE,
-    RECOVERY_MANUAL_SUCCEEDED_MESSAGE,
     RECOVERY_NEEDS_MANUAL_MESSAGE,
-    AutoRecoveryDecision,
-    RecoveryEvidence,
-    classify_auto_recovery,
-    recovery_outcome_for_manual,
 )
 from tracking_engine.controllers.submit import (
     CONFIRM_REASON_AMBIGUOUS,
@@ -101,15 +98,11 @@ from tracking_engine.models.operation import (
 )
 from tracking_engine.models.tracking import (
     TRACKING_AUDIT_ACTOR_SYSTEM,
-    TRACKING_AUDIT_ACTOR_USER,
-    TRACKING_AUDIT_RECOVERY_AUTO_FAILED,
-    TRACKING_AUDIT_RECOVERY_AUTO_SUCCEEDED,
     TRACKING_AUDIT_RECOVERY_EXTERNAL_VERIFIED,
-    TRACKING_AUDIT_RECOVERY_MANUAL_FAILED,
-    TRACKING_AUDIT_RECOVERY_MANUAL_SUCCEEDED,
     TRACKING_AUDIT_RECOVERY_NEEDS_MANUAL,
     TRACKING_STATUS_ACTIVE,
     TRACKING_STATUS_DISABLED,
+    TRACKING_STATUS_EXTERNAL_DELETED,
     TRACKING_STATUS_RECOVERY_REQUIRED,
     TrackingRecord,
     transition_record,
@@ -117,6 +110,33 @@ from tracking_engine.models.tracking import (
 )
 
 _RECOVER_FAILED_STEP = "tracking_recover"
+
+#: The recovery actions one request may actually execute (#228 E2/E3/E5).
+#: ``AUTO`` (自动恢复), ``MARK_SUCCEEDED`` (标记为成功) and ``MARK_FAILED``
+#: (标记为失败) are retired user actions: the recovery family converges on the
+#: read-only external verification, which reads the bound Auto Bangumi
+#: connection and never writes.  Their Web implementations were removed with
+#: their tests in this wave; the request schema also stopped enumerating them,
+#: so an old client fails closed with a bounded 400 instead of a silent write.
+EXECUTABLE_RECOVERY_ACTIONS = frozenset({RECOVERY_ACTION_VERIFY_EXTERNAL})
+
+#: The record statuses a read-only verification may publish as its ``outcome``.
+#: A verification either decides the record (``ACTIVE``/``DISABLED``) or proves
+#: a pending delete took effect (``EXTERNAL_DELETED``); anything else stays
+#: undecided and is published as ``RECOVERY_REQUIRED``.
+_VERIFIED_OUTCOMES = frozenset(
+    {
+        TRACKING_STATUS_ACTIVE,
+        TRACKING_STATUS_DISABLED,
+        TRACKING_STATUS_EXTERNAL_DELETED,
+        TRACKING_STATUS_RECOVERY_REQUIRED,
+    }
+)
+
+
+def _verified_outcome(status: str) -> str:
+    """Return the published recover ``outcome`` for a verified record status."""
+    return status if status in _VERIFIED_OUTCOMES else TRACKING_STATUS_RECOVERY_REQUIRED
 
 
 def _verify_external(
@@ -378,12 +398,19 @@ def run_tracking_recover(
 ) -> dict[str, Any]:
     """Run one explicit recovery for a tracking item.
 
-    ``AUTO`` is a pure-local reconciliation that never touches Auto Bangumi;
-    ``MARK_SUCCEEDED``/``MARK_FAILED`` require ``confirm=true`` and write a
-    ``USER`` audit.  A persisted recovery outcome (``ACTIVE``/``SUBMIT_FAILED``/
-    ``RECOVERY_REQUIRED``) is returned as an HTTP-200-safe result dict; only
-    preconditions (missing record, stale revision, non-recoverable state,
-    missing manual confirmation) raise.
+    Since #228 the only executable recovery action is ``VERIFY_EXTERNAL``: the
+    read-only external verification that reads the bound Auto Bangumi connection
+    and never writes.  Any other code is rejected on ``field=action`` as soon as
+    the record is recoverable — a record that is not recoverable at all still
+    reports the more basic ``tracking_state_conflict`` first.  Either way no
+    tracking record state, audit event or operation is written.  A persisted
+    verification outcome (``ACTIVE``/``DISABLED``/``RECOVERY_REQUIRED``) is
+    returned as an HTTP-200-safe result dict; only preconditions (missing
+    record, stale revision, non-recoverable state, retired action, missing
+    connection) raise.
+
+    ``confirm`` is kept only for call-signature compatibility: a read-only
+    verification needs no confirmation, so the argument is not consulted.
     """
     run_tracking_migration(config=config)
 
@@ -395,21 +422,16 @@ def run_tracking_recover(
     if record.status not in RECOVERABLE_STATUSES:
         _raise_state_conflict(record)
 
-    if action not in RECOVERY_ACTIONS:
+    if action not in EXECUTABLE_RECOVERY_ACTIONS:
+        # #228 E2/E3/E5: only the read-only external verification is still a
+        # user-facing recovery.  A retired code is refused here — after the
+        # record is loaded and its state validated, but before any upstream read
+        # or state write — so an old client fails closed.
         raise Stage1Error(
             "validation_error",
-            "恢复动作必须是 AUTO、MARK_SUCCEEDED、MARK_FAILED 或 VERIFY_EXTERNAL",
+            "恢复只支持只读外部核验（VERIFY_EXTERNAL）",
             _RECOVER_FAILED_STEP,
             {"field": "action"},
-        )
-
-    manual = action in {RECOVERY_ACTION_MARK_SUCCEEDED, RECOVERY_ACTION_MARK_FAILED}
-    if manual and confirm is not True:
-        raise Stage1Error(
-            "tracking_confirmation_required",
-            "人工恢复必须显式确认核验结果",
-            _RECOVER_FAILED_STEP,
-            {"field": "confirm"},
         )
 
     operation = _load_current_operation(config, record)
@@ -447,202 +469,54 @@ def run_tracking_recover(
                 config, record=record, request=None, checked_revision=checked_revision,
                 timestamp=timestamp, reason="management_capability_unknown",
             )
-        result = recover_tracking_management(
+        management_result = recover_tracking_management(
             config, record=record, operation=operation, management_client=client, now=timestamp,
             connection_ref=connection_ref,
         )
         resolved_record = load_tracking_record(config, tracking_id)
-        result.update(
-            {
-                "tracking_id": resolved_record.tracking_id,
-                "action": RECOVERY_ACTION_VERIFY_EXTERNAL,
-                "checked_revision": checked_revision,
-                "next_revision": resolved_record.revision,
-                "checked_at": timestamp,
-                "tracking": tracking_summary_fields(resolved_record, valid_resource_count=0),
-            }
-        )
-        return result
+        # The published recover payload is the same for every verification
+        # branch: the record's status after the read, never the internal
+        # management verdict vocabulary (issue #228 review).
+        resolved_request = _tolerant_load_request(config, resolved_record)
+        outcome = _verified_outcome(resolved_record.status)
+        return {
+            "tracking_id": resolved_record.tracking_id,
+            "action": RECOVERY_ACTION_VERIFY_EXTERNAL,
+            "outcome": outcome,
+            "checked_revision": checked_revision,
+            "next_revision": resolved_record.revision,
+            "checked_at": timestamp,
+            "operation_id": management_result.get("operation_id"),
+            # ``RECOVERY_REQUIRED`` always means a human verdict is still needed,
+            # so the two published fields can never disagree.
+            "needs_manual": outcome == TRACKING_STATUS_RECOVERY_REQUIRED
+            or management_result.get("needs_manual") is True,
+            "verification_reason": None,
+            "tracking": tracking_summary_fields(
+                resolved_record, valid_resource_count=safe_valid_resource_count(resolved_request)
+            ),
+        }
+    # ``EXECUTABLE_RECOVERY_ACTIONS`` is exactly {VERIFY_EXTERNAL}, so this is
+    # the only remaining recovery path: one bounded read of the bound Auto
+    # Bangumi connection, then a single CAS of the resulting record state.
     request = _tolerant_load_request(config, record)
-    ab_result = _ab_result_of(request)
-
-    if action == RECOVERY_ACTION_VERIFY_EXTERNAL:
-        if ab_config is None:
-            raise Stage1Error(
-                "validation_error", "外部核验需要连接配置", _RECOVER_FAILED_STEP, {"field": "ab_config"}
-            )
-        return _verify_external(
-            config,
-            record=record,
-            request=request,
-            checked_revision=checked_revision,
-            timestamp=timestamp,
-            ab_config=ab_config,
-            management_client=management_client,
-            connection_ref=connection_ref,
-            expected_operation=operation,
-            expected_record_revision=checked_revision,
-            read_policy=read_policy,
+    if ab_config is None:
+        raise Stage1Error(
+            "validation_error", "外部核验需要连接配置", _RECOVER_FAILED_STEP, {"field": "ab_config"}
         )
-
-    if action == RECOVERY_ACTION_AUTO:
-        decision = classify_auto_recovery(
-            RecoveryEvidence(
-                operation_state=operation.state if operation is not None else None,
-                ab_result=ab_result,
-            )
-        )
-        return _apply_auto_recovery(
-            config,
-            record=record,
-            operation=operation,
-            request=request,
-            decision=decision,
-            checked_revision=checked_revision,
-            timestamp=timestamp,
-        )
-
-    outcome = recovery_outcome_for_manual(action)
-    audit_action = (
-        TRACKING_AUDIT_RECOVERY_MANUAL_SUCCEEDED
-        if outcome == TRACKING_STATUS_ACTIVE
-        else TRACKING_AUDIT_RECOVERY_MANUAL_FAILED
-    )
-    safe_message = (
-        RECOVERY_MANUAL_SUCCEEDED_MESSAGE
-        if outcome == TRACKING_STATUS_ACTIVE
-        else RECOVERY_MANUAL_FAILED_MESSAGE
-    )
-    reason_code = (
-        "manual_recovery_succeeded" if outcome == TRACKING_STATUS_ACTIVE else "manual_recovery_failed"
-    )
-    return _persist_recovery_outcome(
+    return _verify_external(
         config,
-        action=action,
         record=record,
-        operation=operation,
-        target_status=outcome,
-        audit_action=audit_action,
-        audit_actor=TRACKING_AUDIT_ACTOR_USER,
-        reason_code=reason_code,
-        safe_message=safe_message,
-        target_operation_state=(
-            TRACKING_OPERATION_STATE_SUCCEEDED
-            if outcome == TRACKING_STATUS_ACTIVE
-            else TRACKING_OPERATION_STATE_FAILED
-        ),
         request=request,
         checked_revision=checked_revision,
-        needs_manual=False,
         timestamp=timestamp,
+        ab_config=ab_config,
+        management_client=management_client,
+        connection_ref=connection_ref,
+        expected_operation=operation,
+        expected_record_revision=checked_revision,
+        read_policy=read_policy,
     )
-
-
-# ---------------------------------------------------------------------------
-# AUTO decision application
-# ---------------------------------------------------------------------------
-
-
-def _apply_auto_recovery(
-    config: StorageConfig,
-    *,
-    record: TrackingRecord,
-    operation: TrackingOperation | None,
-    request: dict[str, Any] | None,
-    decision: AutoRecoveryDecision,
-    checked_revision: int,
-    timestamp: str,
-) -> dict[str, Any]:
-    """Persist the AUTO recovery outcome from the pure classifier."""
-    if not decision.resolved:
-        # No clear local evidence: the record must be resolved manually.  A
-        # VERIFYING_EXTERNAL/UNKNOWN record moves to RECOVERY_REQUIRED; one that
-        # is already RECOVERY_REQUIRED stays (an unchanged state is reported
-        # without a revision bump/audit).  An in-flight operation is finalised
-        # to RECOVERY_REQUIRED as durable evidence that only recovery applies.
-        if record.status == TRACKING_STATUS_RECOVERY_REQUIRED:
-            next_record = record
-            needs_manual = True
-            _terminalize_in_flight_operation(
-                config,
-                operation,
-                target_operation_state=TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
-                error_type="requires_manual_recovery",
-                timestamp=timestamp,
-            )
-        else:
-            next_record = transition_record(
-                record,
-                status=TRACKING_STATUS_RECOVERY_REQUIRED,
-                audit_action=TRACKING_AUDIT_RECOVERY_NEEDS_MANUAL,
-                audit_actor=TRACKING_AUDIT_ACTOR_SYSTEM,
-                operation_id=operation.operation_id if operation is not None else None,
-                reason_code="requires_manual_recovery",
-                safe_message=RECOVERY_NEEDS_MANUAL_MESSAGE,
-                now=timestamp,
-            )
-            next_record = compare_and_swap_tracking_record(
-                config,
-                record.tracking_id,
-                base_revision=record.revision,
-                record=next_record,
-            )
-            needs_manual = True
-            _terminalize_in_flight_operation(
-                config,
-                operation,
-                target_operation_state=TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
-                error_type="requires_manual_recovery",
-                timestamp=timestamp,
-            )
-        _sync_queue_projection(
-            config,
-            next_record,
-            TRACKING_STATUS_RECOVERY_REQUIRED,
-        )
-        return _recover_result_payload(
-            record=next_record,
-            action=RECOVERY_ACTION_AUTO,
-            outcome=TRACKING_STATUS_RECOVERY_REQUIRED,
-            checked_revision=checked_revision,
-            operation_id=operation.operation_id if operation is not None else None,
-            needs_manual=needs_manual,
-            request=request,
-            timestamp=timestamp,
-        )
-
-    if decision.outcome == TRACKING_STATUS_ACTIVE:
-        audit_action = TRACKING_AUDIT_RECOVERY_AUTO_SUCCEEDED
-        safe_message = RECOVERY_AUTO_SUCCEEDED_MESSAGE
-        reason_code = "auto_recovery_succeeded"
-        target_operation_state = TRACKING_OPERATION_STATE_SUCCEEDED
-    else:
-        audit_action = TRACKING_AUDIT_RECOVERY_AUTO_FAILED
-        safe_message = RECOVERY_AUTO_FAILED_MESSAGE
-        reason_code = "auto_recovery_failed"
-        target_operation_state = TRACKING_OPERATION_STATE_FAILED
-
-    return _persist_recovery_outcome(
-        config,
-        action=RECOVERY_ACTION_AUTO,
-        record=record,
-        operation=operation,
-        target_status=decision.outcome,
-        audit_action=audit_action,
-        audit_actor=TRACKING_AUDIT_ACTOR_SYSTEM,
-        reason_code=reason_code,
-        safe_message=safe_message,
-        target_operation_state=target_operation_state,
-        request=request,
-        checked_revision=checked_revision,
-        needs_manual=False,
-        timestamp=timestamp,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Persisting a resolved recovery
-# ---------------------------------------------------------------------------
 
 
 def _persist_recovery_outcome(
@@ -824,14 +698,6 @@ def _tolerant_load_request(
         return loaded if isinstance(loaded, dict) else None
     except Stage1Error:
         return None
-
-
-def _ab_result_of(request: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Return the Request's persisted safe AB result, or None when absent."""
-    if not isinstance(request, dict):
-        return None
-    ab_result = request.get("ab_submit_result")
-    return ab_result if isinstance(ab_result, dict) else None
 
 
 def _sync_queue_projection(

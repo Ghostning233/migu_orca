@@ -79,7 +79,8 @@ def test_every_request_body_declares_the_model_its_route_validates() -> None:
             f"with {getattr(declared, '__name__', None) or 'an unreferenced model'}"
         )
         checked += 1
-    assert checked == 29, f"expected 29 documented request bodies, found {checked}"
+    # Issue #228 retired the standalone /delete-external request body.
+    assert checked == 28, f"expected 28 documented request bodies, found {checked}"
 
 
 def test_request_body_overlay_rejects_structural_keys() -> None:
@@ -140,7 +141,7 @@ def test_structural_refinements_reuse_model_declared_field_names() -> None:
     """A refinement may re-encode a rule, never invent a field."""
     known = (
         set(openapi_gen.RequestPreviewModifyPayload.model_fields)
-        | set(openapi_gen.TrackingDeleteExternalPayload.model_fields)
+        | set(openapi_gen._TrackingManagementBasePayload.model_fields)
         # Issue #202: the modify branch re-encodes ``local_plan``, which is a
         # declared field of the model the route validates with.
         | set(openapi_gen.TrackingModifyPayload.model_fields)

@@ -303,7 +303,7 @@ def test_subscription_delete_verifies_absence_without_touching_local_record(tmp_
     result = run_tracking_management(
         config, tracking_id=record.tracking_id, expected_revision=record.revision,
         idempotency_key="delete-subscription", confirm=True,
-        operation="DELETE_EXTERNAL", target_scope="SUBSCRIPTION",
+        operation="DELETE_EXTERNAL", internal_plan_delete=True, target_scope="SUBSCRIPTION",
         management_client=client,
         write=lambda target, payload: calls.append((target, payload)) or {"status_code": 200},
         readback=lambda _operation, _scope, _target: None,
@@ -318,7 +318,7 @@ def test_subscription_delete_verifies_absence_without_touching_local_record(tmp_
     replay = run_tracking_management(
         config, tracking_id=record.tracking_id, expected_revision=record.revision,
         idempotency_key="delete-subscription", confirm=True,
-        operation="DELETE_EXTERNAL", target_scope="SUBSCRIPTION",
+        operation="DELETE_EXTERNAL", internal_plan_delete=True, target_scope="SUBSCRIPTION",
         write=lambda *_args: pytest.fail("terminal delete replay must not write"),
     )
     assert replay == {
@@ -339,7 +339,7 @@ def test_disabled_subscription_can_still_use_the_file_safe_delete_path(tmp_path:
     result = run_tracking_management(
         config, tracking_id=record.tracking_id, expected_revision=record.revision,
         idempotency_key="delete-disabled-subscription", confirm=True,
-        operation="DELETE_EXTERNAL", target_scope="SUBSCRIPTION", management_client=client,
+        operation="DELETE_EXTERNAL", internal_plan_delete=True, target_scope="SUBSCRIPTION", management_client=client,
         write=lambda target, payload: calls.append((target, payload)) or {"status_code": 200},
         readback=lambda _operation, _scope, _target: None,
     )
@@ -358,7 +358,7 @@ def test_deleted_subscription_is_not_treated_as_confirmed_external_deletion(tmp_
     result = run_tracking_management(
         config, tracking_id=record.tracking_id, expected_revision=record.revision,
         idempotency_key="deleted-is-still-present", confirm=True,
-        operation="DELETE_EXTERNAL", target_scope="SUBSCRIPTION", management_client=client,
+        operation="DELETE_EXTERNAL", internal_plan_delete=True, target_scope="SUBSCRIPTION", management_client=client,
         write=lambda _target, _payload: {"status_code": 200},
     )
     assert result["outcome"] == "DEFINITE_FAILURE"
@@ -377,7 +377,7 @@ def test_rss_delete_calls_each_bound_id_and_removes_only_mapping(tmp_path: Path)
     result = run_tracking_management(
         config, tracking_id=record.tracking_id, expected_revision=record.revision,
         idempotency_key="delete-rss", confirm=True,
-        operation="DELETE_EXTERNAL", target_scope="ASSOCIATED_RSS",
+        operation="DELETE_EXTERNAL", internal_plan_delete=True, target_scope="ASSOCIATED_RSS",
         management_client=client,
         write=lambda target, payload: calls.append(target) or {"status_code": 204},
         readback=lambda _operation, _scope, _target: ResolvedManagementTarget(scope="ASSOCIATED_RSS"),
@@ -442,7 +442,7 @@ def test_recovered_modify_and_rss_delete_restore_the_operation_previous_status(t
     delete_client = _FakeClient()
     first = run_tracking_management(
         config, tracking_id=record.tracking_id, expected_revision=record.revision,
-        idempotency_key="recover-rss-delete", confirm=True, operation="DELETE_EXTERNAL",
+        idempotency_key="recover-rss-delete", confirm=True, operation="DELETE_EXTERNAL", internal_plan_delete=True,
         target_scope="ASSOCIATED_RSS", management_client=delete_client,
         write=lambda _target, _payload: {"transport_error": "timeout"},
     )
@@ -834,11 +834,10 @@ def test_retired_record_keeps_only_the_internal_plan_delete_leg(tmp_path: Path) 
         expected_revision=record.revision,
         idempotency_key="key-internal-plan-delete",
         confirm=True,
-        operation="DELETE_EXTERNAL",
+        operation="DELETE_EXTERNAL", internal_plan_delete=True,
         target_scope="SUBSCRIPTION",
         management_client=client,
         write=management_writer(client, "DELETE_EXTERNAL"),
-        internal_plan_delete=True,
     )
 
     assert result["management_status"] == "SUCCEEDED"

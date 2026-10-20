@@ -161,7 +161,13 @@ def test_saved_management_real_entrypoint_four_actions_uses_ref_and_writer(
         lambda *_a, **_k: client,
     )
     monkeypatch.setattr("apps.migu_orca_web.services._WEB_STORAGE_ROOT", tmp_path)
-    result = run_saved_tracking_management(_payload(saved, record, operation, scope, **extra), config_root=private)
+    result = run_saved_tracking_management(
+        _payload(saved, record, operation, scope, **extra),
+        config_root=private,
+        # #228 retired the standalone public entry: the delete only runs through
+        # the composite plan-delete leg, which is what this case covers.
+        internal_plan_delete=(operation == "DELETE_EXTERNAL"),
+    )
     assert result["created"] is True
     assert result["management_status"] == "SUCCEEDED"
     assert client.reads >= (1 if operation == "REFRESH_RSS" else 2)
@@ -568,10 +574,10 @@ def test_legacy31_delete_is_single_file_safe_and_local_bytes_survive(monkeypatch
     if outcome in {"unknown", "server_error"}:
         # An unreadable response and a 5xx are both indeterminate: neither may be
         # reported as a definite failure (the write may have been processed).
-        result = run_saved_tracking_management(payload, config_root=private)
+        result = run_saved_tracking_management(payload, config_root=private, internal_plan_delete=True)
         assert result["outcome"] == "OUTCOME_UNKNOWN"
     else:
-        result = run_saved_tracking_management(payload, config_root=private)
+        result = run_saved_tracking_management(payload, config_root=private, internal_plan_delete=True)
         assert result["outcome"] == ("SUCCESS" if outcome == "success" else "DEFINITE_FAILURE")
     deletes = [call for call in transport.calls if call[0] == "DELETE"]
     assert len(deletes) == 1

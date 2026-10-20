@@ -1184,11 +1184,14 @@ def test_download_existing_same_key_replay_never_calls_ab_again(
 def test_download_existing_recovery_never_reruns_the_collection(
     tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Issue #217 AC5: recovery never claims success and never re-collects.
+    """Issue #217 AC5: the recovery surface never claims success or re-collects.
 
-    A one-time request has no controlled subscription to reconcile, so an
-    explicit recovery is a state conflict: nothing is read back, no "an existing
-    rule proves a download" claim is made, and Auto Bangumi is never called.
+    Issue #228 retired the local recovery action this used to drive, so the
+    endpoint refuses it by contract.  The AC5 guarantee itself is covered where
+    it now lives — ``test_verify_external_never_resolves_a_one_time_collection``:
+    a one-time request has no controlled subscription to reconcile, so a
+    read-only verification resolves nothing and Auto Bangumi is never re-read
+    for a download verdict.
     """
     request = _accepted_request(tmp_path)
     record = _seed_tracking(tmp_path, request)
@@ -1217,11 +1220,12 @@ def test_download_existing_recovery_never_reruns_the_collection(
         },
     )
 
-    # Either the state is not recoverable at all (409) or recovery stays a
-    # definite failure; neither may invent a download success.
-    assert recovered.status_code in (200, 409)
-    if recovered.status_code == 200:
-        assert recovered.get_json()["result"]["outcome"] == TRACKING_STATUS_SUBMIT_FAILED
+    # Issue #228 retired the local recovery action this used to drive, so the
+    # endpoint refuses it outright.  The #217 AC5 invariant is unchanged: the
+    # recovery surface never runs a second collection and never invents a
+    # download success.
+    assert recovered.status_code == 400
+    assert recovered.get_json()["error_type"] == "data_validation_errors"
     assert opener.calls.count("POST /api/v1/rss/collect") == 1
     assert "POST /api/v1/rss/subscribe" not in opener.calls
     stored = load_tracking_record(_config(tmp_path), record.tracking_id)

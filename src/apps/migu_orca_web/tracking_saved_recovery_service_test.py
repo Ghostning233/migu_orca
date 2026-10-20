@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from ab_engine.models.management import AutoBangumiCapabilities, ExternalRss, ExternalSubscription
+from apps.migu_orca_web.api_contract import TrackingRecoverResultDTO
 from apps.migu_orca_web.schemas import SavedTrackingRecoveryInput
 from apps.migu_orca_web.tracking_recovery_service_test import (
     _accepted_request,
@@ -33,7 +34,6 @@ from tracking_engine.models.operation import (
     transition_tracking_operation,
 )
 from tracking_engine.models.tracking import (
-    TRACKING_AUDIT_RECOVERY_MANUAL_SUCCEEDED,
     TRACKING_STATUS_ACTIVE,
     TRACKING_STATUS_RECOVERY_REQUIRED,
     TRACKING_STATUS_VERIFYING_EXTERNAL,
@@ -84,42 +84,50 @@ def _saved_submit_operation(config, record, ref: str, key: str):
     )
 
 
-def test_saved_recovery_schema_is_strict_and_local_actions_are_connection_free():
-    base = {"tracking_id": "trk", "expected_revision": 1, "action": "AUTO"}
-    SavedTrackingRecoveryInput(**base)
-    SavedTrackingRecoveryInput(**{**base, "action": "MARK_SUCCEEDED", "confirm": True})
-    for action in ("MARK_SUCCEEDED", "MARK_FAILED"):
+def test_saved_recovery_schema_is_strict_and_verify_only():
+    """Issue #228: only the read-only verification survives, and it needs the generation."""
+    base = {"tracking_id": "trk", "expected_revision": 1, "action": "VERIFY_EXTERNAL"}
+    SavedTrackingRecoveryInput(**{**base, "connection_ref": REF, "configuration_revision": 1})
+    # The retired local family is gone from the schema, with or without confirm.
+    for action in ("AUTO", "MARK_SUCCEEDED", "MARK_FAILED", "NOT_AN_ACTION"):
+        for extra in ({}, {"confirm": True}):
+            with pytest.raises(ValidationError):
+                SavedTrackingRecoveryInput(
+                    **{**base, "action": action, "connection_ref": REF,
+                       "configuration_revision": 1, **extra}
+                )
+    # The verification always carries its saved connection generation.
+    with pytest.raises(ValidationError):
+        SavedTrackingRecoveryInput(**base)
+    with pytest.raises(ValidationError):
+        SavedTrackingRecoveryInput(**{**base, "connection_ref": REF})
+    with pytest.raises(ValidationError):
+        SavedTrackingRecoveryInput(**{**base, "configuration_revision": 1})
+    for extra in ("secret", "id", "url", "note", "extra"):
         with pytest.raises(ValidationError):
-            SavedTrackingRecoveryInput(**{**base, "action": action})
-    for extra in ("connection_ref", "configuration_revision", "secret", "id", "url", "note", "extra"):
-        with pytest.raises(ValidationError):
-            SavedTrackingRecoveryInput(**{**base, extra: REF if extra == "connection_ref" else 1})
+            SavedTrackingRecoveryInput(
+                **{**base, "connection_ref": REF, "configuration_revision": 1, extra: 1}
+            )
     with pytest.raises(ValidationError):
-        SavedTrackingRecoveryInput(**{**base, "action": "VERIFY_EXTERNAL", "connection_ref": REF})
+        SavedTrackingRecoveryInput(
+            **{**base, "connection_ref": REF.upper(), "configuration_revision": 1}
+        )
     with pytest.raises(ValidationError):
-        SavedTrackingRecoveryInput(**{**base, "action": "VERIFY_EXTERNAL", "configuration_revision": 1})
-    with pytest.raises(ValidationError):
-        SavedTrackingRecoveryInput(**{**base, "action": "VERIFY_EXTERNAL", "connection_ref": REF.upper(), "configuration_revision": 1})
-    with pytest.raises(ValidationError):
-        SavedTrackingRecoveryInput(**{**base, "action": "VERIFY_EXTERNAL", "connection_ref": REF, "configuration_revision": True})
+        SavedTrackingRecoveryInput(
+            **{**base, "connection_ref": REF, "configuration_revision": True}
+        )
 
 
-def test_auto_and_manual_do_not_load_saved_config_or_construct_client(monkeypatch, tmp_path: Path):
-    request = _accepted_request(tmp_path)
-    record = _move_record(tmp_path, _seeded_tracking(tmp_path, request), TRACKING_STATUS_RECOVERY_REQUIRED)
-    monkeypatch.setattr("apps.migu_orca_web.services._WEB_STORAGE_ROOT", tmp_path)
-    monkeypatch.setattr(
-        "apps.migu_orca_web.tracking_saved_recovery_service.create_management_client",
-        lambda *_a, **_k: pytest.fail("local recovery must not construct client"),
-    )
-    auto = run_saved_tracking_recovery(_payload(record), config_root=tmp_path / "missing")
-    assert auto["outcome"] == TRACKING_STATUS_RECOVERY_REQUIRED
-    manual_record = load_tracking_record(_config(tmp_path), record.tracking_id)
-    manual = run_saved_tracking_recovery(
-        _payload(manual_record, "MARK_SUCCEEDED", confirm=True), config_root=tmp_path / "missing"
-    )
-    assert manual["outcome"] == TRACKING_STATUS_ACTIVE
-    assert load_tracking_record(_config(tmp_path), record.tracking_id).audit_events[-1]["action"] == TRACKING_AUDIT_RECOVERY_MANUAL_SUCCEEDED
+def test_retired_local_recovery_actions_fail_closed_at_the_schema():
+    """#228 E2/E3: a retired action cannot even be built, so no IO can follow.
+
+    The whole local path is gone: ``SavedTrackingRecoveryInput`` refuses the
+    retired codes before any config load, client construction or record write.
+    """
+    base = {"tracking_id": "trk", "expected_revision": 1}
+    for action in ("AUTO", "MARK_SUCCEEDED", "MARK_FAILED"):
+        with pytest.raises(ValidationError):
+            SavedTrackingRecoveryInput(**{**base, "action": action, "confirm": True})
 
 
 def _bound_submit_scenario(monkeypatch, tmp_path: Path, state: str, *, plan_ready: bool = False):
@@ -250,20 +258,28 @@ def _uncertain_management(monkeypatch, tmp_path: Path, operation: str, scope: st
     first = run_saved_tracking_management(
         _management_payload(saved, record, operation, scope, **extra),
         config_root=private, write=lambda *_a: {"transport_error": "timeout"},
+        # #228 retired the standalone public DELETE_EXTERNAL entry; the operation
+        # can still exist because the composite "delete plan + external
+        # subscription" leg creates it.  That internal door is what this case
+        # exercises, so the verification coverage stays.
+        internal_plan_delete=(operation == "DELETE_EXTERNAL"),
     )
     latest = load_tracking_record(config, record.tracking_id)
     return private, saved, config, latest, first["operation_id"], client
 
 
 @pytest.mark.parametrize(
-    ("operation", "scope", "extra", "outcome"),
-    [("MODIFY", "SUBSCRIPTION", {"patch": {"title": "New"}}, "DEFINITE_FAILURE"),
-     ("SET_ENABLED", "SUBSCRIPTION", {"enabled": False}, "DEFINITE_FAILURE"),
-     ("DELETE_EXTERNAL", "SUBSCRIPTION", {}, "SUCCESS"),
-     ("REFRESH_RSS", "ASSOCIATED_RSS", {}, "OUTCOME_UNKNOWN")],
+    ("operation", "scope", "extra", "outcome", "needs_manual"),
+    # ``outcome`` is the published recover payload field: the record's status
+    # after the read-only verification (issue #228 review), not the internal
+    # management verdict vocabulary.
+    [("MODIFY", "SUBSCRIPTION", {"patch": {"title": "New"}}, "ACTIVE", False),
+     ("SET_ENABLED", "SUBSCRIPTION", {"enabled": False}, "ACTIVE", False),
+     ("DELETE_EXTERNAL", "SUBSCRIPTION", {}, "EXTERNAL_DELETED", False),
+     ("REFRESH_RSS", "ASSOCIATED_RSS", {}, "RECOVERY_REQUIRED", True)],
 )
 def test_saved_management_recovery_is_read_only_and_preserves_operation_key(
-    monkeypatch, tmp_path: Path, operation, scope, extra, outcome,
+    monkeypatch, tmp_path: Path, operation, scope, extra, outcome, needs_manual,
 ):
     private, saved, config, record, operation_id, client = _uncertain_management(
         monkeypatch, tmp_path, operation, scope, **extra
@@ -276,7 +292,14 @@ def test_saved_management_recovery_is_read_only_and_preserves_operation_key(
         _payload(record, "VERIFY_EXTERNAL", storage_dir="business", connection_ref=str(saved.connection_ref), configuration_revision=saved.configuration_revision),
         config_root=private, management_client=client,
     )
+    # The published payload must describe every branch the same way.
+    TrackingRecoverResultDTO.model_validate(result)
     assert result["outcome"] == outcome
+    assert result["needs_manual"] is needs_manual
+    assert set(result) <= {
+        "tracking_id", "action", "outcome", "checked_revision", "next_revision",
+        "checked_at", "operation_id", "needs_manual", "verification_reason", "tracking",
+    }
     assert (operation_id, load_tracking_operation(config, operation_id).idempotency_key, len(client.calls)) == before
     assert client.reads >= 2
 

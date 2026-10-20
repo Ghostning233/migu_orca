@@ -29,18 +29,6 @@ export type TrackingRefreshRssBody = NonNullable<
   operations['refreshTrackingRss']['requestBody']['content']['application/json']
 >
 /**
- * The per-record external delete body (US-315).
- *
- * It is its own generated shape: ``target_scope`` plus the shared
- * revision/key/confirm/credential fields, and deliberately no ``file`` field —
- * the contract cannot express "also delete the downloaded media", so the page
- * cannot send it either.
- */
-export type TrackingDeleteExternalBody = NonNullable<
-  operations['deleteExternalTrackingItem']['requestBody']['content']['application/json']
->
-
-/**
  * The saved Auto Bangumi generation every management request carries.
  *
  * ``base_url`` is a legacy input value the request builders deliberately ignore:

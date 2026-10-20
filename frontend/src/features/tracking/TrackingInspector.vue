@@ -11,7 +11,7 @@ import {
   canVerifyExternally,
   executableTrackingActions,
   formatSubmissionMode,
-  DELETE_EXTERNAL_HELP,
+  isRecoverableStatus,
   isPendingSubmission,
   MANAGEMENT_ACTIONS_HELP,
   resubmitOfferState,
@@ -42,7 +42,6 @@ import type { RequestDetailResult } from '@/features/requests/requestDetail'
 import type { PreviewPatch } from '@/features/workbench/candidateSearch'
 import CheckboxRow from '@/components/forms/CheckboxRow.vue'
 import { buildReuseHandoff, publishReuseHandoff } from '@/features/requests/reuseHandoff'
-import TrackingExternalDelete from './TrackingExternalDelete.vue'
 import TrackingManagementActions from './TrackingManagementActions.vue'
 import TrackingModifyForm from './TrackingModifyForm.vue'
 import TrackingPoster from './TrackingPoster.vue'
@@ -263,39 +262,21 @@ function requestResubmit(): void {
   emit('resubmit-requested', { item: detail.value })
 }
 
-// -- unknown-result recovery (US-312) ----------------------------------------
-// The three local actions are rendered exactly as the server offers them for a
-// recovery status, so no capability or credential is involved; the read-only
-// external verification is the page's own recovery-flow choice and therefore
-// requires the live page session to have proven `external_verify`.  The page
-// owns the request: this component only projects the actions and renders the
-// page-level recovery result.
-const RECOVERY_BUTTON_IDS = {
-  RECOVER_AUTO: 'tracking-recover-auto',
-  MARK_SUCCEEDED: 'tracking-recover-succeeded',
-  MARK_FAILED: 'tracking-recover-failed',
-} as const satisfies Record<Exclude<TrackingRecoveryActionCode, 'VERIFY_EXTERNAL'>, string>
-
-const RECOVERY_VARIANTS = {
-  PRIMARY: 'primary', SECONDARY: 'secondary', DANGER: 'danger',
-} as const
-
-/** Only the server-computed local recovery actions, in server order. */
-const recoveryActions = computed(() => (
-  detail.value
-    ? executableTrackingActions(detail.value).filter(
-        (action): action is TrackingAction & { code: keyof typeof RECOVERY_BUTTON_IDS } =>
-          action.code === 'RECOVER_AUTO' || action.code === 'MARK_SUCCEEDED' || action.code === 'MARK_FAILED',
-      )
-    : []
+// -- unknown-result recovery (US-312 / issue #228) ---------------------------
+// Issue #228 retired 自动恢复/标记为成功/标记为失败 and their server-projected
+// actions.  Reading the bound Auto Bangumi connection is the only recovery left:
+// it is offered for a record whose exact status is unresolved, only while the
+// page session has proven `external_verify`, and it never writes upstream.  The
+// page owns the request; this component renders the flow and its result.
+/** True while the record's exact status is one only the server can settle. */
+const recoveryRecord = computed(() => (
+  !!detail.value && isRecoverableStatus(detail.value.status)
 ))
-/**
- * The read-only external verification is offered only inside a recovery flow
- * (the server marks every recoverable status with RECOVER_AUTO) and only while
- * the page session proves the capability; it never creates an external write.
- */
+
 const verifyExternalOffered = computed(() => (
-  recoveryActions.value.length > 0 && props.connectionReady === true && canVerifyExternally(props.capabilities)
+  recoveryRecord.value
+  && props.connectionReady === true
+  && canVerifyExternally(props.capabilities)
 ))
 const recoveryInFlight = computed(() => (
   thisRecovery.value?.state === 'IN_FLIGHT'
@@ -307,13 +288,8 @@ const managementInFlight = computed(() => (
 const thisManagement = computed(() => sessionFor(props.sessions?.management))
 /** The modify result is rendered next to the modify form; the rest next to the actions. */
 const thisModify = computed(() => (thisManagement.value?.operation === 'MODIFY' ? thisManagement.value : null))
-/** The delete result belongs to the delete section only (US-315). */
-const thisDelete = computed(() => (
-  thisManagement.value?.operation === 'DELETE_EXTERNAL' ? thisManagement.value : null
-))
 const thisManagementAction = computed(() => (
   thisManagement.value && thisManagement.value.operation !== 'MODIFY'
-    && thisManagement.value.operation !== 'DELETE_EXTERNAL'
     ? thisManagement.value
     : null
 ))
@@ -388,8 +364,8 @@ function requestRecovery(action: TrackingRecoveryActionCode): void {
 }
 
 // -- external management writes (US-313, US-314, US-315) ---------------------
-// Every management action the page sends (MODIFY, SET_ENABLED, REFRESH_RSS,
-// DELETE_EXTERNAL) is server-computed with explicit target scopes, so each one is
+// Every management action the page sends (MODIFY, SET_ENABLED, REFRESH_RSS) is
+// server-computed with explicit target scopes, so each one is
 // projected the same way: it needs the page credential session and the matching
 // capability for the scope the user wants to act on.  The forms own the user's
 // explicit choice (the fields to change, the enable/disable target, the refresh,
@@ -429,7 +405,6 @@ function offerFor(code: TrackingManagementActionCode): ManagementOfferView | nul
 const modifyOffer = computed(() => offerFor('MODIFY'))
 const setEnabledOffer = computed(() => offerFor('SET_ENABLED'))
 const refreshOffer = computed(() => offerFor('REFRESH_RSS'))
-const deleteOffer = computed(() => offerFor('DELETE_EXTERNAL'))
 
 /** Fixed read-only copy when the server does not offer the action at all. */
 function managementHint(verb: string): string {
@@ -439,7 +414,6 @@ function managementHint(verb: string): string {
 const modifyHint = computed(() => managementHint('修改外部方案'))
 const setEnabledHint = computed(() => managementHint('启停外部订阅或关联 RSS'))
 const refreshHint = computed(() => managementHint('立即刷新资源'))
-const deleteHint = computed(() => managementHint('删除外部对象'))
 
 // -- apply an edited plan to the controlled external subscription (issue #91) --
 // The already-active plan is edited with the same shared core, but saving is a
@@ -902,21 +876,13 @@ defineExpose({ reload: () => fetchDetail(true) })
       </section>
 
       <section
-        v-if="!pendingSubmission && (recoveryActions.length || verifyExternalOffered || thisRecovery)"
+        v-if="!pendingSubmission && (recoveryRecord || thisRecovery)"
         class="tracking-inspector-section tracking-recovery"
         aria-labelledby="tracking-recovery-heading"
       >
-        <h4 id="tracking-recovery-heading">结果待确认恢复</h4>
-        <p class="field-help">恢复只用本地证据或只读外部核验，不会重新提交，也不会创建、修改或删除 Auto Bangumi 订阅。</p>
+        <h4 id="tracking-recovery-heading">结果待确认</h4>
+        <p class="field-help">只读核验会用已保存的 Auto Bangumi 连接比对该追番的当前状态；不会重新提交，也不会创建、修改或删除任何外部订阅。</p>
         <div class="tracking-recovery-actions">
-          <BaseButton
-            v-for="action in recoveryActions"
-            :key="action.code"
-            :id="RECOVERY_BUTTON_IDS[action.code]"
-            :variant="RECOVERY_VARIANTS[action.style]"
-            :disabled="actionBusy"
-            @click="requestRecovery(action.code)"
-          >{{ action.label }}</BaseButton>
           <BaseButton
             v-if="verifyExternalOffered"
             id="tracking-recover-verify"
@@ -925,7 +891,7 @@ defineExpose({ reload: () => fetchDetail(true) })
             @click="requestRecovery('VERIFY_EXTERNAL')"
           >只读核验外部状态</BaseButton>
         </div>
-        <p v-if="!verifyExternalOffered && recoveryActions.length" class="field-help">
+        <p v-if="!verifyExternalOffered" class="field-help">
           只读外部核验需要先在页面连接 Auto Bangumi，并确认外部核验能力可用。
         </p>
         <div
@@ -1068,31 +1034,6 @@ defineExpose({ reload: () => fetchDetail(true) })
         </div>
       </details>
 
-      <section
-        class="tracking-inspector-section tracking-delete-external-section"
-        aria-labelledby="tracking-delete-external-section-heading"
-      >
-        <h4 id="tracking-delete-external-section-heading">删除 Auto Bangumi 外部对象</h4>
-        <p class="field-help">{{ DELETE_EXTERNAL_HELP }}</p>
-        <TrackingExternalDelete
-          :item="detail"
-          :action="deleteOffer?.action ?? null"
-          :result="thisDelete"
-          :hint="deleteHint"
-          :busy="actionBusy || !externalWritesAvailable"
-          :loading="managementInFlight"
-          @submit="requestManagement"
-        />
-        <p
-          v-if="deleteOffer && !externalWritesAvailable"
-          id="tracking-delete-connection-required"
-          class="field-help"
-          role="status"
-        >
-          {{ connectionRequiredHint }}
-        </p>
-      </section>
-
       <p v-if="!detail.request_id" class="field-help" role="status">
         该记录没有关联的本地追番方案。
       </p>
@@ -1143,5 +1084,4 @@ defineExpose({ reload: () => fetchDetail(true) })
 .tracking-modify-result.is-succeeded { border-left-color: var(--color-feedback-success-border); }
 .tracking-modify-result.is-failed, .tracking-modify-result.is-conflict, .tracking-modify-result.is-rejected, .tracking-modify-result.is-unknown { border-left-color: var(--color-feedback-error-border); }
 .tracking-modify-verdict, .tracking-modify-manual { font-weight: 600; }
-.tracking-delete-external-section { gap: .65rem; }
 </style>

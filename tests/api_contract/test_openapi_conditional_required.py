@@ -225,17 +225,6 @@ _RUNTIME_CASES = [
         },
         id="recover-verify-external-with-connection",
     ),
-    pytest.param(RECOVER, {"expected_revision": 1, "action": "AUTO"}, id="recover-local"),
-    pytest.param(
-        RECOVER,
-        {"expected_revision": 1, "action": "AUTO", "connection_ref": REF},
-        id="recover-local-carrying-connection-ref",
-    ),
-    pytest.param(
-        RECOVER,
-        {"expected_revision": 1, "action": "AUTO", "configuration_revision": 1},
-        id="recover-local-carrying-configuration-revision",
-    ),
     pytest.param(
         RESUBMIT, {"expected_revision": 1, "confirm": False}, id="resubmit-read-only"
     ),
@@ -292,18 +281,6 @@ def test_documented_condition_matches_the_running_validator(
 _NULL_DIVERGENCE_CASES = [
     pytest.param(
         RECOVER,
-        {"expected_revision": 1, "action": "AUTO", "configuration_revision": None},
-        404,
-        id="recover-local-configuration-revision-null",
-    ),
-    pytest.param(
-        RECOVER,
-        {"expected_revision": 1, "action": "AUTO", "connection_ref": None},
-        404,
-        id="recover-local-connection-ref-null",
-    ),
-    pytest.param(
-        RECOVER,
         {
             "expected_revision": 1,
             "action": "VERIFY_EXTERNAL",
@@ -354,6 +331,22 @@ _NULL_DIVERGENCE_CASES = [
         id="resubmit-read-only-previous-operation-id-null",
     ),
 ]
+
+
+def test_retired_recovery_actions_are_outside_the_published_enum(client: Any) -> None:
+    """Issue #228: the recover body publishes only the read-only verification.
+
+    A retired code is neither documented nor accepted: the request body enum is
+    narrowed and the route answers 400 instead of running a local recovery.
+    """
+    schema = _body_schema(RECOVER)
+    assert schema["properties"]["action"]["enum"] == ["VERIFY_EXTERNAL"]
+    for retired in ("AUTO", "MARK_SUCCEEDED", "MARK_FAILED", "NOT_AN_ACTION"):
+        response = client.post(
+            _request_path(RECOVER), json={"expected_revision": 1, "action": retired}
+        )
+        assert response.status_code == 400, (retired, response.get_json())
+        assert response.get_json()["error_type"] == "data_validation_errors"
 
 
 @pytest.mark.parametrize("openapi_path, body, expected_status", _NULL_DIVERGENCE_CASES)

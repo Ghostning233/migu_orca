@@ -843,15 +843,13 @@ async function runTrackingWrite(payload: TrackingWriteTarget): Promise<void> {
 }
 
 /**
- * Run one explicit unknown-result recovery (US-312).
+ * Run one explicit unknown-result recovery (US-312 / issue #228).
  *
- * ``RECOVER_AUTO`` is pure local: no credential, no confirmation, no external
- * call.  ``MARK_SUCCEEDED``/``MARK_FAILED`` are the user's manual conclusion and
- * are always confirmed a second time (the dialog defaults to cancel and states
- * that the user must have checked Auto Bangumi first).  ``VERIFY_EXTERNAL`` is
- * the read-only external check: it uses the saved connection generation for one
- * verification of the record's own operation and can never create an external
- * write.  Every path converges on the returned tracking and never resends.
+ * ``VERIFY_EXTERNAL`` is the only recovery left: the read-only external check.
+ * It uses the saved connection generation for one verification of the record's
+ * own operation and can never create an external write.  It converges on the
+ * returned tracking and never resends; the retired local verdicts are rejected
+ * by the session before a request exists.
  */
 async function runTrackingRecovery(
   payload: { action: TrackingRecoveryActionCode; item: TrackingItem },
@@ -930,11 +928,11 @@ async function runTrackingCheck(payload: { item: TrackingItem; automatic: boolea
 /**
  * Run one explicit external management write (US-313, US-314).
  *
- * ``MODIFY``, ``SET_ENABLED``, ``REFRESH_RSS`` and ``DELETE_EXTERNAL`` share
- * this single path.  The session re-validates the emitted request against the
- * current server projection, binds the endpoint/body/confirmation to the
- * validated intent and projects the management verdict; the page owns the
- * confirmation dialog and the transport.
+ * ``MODIFY``, ``SET_ENABLED`` and ``REFRESH_RSS`` share this single path (the
+ * standalone ``DELETE_EXTERNAL`` entry is retired, issue #228).  The session
+ * re-validates the emitted request against the current server projection, binds
+ * the endpoint/body/confirmation to the validated intent and projects the
+ * management verdict; the page owns the confirmation dialog and the transport.
  */
 async function runTrackingManagement(payload: {
   action: TrackingAction
