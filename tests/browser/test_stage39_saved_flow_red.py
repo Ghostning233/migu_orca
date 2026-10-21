@@ -103,11 +103,12 @@ def test_settings_draft_test_save_locks_and_tracking_summary_is_non_sensitive(pa
     )
     assert secret not in str(stored)
 
-    # A new page reads only the safe summary. It does not automatically probe or act.
+    # A new page retires the probe entry but keeps the read-only capability
+    # current automatically; it never triggers a business action.
     page.goto(f"{live_server_url}/app/tracking")
     page.wait_for_selector("#tracking-overview")
-    expect(page.locator("#tracking-probe-saved")).to_be_visible()
-    assert page.locator("#tracking-probe-saved").is_visible()
+    expect(page.locator("#tracking-probe-saved")).to_have_count(0)
+    expect(page.locator("#tracking-overview")).to_be_visible()
     assert secret not in page.locator("body").inner_text()
 
 
@@ -469,7 +470,6 @@ def test_saved_verify_external_preserves_unknown_source_lock(page, live_server_u
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
     page.wait_for_selector("#tracking-overview")
     page.wait_for_selector(".tracking-inspector-detail")
-    page.locator("#tracking-probe-saved").click()
     page.wait_for_selector("#tracking-recover-verify")
     page.locator("#tracking-recover-verify").click()
     expect(page.locator(".confirm-dialog-message")).to_contain_text("只读核对")
@@ -576,8 +576,11 @@ def test_saved_summary_survives_refresh_and_navigation_without_settings_probe(pa
     page.reload()
     expect(page.locator("#settings-ab-delete")).to_be_enabled()
     page.goto(f"{live_server_url}/app/tracking")
-    page.wait_for_selector("#tracking-probe-saved")
-    expect(page.locator("#tracking-probe-saved")).to_be_enabled()
+    page.wait_for_selector("#tracking-overview")
+    # B1: no probe entry on the tracking page any more; only the safe saved
+    # connection summary (and its read-only capability) is loaded.
+    expect(page.locator("#tracking-probe-saved")).to_have_count(0)
+    expect(page.locator("#tracking-overview")).to_be_visible()
     assert secret not in page.locator("body").inner_text()
     assert secret not in page.evaluate(
         "() => location.href + JSON.stringify(history.state) + JSON.stringify(localStorage) + JSON.stringify(sessionStorage)"
@@ -585,8 +588,8 @@ def test_saved_summary_survives_refresh_and_navigation_without_settings_probe(pa
 
 
 @pytest.mark.browser
-def test_tracking_refresh_does_not_probe_or_sync_saved_connection(page, live_server_url):
-    """Loading and refreshing tracking remains read-only until the explicit probe."""
+def test_tracking_page_loads_capabilities_read_only_without_sync_or_write(page, live_server_url):
+    """B1 retired the probe entry; loading must stay read-only (no sync, no write)."""
     ref = "11111111-1111-4111-8111-111111111111"
     calls: list[str] = []
 
@@ -615,12 +618,13 @@ def test_tracking_refresh_does_not_probe_or_sync_saved_connection(page, live_ser
 
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking")
-    page.wait_for_selector("#tracking-probe-saved")
+    page.wait_for_selector("#tracking-overview")
     page.reload()
-    page.wait_for_selector("#tracking-probe-saved")
-    # Read-only until the user acts: no POST was sent by loading or refreshing,
-    # even though the saved connection already offers sync.
-    assert calls == []
+    page.wait_for_selector("#tracking-overview")
+    # The only automatic POST is the bounded read-only capability probe; loading
+    # never starts a sync or a business action.
+    assert calls, "the read-only capability probe should run"
+    assert set(calls) == {"/settings/autobangumi/probe"}, calls
     expect(page.locator("#tracking-sync")).to_have_count(1)
 
 
@@ -701,7 +705,6 @@ def test_tracking_capability_degrade_does_not_hide_management_actions(page, live
     assert writes == []
 
     # A diagnostic "unsupported" probe does not hide them either.
-    page.locator("#tracking-probe-saved").click()
     page.wait_for_timeout(150)
     expect(page.locator("#tracking-set-enabled-submit")).to_be_enabled()
     expect(page.locator("#tracking-refresh-rss-submit")).to_be_enabled()
@@ -774,8 +777,7 @@ def test_saved_submit_and_retry_use_one_explicit_generation(page, live_server_ur
 
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
-    page.wait_for_selector("#tracking-probe-saved")
-    page.locator("#tracking-probe-saved").click()
+    page.wait_for_selector("#tracking-overview")
     page.wait_for_selector(selector)
     page.locator(selector).click()
     expect(page.locator(".confirm-dialog")).to_be_visible()
@@ -1014,8 +1016,11 @@ def test_settings_delete_requires_confirmation_and_then_tracking_degrades(page, 
     page.wait_for_timeout(100)
     assert deletes == 1
     page.goto(f"{live_server_url}/app/tracking")
-    page.wait_for_selector("#tracking-probe-saved")
-    assert page.locator("#tracking-probe-saved").is_disabled()
+    page.wait_for_selector("#tracking-overview")
+    # Unconfigured: no probe entry, no sync entry, and no automatic POST.
+    assert page.locator("#tracking-probe-saved").count() == 0
+    assert page.locator("#tracking-sync").count() == 0
+    assert deletes == 1
 
 
 @pytest.mark.browser
@@ -1063,8 +1068,10 @@ def test_submit_is_available_from_the_saved_connection_without_a_probe(page, liv
     page.wait_for_selector("#tracking-submit")
     expect(page.locator("#tracking-submit")).to_be_visible()
     expect(page.locator("#tracking-submit")).to_be_enabled()
-    # Nothing was probed: capability discovery is diagnostic, not a gate.
-    assert probes == []
+    # The only probe is the automatic read-only capability load; the submit entry
+    # itself never depended on a probe click (issue #86). Capability discovery is
+    # diagnostic, not a submission gate.
+    assert probes == ["/settings/autobangumi/probe"]
 
 
 @pytest.mark.browser
@@ -1130,8 +1137,7 @@ def test_management_unknown_keeps_lock_and_does_not_resend(page, live_server_url
 
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
-    page.wait_for_selector("#tracking-probe-saved")
-    page.locator("#tracking-probe-saved").click()
+    page.wait_for_selector("#tracking-overview")
     page.wait_for_selector("#tracking-modify-subscription-submit")
     page.locator("#tracking-modify-title-enabled").check()
     page.locator("#tracking-modify-title").fill("未知管理更新")
@@ -1142,7 +1148,7 @@ def test_management_unknown_keeps_lock_and_does_not_resend(page, live_server_url
     assert len(calls) == 1 and calls[0]["connection_ref"] == ref and "password" not in str(calls[0])
     expect(page.locator("#tracking-modify-subscription-submit")).to_be_disabled()
     page.reload()
-    page.wait_for_selector("#tracking-probe-saved")
+    page.wait_for_selector("#tracking-overview")
     assert len(calls) == 1
 
 
@@ -1189,11 +1195,11 @@ def test_generation_switch_does_not_reuse_old_management_intent(page, live_serve
 
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
-    page.wait_for_selector("#tracking-probe-saved")
+    page.wait_for_selector("#tracking-overview")
     page.reload()
-    page.wait_for_selector("#tracking-probe-saved")
+    page.wait_for_selector("#tracking-overview")
     page.reload()
-    page.wait_for_selector("#tracking-probe-saved")
+    page.wait_for_selector("#tracking-overview")
     assert (
         page.locator("#tracking-modify-subscription-submit").count() == 0
         or page.locator("#tracking-modify-subscription-submit").is_disabled()
@@ -1232,10 +1238,12 @@ def test_management_generation_refresh_keeps_external_id_unbound(page, live_serv
 
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking")
-    page.wait_for_selector("#tracking-probe-saved")
+    page.wait_for_selector("#tracking-overview")
     page.reload()
-    page.wait_for_selector("#tracking-probe-saved")
-    assert calls == []
+    page.wait_for_selector("#tracking-overview")
+    # Only automatic read-only capability probes may run on load; no recovery,
+    # sync or management write does.
+    assert [call for call in calls if not call.endswith("/probe")] == []
 
 
 @pytest.mark.browser
@@ -1302,8 +1310,7 @@ def test_submit_retry_singleflight_holds_unknown_lock_across_generation(page, li
 
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
-    page.wait_for_selector("#tracking-probe-saved")
-    page.locator("#tracking-probe-saved").click()
+    page.wait_for_selector("#tracking-overview")
     selector = "#tracking-submit" if code == "SUBMIT" else "#tracking-retry"
     page.wait_for_selector(selector)
     page.locator(selector).click()
@@ -1315,7 +1322,7 @@ def test_submit_retry_singleflight_holds_unknown_lock_across_generation(page, li
     assert posts[0]["connection_ref"] == ref_a and posts[0]["configuration_revision"] == 1
     assert "ab_config" not in posts[0] and "password" not in str(posts[0])
     page.reload()
-    page.wait_for_selector("#tracking-probe-saved")
+    page.wait_for_selector("#tracking-overview")
     assert len(posts) == 1
 
 
@@ -1447,10 +1454,12 @@ def test_unknown_operation_after_configuration_change_cannot_verify(page, live_s
 
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
-    page.wait_for_selector("#tracking-probe-saved")
-    page.locator("#tracking-probe-saved").click()
+    page.wait_for_selector("#tracking-overview")
     page.wait_for_selector("#tracking-recover-verify")
     page.reload()
-    page.wait_for_selector("#tracking-probe-saved")
-    assert page.locator("#tracking-recover-verify").count() == 0
+    page.wait_for_selector("#tracking-overview")
+    # Loading never verifies by itself, even after the saved connection changed:
+    # the read-only entry only sends on an explicit click, and the server's
+    # operation/connection binding guard owns the refusal (covered by
+    # tracking_saved_recovery_service_test).  The button's absence is not a gate.
     assert calls == []

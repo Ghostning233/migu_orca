@@ -67,7 +67,9 @@ const state = computed(() => (showImage.value ? 'ready' : 'placeholder'))
 }
 
 .tracking-poster--list {
-  inline-size: 44px;
+  /* #225 行规格：60×90 固定 2:3，宽高都消费登记过的几何 token。 */
+  inline-size: var(--tracking-poster-width);
+  block-size: var(--tracking-poster-height);
 }
 
 .tracking-poster--detail {

@@ -171,9 +171,10 @@ class TestTrackingWorkbench:
             ],
         )
 
-        header = page.locator(".tracking-header")
+        header = page.locator(".tracking-page-header")
         assert "我的追番" in header.inner_text()
         assert "管理待提交任务和正在运行的追番" in header.inner_text()
+        assert page.locator(".tracking-header").count() == 0
 
         # Issue #224: four server-owned cards with the authoritative counts; the
         # summary claims 9 records although only two rows are loaded.
@@ -186,11 +187,13 @@ class TestTrackingWorkbench:
         assert "共 9 部" in page.locator(".tracking-list-count").inner_text()
         assert "正在追番" not in page.content()
 
-        rows = page.locator(".tracking-list-item")
+        rows = page.locator(".tracking-list-row")
         assert rows.count() == 2
         assert "第 2 季" in rows.nth(0).inner_text()
-        assert "2026" in rows.nth(0).inner_text()
         assert "已停用" in rows.nth(1).inner_text()
+        # C2: the row's five fixed elements never carry the submission mode or a timestamp.
+        assert page.locator(".tracking-list-mode").count() == 0
+        assert "2026" not in rows.nth(0).inner_text()
 
         # Selecting a row only switches the right-hand detail. Safe-detail
         # loading is asynchronous, so wait for the loaded text rather than the
@@ -694,10 +697,10 @@ class TestPlanDelete:
         page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
         page.wait_for_selector("#tracking-abandon-plan")
 
-        # E8: the read-only verification comes first.
-        expect(page.locator("#tracking-probe-saved")).to_be_visible()
-        page.locator("#tracking-probe-saved").click()
+        # E8: the read-only verification comes first. B1 retires the probe entry;
+        # the page loads the read-only capabilities automatically.
         page.wait_for_selector("#tracking-recover-verify")
+        assert page.locator("#tracking-probe-saved").count() == 0
         verify_box = page.locator("#tracking-recover-verify").bounding_box()
         abandon_box = page.locator("#tracking-abandon-plan").bounding_box()
         assert verify_box and abandon_box and verify_box["y"] < abandon_box["y"]
@@ -911,9 +914,12 @@ class TestSubmissionModeLabels:
         page.goto(f"{live_server_url}/app/tracking")
         page.wait_for_selector(".tracking-list-item")
 
-        labels = page.locator(".tracking-list-mode")
-        assert labels.count() == 1
-        assert labels.first.inner_text().strip() == "持续追番"
-        # The 待提交 row carries no fabricated mode.
-        pending_row = page.locator('[data-tracking-id="tracking-pending"]')
-        assert pending_row.locator(".tracking-list-mode").count() == 0
+        # C2/#225: the submission mode is no longer a list-row element at all —
+        # not even where the server does publish one. It belongs to the detail.
+        assert page.locator(".tracking-list-mode").count() == 0
+        assert "持续追番" not in page.locator(".tracking-list-row").first.inner_text()
+
+        page.locator('[data-tracking-id="tracking-active"] .tracking-list-item').click()
+        page.wait_for_selector(".tracking-inspector-content")
+        expect(page.locator(".tracking-inspector")).to_contain_text("提交方式")
+        expect(page.locator(".tracking-inspector")).to_contain_text("持续追番")

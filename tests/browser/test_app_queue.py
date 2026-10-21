@@ -154,4 +154,4 @@ class TestRetiredQueueEntry:
         assert page.locator("#batch-queue-count").count() == 0
         assert page.locator("#batch-queue-refresh").count() == 0
         assert page.locator("#batch-queue-submit-form").count() == 0
-        assert page.locator("#tracking-refresh").count() == 1
+        assert page.locator("#tracking-batch-mode").count() == 1

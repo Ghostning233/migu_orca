@@ -27,7 +27,7 @@ def _require_dist() -> None:
     ("path", "feature_root", "feature_control"),
     [
         ("/app/add", "#workbench-heading", "#mikan-candidate-query"),
-        ("/app/tracking", "#tracking-overview", "#tracking-refresh"),
+        ("/app/tracking", "#tracking-overview", "#tracking-batch-mode"),
         ("/app/settings", "#settings-heading", "#settings-storage-dir"),
     ],
 )
@@ -148,4 +148,5 @@ def test_tracking_route_is_the_formal_tracking_screen_not_the_retired_queue(
                      "#batch-queue-ab-auth-mode", "#batch-queue-ab-endpoint"):
         assert page.locator(selector).count() == 0, selector
     assert page.get_by_role("link", name="我的追番", exact=True).get_attribute("aria-current") == "page"
-    expect(page.locator("#tracking-heading")).to_contain_text("管理待提交任务和正在运行的追番")
+    expect(page.locator("#tracking-heading")).to_have_text("我的追番")
+    expect(page.locator(".tracking-lede")).to_contain_text("管理待提交任务和正在运行的追番")
