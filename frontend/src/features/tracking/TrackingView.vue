@@ -394,10 +394,12 @@ function hasUnknownCapability(capabilities: CapabilityResult): boolean {
  * T6 (#229 F1): one read-only sync when the page is entered.
  *
  * The saved summary is read first, because the endpoint binds to that
- * connection, and the guard makes the entry the only trigger: a re-render, a
- * filter change or opening a record never runs it again (AC4). `syncSequence`
- * plus the abort controller keep an older response (or a page that has already
- * been left) from overwriting newer state.
+ * connection, and entering the page is the only trigger: a re-render, a filter
+ * change or opening a record never reaches this function at all. The one-shot
+ * flag is defensive on top of that — it keeps a future second entry point (or a
+ * kept-alive page) from stacking a second read against the same connection
+ * (AC4), while `syncSequence` plus the abort controller keep an older response
+ * from overwriting newer state.
  */
 function syncOnEntry(): void {
   if (autoSyncArmed) return
@@ -420,7 +422,14 @@ async function syncTracking(): Promise<void> {
   syncLoading.value = true
   syncStatus.value = ''
   try {
-    const body: SyncBody = { connection_ref: config.connection_ref!, configuration_revision: config.configuration_revision, confirm: true }
+    // Like every other read/write on this page, the sync addresses the selected
+    // storage profile; without it a non-default profile would sync the root one.
+    const body: SyncBody = {
+      connection_ref: config.connection_ref!,
+      configuration_revision: config.configuration_revision,
+      confirm: true,
+      ...storageQuery(),
+    }
     const result = await api.post<SyncResult>('/api/v1/tracking/sync', { body, signal: controller.signal })
     // Only a newer sync intent or an explicit connection reset can discard this
     // result; list refreshes use their own sequence and revision guard.
@@ -442,8 +451,11 @@ async function syncTracking(): Promise<void> {
       // A connection reset (or a newer sync intent) during that read owns the
       // page now: never restore the old summary or its success message.
       if (sequence !== syncSequence) return
-      // The superseded first read never reaches its own cleanup, so the sync's
-      // re-read is what finally retires the list's loading state.
+      // When the entry sync wins the race the first list read is superseded by
+      // `writeGeneration` and never reaches its own cleanup, so the sync's
+      // re-read is what finally retires the loading state. A first read that
+      // finished earlier already cleared it, and the failure/degraded branches
+      // leave `loading` to that first read.
       loading.value = false
       // Issue #88: strangers in Auto Bangumi are counted, never imported.
       const message = result.summary.ignored
@@ -460,6 +472,10 @@ async function syncTracking(): Promise<void> {
       syncStatus.value = result.sync_status === 'PARTIAL'
         ? '同步部分完成，已保留原有本地列表；重新进入本页会再次只读同步。'
         : '同步未完成，已保留原有本地列表；重新进入本页会再次只读同步。'
+    } else if (!result.items) {
+      // Defensive: a COMPLETE + verified result without a list snapshot is not
+      // the same fact as an unknown capability projection.
+      syncStatus.value = '同步已完成，但没有返回列表快照，已保留原有本地列表；重新进入本页会再次只读同步。'
     } else {
       syncStatus.value = '同步已完成，但当前连接能力未知，已降级为只读并保留原有本地列表；重新进入本页会再次只读同步。'
     }

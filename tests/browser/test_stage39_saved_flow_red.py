@@ -184,6 +184,24 @@ def test_saved_management_actions_send_only_bound_connection_fields(page, live_s
                 }
             )
             return
+        if request.method == "POST" and path == "/tracking/sync":
+            # #229 F1: the page entry runs one read-only sync; answer it locally
+            # so this case stays hermetic. A partial result keeps the case's own
+            # list and detail exactly as they were.
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "sync_status": "PARTIAL",
+                        "checked_at": "2026-10-21T00:00:00Z",
+                        "capabilities": _probe_capabilities(),
+                        "summary": {"checked": 0, "created": 0, "updated": 0, "unchanged": 0,
+                                    "ignored": 0, "failed": 1, "unreadable": 0},
+                        "warnings": [],
+                    },
+                }
+            )
+            return
         if request.method == "POST" and "/tracking/items/tracking-a/" in path:
             captured.append(request.post_data_json or {})
             route.fulfill(
@@ -626,6 +644,24 @@ def test_tracking_capability_degrade_does_not_hide_management_actions(page, live
                 }
             )
             return
+        if request.method == "POST" and path == "/tracking/sync":
+            # #229 F1: the page entry runs one read-only sync; answer it locally
+            # so this case stays hermetic. A partial result keeps the case's own
+            # list and detail exactly as they were.
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "sync_status": "PARTIAL",
+                        "checked_at": "2026-10-21T00:00:00Z",
+                        "capabilities": _probe_capabilities(),
+                        "summary": {"checked": 0, "created": 0, "updated": 0, "unchanged": 0,
+                                    "ignored": 0, "failed": 1, "unreadable": 0},
+                        "warnings": [],
+                    },
+                }
+            )
+            return
         if request.method == "POST" and "/tracking/items/" in path:
             writes.append(path)
         route.continue_()
@@ -903,10 +939,13 @@ def test_unconfigured_recovery_has_no_external_verify_or_probe(page, live_server
 def test_settings_delete_requires_confirmation_and_then_tracking_degrades(page, live_server_url):
     ref = "11111111-1111-4111-8111-111111111111"
     deletes = 0
+    posts: list[str] = []
 
     def handler(route, request):
         nonlocal deletes
         path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+        if request.method == "POST":
+            posts.append(path)
         if request.method == "GET" and path == "/settings/autobangumi":
             configured = deletes == 0
             route.fulfill(
@@ -955,9 +994,11 @@ def test_settings_delete_requires_confirmation_and_then_tracking_degrades(page, 
     assert deletes == 1
     page.goto(f"{live_server_url}/app/tracking")
     page.wait_for_selector("#tracking-overview")
-    # Unconfigured: no probe entry, no manual sync entry and no automatic POST.
+    # Unconfigured: no probe entry, no manual sync entry and no automatic POST
+    # (there is no saved connection to bind a read-only sync to).
     assert page.locator("#tracking-probe-saved").count() == 0
     assert page.locator("#tracking-sync").count() == 0
+    assert posts == [], posts
     assert deletes == 1
 
 
@@ -1397,3 +1438,15 @@ def test_unknown_operation_after_configuration_change_cannot_verify(page, live_s
     # request: tracking_saved_recovery_service_test owns that guard.)
     assert page.locator("#tracking-recover-verify").count() == 0
     assert calls == []
+
+@pytest.mark.browser
+def test_settings_states_the_saved_connection_capability_in_one_sentence(page, live_server_url):
+    """#229 F3/AC6: the settings page carries exactly one plain capability
+    sentence and never the technical capability field table."""
+    page.goto(f"{live_server_url}/app/settings")
+    note = page.locator("#settings-ab-capability-note")
+    expect(note).to_have_count(1)
+    expect(note).to_have_text("已保存连接可读取并管理受控外部订阅；提交前仍需逐次确认。")
+    body = page.locator("body").inner_text()
+    for field in ("探测状态", "subscription_list", "external_verify", "rss_refresh"):
+        assert field not in body, field

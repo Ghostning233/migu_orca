@@ -561,6 +561,15 @@ class TestReducedMotionAndFeedback:
 
         def handler(route: Any, request: Any) -> None:
             path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+            if request.method == "GET" and path == "/settings/autobangumi":
+                # Keep the case hermetic: the shared browser session may already
+                # hold a saved connection, which would lock the form.
+                route.fulfill(json={"ok": True, "result": {
+                    "configured": False, "credential_present": False,
+                    "connection_ref": None, "configuration_revision": 0,
+                    "connection_status": "UNCONFIGURED",
+                }})
+                return
             if request.method == "POST" and path == "/settings/autobangumi/test":
                 held.append(route)
                 return

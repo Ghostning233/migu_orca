@@ -85,9 +85,14 @@ function syncResult(overrides: Record<string, unknown> = {}) {
  * Answer the page-entry sync and refuse every other POST, so a test proves the
  * entry itself never turns into a write (AC3 on the frontend side).
  */
+const unexpectedPosts: string[] = []
 function answerSyncOnce(result: unknown = syncResult()) {
+  unexpectedPosts.length = 0
   apiPost.mockImplementation(async (path: string) => {
     if (path === '/api/v1/tracking/sync') return result as never
+    // Recorded so the test can prove the entry never became a write; the throw
+    // alone would just be swallowed by the session's fixed failure copy.
+    unexpectedPosts.push(path)
     throw new Error(`unexpected POST ${path}`)
   })
 }
@@ -154,6 +159,7 @@ describe('TrackingView page skeleton and row model (#225)', () => {
           configuration_revision: 3, connection_status: 'VERIFIED', capabilities: caps,
         }
       : { items: [row()], summary: defaultSummary, status_groups: statusGroups(), warnings: [] })
+    answerSyncOnce()
     const wrapper = mount(TrackingView, { attachTo: document.body, global: { plugins: [createPinia(), router], stubs: { Teleport: true } } })
     await flushPromises()
 
@@ -888,7 +894,10 @@ describe('TrackingView risk-confirmed resubmission (issue #184)', () => {
 // -- T6 (#229): automatic read-only sync and the retired manual entry -------
 
 describe('TrackingView automatic sync (#229 F1/F2/AC3/AC4/AC7)', () => {
-  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset(); nextSyncFixture = null })
+  beforeEach(() => {
+    apiGet.mockReset(); apiPost.mockReset(); nextSyncFixture = null
+    localStorage.clear()
+  })
 
   it('syncs once on entry with the saved connection and never asks for confirmation', async () => {
     const { wrapper } = await mountSaved()
@@ -899,6 +908,7 @@ describe('TrackingView automatic sync (#229 F1/F2/AC3/AC4/AC7)', () => {
     })
     // AC3 (frontend side): entering the page never becomes a write.
     expect(apiPost.mock.calls.map((call) => call[0])).toEqual(['/api/v1/tracking/sync'])
+    expect(unexpectedPosts).toEqual([])
     // F1: neither the manual entry nor its confirmation dialog exists any more.
     expect(wrapper.find('#tracking-sync').exists()).toBe(false)
     expect(wrapper.find('.confirm-dialog').exists()).toBe(false)
@@ -989,12 +999,31 @@ describe('TrackingView automatic sync (#229 F1/F2/AC3/AC4/AC7)', () => {
     expect(wrapper.text()).not.toContain('还没有本地追番记录')
   })
 
-  it('keeps a record the entry sync detects as externally deleted out of the inspector (F2)', async () => {
-    const deleted = {
+  it('adopts the sync snapshot that detects an externally deleted record (F2)', async () => {
+    const active = {
       ...rowFor('tracking-1', '外部已删', [], 'ATTENTION'),
-      status: 'EXTERNAL_DELETED', status_label: '外部已删除', status_group: 'ATTENTION',
+      status: 'ACTIVE', status_label: '追番中', status_group: 'ACTIVE',
     }
-    // This test mounts the page itself, so it answers the entry sync directly.
+    const deleted = { ...active, status: 'EXTERNAL_DELETED', status_label: '外部已删除' }
+    let listReads = 0
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/v1/settings/autobangumi') {
+        return { configured: true, credential_present: true, connection_ref: REF, configuration_revision: 3, connection_status: 'CONFIGURED', capabilities: null }
+      }
+      if (path === '/api/v1/tracking/items/{tracking_id}') return pendingDetail() as never
+      listReads += 1
+      if (listReads === 1) {
+        // The pre-sync read still sees the record as 追番中.
+        return {
+          items: [active],
+          summary: { ...defaultSummary, pending: 0, active: 1 },
+          status_groups: statusGroups({ ACTIVE: 1 }), warnings: [],
+        } as never
+      }
+      // The post-sync re-read fails, so only the adopted snapshot can carry the
+      // external-deletion fact into the page.
+      throw new Error('list re-read offline')
+    })
     answerSyncOnce(syncResult({
       items: [deleted],
       summary: { checked: 1, created: 0, updated: 1, unchanged: 0, ignored: 0, failed: 0, unreadable: 0 },
@@ -1003,32 +1032,118 @@ describe('TrackingView automatic sync (#229 F1/F2/AC3/AC4/AC7)', () => {
       { path: '/tracking', component: TrackingView },
     ] })
     await router.push('/tracking?tracking_id=tracking-1'); await router.isReady()
-    apiGet.mockImplementation(async (path) => path === '/api/v1/settings/autobangumi'
-      ? { configured: true, credential_present: true, connection_ref: REF, configuration_revision: 3, connection_status: 'CONFIGURED', capabilities: null }
-      : path === '/api/v1/tracking/items/{tracking_id}'
-        ? pendingDetail()
-        : {
-            items: [deleted],
-            summary: { ...defaultSummary, pending: 0, needs_attention: 1 },
-            status_groups: statusGroups({ ATTENTION: 1 }), warnings: [],
-          })
     const wrapper = mount(TrackingView, {
       attachTo: document.body,
       global: { plugins: [createPinia(), router], stubs: { Teleport: true } },
     })
     await flushPromises()
 
-    // The fact stays visible in the list, in 需处理, but the record is not
-    // offered as an open record (the sync drops a dead external mapping).
+    // The fact stays visible in the list, but the dead mapping is no longer an
+    // open record (the selection and the URL are dropped).
     expect(wrapper.find('.tracking-list-item').text()).toContain('外部已删除')
-    expect(wrapper.find('#tracking-overview-attention').text()).toContain('需处理1')
     expect(wrapper.find('.tracking-inspector-content').exists()).toBe(false)
     expect(router.currentRoute.value.query.tracking_id).toBeUndefined()
   })
-})
 
-describe('TrackingView connection copy (#229 F3)', () => {
-  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset(); nextSyncFixture = null })
+  it('binds the entry sync to the selected storage profile (M-1)', async () => {
+    localStorage.setItem('miguOrca.web.storageDir', 'backups')
+    const profile = await mountSaved()
+    expect(syncCalls()[0]?.[1]).toMatchObject({ body: { storage_dir: 'backups' } })
+    profile.wrapper.unmount()
+
+    localStorage.clear()
+    const root = await mountSaved()
+    const body = (syncCalls().at(-1)?.[1] as { body?: Record<string, unknown> } | undefined)?.body
+    expect(body).toBeDefined()
+    // The default root profile stays implicit: the body keeps its exact shape.
+    expect(body).not.toHaveProperty('storage_dir')
+    root.wrapper.unmount()
+  })
+
+  it('never reports an unknown capability for a complete sync without a snapshot (m-1)', async () => {
+    useSyncFixture(syncResult({ items: undefined }))
+    const { wrapper } = await mountSaved()
+
+    const status = wrapper.find('#tracking-sync-status').text()
+    expect(status).toContain('没有返回列表快照')
+    expect(status).not.toContain('能力未知')
+  })
+
+  it('renders the list after a failed entry sync and a held first read (AC4)', async () => {
+    let releaseList!: (value: unknown) => void
+    const firstList = new Promise((resolve) => { releaseList = resolve })
+    let listCalls = 0
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/v1/settings/autobangumi') {
+        return { configured: true, credential_present: true, connection_ref: REF, configuration_revision: 3, connection_status: 'CONFIGURED', capabilities: null }
+      }
+      listCalls += 1
+      if (listCalls === 1) return firstList as never
+      return { items: [row()], summary: defaultSummary, status_groups: statusGroups(), warnings: [] }
+    })
+    apiPost.mockImplementation(async (path) => {
+      if (path === '/api/v1/tracking/sync') throw new Error('sync offline')
+      throw new Error(`unexpected POST ${path}`)
+    })
+    const router = createRouter({ history: createMemoryHistory('/app/'), routes: [
+      { path: '/tracking', component: TrackingView },
+    ] })
+    await router.push('/tracking'); await router.isReady()
+    const wrapper = mount(TrackingView, {
+      attachTo: document.body,
+      global: { plugins: [createPinia(), router], stubs: { Teleport: true } },
+    })
+    await flushPromises()
+
+    expect(wrapper.find('#tracking-sync-status').text()).toContain('同步 Auto Bangumi 失败')
+    // The first read is still pending: the page keeps its loading state.
+    expect(wrapper.find('.tracking-list-state .loading-state').exists()).toBe(true)
+
+    releaseList({ items: [row()], summary: defaultSummary, status_groups: statusGroups(), warnings: [] })
+    await flushPromises()
+    expect(wrapper.find('.tracking-list-item').exists()).toBe(true)
+    expect(wrapper.find('.tracking-list-state .loading-state').exists()).toBe(false)
+  })
+
+  it('still runs exactly one bounded check when the entry sync remounts the detail (AC2)', async () => {
+    const checkResult = {
+      tracking_id: 'tracking-1', action: 'VERIFY_EXTERNAL', outcome: 'ACTIVE',
+      checked_revision: 4, next_revision: 5, checked_at: '2026-10-21T00:00:00Z',
+      operation_id: 'operation-1', needs_manual: false, verification_reason: null,
+      tracking: pendingRow(),
+    }
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/v1/settings/autobangumi') {
+        return { configured: true, credential_present: true, connection_ref: REF, configuration_revision: 3, connection_status: 'CONFIGURED', capabilities: null }
+      }
+      if (path === '/api/v1/tracking/items/{tracking_id}') return pendingDetail() as never
+      return {
+        items: [pendingRow()],
+        summary: { ...defaultSummary, pending: 0, processing: 1 },
+        status_groups: statusGroups({ PROCESSING: 1 }), warnings: [],
+      } as never
+    })
+    apiPost.mockImplementation(async (path) => {
+      if (path === '/api/v1/tracking/sync') return syncResult() as never
+      if (path === '/api/v1/tracking/items/{tracking_id}/check') return checkResult as never
+      throw new Error(`unexpected POST ${path}`)
+    })
+    const router = createRouter({ history: createMemoryHistory('/app/'), routes: [
+      { path: '/tracking', component: TrackingView },
+    ] })
+    await router.push('/tracking?tracking_id=tracking-1'); await router.isReady()
+    const wrapper = mount(TrackingView, {
+      attachTo: document.body,
+      global: { plugins: [createPinia(), router], stubs: { Teleport: true } },
+    })
+    await flushPromises()
+    await flushPromises()
+
+    const checks = apiPost.mock.calls.filter((call) => call[0] === '/api/v1/tracking/items/{tracking_id}/check')
+    expect(syncCalls()).toHaveLength(1)
+    expect(checks).toHaveLength(1)
+    wrapper.unmount()
+  })
 
   it('never turns the last capability probe into a submit condition', async () => {
     const unverified = { ...caps, probe_status: 'UNKNOWN' }
