@@ -95,8 +95,13 @@ const savedRef = computed<SavedConnection | null>(() => {
   const summary = savedConnection.value
   return summary?.connection_ref && summary.credential_present ? summary : null
 })
+/**
+ * T6 (#229): the page owns at most one automatic read-only sync per entry.
+ * There is no manual entry and no confirmation step any more: the endpoint is
+ * read-only, so entering the page is the only trigger the user needs.
+ */
 const syncLoading = ref(false)
-const syncPending = ref(false)
+let autoSyncArmed = false
 // B5: only degraded / incomplete / ignored sync results stay on the page (in a
 // bounded status region inside the list panel); a clean success is a toast.
 const syncStatus = ref('')
@@ -377,7 +382,6 @@ function cancelSync(): void {
   syncSequence += 1
   syncController?.abort()
   syncController = null
-  syncPending.value = false
   syncLoading.value = false
 }
 
@@ -386,31 +390,33 @@ function hasUnknownCapability(capabilities: CapabilityResult): boolean {
     || projectCapabilitySummary(capabilities).some((entry) => entry.state === 'UNKNOWN')
 }
 
-async function syncTracking(): Promise<void> {
-  // One sync intent at a time: the guard is taken before the confirmation
-  // dialog opens so a second click cannot supersede a pending intent.
-  if (syncPending.value || syncLoading.value) return
+/**
+ * T6 (#229 F1): one read-only sync when the page is entered.
+ *
+ * The saved summary is read first, because the endpoint binds to that
+ * connection, and the guard makes the entry the only trigger: a re-render, a
+ * filter change or opening a record never runs it again (AC4). `syncSequence`
+ * plus the abort controller keep an older response (or a page that has already
+ * been left) from overwriting newer state.
+ */
+function syncOnEntry(): void {
+  if (autoSyncArmed) return
+  autoSyncArmed = true
   // Issue #86: the saved connection is enough; the server validates it.
   if (!savedRef.value) return
-  syncPending.value = true
-  let confirmed = false
-  try {
-    confirmed = (await confirmDialog.value?.confirm({
-      title: '同步 Auto Bangumi',
-      message: '将使用已保存的 Auto Bangumi 连接读取外部追番并更新本地安全摘要，是否继续？',
-      confirmLabel: '确认同步',
-      cancelLabel: '取消',
-    })) ?? false
-  } finally {
-    syncPending.value = false
-  }
-  if (!confirmed || !savedRef.value) return
+  void syncTracking()
+}
+
+async function syncTracking(): Promise<void> {
+  // One sync intent at a time, whichever entry asked for it.
+  if (syncLoading.value || !savedRef.value) return
   const config = savedRef.value
   const sequence = ++syncSequence
   const controller = new AbortController()
   syncController?.abort()
   syncController = controller
-  loading.value = false
+  // The first list read keeps the list's loading state while the entry sync
+  // runs; clearing it here would flash the empty state before any rows exist.
   syncLoading.value = true
   syncStatus.value = ''
   try {
@@ -436,6 +442,9 @@ async function syncTracking(): Promise<void> {
       // A connection reset (or a newer sync intent) during that read owns the
       // page now: never restore the old summary or its success message.
       if (sequence !== syncSequence) return
+      // The superseded first read never reaches its own cleanup, so the sync's
+      // re-read is what finally retires the list's loading state.
+      loading.value = false
       // Issue #88: strangers in Auto Bangumi are counted, never imported.
       const message = result.summary.ignored
         ? `同步完成：检查 ${result.summary.checked} 条，新增 ${result.summary.created} 条，更新 ${result.summary.updated} 条；忽略 ${result.summary.ignored} 条不属于 MiGuOrca 管理的外部订阅。`
@@ -449,15 +458,15 @@ async function syncTracking(): Promise<void> {
       }
     } else if (incomplete) {
       syncStatus.value = result.sync_status === 'PARTIAL'
-        ? '同步部分完成，已保留原有本地列表；可重连或再次同步。'
-        : '同步未完成，已保留原有本地列表；可重连、重探测或再次同步。'
+        ? '同步部分完成，已保留原有本地列表；重新进入本页会再次只读同步。'
+        : '同步未完成，已保留原有本地列表；重新进入本页会再次只读同步。'
     } else {
-      syncStatus.value = '同步已完成，但当前连接能力未知，已降级为只读并保留原有本地列表；可重连或再次同步。'
+      syncStatus.value = '同步已完成，但当前连接能力未知，已降级为只读并保留原有本地列表；重新进入本页会再次只读同步。'
     }
     savedState.value = { ...config, capabilities: result.capabilities }
   } catch (error) {
     if (sequence !== syncSequence) return
-    syncStatus.value = '同步 Auto Bangumi 失败，已保留原有本地列表；可重连或再次同步。'
+    syncStatus.value = '同步 Auto Bangumi 失败，已保留原有本地列表；重新进入本页会再次只读同步。'
     void error
   } finally {
     if (sequence === syncSequence) {
@@ -1022,7 +1031,11 @@ async function runPlanDelete(payload: {
 }
 
 onMounted(() => {
-  void loadSavedConnection()
+  void loadSavedConnection().then(() => {
+    // The sync binds to the saved connection, so it can only start after the
+    // summary is adopted; `syncOnEntry` keeps it to one run per page entry.
+    syncOnEntry()
+  })
   void loadList().then(() => {
     // A legacy batch link is located against the freshly read local list, so the
     // compat read never races the tracking list it maps onto.
@@ -1056,16 +1069,8 @@ onBeforeUnmount(() => {
         <h1 id="tracking-heading" class="tracking-page-title">我的追番</h1>
         <p class="tracking-lede">管理待提交任务和正在运行的追番。</p>
       </div>
-      <!-- B1 keeps the manual sync entry until T6 (#229) retires it; only the
-           page-level header card, the probe entry and the connection module go. -->
-      <BaseButton
-        v-if="savedRef"
-        id="tracking-sync"
-        variant="secondary"
-        :loading="syncLoading"
-        :disabled="syncLoading || syncPending"
-        @click="syncTracking"
-      >同步 Auto Bangumi</BaseButton>
+      <!-- T6 (#229 F1): the manual sync entry is retired; the page syncs once,
+           read-only, when it is entered. -->
     </header>
 
     <section class="tracking-status-overview" aria-labelledby="tracking-status-heading">
@@ -1079,6 +1084,7 @@ onBeforeUnmount(() => {
           :id="`tracking-overview-${group.group.toLowerCase()}`"
           :class="{ 'is-selected': statusFilter === group.group }"
           :aria-pressed="statusFilter === group.group"
+          :title="statusFilter === group.group ? '再次点击取消筛选' : undefined"
           @click="selectOverviewGroup(group.group)"
         >
           <span>{{ group.label }}</span><strong>{{ group.count }}</strong>

@@ -206,9 +206,9 @@ def test_saved_management_actions_send_only_bound_connection_fields(page, live_s
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
     page.wait_for_selector("#tracking-overview")
-    # #tracking-sync only appears once the saved connection summary is loaded;
-    # the management actions depend on that same saved connection.
-    page.wait_for_selector("#tracking-sync")
+    # #229 retires the manual sync entry; the action itself only renders once the
+    # saved connection summary is adopted.
+    page.wait_for_selector(selector)
     page.locator(selector).scroll_into_view_if_needed()
     if setup == "modify":
         page.locator("#tracking-modify-title-enabled").check()
@@ -235,14 +235,16 @@ def test_saved_management_actions_send_only_bound_connection_fields(page, live_s
 
 
 @pytest.mark.browser
-def test_saved_sync_uses_the_saved_connection_and_sends_ref_revision(page, live_server_url):
-    """Issue #86: syncing needs the saved connection, not a probe click."""
+def test_page_entry_runs_one_read_only_sync_with_the_saved_connection(page, live_server_url):
+    """#229 F1: entering the page is the trigger — one read-only sync bound to
+    the saved connection, with no probe, no confirmation dialog and no manual
+    entry left behind."""
     ref = "11111111-1111-4111-8111-111111111111"
     calls: list[dict] = []
     item = {**_item("tracking-a", "测试番"), "available_actions": [], "revision": 1}
 
     def handler(route, request):
-        path = request.url.split("/api/v1", 1)[-1]
+        path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
         if request.method == "GET" and path.startswith("/settings/autobangumi"):
             route.fulfill(
                 json={
@@ -284,28 +286,8 @@ def test_saved_sync_uses_the_saved_connection_and_sends_ref_revision(page, live_
                     "ok": True,
                     "result": {
                         "sync_status": "COMPLETE",
-                        "capabilities": {
-                            "probe_status": "VERIFIED",
-                            **{
-                                name: "SUPPORTED"
-                                for name in (
-                                    "subscription_list",
-                                    "subscription_detail",
-                                    "subscription_submit",
-                                    "subscription_modify",
-                                    "subscription_enable",
-                                    "subscription_disable",
-                                    "subscription_delete",
-                                    "rss_list",
-                                    "rss_modify",
-                                    "rss_enable",
-                                    "rss_disable",
-                                    "rss_delete",
-                                    "rss_refresh",
-                                    "external_verify",
-                                )
-                            },
-                        },
+                        "checked_at": "2026-10-21T00:00:00Z",
+                        "capabilities": _probe_capabilities(),
                         "summary": {"checked": 1, "created": 0, "updated": 0, "unchanged": 1, "ignored": 2},
                         "items": [item],
                     },
@@ -317,15 +299,14 @@ def test_saved_sync_uses_the_saved_connection_and_sends_ref_revision(page, live_
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking")
     page.wait_for_selector("#tracking-overview")
-    # The saved connection already offers sync; no probe was clicked.
-    expect(page.locator("#tracking-sync")).to_have_count(1)
-    expect(page.locator("#tracking-sync")).to_be_enabled()
-    page.locator("#tracking-sync").click()
-    page.locator(".confirm-dialog .danger-button, .confirm-dialog .primary-button").last.click()
-    page.wait_for_timeout(100)
-    assert calls == [{"connection_ref": ref, "configuration_revision": 3, "confirm": True}]
-    # Issue #88: strangers are only counted and stated, never imported.
+    # A degraded result that ignored strangers is reported in the bounded area.
     expect(page.locator("#tracking-sync-status")).to_contain_text("忽略 2 条不属于 MiGuOrca 管理的外部订阅")
+
+    # One entry, one read-only sync bound to the saved connection.
+    assert calls == [{"connection_ref": ref, "configuration_revision": 3, "confirm": True}]
+    expect(page.locator("#tracking-sync")).to_have_count(0)
+    expect(page.locator("#tracking-probe-saved")).to_have_count(0)
+    assert page.locator(".confirm-dialog").count() == 0
 
 
 @pytest.mark.browser
@@ -527,10 +508,11 @@ def test_saved_summary_survives_refresh_and_navigation_without_settings_probe(pa
 
 
 @pytest.mark.browser
-def test_tracking_page_load_never_probes_syncs_or_writes(page, live_server_url):
-    """Stage 39 + B1: loading reads the summary only; no probe, sync or write."""
+def test_tracking_page_load_syncs_once_without_probing_or_writing(page, live_server_url):
+    """#229 F1 + Stage 39 + B1: each entry reads the summary and runs exactly one
+    read-only sync; it never probes and never starts a business write."""
     ref = "11111111-1111-4111-8111-111111111111"
-    calls: list[str] = []
+    posts: list[str] = []
 
     def handler(route, request):
         path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
@@ -551,19 +533,38 @@ def test_tracking_page_load_never_probes_syncs_or_writes(page, live_server_url):
         if request.method == "GET" and path == "/tracking/items":
             route.fulfill(json={"ok": True, "result": {"items": [], "summary": {"total": 0}, "status_groups": _status_groups_for([]), "warnings": []}})
             return
+        if request.method == "POST" and path == "/tracking/sync":
+            posts.append(path)
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "result": {
+                        "sync_status": "COMPLETE",
+                        "checked_at": "2026-10-21T00:00:00Z",
+                        "capabilities": _probe_capabilities(),
+                        "summary": {"checked": 0, "created": 0, "updated": 0, "unchanged": 0, "ignored": 0},
+                        "items": [],
+                    },
+                }
+            )
+            return
         if request.method == "POST":
-            calls.append(path)
+            posts.append(path)
         route.continue_()
 
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking")
     page.wait_for_selector("#tracking-overview")
+    expect(page.locator(".global-notification")).to_contain_text("同步完成")
     page.reload()
     page.wait_for_selector("#tracking-overview")
-    # Loading the page sends no POST at all: no probe, no sync, no business write.
-    assert calls == [], calls
+    expect(page.locator(".global-notification")).to_contain_text("同步完成")
+
+    # One entry, one read-only sync; no probe and no business write at all.
+    assert posts == ["/tracking/sync", "/tracking/sync"], posts
     expect(page.locator("#tracking-probe-saved")).to_have_count(0)
-    expect(page.locator("#tracking-sync")).to_have_count(1)
+    expect(page.locator("#tracking-sync")).to_have_count(0)
+    assert page.locator(".confirm-dialog").count() == 0
 
 
 @pytest.mark.browser
@@ -632,7 +633,6 @@ def test_tracking_capability_degrade_does_not_hide_management_actions(page, live
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
     page.wait_for_selector("#tracking-overview")
-    page.wait_for_selector("#tracking-sync")
     page.wait_for_selector(".tracking-inspector-content")
 
     # No probe was clicked: the saved connection already offers every action the
@@ -955,7 +955,7 @@ def test_settings_delete_requires_confirmation_and_then_tracking_degrades(page, 
     assert deletes == 1
     page.goto(f"{live_server_url}/app/tracking")
     page.wait_for_selector("#tracking-overview")
-    # Unconfigured: no probe entry, no sync entry, and no automatic POST.
+    # Unconfigured: no probe entry, no manual sync entry and no automatic POST.
     assert page.locator("#tracking-probe-saved").count() == 0
     assert page.locator("#tracking-sync").count() == 0
     assert deletes == 1
@@ -1175,9 +1175,10 @@ def test_management_generation_refresh_keeps_external_id_unbound(page, live_serv
     page.wait_for_selector("#tracking-overview")
     page.reload()
     page.wait_for_selector("#tracking-overview")
-    # Only automatic read-only capability probes may run on load; no recovery,
-    # sync or management write does.
-    assert [call for call in calls if not call.endswith("/probe")] == []
+    # #229 F1: each entry runs exactly one automatic read-only sync; no probe,
+    # recovery, submit or management write runs on load.
+    assert [call for call in calls if call != "/tracking/sync"] == [], calls
+    assert calls.count("/tracking/sync") == 2, calls
 
 
 @pytest.mark.browser

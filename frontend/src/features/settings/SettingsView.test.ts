@@ -425,3 +425,30 @@ describe('SettingsView saved Auto Bangumi connection flow', () => {
     expect(apiDelete).not.toHaveBeenCalled()
   })
 })
+
+describe('SettingsView saved-connection capability note (#229 F3/AC6)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    sessionStorage.clear()
+    apiGet.mockReset()
+    apiPost.mockReset()
+    apiPut.mockReset()
+    apiDelete.mockReset()
+    apiGet.mockResolvedValue(DEFAULT_PREFERENCES)
+  })
+
+  it('states the saved connection capability in exactly one plain sentence', async () => {
+    const { wrapper } = await mountSettings()
+    await nextTick()
+
+    const notes = wrapper.findAll('#settings-ab-capability-note')
+    expect(notes).toHaveLength(1)
+    expect(notes[0]!.text()).toBe('已保存连接可读取并管理受控外部订阅；提交前仍需逐次确认。')
+
+    // F3/AC6: the sentence does not bring back the technical field table.
+    const text = wrapper.text()
+    for (const field of ['探测状态', 'subscription_list', 'external_verify', 'rss_refresh', 'safe_message']) {
+      expect(text).not.toContain(field)
+    }
+  })
+})

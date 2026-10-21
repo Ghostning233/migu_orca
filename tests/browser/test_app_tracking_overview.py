@@ -781,15 +781,12 @@ def _sync_page(page: Page, live_server_url: str, storage_dir, sync_result: dict[
 
     page.route("**/api/v1/**", handler)
     set_storage_preferences(page, storage_dir)
+    # #229 F1: entering the page runs the one read-only sync; each test below
+    # waits for its own result (toast or bounded status area) instead of
+    # clicking a retired button.
     page.goto(f"{live_server_url}/app/tracking")
-    page.wait_for_selector("#tracking-sync")
+    page.wait_for_selector("#tracking-overview")
     return probes
-
-
-def _sync_once(page: Page) -> None:
-    page.locator("#tracking-sync").click()
-    page.locator(".confirm-dialog .danger-button, .confirm-dialog .primary-button").last.click()
-    page.wait_for_timeout(300)
 
 
 def test_clean_sync_success_uses_the_global_notification(
@@ -804,10 +801,9 @@ def test_clean_sync_success_uses_the_global_notification(
                     "ignored": 0, "failed": 0, "unreadable": 0},
         "warnings": [], "items": [_item(1)],
     })
-    _sync_once(page)
+    expect(page.locator(".global-notification")).to_contain_text("同步完成")
 
     assert probes == [], "loading must never probe; the summary is the only source"
-    expect(page.locator(".global-notification")).to_contain_text("同步完成")
     # The list-module status area stays empty for a clean success.
     assert page.locator("#tracking-sync-status").count() == 0
     assert page.locator(".tracking-toolbar-status").count() == 0
@@ -825,12 +821,11 @@ def test_degraded_or_ignoring_sync_stays_in_the_list_status_area(
                     "ignored": 2, "failed": 1, "unreadable": 0},
         "warnings": [], "items": [_item(1)],
     })
-    _sync_once(page)
-
-    assert probes == [], "loading must never probe; the summary is the only source"
     status = page.locator("#tracking-sync-status")
     expect(status).to_be_visible()
     expect(status).to_contain_text("同步部分完成")
+
+    assert probes == [], "loading must never probe; the summary is the only source"
     expect(page.locator(".tracking-list-panel #tracking-sync-status")).to_have_count(1)
     # No success toast is claimed for a degraded result.
     assert page.locator(".global-notification").count() == 0
@@ -848,12 +843,11 @@ def test_complete_sync_with_ignored_strangers_stays_inline(
                     "ignored": 2, "failed": 0, "unreadable": 0},
         "warnings": [], "items": [_item(1)],
     })
-    _sync_once(page)
-
-    assert probes == [], "loading must never probe; the summary is the only source"
     status = page.locator("#tracking-sync-status")
     expect(status).to_be_visible()
     expect(status).to_contain_text("忽略 2 条")
+
+    assert probes == [], "loading must never probe; the summary is the only source"
     assert page.locator(".global-notification").count() == 0
 
 
@@ -904,8 +898,11 @@ def test_overview_cards_keep_the_server_count_and_clear_the_search(
     }
     for group, (_label, count) in expected.items():
         card = page.locator(f"#tracking-overview-{group}")
+        # #229 T3 residual: only the selected card carries the native hint.
+        assert card.get_attribute("title") is None
         card.click()
         assert card.get_attribute("aria-pressed") == "true"
+        assert card.get_attribute("title") == "再次点击取消筛选"
         expect(page.locator(".tracking-list-item")).to_have_count(count)
         assert page.locator(".tracking-list-count").inner_text() == f"共 {count} 部"
 
