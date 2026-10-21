@@ -164,31 +164,58 @@ def load_tracking_record(
 def delete_tracking_record(
     config: StorageConfig,
     tracking_id: str,
+    *,
+    expected_revision: int | None = None,
+    step: str = "delete_tracking_record",
 ) -> dict[str, Any]:
     """Delete one tracking record file (issue #92).
 
     A missing record is an explicit ``tracking_not_found`` instead of a silent
     success, so a plan delete can never half-apply and report success. Only the
     record file is removed: no media, cache or external object is touched.
+
+    Issue #230 (ADR-0006): ``expected_revision`` turns the delete into a
+    compare-and-swap.  The revision is checked against the bytes on disk
+    immediately before the unlink, so a delete that was confirmed against an
+    older record removes nothing.  The project keeps its JSON store in one
+    process without a background worker, so this read-then-unlink inside the
+    repository is the strongest guarantee the storage layer offers.
     """
-    clean_id = _validated_tracking_id(tracking_id, "delete_tracking_record")
-    path = _tracking_path(config, clean_id, "delete_tracking_record")
-    if not path.exists():
-        raise Stage1Error(
-            "tracking_not_found",
-            "未找到该追番记录",
-            "delete_tracking_record",
-            {"tracking_id": clean_id},
-        )
-    try:
-        path.unlink()
-    except OSError as exc:
-        raise Stage1Error(
-            "storage_error",
-            "删除追番记录失败",
-            "delete_tracking_record",
-            {"tracking_id": clean_id, "directory": config.tracking_dir.name},
-        ) from exc
+    clean_id = _validated_tracking_id(tracking_id, step)
+    path = _tracking_path(config, clean_id, step)
+    # The read → compare → unlink runs under the same per-key lock as every other
+    # tracking write, so a concurrent CAS cannot slip a new revision between the
+    # check and the unlink (issue #230, ADR-0006).
+    with _LOCKS.for_key(clean_id):
+        if not path.exists():
+            raise Stage1Error(
+                "tracking_not_found",
+                "未找到该追番记录",
+                step,
+                {"tracking_id": clean_id},
+            )
+        if expected_revision is not None:
+            current = _load_tracking_record(config, clean_id, step)
+            if current.revision != expected_revision:
+                raise Stage1Error(
+                    "tracking_revision_conflict",
+                    "追番记录版本已变化，请刷新后重试",
+                    step,
+                    {
+                        "tracking_id": clean_id,
+                        "expected_revision": expected_revision,
+                        "current_revision": current.revision,
+                    },
+                )
+        try:
+            path.unlink()
+        except OSError as exc:
+            raise Stage1Error(
+                "storage_error",
+                "删除追番记录失败",
+                step,
+                {"tracking_id": clean_id, "directory": config.tracking_dir.name},
+            ) from exc
     return {"tracking_id": clean_id, "deleted": True}
 
 

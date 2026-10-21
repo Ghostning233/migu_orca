@@ -984,6 +984,9 @@ async function openReuseJourney(): Promise<void> {
 async function runPlanDelete(payload: {
   item: TrackingItem
   deleteExternal: boolean
+  abandon?: boolean
+  expectedRevision?: number | null
+  expectedOperationId?: string | null
 }): Promise<void> {
   // Issue #96: a purely local delete needs no Auto Bangumi connection at all;
   // only the optional external delete requires the saved connection (the

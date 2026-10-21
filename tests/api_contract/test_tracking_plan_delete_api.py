@@ -324,16 +324,12 @@ def test_delete_plan_allows_a_settled_operation(
 
 @pytest.mark.parametrize(
     "state",
-    [
-        TRACKING_OPERATION_STATE_PREPARED,
-        TRACKING_OPERATION_STATE_IN_PROGRESS,
-        TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN,
-        TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
-    ],
+    [TRACKING_OPERATION_STATE_PREPARED, TRACKING_OPERATION_STATE_IN_PROGRESS],
 )
-def test_delete_plan_still_blocks_an_unresolved_operation(
+def test_delete_plan_still_blocks_a_write_that_may_run(
     tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch, state: str
 ) -> None:
+    """ADR-0006: an in-flight (or armed) write is never deletable."""
     record, _request = _seed(tmp_path, mapped=False)
     record = _with_operation(tmp_path, record, state=state)
     calls = _stub_management(monkeypatch, "SUCCEEDED")
@@ -342,6 +338,28 @@ def test_delete_plan_still_blocks_an_unresolved_operation(
 
     assert response.status_code == 409
     assert response.get_json()["error_type"] == "tracking_state_conflict"
+    assert calls == []
+    assert [
+        item.tracking_id for item in list_tracking_records(_config(tmp_path)).records
+    ] == [record.tracking_id]
+
+
+@pytest.mark.parametrize(
+    "state",
+    [TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN, TRACKING_OPERATION_STATE_RECOVERY_REQUIRED],
+)
+def test_delete_plan_needs_the_risk_confirmation_for_an_unresolved_write(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch, state: str
+) -> None:
+    """ADR-0006: an exited-but-undecidable write needs the bound confirmation."""
+    record, _request = _seed(tmp_path, mapped=False)
+    record = _with_operation(tmp_path, record, state=state)
+    calls = _stub_management(monkeypatch, "SUCCEEDED")
+
+    response = _post(client, record, delete_external=False)
+
+    assert response.status_code == 400
+    assert response.get_json()["error_type"] == "validation_error"
     assert calls == []
     assert [
         item.tracking_id for item in list_tracking_records(_config(tmp_path)).records

@@ -110,8 +110,16 @@ const emit = defineEmits<{
   (e: 'resubmit-requested', payload: { item: TrackingItem }): void
   // A management request carries the scope the user chose and the strict patch
   // its own form built; the page re-validates both before anything is sent.
-  /** Issue #92: delete this plan, optionally with its controlled external object. */
-  (e: 'plan-delete-requested', payload: { item: TrackingItem; deleteExternal: boolean }): void
+  /** Issue #92: delete this plan, optionally with its controlled external object.
+   *  Issue #230: an unresolved record uses the same request as a local-only
+   *  abandon bound to the record revision and current operation. */
+  (e: 'plan-delete-requested', payload: {
+    item: TrackingItem
+    deleteExternal: boolean
+    abandon?: boolean
+    expectedRevision?: number | null
+    expectedOperationId?: string | null
+  }): void
   /** Issue #93: reuse this plan's safe suggestion in the add journey. */
   (e: 'reuse-requested'): void
   (e: 'management-requested', payload: {
@@ -473,20 +481,33 @@ const UNDELETABLE_PLAN_STATUSES = new Set([
 const deletePlanOpen = ref(false)
 const deleteExternalChecked = ref(false)
 
-// Issue #96: a settled operation is history, not a delete lock. Only an
-// in-flight or unresolved current operation (or a status mid-external-action)
-// still blocks; an unrecognized state fails closed.
+// Issue #96: a settled operation is history, not a delete lock. Issue #230
+// (ADR-0006) mirrors the server's operation-state matrix: a write that may still
+// run (`PREPARED`/`IN_PROGRESS`, or an unrecognized state) blocks every delete,
+// while an exited-but-undecidable write (`OUTCOME_UNKNOWN`/`RECOVERY_REQUIRED`)
+// unlocks the risk-confirmed abandon.
 const SETTLED_OPERATION_STATES = new Set(['SUCCEEDED', 'FAILED'])
-const hasUnresolvedOperation = computed(() => {
-  const operation = detail.value?.current_operation
-  if (!operation) return false
-  return !SETTLED_OPERATION_STATES.has(String(operation.state))
+const ABANDONABLE_OPERATION_STATES = new Set(['OUTCOME_UNKNOWN', 'RECOVERY_REQUIRED'])
+const currentOperationState = computed<string | null>(() => {
+  const raw = detail.value?.current_operation?.state
+  return typeof raw === 'string' ? raw : null
 })
-
+/** A write that may still run (or a state this page cannot interpret). */
+const operationInFlight = computed(() => {
+  const state = currentOperationState.value
+  if (state === null) return false
+  return !SETTLED_OPERATION_STATES.has(state) && !ABANDONABLE_OPERATION_STATES.has(state)
+})
+/** An exited external write whose result the server cannot decide. */
+const abandonableOperation = computed(() => {
+  const state = currentOperationState.value
+  return state !== null && ABANDONABLE_OPERATION_STATES.has(state)
+})
 const canDeletePlan = computed(() => Boolean(
   detail.value
+  && !operationInFlight.value
+  && !abandonableOperation.value
   && !UNDELETABLE_PLAN_STATUSES.has(detail.value.status)
-  && !hasUnresolvedOperation.value
 ))
 /** Only a controlled mapping makes the external option applicable at all. */
 const deletePlanHasExternal = computed(() => Boolean(detail.value?.external_mapping))
@@ -497,9 +518,11 @@ const thisPlanDelete = computed(() => (
 ))
 
 const deletePlanConsequence = computed(() => (
-  deleteExternalChecked.value
-    ? '将先删除 Auto Bangumi 中的受控外部订阅，明确成功后再删除本地方案与追番记录；该外部对象不会被保留，也不会删除已下载媒体。'
-    : '本地方案与追番记录将被删除；Auto Bangumi 中的受控外部订阅继续运行，但 MiGuOrca 不再管理它。已下载媒体始终保留。'
+  abandonableOperation.value
+    ? '放弃只删除本地方案与追番记录，不会向 Auto Bangumi 发送任何请求；Auto Bangumi 中可能已经存在并在继续下载的订阅不再由 MiGuOrca 管理。已下载媒体始终保留。'
+    : deleteExternalChecked.value
+      ? '将先删除 Auto Bangumi 中的受控外部订阅，明确成功后再删除本地方案与追番记录；该外部对象不会被保留，也不会删除已下载媒体。'
+      : '本地方案与追番记录将被删除；Auto Bangumi 中的订阅会继续运行，MiGuOrca 不再管理它们。已下载媒体始终保留。'
 ))
 
 function openDeletePlan(): void {
@@ -514,10 +537,27 @@ function cancelDeletePlan(): void {
 }
 
 function confirmDeletePlan(): void {
-  if (!detail.value || !canDeletePlan.value) return
+  if (!detail.value) return
+  if (abandonableOperation.value) {
+    // The risk confirmation binds the record revision and the operation the
+    // user saw; the server re-reads both before deleting (ADR-0006).  The
+    // abandon never carries the external scope.
+    emit('plan-delete-requested', {
+      item: detail.value,
+      deleteExternal: false,
+      abandon: true,
+      expectedRevision: detail.value.revision,
+      expectedOperationId: detail.value.current_operation?.operation_id ?? null,
+    })
+    return
+  }
+  if (!canDeletePlan.value) return
   emit('plan-delete-requested', {
     item: detail.value,
     deleteExternal: deletePlanHasExternal.value && deleteExternalChecked.value,
+    abandon: false,
+    expectedRevision: null,
+    expectedOperationId: null,
   })
 }
 
@@ -699,53 +739,6 @@ defineExpose({ reload: () => fetchDetail(true) })
       </section>
 
       <section
-        v-if="canDeletePlan"
-        id="tracking-delete-plan-section"
-        class="tracking-inspector-section tracking-delete-plan-section"
-        aria-labelledby="tracking-delete-plan-heading"
-      >
-        <h4 id="tracking-delete-plan-heading">删除追番方案</h4>
-        <p class="field-help">删除本地方案与追番记录；已下载的媒体始终保留。</p>
-        <BaseButton
-          v-if="!deletePlanOpen"
-          id="tracking-delete-plan"
-          variant="danger"
-          :disabled="actionBusy"
-          @click="openDeletePlan"
-        >删除追番方案</BaseButton>
-        <template v-else>
-          <CheckboxRow
-            v-if="deletePlanHasExternal"
-            id="tracking-delete-plan-external"
-            v-model:checked="deleteExternalChecked"
-            label="同时删除 Auto Bangumi 中的受控外部订阅"
-          />
-          <p class="field-help">{{ deletePlanConsequence }}</p>
-          <div class="tracking-delete-plan-actions">
-            <BaseButton
-              id="tracking-delete-plan-confirm"
-              variant="danger"
-              :loading="Boolean(thisPlanDelete && thisPlanDelete.state === 'IN_FLIGHT')"
-              :disabled="actionBusy"
-              @click="confirmDeletePlan"
-            >删除追番方案</BaseButton>
-            <BaseButton
-              id="tracking-delete-plan-cancel"
-              variant="secondary"
-              :disabled="actionBusy"
-              @click="cancelDeletePlan"
-            >取消</BaseButton>
-          </div>
-        </template>
-        <p
-          v-if="thisPlanDelete && thisPlanDelete.state !== 'IN_FLIGHT'"
-          id="tracking-delete-plan-result"
-          class="field-help"
-          role="status"
-        >{{ thisPlanDelete.message }}</p>
-      </section>
-
-      <section
         v-if="canEditPlan"
         class="tracking-inspector-section tracking-plan-edit-section"
         aria-labelledby="tracking-plan-edit-heading"
@@ -906,6 +899,58 @@ defineExpose({ reload: () => fetchDetail(true) })
             {{ thisRecovery.manualNotice }}
           </p>
         </div>
+      </section>
+
+      <section
+        v-if="canDeletePlan || abandonableOperation"
+        id="tracking-delete-plan-section"
+        class="tracking-inspector-section tracking-delete-plan-section"
+        aria-labelledby="tracking-delete-plan-heading"
+      >
+        <h4 id="tracking-delete-plan-heading">{{ abandonableOperation ? '放弃跟踪并删除' : '删除追番方案' }}</h4>
+        <p
+          v-if="abandonableOperation"
+          id="tracking-abandon-risk"
+          class="field-help"
+        >这次提交的结果无法确认，Auto Bangumi 中可能已经建立了订阅并会继续下载；删除后 MiGuOrca 不再跟踪它，也不会再提醒。放弃只删除本地数据，不会向 Auto Bangumi 发送任何请求。</p>
+        <p v-else class="field-help">删除本地方案与追番记录；已下载的媒体始终保留。</p>
+        <BaseButton
+          v-if="!deletePlanOpen"
+          :id="abandonableOperation ? 'tracking-abandon-plan' : 'tracking-delete-plan'"
+          variant="danger"
+          :disabled="actionBusy"
+          @click="openDeletePlan"
+        >{{ abandonableOperation ? '放弃跟踪并删除' : '删除追番方案' }}</BaseButton>
+        <template v-else>
+          <CheckboxRow
+            v-if="!abandonableOperation && deletePlanHasExternal"
+            id="tracking-delete-plan-external"
+            v-model:checked="deleteExternalChecked"
+            label="同时删除 Auto Bangumi 中的受控外部订阅"
+          />
+          <p class="field-help">{{ deletePlanConsequence }}</p>
+          <div class="tracking-delete-plan-actions">
+            <BaseButton
+              :id="abandonableOperation ? 'tracking-abandon-confirm' : 'tracking-delete-plan-confirm'"
+              variant="danger"
+              :loading="Boolean(thisPlanDelete && thisPlanDelete.state === 'IN_FLIGHT')"
+              :disabled="actionBusy"
+              @click="confirmDeletePlan"
+            >{{ abandonableOperation ? '确认放弃并删除' : '删除追番方案' }}</BaseButton>
+            <BaseButton
+              :id="abandonableOperation ? 'tracking-abandon-cancel' : 'tracking-delete-plan-cancel'"
+              variant="secondary"
+              :disabled="actionBusy"
+              @click="cancelDeletePlan"
+            >取消</BaseButton>
+          </div>
+        </template>
+        <p
+          v-if="thisPlanDelete && thisPlanDelete.state !== 'IN_FLIGHT'"
+          id="tracking-delete-plan-result"
+          class="field-help"
+          role="status"
+        >{{ thisPlanDelete.message }}</p>
       </section>
 
       <section class="tracking-inspector-section tracking-modify-section" aria-labelledby="tracking-modify-heading">

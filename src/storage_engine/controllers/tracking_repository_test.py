@@ -445,3 +445,37 @@ def test_delete_tracking_record_removes_only_that_record(tmp_path: Path) -> None
     # A second delete is an explicit not-found, never a silent success.
     with pytest.raises(Stage1Error, match="未找到"):
         delete_tracking_record(config, first.tracking_id)
+
+
+def test_delete_tracking_record_cas_refuses_a_stale_revision(tmp_path: Path) -> None:
+    """Issue #230: the risk-confirmed delete compares-and-swaps the revision.
+
+    A confirmation bound to an older revision must remove nothing, and the
+    record file must still be there for the user to re-read.
+    """
+    config = _config(tmp_path)
+    record, _ = ensure_tracking_record(config, _record())
+
+    with pytest.raises(Stage1Error) as error:
+        delete_tracking_record(
+            config, record.tracking_id, expected_revision=record.revision + 1
+        )
+
+    assert error.value.error_type == "tracking_revision_conflict"
+    assert error.value.details["expected_revision"] == record.revision + 1
+    assert error.value.details["current_revision"] == record.revision
+    assert load_tracking_record(config, record.tracking_id).revision == record.revision
+
+
+def test_delete_tracking_record_without_a_revision_keeps_the_old_behaviour(
+    tmp_path: Path,
+) -> None:
+    """The optional CAS never changes the plain delete contract."""
+    config = _config(tmp_path)
+    record, _ = ensure_tracking_record(config, _record())
+
+    assert delete_tracking_record(config, record.tracking_id) == {
+        "tracking_id": record.tracking_id,
+        "deleted": True,
+    }
+    assert list_tracking_records(config).records == []

@@ -1495,7 +1495,11 @@ function projectManagementOutcome(
 
 export interface TrackingPlanDeleteSession {
   readonly trackingId: string
-  readonly state: 'IN_FLIGHT' | 'DELETED' | 'EXTERNAL_FAILED' | 'EXTERNAL_UNKNOWN'
+  readonly state:
+    | 'IN_FLIGHT' | 'DELETED'
+    | 'EXTERNAL_FAILED' | 'EXTERNAL_UNKNOWN'
+    | 'LOCAL_FAILED' | 'LOCAL_UNKNOWN'
+    | 'ABANDON_FAILED' | 'ABANDON_MISSING' | 'ABANDON_UNKNOWN'
   readonly message: string
 }
 
@@ -1503,14 +1507,24 @@ const PLAN_DELETE_ENDPOINT = '/api/v1/tracking/items/{tracking_id}/delete-plan' 
 
 /**
  * ``DELETED`` is the only state where the local plan and its tracking record are
- * gone; the two external states mean nothing local was removed and the user must
+ * gone; the external states mean nothing local was removed and the user must
  * retry or recover deliberately.
+ *
+ * Issue #230: an abandon sends no external request at all, so its failure copy
+ * must never mention the external object (that would state something about a
+ * remote system the page never contacted).  A refused abandon is a stale or
+ * incomplete confirmation; an unreadable one leaves the local state unknown.
  */
 const PLAN_DELETE_MESSAGES: Record<TrackingPlanDeleteSession['state'], string> = {
   IN_FLIGHT: '正在删除追番方案，请稍候…',
   DELETED: '追番方案已删除。',
   EXTERNAL_FAILED: 'Auto Bangumi 未删除该受控外部订阅，本地方案与追番记录均已保留；请核对后重试。',
   EXTERNAL_UNKNOWN: '外部删除结果待确认，本地方案与追番记录均已保留；请先恢复核验后再决定。',
+  LOCAL_FAILED: '本次删除未生效：服务端拒绝了请求（记录已变化或当前状态不允许删除），本地方案与追番记录均已保留；请刷新后重新确认。',
+  LOCAL_UNKNOWN: '删除结果待确认：服务端返回了无法判定的错误；请刷新后核对该追番方案是否仍然存在，再决定是否重试。',
+  ABANDON_FAILED: '本次放弃未生效：服务端拒绝了该请求（确认可能已过期或绑定不完整），本地方案与追番记录均已保留；请重新只读核验后再确认。',
+  ABANDON_MISSING: '该追番记录已不存在，本次放弃未改动任何本地数据。',
+  ABANDON_UNKNOWN: '放弃结果待确认：服务端返回了无法判定的错误；请刷新后核对该追番方案是否仍然存在，再决定是否重试。',
 }
 
 function createPlanDeleteSession(
@@ -1900,9 +1914,18 @@ interface TrackingWriteSessionApi {
   failManagement: (error: TrackingWriteError) => readonly TrackingWriteEffect[]
 
   // -- unified plan delete --------------------------------------------------
+  /**
+   * Issue #92 local delete, optionally with the controlled external object.
+   * Issue #230: an unresolved operation uses the same request as a local-only
+   * abandon — the optional revision + operation id are the risk confirmation
+   * binding the server re-checks before deleting.
+   */
   beginPlanDelete: (payload: {
     readonly item: TrackingItem
     readonly deleteExternal: boolean
+    readonly abandon?: boolean
+    readonly expectedRevision?: number | null
+    readonly expectedOperationId?: string | null
   }, options?: TrackingWriteBeginOptions) => TrackingWriteStart
   finishPlanDelete: (result: TrackingPlanDeleteResult) => readonly TrackingWriteEffect[]
   failPlanDelete: (error: TrackingWriteError) => readonly TrackingWriteEffect[]
@@ -2003,6 +2026,7 @@ interface TrackingWriteCore {
   managementConfigSnapshot: TrackingWriteConfig | null
   active: ActiveTransport | null
   planDeleteExternal: boolean
+  planDeleteAbandon: boolean
   checkAttempt: { readonly trackingId: string; readonly revision: number } | null
   resubmitAttempt: { readonly trackingId: string; readonly revision: number } | null
 
@@ -2115,6 +2139,7 @@ function createTrackingWriteCore(): TrackingWriteCore {
     managementConfigSnapshot: null,
     active: null,
     planDeleteExternal: false,
+    planDeleteAbandon: false,
     checkAttempt: null,
     resubmitAttempt: null,
     unresolvedOwner,
@@ -2897,6 +2922,7 @@ type PlanDeleteFamilyCore = Pick<
   TrackingWriteCore,
   | 'planDelete'
   | 'planDeleteExternal'
+  | 'planDeleteAbandon'
   | 'recheck'
 >
 
@@ -2904,15 +2930,39 @@ function createPlanDeleteFamily(core: PlanDeleteFamilyCore) {
   // -- unified plan delete (issue #92) --------------------------------------
 
   function beginPlanDelete(
-    payload: { readonly item: TrackingItem; readonly deleteExternal: boolean },
+    payload: {
+      readonly item: TrackingItem
+      readonly deleteExternal: boolean
+      /** Issue #230: this request *is* a risk-confirmed abandon. */
+      readonly abandon?: boolean
+      /** The risk confirmation binds the record revision… */
+      readonly expectedRevision?: number | null
+      /** …and the operation the user saw; both or neither. */
+      readonly expectedOperationId?: string | null
+    },
     options: TrackingWriteBeginOptions = {},
   ): TrackingWriteStart {
     const connection = options.connection ?? null
+    const abandon = payload.abandon === true
+    if (abandon) {
+      // An abandon must never turn into a new external write (ADR-0006), and a
+      // half binding is not a confirmation: refuse rather than degrade into a
+      // plain delete without the compare-and-swap.
+      if (payload.deleteExternal) return ignoredStart()
+      if (
+        typeof payload.expectedRevision !== 'number'
+        || typeof payload.expectedOperationId !== 'string'
+        || payload.expectedOperationId.length === 0
+      ) {
+        return ignoredStart()
+      }
+    }
     // Issue #96: a purely local delete needs no Auto Bangumi connection at all;
     // only the optional external delete requires the saved connection.
     if (payload.deleteExternal && !connection?.connection_ref) return ignoredStart()
     const trackingId = payload.item.tracking_id
     core.planDeleteExternal = payload.deleteExternal
+    core.planDeleteAbandon = abandon
     core.planDelete.value = createPlanDeleteSession(trackingId, 'IN_FLIGHT')
     const storageDir = options.storageDir
     // The generated body declares ``connection_ref`` unconditionally, but a
@@ -2921,6 +2971,12 @@ function createPlanDeleteFamily(core: PlanDeleteFamilyCore) {
       confirm: true as const,
       delete_external: payload.deleteExternal,
       idempotency_key: makeOpaqueKey(),
+      ...(abandon
+        ? {
+            expected_revision: payload.expectedRevision as number,
+            expected_operation_id: payload.expectedOperationId as string,
+          }
+        : {}),
       ...(payload.deleteExternal && connection?.connection_ref
         ? {
             connection_ref: connection.connection_ref,
@@ -2957,10 +3013,12 @@ function createPlanDeleteFamily(core: PlanDeleteFamilyCore) {
           kind: 'notify',
           feedback: {
             channel: 'success',
-            title: '追番方案已删除',
+            title: core.planDeleteAbandon ? '已放弃跟踪并删除追番方案' : '追番方案已删除',
             message: core.planDeleteExternal
               ? '已同时删除受控外部订阅；已下载媒体保留。'
-              : 'Auto Bangumi 中的订阅继续运行，MiGuOrca 不再管理它。',
+              : core.planDeleteAbandon
+                ? '已放弃跟踪并删除本地方案；Auto Bangumi 中可能存在并在继续下载的订阅不再由 MiGuOrca 管理，已下载媒体保留。'
+                : 'Auto Bangumi 中的订阅继续运行，MiGuOrca 不再管理它们。',
           },
         },
         core.recheck(null, true),
@@ -2974,6 +3032,25 @@ function createPlanDeleteFamily(core: PlanDeleteFamilyCore) {
     if (!current) return []
     if (error.cancelled === true && error.httpError !== true) return []
     const trackingId = current.trackingId
+    // Each family gets copy that matches what it actually did: only the external
+    // delete may talk about the external object, and a missing record is its own
+    // outcome (nothing was preserved because nothing is there any more).
+    if (core.planDeleteAbandon) {
+      const state = error.status === 404
+        ? 'ABANDON_MISSING'
+        : error.status === 409 || error.status === 400
+          ? 'ABANDON_FAILED'
+          : 'ABANDON_UNKNOWN'
+      core.planDelete.value = createPlanDeleteSession(trackingId, state)
+      return [core.recheck(trackingId, true)]
+    }
+    if (!core.planDeleteExternal) {
+      const state = error.status === 409 || error.status === 400 || error.status === 404
+        ? 'LOCAL_FAILED'
+        : 'LOCAL_UNKNOWN'
+      core.planDelete.value = createPlanDeleteSession(trackingId, state)
+      return [core.recheck(trackingId, true)]
+    }
     core.planDelete.value = createPlanDeleteSession(
       trackingId, error.status === 409 ? 'EXTERNAL_FAILED' : 'EXTERNAL_UNKNOWN',
     )

@@ -614,6 +614,117 @@ class TestPlanDelete:
         expect(page.locator("#tracking-delete-plan")).to_be_visible()
         expect(page.locator(".tracking-list-item")).to_have_count(1)
 
+    def test_unresolved_record_is_abandoned_with_a_bound_risk_confirmation(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        """Issue #230 / ADR-0006: the last exit is local-only and bound.
+
+        The panel offers the read-only verification first and the abandon after
+        it, states that Auto Bangumi may still be downloading, offers no external
+        scope, and posts the record revision + current operation it showed.
+        """
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        item = {
+            **_item("tracking-a", "葬送的芙莉莲"),
+            "request_id": "request-plan",
+            "status": "RECOVERY_REQUIRED",
+            "status_label": "需要恢复",
+            "status_group": "ATTENTION",
+            "revision": 7,
+            "available_actions": [],
+        }
+        detail = {
+            **item, "origin": "single", "batch_id": None, "created_at": "2026-09-01T00:00:00Z",
+            "last_synced_at": None, "safe_info": None,
+            "current_operation": {
+                "operation_id": "op-unresolved", "operation": "REFRESH_RSS",
+                "state": "OUTCOME_UNKNOWN", "attempt": 1, "external_result_id": None,
+                "error_type": None, "created_at": None, "updated_at": None, "completed_at": None,
+            },
+            "revalidation_issues": [], "audit_events": [], "warnings": [],
+            "external_mapping": {"match_reason": "标题", "enabled": True, "external_deleted": False},
+        }
+        deletes: list[dict[str, Any]] = []
+        state = {"deleted": False}
+
+        def handler(route: Any, request: Any) -> None:
+            path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+            if request.method == "GET" and path == "/settings/autobangumi":
+                route.fulfill(json={"ok": True, "result": {
+                    "configured": True, "credential_present": True,
+                    "connection_ref": "11111111-1111-4111-8111-111111111111",
+                    "configuration_revision": 1, "connection_status": "CONFIGURED",
+                }})
+                return
+            if request.method == "POST" and path == "/settings/autobangumi/probe":
+                route.fulfill(json={"ok": True, "result": {
+                    "probe_status": "VERIFIED", "version": "3.1.18", "adapter": "legacy_3_1",
+                    "subscription_list": "SUPPORTED", "subscription_detail": "SUPPORTED",
+                    "subscription_submit": "SUPPORTED", "subscription_modify": "SUPPORTED",
+                    "subscription_enable": "SUPPORTED", "subscription_disable": "SUPPORTED",
+                    "subscription_delete": "SUPPORTED", "rss_list": "SUPPORTED",
+                    "rss_modify": "SUPPORTED", "rss_enable": "SUPPORTED",
+                    "rss_disable": "SUPPORTED", "rss_delete": "SUPPORTED",
+                    "rss_refresh": "SUPPORTED", "external_verify": "SUPPORTED",
+                    "checked_at": None, "safe_message": "ok",
+                }})
+                return
+            if request.method == "GET" and path == "/tracking/items":
+                items = [] if state["deleted"] else [item]
+                route.fulfill(json={"ok": True, "result": {
+                    "items": items, "summary": _summary(len(items), needs_attention=len(items)),
+                    "status_groups": _status_groups_for(items), "warnings": [],
+                }})
+                return
+            if request.method == "GET" and path == "/tracking/items/tracking-a":
+                route.fulfill(json={"ok": True, "result": detail})
+                return
+            if request.method == "POST" and path == "/tracking/items/tracking-a/delete-plan":
+                body = request.post_data_json or {}
+                deletes.append(body)
+                state["deleted"] = True
+                route.fulfill(json={"ok": True, "result": {
+                    "tracking_id": "tracking-a", "outcome": "DELETED", "external_deleted": False,
+                }})
+                return
+            route.continue_()
+
+        page.route("**/api/v1/**", handler)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-abandon-plan")
+
+        # E8: the read-only verification comes first.
+        expect(page.locator("#tracking-probe-saved")).to_be_visible()
+        page.locator("#tracking-probe-saved").click()
+        page.wait_for_selector("#tracking-recover-verify")
+        verify_box = page.locator("#tracking-recover-verify").bounding_box()
+        abandon_box = page.locator("#tracking-abandon-plan").bounding_box()
+        assert verify_box and abandon_box and verify_box["y"] < abandon_box["y"]
+
+        page.locator("#tracking-abandon-plan").click()
+        risk = page.locator("#tracking-abandon-risk").inner_text()
+        assert "可能已经建立了订阅并会继续下载" in risk
+        assert "不再跟踪" in risk
+        assert "确定失败" not in risk and "可安全重试" not in risk
+        # The abandon never offers the external scope.
+        expect(page.locator("#tracking-delete-plan-external")).to_have_count(0)
+        expect(page.locator("#tracking-abandon-confirm")).to_have_text("确认放弃并删除")
+
+        page.locator("#tracking-abandon-confirm").click()
+        page.wait_for_timeout(400)
+
+        assert len(deletes) == 1
+        body = deletes[0]
+        assert body["confirm"] is True
+        assert body["delete_external"] is False
+        assert body["expected_revision"] == 7
+        assert body["expected_operation_id"] == "op-unresolved"
+        rendered = json.dumps(body, ensure_ascii=False)
+        for forbidden in ("file", "password", "token", "connection_ref"):
+            assert forbidden not in rendered
+        expect(page.locator(".tracking-list-item")).to_have_count(0)
+
 class TestPlanReuse:
     """Issue #93: "复制并重新添加" lives in the tracking detail."""
 
