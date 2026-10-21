@@ -202,11 +202,22 @@ function _safeCount(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0
 }
 
+/** Parse a server timestamp, or null when it is absent/unreadable. */
+function parseServerTimestamp(value: string | null | undefined): Date | null {
+  if (typeof value !== 'string' || !value.trim()) return null
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
 /** Format a server timestamp for the list's "最近更新时间" column (issue #85). */
 export function formatTrackingUpdatedAt(value: string | null | undefined): string {
-  if (typeof value !== 'string' || !value.trim()) return '更新时间不可用'
-  const parsed = new Date(value)
-  if (Number.isNaN(parsed.getTime())) return '更新时间不可用'
+  const parsed = parseServerTimestamp(value)
+  if (!parsed) return '更新时间不可用'
+  return formatTimestamp(parsed)
+}
+
+/** The one timestamp shape the tracking surface uses (YYYY/MM/DD HH:mm). */
+function formatTimestamp(parsed: Date): string {
   return new Intl.DateTimeFormat('zh-CN', {
     year: 'numeric',
     month: '2-digit',
@@ -215,6 +226,89 @@ export function formatTrackingUpdatedAt(value: string | null | undefined): strin
     minute: '2-digit',
     hour12: false,
   }).format(parsed)
+}
+
+/**
+ * Format a server timestamp for the detail's 创建时间 value (issue #227 D2).
+ *
+ * The 2026-10-20 revision replaced 「最近更新」(updated_at) with 创建时间
+ * (created_at): updated_at moves on every submit/modify/enable/sync, so it never
+ * described resource freshness.  A missing or unreadable value uses the same
+ * "未设置" wording the rest of the summary uses for absent metadata.
+ */
+export function formatTrackingCreatedAt(value: string | null | undefined): string {
+  const parsed = parseServerTimestamp(value)
+  if (!parsed) return '未设置'
+  return formatTimestamp(parsed)
+}
+
+/**
+ * Chinese wording for the record's current operation and its state (issue #227
+ * D6).  The values are the server's public enums; an unrecognized value is
+ * returned verbatim so the operational record never hides evidence behind a
+ * made-up label.
+ */
+const OPERATION_LABELS: Record<string, string> = {
+  SUBMIT: '提交',
+  MODIFY: '修改',
+  SET_ENABLED: '启停',
+  DELETE_EXTERNAL: '删除外部订阅',
+  REFRESH_RSS: '刷新资源',
+}
+
+const OPERATION_STATE_LABELS: Record<string, string> = {
+  PREPARED: '已准备',
+  IN_PROGRESS: '进行中',
+  SUCCEEDED: '成功',
+  FAILED: '失败',
+  OUTCOME_UNKNOWN: '结果待确认',
+  RECOVERY_REQUIRED: '需要恢复',
+}
+
+const AUDIT_ACTION_LABELS: Record<string, string> = {
+  TRACKING_CREATED: '已创建追番记录',
+  TRACKING_BACKFILLED: '已回填历史记录',
+  PLAN_CHANGE_DETECTED: '检测到方案变化',
+  REVALIDATION_PASSED: '提交前复核通过',
+  REVALIDATION_FAILED: '提交前复核未通过',
+  SUBMIT_STARTED: '开始提交',
+  SUBMIT_SUCCEEDED: '提交成功',
+  SUBMIT_FAILED: '提交失败',
+  SUBMIT_OUTCOME_UNKNOWN: '提交结果待确认',
+  MANAGEMENT_STARTED: '开始外部管理操作',
+  MANAGEMENT_SUCCEEDED: '外部管理操作成功',
+  MANAGEMENT_FAILED: '外部管理操作失败',
+  MANAGEMENT_UNKNOWN: '外部管理结果待确认',
+  RESULT_PERSIST_FAILED: '结果落盘失败',
+  RECOVERY_AUTO_SUCCEEDED: '本地恢复成功',
+  RECOVERY_AUTO_FAILED: '本地恢复确认失败',
+  RECOVERY_NEEDS_MANUAL: '需要人工核验',
+  RECOVERY_MANUAL_SUCCEEDED: '人工核验标记成功',
+  RECOVERY_MANUAL_FAILED: '人工核验标记失败',
+  RESUBMIT_RISK_CONFIRMED: '已确认主动重发风险',
+  RECOVERY_EXTERNAL_VERIFIED: '只读核验外部状态',
+  COMPAT_QUEUE_UPDATED: '兼容队列已更新',
+  COMPAT_QUEUE_UPDATE_FAILED: '兼容队列更新失败',
+}
+
+function pickLabel(value: unknown, labels: Record<string, string>, fallback: string): string {
+  if (typeof value !== 'string' || !value) return fallback
+  return labels[value] ?? value
+}
+
+/** Chinese name of one operation kind; unknown codes stay visible. */
+export function formatTrackingOperation(value: unknown): string {
+  return pickLabel(value, OPERATION_LABELS, '未知操作')
+}
+
+/** Chinese name of one operation state; unknown codes stay visible. */
+export function formatTrackingOperationState(value: unknown): string {
+  return pickLabel(value, OPERATION_STATE_LABELS, '未知状态')
+}
+
+/** Chinese name of one audit action; unknown codes stay visible. */
+export function formatTrackingAuditAction(value: unknown): string {
+  return pickLabel(value, AUDIT_ACTION_LABELS, '未知操作记录')
 }
 
 /** Search only public title/subtitle fields and apply a server status group. */
