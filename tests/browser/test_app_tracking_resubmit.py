@@ -31,6 +31,14 @@ RESUBMIT = "/tracking/items/tracking-a/resubmit"
 pytestmark = pytest.mark.browser
 
 
+def _open_disclosure(page: Page, disclosure_id: str) -> None:
+    """Open one detail disclosure (issue #233: dangerous actions start folded)."""
+    disclosure = page.locator(f"#{disclosure_id}")
+    if disclosure.evaluate("el => el.open") is False:
+        disclosure.locator("summary").first.click()
+    assert disclosure.evaluate("el => el.open") is True
+
+
 def _require_dist() -> None:
     if not (REPO_ROOT / "frontend" / "dist" / "index.html").is_file():
         pytest.skip("frontend/dist not built; run `npm run build` in frontend/")
@@ -186,6 +194,7 @@ class TestRiskConfirmedResubmission:
         _open(page, live_server_url, storage_dir)
         # The ordinary automatic read-only check already ran.
         page.wait_for_selector("#tracking-check-result", timeout=10_000)
+        _open_disclosure(page, "tracking-more-actions")
         page.wait_for_selector("#tracking-resubmit", timeout=10_000)
 
         page.locator("#tracking-resubmit").click()
@@ -218,6 +227,7 @@ class TestRiskConfirmedResubmission:
     ) -> None:
         calls = _install(page, _pending_item())
         _open(page, live_server_url, storage_dir)
+        _open_disclosure(page, "tracking-more-actions")
         page.wait_for_selector("#tracking-resubmit", timeout=10_000)
 
         page.locator("#tracking-resubmit").click()
@@ -260,6 +270,7 @@ class TestRiskConfirmedResubmission:
             ),
         )
         _open(page, live_server_url, storage_dir)
+        _open_disclosure(page, "tracking-more-actions")
         page.wait_for_selector("#tracking-resubmit", timeout=10_000)
 
         page.locator("#tracking-resubmit").click()
@@ -294,6 +305,7 @@ class TestRiskConfirmedResubmission:
             ),
         )
         _open(page, live_server_url, storage_dir)
+        _open_disclosure(page, "tracking-more-actions")
         page.wait_for_selector("#tracking-resubmit", timeout=10_000)
 
         page.locator("#tracking-resubmit").click()

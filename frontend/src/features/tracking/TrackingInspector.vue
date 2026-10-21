@@ -161,13 +161,6 @@ const writeActions = computed(() => (
 ))
 const submitAction = computed(() => writeActions.value.find((action) => action.code === 'SUBMIT') ?? null)
 const retryAction = computed(() => writeActions.value.find((action) => action.code === 'RETRY') ?? null)
-const writeHint = computed(() => {
-  const offered = (detail.value?.available_actions ?? []).some(
-    (action) => action.code === 'SUBMIT' || action.code === 'RETRY',
-  )
-  return offered ? '当前动作不在受支持的提交范围内，已降级为只读。' : '当前状态不可提交或重试外部订阅。'
-})
-
 // -- saved local plan editing (issue #90) ------------------------------------
 // The pending/needs-reconfirm/failed plan is edited with the same shared editor
 // core the add journeys use. Saving is revision-authoritative on the server: the
@@ -600,14 +593,62 @@ const modifyOffer = computed(() => offerFor('MODIFY'))
 const setEnabledOffer = computed(() => offerFor('SET_ENABLED'))
 const refreshOffer = computed(() => offerFor('REFRESH_RSS'))
 
-/** Fixed read-only copy when the server does not offer the action at all. */
-function managementHint(verb: string): string {
-  return `当前状态不可${verb}。`
+// -- detail action grouping (issue #233 D3/D4) -------------------------------
+// Classification only decides the hierarchy.  Every rendered entry still comes
+// from the server action intersection (submit/retry) or the management offers
+// above; none of these computeds can authorise an action the server withheld.
+/** 需重新确认: the local plan is the one next step, editing it re-arms submit. */
+const reconfirmPrimary = computed(() => (
+  detail.value?.status === 'NEEDS_RECONFIRM' && canEditPlan.value
+))
+const showRecoveryHeading = computed(() => (
+  recoveryRecord.value && !pendingSubmission.value
+))
+const primaryZoneVisible = computed(() => Boolean(
+  pendingSubmission.value || recoveryRecord.value || reconfirmPrimary.value
+  || submitAction.value || retryAction.value
+  // A converged write/check/verify keeps its result visible after the record
+  // leaves the actionable state.
+  || thisWrite.value || thisCheck.value || thisRecovery.value,
+))
+const managementEntriesVisible = computed(() => Boolean(
+  modifyOffer.value || setEnabledOffer.value || refreshOffer.value
+  || thisManagement.value,
+))
+const localPlanVisible = computed(() => Boolean(
+  canEditPlan.value || canApplyPlan.value || planEditor.formOpen.value,
+))
+const moreActionsVisible = computed(() => Boolean(
+  resubmitOffered.value || resubmitHint.value || canReusePlan.value
+  || canDeletePlan.value || abandonableOperation.value
+  || thisResubmit.value || thisPlanDelete.value,
+))
+
+const localPlanFold = ref<HTMLDetailsElement | null>(null)
+/** True when the current MODIFY result came from the local+sync apply. */
+const applySubmitted = ref(false)
+
+/**
+ * The primary 修改方案 entry opens the 本地追番方案 fold and its editor, so the
+ * primary stays one click away without duplicating the editor in the top zone.
+ */
+async function openLocalPlanEditor(): Promise<void> {
+  if (!detail.value) return
+  if (localPlanFold.value) localPlanFold.value.open = true
+  // Same guard as the fold's own entry: an in-flight/unconfirmed save locks it.
+  if (!planEditor.formOpen.value && !planEditor.inFlight.value && !planEditor.resultUnknown.value) {
+    await togglePlanEditor()
+  }
+  await nextTick()
+  localPlanFold.value?.scrollIntoView?.({ block: 'nearest' })
 }
 
-const modifyHint = computed(() => managementHint('修改外部方案'))
-const setEnabledHint = computed(() => managementHint('启停外部订阅或关联 RSS'))
-const refreshHint = computed(() => managementHint('立即刷新资源'))
+/** 管理操作 keeps the external modify form behind one explicit entry. */
+const modifyFormOpen = ref(false)
+
+function toggleModifyForm(): void {
+  modifyFormOpen.value = !modifyFormOpen.value
+}
 
 // -- apply an edited plan to the controlled external subscription (issue #91) --
 // The already-active plan is edited with the same shared core, but saving is a
@@ -620,6 +661,9 @@ const canApplyPlan = computed(() => Boolean(
   detail.value?.request_id
   && detail.value.external_mapping
   && APPLY_PLAN_STATUSES.has(detail.value.status)
+  // The apply is an external MODIFY of the controlled subscription: without
+  // that exact server-offered scope the entry must not exist at all (#233 AC2).
+  && modifyOffer.value?.scopes.includes('SUBSCRIPTION')
 ))
 
 async function toggleApplyPlan(): Promise<void> {
@@ -645,6 +689,8 @@ function applyPatchFromEditor(patch: PreviewPatch): Record<string, unknown> {
 function applyPlanToExternal(patch: PreviewPatch): void {
   const offer = modifyOffer.value
   if (!offer || !detail.value || actionBusy.value) return
+  if (!offer.scopes.includes('SUBSCRIPTION')) return
+  applySubmitted.value = true
   const externalPatch = applyPatchFromEditor(patch)
   if (!Object.keys(externalPatch).length) return
   emit('management-requested', {
@@ -833,8 +879,25 @@ function loadDetail(): Promise<void> {
 // Selecting another record re-reads its detail; the immediate run loads the
 // detail the page selected on mount.
 watch(() => props.trackingId, () => {
+  // Per-record disclosure and result state never travels to another record.
+  modifyFormOpen.value = false
+  applyPlanOpen.value = false
+  deletePlanOpen.value = false
+  planSnapshot.value = null
+  planLoadFailed.value = false
+  applySubmitted.value = false
   void loadDetail()
 }, { immediate: true })
+
+// A record that loses the modify offer must not keep an open (now empty) form.
+watch(modifyOffer, (offer) => {
+  if (!offer) modifyFormOpen.value = false
+})
+
+// The applied-write flag only belongs to the session that produced it.
+watch(thisModify, (session) => {
+  if (!session) applySubmitted.value = false
+})
 
 onBeforeUnmount(() => {
   controller?.abort()
@@ -911,169 +974,99 @@ defineExpose({ reload: () => fetchDetail(true) })
         role="status"
       >{{ intentNotice }}</p>
 
+      <!--
+        D3 (issue #233): one primary next step per state, taken from the server
+        action intersection.  No primary is invented for a state that has none,
+        and a server-offered action this page cannot execute degrades to a hint
+        instead of a fake disabled button.
+      -->
       <section
-        v-if="canApplyPlan"
-        class="tracking-inspector-section tracking-plan-apply-section"
-        aria-labelledby="tracking-plan-apply-heading"
+        v-if="primaryZoneVisible"
+        id="tracking-primary-actions"
+        class="tracking-primary-actions"
+        :aria-labelledby="showRecoveryHeading ? 'tracking-recovery-heading' : 'tracking-submit-heading'"
       >
-        <h4 id="tracking-plan-apply-heading">已生效追番方案</h4>
-        <p class="field-help">
-          过滤规则与存储目录名会同时应用到本地方案与受控外部订阅；字幕组等身份字段为只读，
-          更换真实 RSS 来源需要删除该追番后重新添加。
-        </p>
-        <BaseButton
-          id="tracking-apply-plan"
-          variant="secondary"
-          :aria-expanded="applyPlanOpen"
-          :disabled="actionBusy"
-          @click="toggleApplyPlan"
-        >保存并应用到 Auto Bangumi</BaseButton>
-        <AnimeDraftEditor
-          v-if="applyPlanOpen && planSnapshot?.request"
-          :request="planSnapshot.request"
-          mode="saved"
-          heading="保存并应用到 Auto Bangumi"
-          form-heading="编辑已生效追番方案"
-          apply-label="保存并应用到 Auto Bangumi"
-          id-prefix="tracking-apply"
-          container-id="tracking-apply-editor"
-          form-id="tracking-apply-form"
-          :applying="managementInFlight"
-          :disabled="actionBusy"
-          subtitle-group-read-only
-          @apply="applyPlanToExternal"
-          @empty-apply="applyPlanToExternal({})"
-        />
-        <p v-if="thisManagementAction" id="tracking-apply-result" class="field-help" role="status">
-          {{ thisManagementAction.message }}
-        </p>
-      </section>
-
-      <section
-        v-if="canReusePlan"
-        class="tracking-inspector-section tracking-reuse-section"
-        aria-labelledby="tracking-reuse-heading"
-      >
-        <h4 id="tracking-reuse-heading">复制并重新添加</h4>
-        <p class="field-help">
-          只携带安全标题与编辑建议，回到添加番剧后需要重新选择真实 MiKan 合集；
-          不会复制外部映射、历史或状态。
-        </p>
-        <BaseButton
-          id="tracking-reuse-plan"
-          variant="secondary"
-          @click="reusePlan"
-        >复制并重新添加</BaseButton>
-      </section>
-
-      <section
-        v-if="canEditPlan"
-        class="tracking-inspector-section tracking-plan-edit-section"
-        aria-labelledby="tracking-plan-edit-heading"
-      >
-        <h4 id="tracking-plan-edit-heading">追番方案</h4>
-        <p class="field-help">
-          修改只更新本地追番方案（身份字段保持只读）；保存后请重新确认再提交到 Auto Bangumi。
-        </p>
-        <BaseButton
-          id="tracking-edit-plan"
-          variant="secondary"
-          :loading="planLoading"
-          :aria-expanded="planEditor.formOpen.value"
-          :disabled="planEditor.inFlight.value || planEditor.resultUnknown.value"
-          @click="togglePlanEditor"
-        >修改追番方案</BaseButton>
-        <p v-if="planLoadFailed" id="tracking-plan-load-failed" class="field-help" role="status">
-          暂时无法读取本地追番方案，请稍后重试。
-        </p>
-        <AnimeDraftEditor
-          v-if="planEditor.formOpen.value && planSnapshot?.request"
-          :request="planSnapshot.request"
-          mode="saved"
-          heading="修改追番方案"
-          form-heading="编辑本地追番方案"
-          apply-label="保存追番方案"
-          id-prefix="tracking-plan"
-          container-id="tracking-plan-editor"
-          form-id="tracking-plan-form"
-          :applying="planEditor.inFlight.value"
-          :error="planEditor.error.value"
-          :can-retry="Boolean(planEditor.error.value)"
-          :retry-label="planEditor.resultUnknown.value ? '重新确认结果' : '重试修改'"
-          :disabled="planEditor.resultUnknown.value"
-          @apply="planEditor.submit"
-          @empty-apply="planEditor.submit({})"
-          @retry="planEditor.retry"
-          @reset="planEditor.recover"
-        />
-      </section>
-
-      <section class="tracking-inspector-section tracking-submit" aria-labelledby="tracking-submit-heading">
-        <h4 id="tracking-submit-heading">提交到 Auto Bangumi</h4>
-        <template v-if="pendingSubmission || thisCheck || thisResubmit">
-          <p v-if="pendingSubmission" class="field-help">
-            持续追番提交结果尚未确认。重新检查只会使用原提交绑定的已保存连接只读核对
+        <h4 v-if="showRecoveryHeading" id="tracking-recovery-heading">结果待确认</h4>
+        <h4 v-else id="tracking-submit-heading" class="tracking-visually-hidden">提交到 Auto Bangumi</h4>
+        <template v-if="pendingSubmission">
+          <p class="field-help">
+            持续追番提交结果尚未确认。核验只使用原提交绑定的已保存连接只读核对
             Auto Bangumi 的当前状态，不会创建、修改、删除或重新提交订阅。
           </p>
-          <div class="tracking-submit-actions">
-            <BaseButton
-              v-if="pendingSubmission"
-              id="tracking-check"
-              variant="secondary"
-              :loading="checkInFlight"
-              :disabled="checkBusy"
-              @click="requestCheck(false)"
-            >重新检查</BaseButton>
-            <BaseButton
-              v-if="resubmitOffered"
-              id="tracking-resubmit"
-              variant="secondary"
-              :loading="resubmitInFlight"
-              :disabled="resubmitBusy"
-              @click="requestResubmit"
-            >重新提交</BaseButton>
-          </div>
-          <p v-if="resubmitHint" id="tracking-resubmit-hint" class="field-help" role="status">
-            {{ resubmitHint }}
+          <BaseButton
+            id="tracking-check"
+            variant="primary"
+            class="tracking-primary-button"
+            :loading="checkInFlight"
+            :disabled="checkBusy"
+            @click="requestCheck(false)"
+          >核验结果</BaseButton>
+        </template>
+        <template v-else-if="recoveryRecord">
+          <p class="field-help">
+            只读核验会用已保存的 Auto Bangumi 连接比对该追番的当前状态；
+            不会重新提交，也不会创建、修改或删除任何外部订阅。
           </p>
-          <div
-            v-if="thisResubmit"
-            id="tracking-resubmit-result"
-            class="tracking-submit-result"
-            :class="`is-${thisResubmit.state.toLowerCase()}`"
-            role="status"
-          >
-            <p class="tracking-submit-verdict">{{ thisResubmit.message }}</p>
-          </div>
-          <div
-            v-if="thisCheck"
-            id="tracking-check-result"
-            class="tracking-submit-result"
-            :class="`is-${thisCheck.state.toLowerCase()}`"
-            role="status"
-          >
-            <p class="tracking-submit-verdict">{{ thisCheck.message }}</p>
-          </div>
+          <BaseButton
+            v-if="verifyExternalOffered"
+            id="tracking-recover-verify"
+            variant="primary"
+            class="tracking-primary-button"
+            :disabled="actionBusy"
+            @click="requestRecovery('VERIFY_EXTERNAL')"
+          >核验结果</BaseButton>
+          <p v-else class="field-help">
+            只读外部核验需要先在页面连接 Auto Bangumi，并确认外部核验能力可用。
+          </p>
+        </template>
+        <template v-else-if="reconfirmPrimary">
+          <BaseButton
+            id="tracking-primary-edit-plan"
+            variant="primary"
+            class="tracking-primary-button"
+            :disabled="actionBusy"
+            @click="openLocalPlanEditor"
+          >修改方案</BaseButton>
+          <p class="field-help">
+            先修改本地追番方案；保存后重新确认，才会再次提交到 Auto Bangumi。
+          </p>
+          <BaseButton
+            v-if="submitAction"
+            id="tracking-submit"
+            variant="secondary"
+            :loading="writeInFlight"
+            :disabled="actionBusy || !externalWritesAvailable"
+            @click="requestWrite(submitAction)"
+          >提交方案</BaseButton>
         </template>
         <template v-else-if="submitAction">
-          <p class="field-help">提交会使用已保存的 Auto Bangumi 连接，在 Auto Bangumi 创建外部订阅并可能触发下载；服务端会在同一次请求中校验连接、认证、版本与写能力，每次提交都需要单独确认。</p>
+          <p class="field-help">
+            提交会使用已保存的 Auto Bangumi 连接，在 Auto Bangumi 创建外部订阅并可能触发下载；
+            服务端会在同一次请求中校验连接、认证、版本与写能力，每次提交都需要单独确认。
+          </p>
           <BaseButton
             id="tracking-submit"
+            variant="primary"
+            class="tracking-primary-button"
             :loading="writeInFlight"
             :disabled="actionBusy || !externalWritesAvailable"
             @click="requestWrite(submitAction)"
           >提交方案</BaseButton>
         </template>
         <template v-else-if="retryAction">
-          <p class="field-help">该记录上次提交明确失败。重试会使用已保存的 Auto Bangumi 连接，重新在 Auto Bangumi 创建外部订阅并可能触发下载；每次重试都需要单独确认。</p>
+          <p class="field-help">
+            该记录上次提交明确失败。重试会使用已保存的 Auto Bangumi 连接，重新在 Auto Bangumi
+            创建外部订阅并可能触发下载；每次重试都需要单独确认。
+          </p>
           <BaseButton
             id="tracking-retry"
+            variant="primary"
+            class="tracking-primary-button"
             :loading="writeInFlight"
             :disabled="actionBusy || !externalWritesAvailable"
             @click="requestWrite(retryAction)"
           >{{ retryAction.label }}</BaseButton>
         </template>
-        <p v-else class="field-help">{{ writeHint }}</p>
         <p
           v-if="(submitAction || retryAction) && !externalWritesAvailable"
           id="tracking-submit-connection-required"
@@ -1094,27 +1087,15 @@ defineExpose({ reload: () => fetchDetail(true) })
             <li v-for="issue in thisWrite.issues" :key="issue.code">{{ issue.message }}</li>
           </ul>
         </div>
-      </section>
-
-      <section
-        v-if="!pendingSubmission && (recoveryRecord || thisRecovery)"
-        class="tracking-inspector-section tracking-recovery"
-        aria-labelledby="tracking-recovery-heading"
-      >
-        <h4 id="tracking-recovery-heading">结果待确认</h4>
-        <p class="field-help">只读核验会用已保存的 Auto Bangumi 连接比对该追番的当前状态；不会重新提交，也不会创建、修改或删除任何外部订阅。</p>
-        <div class="tracking-recovery-actions">
-          <BaseButton
-            v-if="verifyExternalOffered"
-            id="tracking-recover-verify"
-            variant="secondary"
-            :disabled="actionBusy"
-            @click="requestRecovery('VERIFY_EXTERNAL')"
-          >只读核验外部状态</BaseButton>
+        <div
+          v-if="thisCheck"
+          id="tracking-check-result"
+          class="tracking-submit-result"
+          :class="`is-${thisCheck.state.toLowerCase()}`"
+          role="status"
+        >
+          <p class="tracking-submit-verdict">{{ thisCheck.message }}</p>
         </div>
-        <p v-if="!verifyExternalOffered" class="field-help">
-          只读外部核验需要先在页面连接 Auto Bangumi，并确认外部核验能力可用。
-        </p>
         <div
           v-if="thisRecovery"
           id="tracking-recovery-result"
@@ -1129,83 +1110,60 @@ defineExpose({ reload: () => fetchDetail(true) })
         </div>
       </section>
 
+      <!--
+        D4 (issue #233): 管理操作 holds external-subscription writes only.  The
+        local plan's own view/edit and the local+sync apply live in the fold
+        below, so the two modify entries can never be confused.
+      -->
       <section
-        v-if="canDeletePlan || abandonableOperation"
-        id="tracking-delete-plan-section"
-        class="tracking-inspector-section tracking-delete-plan-section"
-        aria-labelledby="tracking-delete-plan-heading"
+        v-if="managementEntriesVisible"
+        id="tracking-management-section"
+        class="tracking-inspector-section tracking-management-section"
+        aria-labelledby="tracking-management-heading"
       >
-        <h4 id="tracking-delete-plan-heading">{{ abandonableOperation ? '放弃跟踪并删除' : '删除追番方案' }}</h4>
-        <p
-          v-if="abandonableOperation"
-          id="tracking-abandon-risk"
-          class="field-help"
-        >这次提交的结果无法确认，Auto Bangumi 中可能已经建立了订阅并会继续下载；删除后 MiGuOrca 不再跟踪它，也不会再提醒。放弃只删除本地数据，不会向 Auto Bangumi 发送任何请求。</p>
-        <p v-else class="field-help">删除本地方案与追番记录；已下载的媒体始终保留。</p>
-        <BaseButton
-          v-if="!deletePlanOpen"
-          :id="abandonableOperation ? 'tracking-abandon-plan' : 'tracking-delete-plan'"
-          variant="danger"
-          :disabled="actionBusy"
-          @click="openDeletePlan"
-        >{{ abandonableOperation ? '放弃跟踪并删除' : '删除追番方案' }}</BaseButton>
-        <template v-else>
-          <CheckboxRow
-            v-if="!abandonableOperation && deletePlanHasExternal"
-            id="tracking-delete-plan-external"
-            v-model:checked="deleteExternalChecked"
-            label="同时删除 Auto Bangumi 中的受控外部订阅"
-          />
-          <p class="field-help">{{ deletePlanConsequence }}</p>
-          <div class="tracking-delete-plan-actions">
+        <h4 id="tracking-management-heading">管理操作</h4>
+        <p class="field-help">{{ MANAGEMENT_ACTIONS_HELP }}</p>
+        <p class="field-help">
+          作用范围：只改 Auto Bangumi，不改本地追番方案；启停只改变外部对象是否启用，
+          刷新只让 Auto Bangumi 重新拉取关联 RSS，都不会删除外部对象或清空已下载的媒体。
+        </p>
+        <div class="tracking-management-entries">
+          <div v-if="modifyOffer" class="tracking-management-entry">
             <BaseButton
-              :id="abandonableOperation ? 'tracking-abandon-confirm' : 'tracking-delete-plan-confirm'"
-              variant="danger"
-              :loading="Boolean(thisPlanDelete && thisPlanDelete.state === 'IN_FLIGHT')"
-              :disabled="actionBusy"
-              @click="confirmDeletePlan"
-            >{{ abandonableOperation ? '确认放弃并删除' : '删除追番方案' }}</BaseButton>
-            <BaseButton
-              :id="abandonableOperation ? 'tracking-abandon-cancel' : 'tracking-delete-plan-cancel'"
+              id="tracking-modify-open"
               variant="secondary"
-              :disabled="actionBusy"
-              @click="cancelDeletePlan"
-            >取消</BaseButton>
+              :disabled="actionBusy || !externalWritesAvailable"
+              @click="toggleModifyForm"
+            >{{ modifyFormOpen ? '收起修改表单' : '修改外部订阅' }}</BaseButton>
           </div>
-        </template>
-        <p
-          v-if="thisPlanDelete && thisPlanDelete.state !== 'IN_FLIGHT'"
-          id="tracking-delete-plan-result"
-          class="field-help"
-          role="status"
-        >{{ thisPlanDelete.message }}</p>
-      </section>
-
-      <section class="tracking-inspector-section tracking-modify-section" aria-labelledby="tracking-modify-heading">
-        <h4 id="tracking-modify-heading">修改 Auto Bangumi 外部方案</h4>
-        <template v-if="modifyOffer">
-          <p class="field-help">
-            修改只作用于当前受控外部订阅及其关联 RSS，不显示外部对象标识。
-          </p>
-          <TrackingModifyForm
+          <TrackingManagementActions
             :item="detail"
-            :action="modifyOffer.action"
+            :set-enabled="setEnabledOffer?.action ?? null"
+            :refresh-rss="refreshOffer?.action ?? null"
+            :result="thisManagementAction"
             :busy="actionBusy || !externalWritesAvailable"
             :loading="managementInFlight"
             @submit="requestManagement"
           />
-        </template>
-        <p v-else class="field-help">{{ modifyHint }}</p>
+        </div>
+        <TrackingModifyForm
+          v-if="modifyOffer && modifyFormOpen"
+          :item="detail"
+          :action="modifyOffer.action"
+          :busy="actionBusy || !externalWritesAvailable"
+          :loading="managementInFlight"
+          @submit="requestManagement"
+        />
         <p
-          v-if="modifyOffer && !externalWritesAvailable"
-          id="tracking-modify-connection-required"
+          v-if="managementEntriesVisible && !externalWritesAvailable"
+          id="tracking-management-connection-required"
           class="field-help"
           role="status"
         >
           {{ connectionRequiredHint }}
         </p>
         <div
-          v-if="thisModify"
+          v-if="thisModify && !applySubmitted"
           id="tracking-modify-result"
           class="tracking-modify-result"
           :class="`is-${thisModify.state.toLowerCase()}`"
@@ -1218,32 +1176,202 @@ defineExpose({ reload: () => fetchDetail(true) })
         </div>
       </section>
 
-      <section
-        class="tracking-inspector-section tracking-management-actions-section"
-        aria-labelledby="tracking-management-actions-heading"
+      <details
+        v-if="localPlanVisible"
+        id="tracking-local-plan"
+        ref="localPlanFold"
+        class="tracking-inspector-disclosure"
       >
-        <h4 id="tracking-management-actions-heading">启停与关联 RSS 刷新</h4>
-        <p class="field-help">{{ MANAGEMENT_ACTIONS_HELP }}</p>
-        <TrackingManagementActions
-          :item="detail"
-          :set-enabled="setEnabledOffer?.action ?? null"
-          :refresh-rss="refreshOffer?.action ?? null"
-          :set-enabled-hint="setEnabledHint"
-          :refresh-hint="refreshHint"
-          :result="thisManagementAction"
-          :busy="actionBusy || !externalWritesAvailable"
-          :loading="managementInFlight"
-          @submit="requestManagement"
-        />
-        <p
-          v-if="(setEnabledOffer || refreshOffer) && !externalWritesAvailable"
-          id="tracking-management-connection-required"
-          class="field-help"
-          role="status"
-        >
-          {{ connectionRequiredHint }}
-        </p>
-      </section>
+        <summary>本地追番方案</summary>
+        <div class="tracking-inspector-disclosure-body">
+          <section
+            v-if="canEditPlan"
+            class="tracking-inspector-section tracking-plan-edit-section"
+            aria-labelledby="tracking-plan-edit-heading"
+          >
+            <h4 id="tracking-plan-edit-heading">改本地追番方案</h4>
+            <p class="field-help">
+              作用范围：只改本地追番方案，不改 Auto Bangumi（身份字段保持只读）；
+              保存后需要重新确认再提交。
+            </p>
+            <BaseButton
+              id="tracking-edit-plan"
+              variant="secondary"
+              :loading="planLoading"
+              :aria-expanded="planEditor.formOpen.value"
+              :disabled="planEditor.inFlight.value || planEditor.resultUnknown.value"
+              @click="togglePlanEditor"
+            >修改追番方案</BaseButton>
+            <p v-if="planLoadFailed" id="tracking-plan-load-failed" class="field-help" role="status">
+              暂时无法读取本地追番方案，请稍后重试。
+            </p>
+            <AnimeDraftEditor
+              v-if="planEditor.formOpen.value && planSnapshot?.request"
+              :request="planSnapshot.request"
+              mode="saved"
+              heading="修改追番方案"
+              form-heading="编辑本地追番方案"
+              apply-label="保存追番方案"
+              id-prefix="tracking-plan"
+              container-id="tracking-plan-editor"
+              form-id="tracking-plan-form"
+              :applying="planEditor.inFlight.value"
+              :error="planEditor.error.value"
+              :can-retry="Boolean(planEditor.error.value)"
+              :retry-label="planEditor.resultUnknown.value ? '重新确认结果' : '重试修改'"
+              :disabled="planEditor.resultUnknown.value"
+              @apply="planEditor.submit"
+              @empty-apply="planEditor.submit({})"
+              @retry="planEditor.retry"
+              @reset="planEditor.recover"
+            />
+          </section>
+
+          <section
+            v-if="canApplyPlan"
+            class="tracking-inspector-section tracking-plan-apply-section"
+            aria-labelledby="tracking-plan-apply-heading"
+          >
+            <h4 id="tracking-plan-apply-heading">改本地并同步到 Auto Bangumi</h4>
+            <p class="field-help">
+              作用范围：改本地并同步到 Auto Bangumi——过滤规则与存储目录名会同时写回受控外部订阅；
+              字幕组等身份字段为只读，更换真实 RSS 来源需要删除该追番后重新添加。
+            </p>
+            <BaseButton
+              id="tracking-apply-plan"
+              variant="secondary"
+              :aria-expanded="applyPlanOpen"
+              :disabled="actionBusy"
+              @click="toggleApplyPlan"
+            >保存并应用到 Auto Bangumi</BaseButton>
+            <AnimeDraftEditor
+              v-if="applyPlanOpen && planSnapshot?.request"
+              :request="planSnapshot.request"
+              mode="saved"
+              heading="保存并应用到 Auto Bangumi"
+              form-heading="编辑已生效追番方案"
+              apply-label="保存并应用到 Auto Bangumi"
+              id-prefix="tracking-apply"
+              container-id="tracking-apply-editor"
+              form-id="tracking-apply-form"
+              :applying="managementInFlight"
+              :disabled="actionBusy"
+              subtitle-group-read-only
+              @apply="applyPlanToExternal"
+              @empty-apply="applyPlanToExternal({})"
+            />
+            <p v-if="thisModify && applySubmitted" id="tracking-apply-result" class="field-help" role="status">
+              {{ thisModify.message }}
+            </p>
+          </section>
+        </div>
+      </details>
+
+      <details v-if="moreActionsVisible" id="tracking-more-actions" class="tracking-inspector-disclosure">
+        <summary>更多操作</summary>
+        <div class="tracking-inspector-disclosure-body">
+          <section
+            v-if="resubmitOffered || resubmitHint || thisResubmit"
+            class="tracking-inspector-section tracking-resubmit-section"
+            aria-labelledby="tracking-resubmit-heading"
+          >
+            <h4 id="tracking-resubmit-heading">主动重发（需确认风险）</h4>
+            <p class="field-help">
+              主动重发以新的 operation 重新提交，不改写、不重放原来待确认的请求；
+              只读核验仍无法定论时才需要它。
+            </p>
+            <BaseButton
+              v-if="resubmitOffered"
+              id="tracking-resubmit"
+              variant="secondary"
+              :loading="resubmitInFlight"
+              :disabled="resubmitBusy"
+              @click="requestResubmit"
+            >主动重发（需确认风险）</BaseButton>
+            <p v-if="resubmitHint" id="tracking-resubmit-hint" class="field-help" role="status">
+              {{ resubmitHint }}
+            </p>
+            <div
+              v-if="thisResubmit"
+              id="tracking-resubmit-result"
+              class="tracking-submit-result"
+              :class="`is-${thisResubmit.state.toLowerCase()}`"
+              role="status"
+            >
+              <p class="tracking-submit-verdict">{{ thisResubmit.message }}</p>
+            </div>
+          </section>
+
+          <section
+            v-if="canReusePlan"
+            class="tracking-inspector-section tracking-reuse-section"
+            aria-labelledby="tracking-reuse-heading"
+          >
+            <h4 id="tracking-reuse-heading">复制并重新添加</h4>
+            <p class="field-help">
+              只携带安全标题与编辑建议，回到添加番剧后需要重新选择真实 MiKan 合集；
+              不会复制外部映射、历史或状态。
+            </p>
+            <BaseButton
+              id="tracking-reuse-plan"
+              variant="secondary"
+              @click="reusePlan"
+            >复制并重新添加</BaseButton>
+          </section>
+
+          <section
+            v-if="canDeletePlan || abandonableOperation || thisPlanDelete"
+            id="tracking-delete-plan-section"
+            class="tracking-inspector-section tracking-delete-plan-section"
+            aria-labelledby="tracking-delete-plan-heading"
+          >
+            <h4 id="tracking-delete-plan-heading">{{ abandonableOperation ? '放弃跟踪并删除' : '删除追番方案' }}</h4>
+            <p
+              v-if="abandonableOperation"
+              id="tracking-abandon-risk"
+              class="field-help"
+            >这次提交的结果无法确认，Auto Bangumi 中可能已经建立了订阅并会继续下载；删除后 MiGuOrca 不再跟踪它，也不会再提醒。放弃只删除本地数据，不会向 Auto Bangumi 发送任何请求。</p>
+            <p v-else class="field-help">删除本地方案与追番记录；已下载的媒体始终保留。</p>
+            <BaseButton
+              v-if="!deletePlanOpen"
+              :id="abandonableOperation ? 'tracking-abandon-plan' : 'tracking-delete-plan'"
+              variant="danger"
+              :disabled="actionBusy"
+              @click="openDeletePlan"
+            >{{ abandonableOperation ? '放弃跟踪并删除' : '删除追番方案' }}</BaseButton>
+            <template v-else>
+              <CheckboxRow
+                v-if="!abandonableOperation && deletePlanHasExternal"
+                id="tracking-delete-plan-external"
+                v-model:checked="deleteExternalChecked"
+                label="同时删除 Auto Bangumi 中的受控外部订阅"
+              />
+              <p class="field-help">{{ deletePlanConsequence }}</p>
+              <div class="tracking-delete-plan-actions">
+                <BaseButton
+                  :id="abandonableOperation ? 'tracking-abandon-confirm' : 'tracking-delete-plan-confirm'"
+                  variant="danger"
+                  :loading="Boolean(thisPlanDelete && thisPlanDelete.state === 'IN_FLIGHT')"
+                  :disabled="actionBusy"
+                  @click="confirmDeletePlan"
+                >{{ abandonableOperation ? '确认放弃并删除' : '删除追番方案' }}</BaseButton>
+                <BaseButton
+                  :id="abandonableOperation ? 'tracking-abandon-cancel' : 'tracking-delete-plan-cancel'"
+                  variant="secondary"
+                  :disabled="actionBusy"
+                  @click="cancelDeletePlan"
+                >取消</BaseButton>
+              </div>
+            </template>
+            <p
+              v-if="thisPlanDelete && thisPlanDelete.state !== 'IN_FLIGHT'"
+              id="tracking-delete-plan-result"
+              class="field-help"
+              role="status"
+            >{{ thisPlanDelete.message }}</p>
+          </section>
+        </div>
+      </details>
 
       <details id="tracking-activity-log" class="tracking-inspector-disclosure">
         <summary>操作记录</summary>
@@ -1407,23 +1535,42 @@ defineExpose({ reload: () => fetchDetail(true) })
   border: 0;
   background: transparent;
 }
+/* Labelled entries keep their accessible name without adding visual clutter. */
+.tracking-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+/* Issue #233 D3: one primary next step per state, full width like the design. */
+.tracking-primary-actions { display: grid; gap: .55rem; }
+.tracking-primary-button { width: 100%; }
+/* 管理操作 is a row of peer secondary entries (D4: external-only writes). */
+.tracking-management-entries {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+/* Peer entries share the row equally, like the design's 管理操作 strip. */
+.tracking-management-entries :deep(.tracking-management-entry) { flex: 1 1 0; min-width: 8rem; }
 .tracking-intent-notice { padding: var(--space-3); border: 1px solid var(--color-border-subtle); border-left: 0.3rem solid var(--color-accent-emphasis); border-radius: var(--radius-sm); background: var(--color-surface-raised); font-weight: 600; }
-.tracking-submit { gap: .65rem; }
-.tracking-submit-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .tracking-submit-result { display: grid; gap: .4rem; padding: var(--space-3); border: 1px solid var(--color-border-subtle); border-left: 0.3rem solid var(--color-text-muted); border-radius: var(--radius-sm); background: var(--color-surface-raised); }
 .tracking-submit-result.is-active { border-left-color: var(--color-feedback-success-border); }
 .tracking-submit-result.is-submit_failed, .tracking-submit-result.is-conflict, .tracking-submit-result.is-rejected, .tracking-submit-result.is-unknown { border-left-color: var(--color-feedback-error-border); }
 .tracking-submit-result.is-needs_reconfirm, .tracking-submit-result.is-verifying_external, .tracking-submit-result.is-recovery_required { border-left-color: var(--color-accent-emphasis); }
 .tracking-submit-verdict { font-weight: 600; }
 .tracking-submit-issues { padding-left: 1.2rem; }
-.tracking-recovery { gap: .65rem; }
-.tracking-recovery-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 .tracking-recovery-result { display: grid; gap: .4rem; padding: var(--space-3); border: 1px solid var(--color-border-subtle); border-left: 0.3rem solid var(--color-text-muted); border-radius: var(--radius-sm); background: var(--color-surface-raised); }
 .tracking-recovery-result.is-active { border-left-color: var(--color-feedback-success-border); }
 .tracking-recovery-result.is-submit_failed, .tracking-recovery-result.is-conflict, .tracking-recovery-result.is-rejected, .tracking-recovery-result.is-unknown { border-left-color: var(--color-feedback-error-border); }
 .tracking-recovery-result.is-recovery_required { border-left-color: var(--color-accent-emphasis); }
 .tracking-recovery-verdict, .tracking-recovery-manual { font-weight: 600; }
-.tracking-modify-section { gap: .65rem; }
 .tracking-modify-scope { margin-left: .4rem; padding: .1rem .45rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-subtle); font-weight: 600; }
 .tracking-modify-result { display: grid; gap: .4rem; padding: var(--space-3); border: 1px solid var(--color-border-subtle); border-left: 0.3rem solid var(--color-text-muted); border-radius: var(--radius-sm); background: var(--color-surface-raised); }
 .tracking-modify-result.is-succeeded { border-left-color: var(--color-feedback-success-border); }
