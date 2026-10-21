@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from flask import request
 
 """Tracking-items family API routes (US-223).
@@ -63,11 +65,55 @@ from apps.migu_orca_web.tracking_submission_service import (
     run_saved_tracking_submit,
 )
 from extensions.flask_api import class_route
+from extensions.flask_api.api import failed_response
 from extensions.flask_api.views import GetView, PostView
 from storage_engine.controllers.operation_repository import load_tracking_operation
 from storage_engine.controllers.storage_config import load_storage_config
-from storage_engine.controllers.tracking_repository import load_tracking_record, tracking_batch_lease
+from storage_engine.controllers.tracking_repository import (
+    load_tracking_record,
+    tracking_batch_active,
+    tracking_batch_lease,
+)
 from tracking_engine.models.operation import TRACKING_OPERATION_STATE_SUCCEEDED
+
+#: Issue #223 (ADR-0007): single tracking writes that must not start while a
+#: batch owns the store.  The refusal happens at the request boundary — before
+#: any service persists an operation intent — so it can never leave an orphan
+#: PREPARED operation behind; the repository serialization stays as the ordering
+#: fallback for the race window between this check and the service.
+_SINGLE_TRACKING_WRITE_RULES: frozenset[tuple[str, str]] = frozenset({
+    ("POST", "/api/v1/tracking/items/<path:tracking_id>/submit"),
+    ("POST", "/api/v1/tracking/items/<path:tracking_id>/retry"),
+    ("POST", "/api/v1/tracking/items/<path:tracking_id>/delete-plan"),
+    ("POST", "/api/v1/tracking/items/<path:tracking_id>/recover"),
+    ("POST", "/api/v1/tracking/items/<path:tracking_id>/check"),
+    ("POST", "/api/v1/tracking/items/<path:tracking_id>/revalidate"),
+    ("POST", "/api/v1/tracking/items/<path:tracking_id>/resubmit"),
+    ("POST", "/api/v1/tracking/items/<path:tracking_id>/modify"),
+    ("POST", "/api/v1/tracking/items/<path:tracking_id>/set-enabled"),
+    ("POST", "/api/v1/tracking/items/<path:tracking_id>/refresh"),
+})
+
+
+@api_blueprint.before_request
+def _refuse_single_tracking_write_during_batch() -> Any | None:
+    """ADR-0007: a batch excludes single external writes in both directions.
+
+    A later single write is refused **before** its service persists anything, so
+    the published ``connection_in_use`` (409) is the real outcome and no orphan
+    intent can appear.  A request that already passed this check only races the
+    batch for milliseconds; the repository serializer then queues it.
+    """
+    if not tracking_batch_active():
+        return None
+    rule = request.url_rule
+    if rule is None or (request.method.upper(), rule.rule) not in _SINGLE_TRACKING_WRITE_RULES:
+        return None
+    return failed_response(
+        "connection_in_use",
+        "批量操作正在执行，请稍后再试",
+        {"failed_step": "tracking_batch_exclusion"},
+    )
 
 
 @class_route(api_blueprint, "/api/v1/tracking/items", methods=["GET"])

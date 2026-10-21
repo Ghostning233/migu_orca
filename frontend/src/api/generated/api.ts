@@ -10085,7 +10085,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 */
+            /** @description invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / validation_error: batch_key 不是合法的批量删除幂等键 */
             400: {
                 headers: {
                     [name: string]: unknown;

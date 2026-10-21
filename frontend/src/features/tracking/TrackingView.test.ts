@@ -1368,7 +1368,9 @@ describe('TrackingView batch delete (#223)', () => {
     await flushPromises()
 
     const entries = wrapper.findAll('#tracking-batch-delete-result .tracking-batch-entries li').map((entry) => entry.text())
-    // The row is gone from the list, but the result still names it.
+    // The refresh really removed the row (so the title can only come from the
+    // pre-refresh snapshot), and the result still names it.
+    expect(wrapper.find('[data-tracking-id="a"]').exists()).toBe(false)
     expect(entries).toContain('番 A：已删除本地记录')
   })
 

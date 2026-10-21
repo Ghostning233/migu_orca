@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
@@ -482,8 +483,19 @@ def test_a_single_write_queues_behind_a_batch_and_leaves_no_orphan_intent(
 
     single_thread = threading.Thread(target=run_single)
     single_thread.start()
-    # Queued: it must not reach the external boundary while the batch runs.
-    assert not single_done.wait(timeout=0.3), "the single write was not serialized"
+    # Deterministic signal: the single write has persisted its intent (that
+    # happens before the queue gate) and is waiting, with no external call yet.
+    operation_id = tracking_operation_id_for_idempotency_key(single_key)
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        try:
+            load_tracking_operation(config, operation_id)
+            break
+        except Stage1Error:
+            time.sleep(0.01)
+    else:  # pragma: no cover - only when the write never starts
+        raise AssertionError("the single write never persisted its intent")
+    assert not single_done.is_set(), "the single write was not serialized"
     assert "delete:sub-2" not in fake.calls
 
     fake.gate.set()
@@ -750,7 +762,9 @@ def test_a_batch_is_refused_while_another_records_write_is_in_flight(
     _install_fake(monkeypatch, fake)
     busy_other = _seed_record(config, 1, connection_ref=REF)
     target = _seed_record(config, 2, connection_ref=REF)
-    _operation_in_state(config, busy_other, "IN_PROGRESS", key="single-in-flight")
+    # A live record points at the running operation: it really can still write.
+    operation = _operation_in_state(config, busy_other, "IN_PROGRESS", key="single-in-flight")
+    _point_record_at(config, busy_other, operation)
 
     with pytest.raises(Stage1Error) as failure:
         batch_delete.run_saved_tracking_batch_delete(
@@ -760,6 +774,39 @@ def test_a_batch_is_refused_while_another_records_write_is_in_flight(
     assert failure.value.error_type == "connection_in_use"
     assert fake.calls == []
     load_tracking_record(config, target.tracking_id)
+
+
+def test_inert_operation_evidence_never_blocks_a_batch(
+    roots: tuple[StorageConfig, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """B1: an orphan or damaged operation file is inert, not a running write.
+
+    Resume/execution only ever starts from ``TrackingRecord.current_operation_id``,
+    so an operation nobody points at (a historical crashed bind) or an unreadable
+    file cannot reach Auto Bangumi.  Treating either as "a write is running"
+    would disable every batch forever with no user recovery path.
+    """
+    config, _saved = roots
+    fake = _FakeAb()
+    _install_fake(monkeypatch, fake)
+    orphan_owner = _seed_record(config, 1, connection_ref=REF)
+    target = _seed_record(config, 2, connection_ref=REF)
+    # Orphan intents: IN_PROGRESS and PREPARED operations with no record pointer.
+    _operation_in_state(config, orphan_owner, "IN_PROGRESS", key="orphan-in-flight")
+    _operation_in_state(config, orphan_owner, "PREPARED", key="orphan-prepared")
+    # And a damaged operation file in the same directory.
+    config.tracking_operations_dir.mkdir(parents=True, exist_ok=True)
+    (config.tracking_operations_dir / "damaged-operation.json").write_text(
+        "{not json", encoding="utf-8"
+    )
+
+    result = batch_delete.run_saved_tracking_batch_delete(
+        config, payload=_local_payload([target], key="batch-inert"), delete_external=False
+    )
+
+    assert result["items"][0]["outcome"] == "DELETED"
+    with pytest.raises(Stage1Error):
+        load_tracking_record(config, target.tracking_id)
 
 
 def test_lease_is_released_when_the_batch_fails_inside_it(

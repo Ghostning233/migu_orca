@@ -90,14 +90,22 @@ class TrackingListResult:
 #: through (non-zero depth on the owning thread).
 _BATCH_LOCK = threading.Lock()
 _BATCH_STATE = threading.local()
+#: Set while a **batch** lease is held (a single write also holds the lock, but
+#: very briefly; the route-level exclusion must only react to a batch).
+_ACTIVE_BATCH = threading.Event()
 
-#: How long the later side waits before failing closed.  The request itself
-#: keeps its own budget; this only bounds the queueing window.
+#: How long a batch waits for another batch/single write before failing closed.
+#: The request itself keeps its own budget; this only bounds the queueing window.
 _BATCH_WAIT_SECONDS = 10.0
 
 
 def _batch_depth() -> int:
     return getattr(_BATCH_STATE, "depth", 0)
+
+
+def tracking_batch_active() -> bool:
+    """True while a batch (not a single write) holds the store."""
+    return _ACTIVE_BATCH.is_set()
 
 
 @contextmanager
@@ -120,9 +128,16 @@ def tracking_batch_lease(
             {"batch_key": batch_key},
         )
     _BATCH_STATE.depth = depth + 1
+    owns_batch = getattr(_BATCH_STATE, "batch", 0) == 0
+    if owns_batch:
+        _BATCH_STATE.batch = 1
+        _ACTIVE_BATCH.set()
     try:
         yield batch_key
     finally:
+        if owns_batch:
+            _BATCH_STATE.batch = 0
+            _ACTIVE_BATCH.clear()
         _BATCH_STATE.depth = depth
         if depth == 0:
             _BATCH_LOCK.release()
@@ -143,14 +158,22 @@ def _serialized_tracking_write(step: str) -> Iterator[None]:
     A bounded refusal is reserved for a batch that arrives while another batch
     runs (``tracking_batch_lease``), where nothing has been persisted yet.
     """
-    if _batch_depth() > 0:
-        # The batch's own nested write already owns the store.
-        yield
+    depth = _batch_depth()
+    if depth > 0:
+        # The owning batch (or an enclosing write in this thread) already holds
+        # the store; count the nesting so a future nested call cannot deadlock.
+        _BATCH_STATE.depth = depth + 1
+        try:
+            yield
+        finally:
+            _BATCH_STATE.depth = depth
         return
     _BATCH_LOCK.acquire()
+    _BATCH_STATE.depth = 1
     try:
         yield
     finally:
+        _BATCH_STATE.depth = 0
         _BATCH_LOCK.release()
 
 
@@ -530,6 +553,7 @@ def _tracking_path(
 
 
 __all__ = [
+    "tracking_batch_active",
     "tracking_batch_lease",
     "TrackingListResult",
     "compare_and_swap_tracking_record",

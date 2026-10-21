@@ -1692,6 +1692,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "errors": {
             "400": {
                 "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+                "validation_error": "batch_key 不是合法的批量删除幂等键",
             },
             "404": {"tracking_not_found": "未找到该批量删除批次"},
             "500": {

@@ -888,6 +888,9 @@ function batchDeleteEntryMessage(entry: BatchDeleteItemResult): string {
   if (entry.error_type === 'config_error') {
     return 'Auto Bangumi 连接不可用：本次跳过，请先在设置中检查连接'
   }
+  if (entry.error_type === 'storage_error' || entry.error_type === 'storage_json_error') {
+    return '本地追番记录读取失败：本次未删除，请刷新后重试'
+  }
   return '服务端在删除前拒绝了该条目：本次未删除'
 }
 

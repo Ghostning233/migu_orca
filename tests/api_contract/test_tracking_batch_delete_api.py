@@ -233,6 +233,53 @@ def test_unresolved_entry_is_skipped_with_a_reason_and_kept(
     assert load_tracking_record(_config(tmp_path), record.tracking_id).current_operation_id == operation.operation_id
 
 
+def test_a_single_tracking_write_is_refused_before_persisting_anything(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0007 + B1: the later single write is refused at the request boundary.
+
+    The refusal must happen before the service persists an operation intent, so
+    no orphan PREPARED operation can exist for a same-key retry to trip over.
+    """
+    from storage_engine.controllers.tracking_repository import tracking_batch_lease
+
+    record = _seed(tmp_path, 1)
+    held = threading.Event()
+    release = threading.Event()
+
+    def hold_batch() -> None:
+        with tracking_batch_lease(batch_key="held-batch"):
+            held.set()
+            assert release.wait(timeout=10)
+
+    holder = threading.Thread(target=hold_batch)
+    holder.start()
+    assert held.wait(timeout=10)
+
+    try:
+        response = client.post(
+            f"/api/v1/tracking/items/{record.tracking_id}/submit",
+            json={
+                "confirm": True,
+                "expected_revision": record.revision,
+                "idempotency_key": "single-write-refused",
+                "connection_ref": REF,
+                "configuration_revision": 3,
+                "storage_dir": "storage",
+            },
+        )
+    finally:
+        release.set()
+        holder.join(timeout=10)
+
+    assert response.status_code == 409, response.get_json()
+    assert response.get_json()["error_type"] == "connection_in_use"
+    store = _config(tmp_path)
+    # Zero persistence: no intent was written and the record is untouched.
+    assert list(store.tracking_operations_dir.glob("*.json")) == []
+    assert load_tracking_record(store, record.tracking_id).revision == record.revision
+
+
 def test_same_key_replay_returns_the_stored_result_without_second_external_write(
     tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -271,6 +318,16 @@ def test_status_endpoint_reports_the_completed_batch_and_404_for_unknown_keys(
     unknown = client.get(STATUS_URL.format("batch-never-existed"), query_string={"storage_dir": "storage"})
     assert unknown.status_code == 404
     assert unknown.get_json()["error_type"] == "tracking_not_found"
+
+
+def test_status_endpoint_rejects_an_invalid_batch_key(
+    client: FlaskClient,
+) -> None:
+    """A path-shaped key is validated by the service, so the 400 must be published."""
+    response = client.get(STATUS_URL.format("bad%20key"), query_string={"storage_dir": "storage"})
+
+    assert response.status_code == 400, response.get_json()
+    assert response.get_json()["error_type"] == "validation_error"
 
 
 def test_same_key_bound_to_different_entries_is_a_conflict(

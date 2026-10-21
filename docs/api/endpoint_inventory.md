@@ -160,10 +160,12 @@
 
 ## 3. 端点族明细
 
-> ADR-0007（#223）起：任何会持久化 tracking 写的端点（`batch-submit`、`delete-plan`、
-> `submit`、`retry`、`recover`、`check`、`revalidate`、`resubmit`、`modify`、`set-enabled`、
-> `refresh`）在另一个批次持有批次级写租约时都可能返回 409 `connection_in_use`；
-> 单条写会在有界等待内排队，批次后到者按 `_BATCH_WAIT_SECONDS` 拒绝。
+> ADR-0007（#223）起：批量执行期间，单条 tracking 写请求（`delete-plan`、`submit`、
+> `retry`、`recover`、`check`、`revalidate`、`resubmit`、`modify`、`set-enabled`、
+> `refresh`）在**请求入口**即返回 409 `connection_in_use`，此时尚未持久化任何
+> operation 意图；若请求已通过入口检查、随后批次才取得批次租约，仓库层会将该写排队到
+> 批次结束（不重复外部写）。`batch-submit` 与两个批量删除作为“批次”本身在另一个批次
+> 持租约时按 `_BATCH_WAIT_SECONDS` 等待后返回同一 409。
 
 ### 3.1 Requests（`/api/v1/requests`）
 

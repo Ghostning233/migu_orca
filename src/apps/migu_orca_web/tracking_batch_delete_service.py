@@ -127,7 +127,14 @@ def _racing_single_writes(config: StorageConfig, batch_ids: set[str]) -> list[st
     which stops any later single write; this check closes the other direction: a
     single write that already persisted its intent (PREPARED can still be resumed
     into IN_PROGRESS, ADR-0006) keeps the batch away instead of letting the batch
-    become the later, uninvited side.  An unreadable operation file fails closed.
+    become the later, uninvited side.
+
+    Only an operation a **live record still points at** counts.  An operation
+    file with no current-record pointer can never be executed or resumed (every
+    resume path starts from ``TrackingRecord.current_operation_id``), so it is
+    inert evidence — and an unreadable operation file is inert too.  Treating
+    either as "a write is running" would disable every batch forever after one
+    historical crash or a damaged file, with no way for the user to recover.
     """
     directory = config.tracking_operations_dir
     if not directory.is_dir():
@@ -136,17 +143,28 @@ def _racing_single_writes(config: StorageConfig, batch_ids: set[str]) -> list[st
     try:
         candidates = sorted(directory.glob("*.json"))
     except OSError:
-        return ["<unreadable>"]
+        # A directory that cannot be listed is a storage fault, not evidence of
+        # a running write; the batch itself will surface the damage when it reads.
+        return []
     for candidate in candidates:
         try:
             operation = load_tracking_operation(config, candidate.stem)
         except Stage1Error:
-            return ["<unreadable>"]
+            # Inert evidence: nothing can execute an operation without a pointer.
+            continue
         if getattr(operation, "state", None) not in _IN_FLIGHT_OPERATION_STATES:
             continue
         if getattr(operation, "tracking_id", None) in batch_ids:
             # This entry's own unresolved write is skipped per entry, not a
             # reason to refuse the whole batch (AC4/AC8).
+            continue
+        try:
+            owner = load_tracking_record(config, operation.tracking_id)
+        except Stage1Error:
+            # No live record points at it (deleted or never handed off): an
+            # orphan operation file can no longer reach Auto Bangumi.
+            continue
+        if owner.current_operation_id != operation.operation_id:
             continue
         racing.append(operation.operation_id)
     return racing
@@ -379,7 +397,19 @@ def _delete_one(
     external kind, only deletes local data after a confirmed external success.
     Its stable refusals become per-entry skip reasons.
     """
-    skip_reason = _skip_reason(config, entry)
+    try:
+        skip_reason = _skip_reason(config, entry)
+    except Stage1Error as exc:
+        # ADR-0007 decision 5: one bad entry never aborts the others.  A storage
+        # fault is reported with its stable code instead of being disguised as
+        # "unresolved" (that would hide a damaged store).
+        return {
+            "tracking_id": entry.tracking_id,
+            "outcome": OUTCOME_SKIPPED,
+            "external_deleted": False,
+            "skip_reason": None,
+            "error_type": exc.error_type,
+        }
     if skip_reason is not None:
         return {
             "tracking_id": entry.tracking_id,
