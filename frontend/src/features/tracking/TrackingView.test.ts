@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
@@ -52,9 +55,6 @@ async function mountSaved(
     { path: '/tracking', component: TrackingView },
   ] })
   await router.push('/tracking'); await router.isReady()
-  // B1 retires the visible probe entry; the page keeps the read-only capability
-  // projection current with one automatic probe per load.
-  apiPost.mockResolvedValue(caps as never)
   apiGet.mockImplementation(async (path) => path === '/api/v1/settings/autobangumi'
     ? { configured: true, credential_present: true, connection_ref: '11111111-1111-4111-8111-111111111111', configuration_revision: 3, connection_status: 'CONFIGURED', capabilities: null }
     : { items: rows ?? [row(actions, posterPath)], summary, status_groups: groups, warnings: [] })
@@ -80,20 +80,45 @@ function rowFor(
 }
 
 describe('TrackingView page skeleton and row model (#225)', () => {
+  it('registers the five row geometry aliases in the shared token file', () => {
+    const tokens = readFileSync(resolve(process.cwd(), 'src/styles/tokens.css'), 'utf8')
+    expect(tokens).toContain('--tracking-poster-width: calc(var(--space-10) + var(--space-5))')
+    expect(tokens).toContain('--tracking-poster-height: calc(var(--tracking-poster-width) * 1.5)')
+    expect(tokens).toContain(
+      '--tracking-row-min-height: calc(\n    var(--tracking-poster-height) + 2 * var(--space-3) + var(--control-border-width)\n  )',
+    )
+    expect(tokens).toContain('--tracking-search-min-width: calc(4 * var(--space-10))')
+    expect(tokens).toContain('--tracking-search-width: calc(6 * var(--space-10))')
+    // No new colour or interaction-state token came with the row spec.
+    expect(tokens.match(/--tracking-[a-z-]+:/g)?.sort()).toEqual([
+      '--tracking-poster-height:',
+      '--tracking-poster-width:',
+      '--tracking-row-min-height:',
+      '--tracking-search-min-width:',
+      '--tracking-search-width:',
+    ])
+  })
+
   beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
 
-  it('keeps the read-only capability current without a visible probe entry', async () => {
-    const { wrapper } = await mountSaved()
+  it('adopts the summary capability projection without probing (#225 B1)', async () => {
+    const router = createRouter({ history: createMemoryHistory('/app/'), routes: [
+      { path: '/tracking', component: TrackingView },
+    ] })
+    await router.push('/tracking'); await router.isReady()
+    apiGet.mockImplementation(async (path) => path === '/api/v1/settings/autobangumi'
+      ? {
+          configured: true, credential_present: true,
+          connection_ref: '11111111-1111-4111-8111-111111111111',
+          configuration_revision: 3, connection_status: 'VERIFIED', capabilities: caps,
+        }
+      : { items: [row()], summary: defaultSummary, status_groups: statusGroups(), warnings: [] })
+    const wrapper = mount(TrackingView, { attachTo: document.body, global: { plugins: [createPinia(), router], stubs: { Teleport: true } } })
+    await flushPromises()
 
-    const calls = apiPost.mock.calls.map(([path]) => path)
-    // Exactly one bounded read-only probe on load; never a business write.
-    expect(calls).toEqual(['/api/v1/settings/autobangumi/probe'])
-    const [, options] = apiPost.mock.calls[0] as [string, { body: Record<string, unknown> }]
-    expect(options.body).toEqual({
-      connection_ref: '11111111-1111-4111-8111-111111111111',
-      configuration_revision: 3,
-    })
-    expect(JSON.stringify(options.body)).not.toContain('password')
+    // Stage 39: loading the page never probes by itself; the published summary
+    // is the only capability source, and it is not rendered as a module.
+    expect(apiPost).not.toHaveBeenCalled()
     expect(wrapper.find('#tracking-probe-saved').exists()).toBe(false)
     expect(wrapper.find('.tracking-connection-status').exists()).toBe(false)
     expect(wrapper.find('#tracking-capability-summary').exists()).toBe(false)
@@ -378,6 +403,22 @@ describe('TrackingView page skeleton and row model (#225)', () => {
     expect(skipped).toContain('不可提交')
     // C7: the skip notice must not remove the list container.
     expect(wrapper.find('#tracking-list-container').exists()).toBe(true)
+  })
+
+  it('offers multi-select without a saved connection but keeps submit disabled and explained', async () => {
+    const router = createRouter({ history: createMemoryHistory('/app/'), routes: [
+      { path: '/tracking', component: TrackingView },
+    ] })
+    await router.push('/tracking'); await router.isReady()
+    apiGet.mockImplementation(async (path) => path === '/api/v1/settings/autobangumi'
+      ? { configured: false, credential_present: false, connection_ref: null, configuration_revision: 0, connection_status: 'UNCONFIGURED', capabilities: null }
+      : { items: [rowFor('a', '番 A')], summary: defaultSummary, status_groups: statusGroups(), warnings: [] })
+    const wrapper = mount(TrackingView, { attachTo: document.body, global: { plugins: [createPinia(), router], stubs: { Teleport: true } } })
+    await flushPromises()
+
+    await wrapper.find('#tracking-batch-mode').trigger('click')
+    expect(wrapper.find('#tracking-batch-submit').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('#tracking-batch-connection-required').text()).toContain('先在设置中连接 Auto Bangumi')
   })
 
   it('clears the selection when leaving multi-select', async () => {

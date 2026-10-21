@@ -21,7 +21,11 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import set_storage_preferences
-from tests.browser.saved_tracking_fixtures import _status_groups_for, _summary
+from tests.browser.saved_tracking_fixtures import (
+    _probe_capabilities,
+    _status_groups_for,
+    _summary,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -657,20 +661,9 @@ class TestPlanDelete:
                 route.fulfill(json={"ok": True, "result": {
                     "configured": True, "credential_present": True,
                     "connection_ref": "11111111-1111-4111-8111-111111111111",
-                    "configuration_revision": 1, "connection_status": "CONFIGURED",
-                }})
-                return
-            if request.method == "POST" and path == "/settings/autobangumi/probe":
-                route.fulfill(json={"ok": True, "result": {
-                    "probe_status": "VERIFIED", "version": "3.1.18", "adapter": "legacy_3_1",
-                    "subscription_list": "SUPPORTED", "subscription_detail": "SUPPORTED",
-                    "subscription_submit": "SUPPORTED", "subscription_modify": "SUPPORTED",
-                    "subscription_enable": "SUPPORTED", "subscription_disable": "SUPPORTED",
-                    "subscription_delete": "SUPPORTED", "rss_list": "SUPPORTED",
-                    "rss_modify": "SUPPORTED", "rss_enable": "SUPPORTED",
-                    "rss_disable": "SUPPORTED", "rss_delete": "SUPPORTED",
-                    "rss_refresh": "SUPPORTED", "external_verify": "SUPPORTED",
-                    "checked_at": None, "safe_message": "ok",
+                    "configuration_revision": 1, "connection_status": "VERIFIED",
+                    # #225 B1: the summary is the only capability source.
+                    "capabilities": _probe_capabilities(),
                 }})
                 return
             if request.method == "GET" and path == "/tracking/items":

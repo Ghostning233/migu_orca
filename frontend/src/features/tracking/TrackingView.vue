@@ -154,37 +154,35 @@ let writeGeneration = 0
 let syncSequence = 0
 let syncController: AbortController | null = null
 
+/**
+ * Read the saved connection summary, which already carries the deployment's last
+ * proven capability projection (Stage 39 PRD: loading the page must never probe
+ * by itself). B1 retires the manual probe entry, so the page only adopts what
+ * the summary publishes — a cold cache simply leaves the read-only external
+ * check unavailable until the next explicit sync (T6/#229 owns automatic
+ * refresh). No extra network call and no capability write happen here.
+ */
 async function loadSavedConnection(): Promise<void> {
   try {
     const summary = await api.get<SavedConnection>('/api/v1/settings/autobangumi')
+    savedConnection.value = summary
+    const capabilities = summary.capabilities
+    const usable = Boolean(
+      summary.connection_ref && summary.credential_present && capabilities,
+    )
     const changed = savedState.value && (savedState.value.connection_ref !== summary.connection_ref
       || savedState.value.configuration_revision !== summary.configuration_revision)
-    savedConnection.value = summary
-    if (changed) savedState.value = null
-  } catch {
-    savedConnection.value = null
-    savedState.value = null
-  }
-}
-
-/**
- * Keep the read-only capability projection current without a visible probe
- * entry (B1 retires「测试已保存连接」, and #228's unified read-only verification
- * still needs the published capability). It is one bounded read-only call per
- * page load, only when a saved connection exists; failures stay silent.
- */
-async function loadCapabilities(): Promise<void> {
-  const summary = savedConnection.value
-  if (!summary?.connection_ref || !summary.credential_present) return
-  try {
-    const capabilities = await api.post<CapabilityResult>('/api/v1/settings/autobangumi/probe', {
-      body: { connection_ref: summary.connection_ref, configuration_revision: summary.configuration_revision },
-    })
-    if (savedConnection.value?.connection_ref === summary.connection_ref
-      && savedConnection.value.configuration_revision === summary.configuration_revision) {
-      savedState.value = { connection_ref: summary.connection_ref, configuration_revision: summary.configuration_revision, capabilities }
+    if (!usable) {
+      savedState.value = null
+    } else if (!savedState.value || changed) {
+      savedState.value = {
+        connection_ref: summary.connection_ref!,
+        configuration_revision: summary.configuration_revision,
+        capabilities: capabilities as CapabilityResult,
+      }
     }
   } catch {
+    savedConnection.value = null
     savedState.value = null
   }
 }
@@ -454,7 +452,7 @@ async function syncTracking(): Promise<void> {
         ? '同步部分完成，已保留原有本地列表；可重连或再次同步。'
         : '同步未完成，已保留原有本地列表；可重连、重探测或再次同步。'
     } else {
-      syncStatus.value = '同步已完成，但当前连接能力未知，已降级为只读并保留原有本地列表；可重新探测或再次同步。'
+      syncStatus.value = '同步已完成，但当前连接能力未知，已降级为只读并保留原有本地列表；可重连或再次同步。'
     }
     savedState.value = { ...config, capabilities: result.capabilities }
   } catch (error) {
@@ -1024,7 +1022,7 @@ async function runPlanDelete(payload: {
 }
 
 onMounted(() => {
-  void loadSavedConnection().then(() => loadCapabilities())
+  void loadSavedConnection()
   void loadList().then(() => {
     // A legacy batch link is located against the freshly read local list, so the
     // compat read never races the tracking list it maps onto.
@@ -1166,7 +1164,7 @@ onBeforeUnmount(() => {
 
         <!-- C7：提示是独立兄弟节点，绝不因为批量提示而移除列表容器。 -->
         <div
-          v-if="!loading && !failed && items.length"
+          v-if="!loading && !failed && items.length && filteredItems.length"
           id="tracking-list-container"
           ref="listContainer"
           class="tracking-list"
@@ -1295,6 +1293,9 @@ onBeforeUnmount(() => {
 
 @media (min-width: 761px) {
   .tracking-overview {
+    /* The shell owns the header height and the main padding; 2px is the
+       sub-pixel safety slack that keeps a fractional viewport from producing a
+       document scrollbar on the acceptance canvas. */
     height: calc(100vh - var(--size-shell-header) - 2 * var(--space-6) - 2px);
   }
 }
@@ -1613,8 +1614,15 @@ onBeforeUnmount(() => {
   background: var(--color-bg);
 }
 
-/* ≤760px：只用壳层断点纵向重排；标题/多选一行、搜索独占下一行；批量左组先排、
- * 提交选中独占下一行占满宽度；无横向滚动、允许整页滚动。 */
+/* 低高度降级（B4）：两栏保底 320px 后，批量工具栏/状态区/结果区可能挤占列表；
+ * 此时让整块列表面板滚动（列表本身不再二次内滚），内容始终可达。 */
+@media (max-height: 640px) {
+  .tracking-list-panel { overflow-y: auto; }
+  .tracking-list { flex: 0 0 auto; overflow-y: visible; min-block-size: 0; }
+}
+
+/* ≤760px：只用壳层断点纵向重排；标题与多选/完成同一行、搜索独占下一行；批量
+ * 左组先排、提交选中独占下一行占满宽度；无横向滚动、允许整页滚动。 */
 @media (max-width: 760px) {
   .tracking-overview { height: auto; }
   .tracking-status-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1623,13 +1631,18 @@ onBeforeUnmount(() => {
     min-height: 0;
   }
   .tracking-list-panel, .tracking-inspector { min-block-size: 320px; }
-  .tracking-list-heading-row { align-items: flex-start; }
-  .tracking-list-tools { inline-size: 100%; margin-inline-start: 0; }
+  .tracking-list-heading-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+  .tracking-list-tools { display: contents; }
+  .tracking-list-tools :deep(.base-button) { grid-column: 2; grid-row: 1; }
   .tracking-search-input {
+    grid-column: 1 / -1;
+    grid-row: 2;
     inline-size: 100%;
     min-inline-size: 0;
-    order: 3;
-    flex-basis: 100%;
   }
   .tracking-batch-toolbar { align-items: flex-start; }
   .tracking-batch-selection { inline-size: 100%; }

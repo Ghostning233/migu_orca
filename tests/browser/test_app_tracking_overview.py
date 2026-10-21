@@ -235,11 +235,13 @@ def _row_style_geometry(page: Page) -> dict[str, Any]:
           const bar = (row) => {
             const layer = row.querySelector('.tracking-row-background')
             const cs = getComputedStyle(layer, '::before')
+            const lb = layer.getBoundingClientRect()
             return { content: cs.content, width: cs.width, height: cs.height,
                      background: cs.backgroundColor,
                      radius: getComputedStyle(layer).borderRadius,
                      overflow: getComputedStyle(layer).overflow,
-                     pointer: getComputedStyle(layer).pointerEvents }
+                     pointer: getComputedStyle(layer).pointerEvents,
+                     layerHeight: Math.round(lb.height) }
           }
           const sep = (row) => {
             const cs = getComputedStyle(row, '::after')
@@ -268,6 +270,19 @@ def _row_style_geometry(page: Page) -> dict[str, Any]:
             surface: tokenColor('--color-surface'),
             infoSurface: tokenColor('--color-info-surface'),
             primary: tokenColor('--color-primary'),
+            titleStyle: (() => {
+              const cs = getComputedStyle(first.querySelector('.tracking-list-title'))
+              return { size: cs.fontSize, weight: cs.fontWeight, whiteSpace: cs.whiteSpace }
+            })(),
+            pillStyle: (() => {
+              const cs = getComputedStyle(first.querySelector('.tracking-status-pill'))
+              return { size: cs.fontSize, padding: cs.padding, radius: cs.borderRadius,
+                       whiteSpace: cs.whiteSpace }
+            })(),
+            searchStyle: (() => {
+              const cs = getComputedStyle(document.querySelector('#tracking-search'))
+              return { width: cs.width, minWidth: cs.minWidth }
+            })(),
             rowBorder: getComputedStyle(first).borderTopWidth,
             rowShadow: getComputedStyle(first).boxShadow,
             rowTransform: getComputedStyle(first).transform,
@@ -282,8 +297,8 @@ def test_desktop_skeleton_has_no_page_scroll_and_equal_panels(
 ) -> None:
     """AC1 + AC5: no page scroll at 1440×900, equal columns, no retired modules."""
     page.set_viewport_size({"width": 1440, "height": 900})
-    _open(page, live_server_url, storage_dir, [_item(index) for index in range(24)])
-    expect(page.locator(".tracking-list-item")).to_have_count(24)
+    _open(page, live_server_url, storage_dir, [_item(index) for index in range(40)])
+    expect(page.locator(".tracking-list-item")).to_have_count(40)
 
     g = _skeleton_geometry(page)
     # AC1: the document itself never scrolls on the acceptance canvas.
@@ -315,7 +330,7 @@ def test_columns_scroll_independently_and_folds_keep_page_height(
 ) -> None:
     """AC2: each column scrolls alone and expanding a detail fold never grows the page."""
     page.set_viewport_size({"width": 1440, "height": 900})
-    _open(page, live_server_url, storage_dir, [_item(index) for index in range(24)], audits=40)
+    _open(page, live_server_url, storage_dir, [_item(index) for index in range(40)], audits=40)
     page.locator(".tracking-list-item").first.click()
     _wait_for_loaded_detail(page)
     page_height = page.evaluate("() => document.scrollingElement.scrollHeight")
@@ -371,7 +386,7 @@ def test_low_height_degrades_to_page_scroll_with_320px_columns(
 ) -> None:
     """AC3/B4: below the 320px floor the page may scroll; both columns keep the floor."""
     page.set_viewport_size({"width": 1280, "height": 600})
-    _open(page, live_server_url, storage_dir, [_item(index) for index in range(24)])
+    _open(page, live_server_url, storage_dir, [_item(index) for index in range(40)])
 
     g = _skeleton_geometry(page)
     assert g["doc"]["scrollHeight"] > g["doc"]["clientHeight"]
@@ -409,6 +424,12 @@ def test_shell_vertical_reflow_starts_at_760_not_an_800px_breakpoint(
         panel = page.locator(".tracking-list-panel").bounding_box()
         assert search is not None and panel is not None
         assert search["width"] >= panel["width"] - 60
+        # Title and 多选/完成 share the first line; the search owns the next one.
+        title = page.locator(".tracking-list-heading").bounding_box()
+        toggle = page.locator("#tracking-batch-mode").bounding_box()
+        assert title is not None and toggle is not None
+        assert abs((title["y"] + title["height"] / 2) - (toggle["y"] + toggle["height"] / 2)) <= 8
+        assert search["y"] >= title["y"] + title["height"] - 1
         # Batch submit moves to its own full-width row.
         submit = page.locator("#tracking-batch-submit").bounding_box()
         toolbar = page.locator(".tracking-batch-toolbar").bounding_box()
@@ -416,12 +437,49 @@ def test_shell_vertical_reflow_starts_at_760_not_an_800px_breakpoint(
         assert submit["width"] >= toolbar["width"] - 60
 
 
+def test_low_height_with_multi_select_keeps_the_list_reachable(
+    page: Page, live_server_url: str, storage_dir
+) -> None:
+    """B4: at 1280×600 the panel keeps 320px and scrolls as a whole when the
+    batch toolbar and status area would otherwise crush the list."""
+    page.set_viewport_size({"width": 1280, "height": 600})
+    _open(page, live_server_url, storage_dir, [
+        _submittable_item(index) for index in range(3)
+    ] + [_item(9)])
+    page.locator("#tracking-batch-mode").click()
+    page.locator("#tracking-batch-select-all").click()
+
+    metrics = page.evaluate(
+        """() => {
+          const panel = document.querySelector('.tracking-list-panel')
+          const list = document.querySelector('#tracking-list-container')
+          const cs = getComputedStyle(panel)
+          return {
+            panelHeight: Math.round(panel.getBoundingClientRect().height),
+            panelOverflow: cs.overflowY,
+            panelScrollable: panel.scrollHeight > panel.clientHeight,
+            listHeight: Math.round(list.getBoundingClientRect().height),
+            toolbar: Math.round(document.querySelector('.tracking-batch-toolbar').getBoundingClientRect().height),
+            status: document.querySelector('#tracking-batch-skipped')?.textContent || '',
+          }
+        }"""
+    )
+    assert metrics["panelHeight"] >= 320
+    assert metrics["panelOverflow"] == "auto"
+    assert metrics["status"]
+    assert metrics["listHeight"] > 0
+    if metrics["panelScrollable"]:
+        page.evaluate("() => { const p = document.querySelector('.tracking-list-panel'); p.scrollTop = p.scrollHeight }")
+        assert page.locator(".tracking-list-row").last.is_visible()
+
+
 def test_row_spec_structure_and_visual_tokens(
     page: Page, live_server_url: str, storage_dir
 ) -> None:
     """D0 row spec: two sibling buttons, no card chrome, separators, bar and hover."""
     page.set_viewport_size({"width": 1440, "height": 900})
-    items = [_item(index) for index in range(4)]
+    # Submittable rows so the multi-select row body is a real click target.
+    items = [_submittable_item(index) for index in range(4)]
     _open(page, live_server_url, storage_dir, items)
     # Browse-click selects a detail row; no checkbox exists in any row.
     page.locator(".tracking-list-item").first.click()
@@ -445,6 +503,12 @@ def test_row_spec_structure_and_visual_tokens(
     assert g["arrow"]["height"] >= 44
     assert g["title"]["width"] > 0
     assert g["body"]["width"] <= g["row"]["width"] - 44
+    # Hovering the arrow never squeezes or moves the title column.
+    page.locator(".tracking-list-arrow").first.hover()
+    page.wait_for_timeout(150)
+    title_after = page.locator(".tracking-list-title").first.bounding_box()
+    assert title_after is not None
+    assert abs(title_after["width"] - g["title"]["width"]) <= 1
     # Shared background layer: 10px radius, clipped, decorative only.
     assert g["selectedBar"]["radius"] == "10px"
     assert g["selectedBar"]["overflow"] == "hidden"
@@ -459,6 +523,31 @@ def test_row_spec_structure_and_visual_tokens(
     assert g["firstSeparator"]["background"] != "rgba(0, 0, 0, 0)"
     assert g["lastSeparator"]["height"] == "1px"
     assert g["lastSeparator"]["background"] == "rgba(0, 0, 0, 0)"
+    # The separator is inset by 16px on both sides and the bar fills the layer.
+    assert g["firstSeparator"]["left"] == "16px"
+    assert g["firstSeparator"]["right"] == "16px"
+    assert abs(int(float(g["selectedBar"]["height"].rstrip("px"))) - g["selectedBar"]["layerHeight"]) <= 1
+    # Token-level typography and pill geometry.
+    assert g["titleStyle"] == {"size": "17px", "weight": "650", "whiteSpace": "nowrap"}
+    assert g["pillStyle"]["size"] == "14px"
+    assert g["pillStyle"]["padding"] == "4px 12px"
+    assert g["pillStyle"]["radius"] == "999px"
+    assert g["pillStyle"]["whiteSpace"] == "nowrap"
+    assert g["searchStyle"]["width"] == "240px"
+    assert g["searchStyle"]["minWidth"] == "160px"
+
+    # The row body is the keyboard stop, with a 3px inset focus ring (reached
+    # through Tab so the focus-visible heuristic applies).
+    page.locator("#tracking-list-container").focus()
+    page.keyboard.press("Tab")
+    focused = page.evaluate("() => document.activeElement?.className || ''")
+    assert "tracking-list-item" in focused, focused
+    ring = page.evaluate(
+        "() => { const cs = getComputedStyle(document.activeElement);"
+        " return { width: cs.outlineWidth, style: cs.outlineStyle, offset: cs.outlineOffset } }"
+    )
+    assert ring["width"] == "3px" and ring["style"] == "solid", ring
+    assert ring["offset"] == "-3px", ring
 
     # Hover is a temporary info-surface background with no extra bar.
     page.locator(".tracking-list-row").nth(1).hover()
@@ -479,6 +568,54 @@ def test_row_spec_structure_and_visual_tokens(
     )
     assert hovered["background"] == hovered["info"]
     assert hovered["bar"] == "none"
+
+    # Hovering a batch-selected row never adds a bar, and moving the pointer away
+    # keeps its selection background (hover is temporary, selection is state).
+    page.locator("#tracking-batch-mode").click()
+    page.locator(".tracking-list-item").nth(1).click()
+    page.locator(".tracking-list-row").nth(1).hover()
+    page.wait_for_timeout(200)
+    page.locator(".tracking-page-title").hover()
+    page.wait_for_timeout(200)
+    persisted = page.evaluate(
+        """() => {
+          const row = document.querySelectorAll('.tracking-list-row')[1]
+          const layer = row.querySelector('.tracking-row-background')
+          const probe = document.createElement('span')
+          probe.style.color = 'var(--color-info-surface)'
+          document.body.appendChild(probe)
+          const info = getComputedStyle(probe).color
+          probe.remove()
+          return {
+            classes: row.className,
+            background: getComputedStyle(layer).backgroundColor,
+            bar: getComputedStyle(layer, '::before').content,
+            info,
+          }
+        }"""
+    )
+    assert "is-batch-selected" in persisted["classes"]
+    assert persisted["background"] == persisted["info"]
+    assert persisted["bar"] == "none"
+    # The detail-selected row keeps its single background and its only bar.
+    selected_state = page.evaluate(
+        """() => {
+          const row = document.querySelector('.tracking-list-row.is-selected')
+          const layer = row.querySelector('.tracking-row-background')
+          const probe = document.createElement('span')
+          probe.style.color = 'var(--color-info-surface)'
+          document.body.appendChild(probe)
+          const info = getComputedStyle(probe).color
+          probe.remove()
+          return {
+            background: getComputedStyle(layer).backgroundColor,
+            barWidth: getComputedStyle(layer, '::before').width,
+            info,
+          }
+        }"""
+    )
+    assert selected_state["background"] == selected_state["info"]
+    assert selected_state["barWidth"] == "4px"
 
 
 def test_row_and_arrow_actions_follow_the_documented_mode_matrix(
@@ -566,6 +703,23 @@ def test_batch_toolbar_is_its_own_row_with_the_single_primary_action(
     assert "primary-button" in (
         page.locator("#tracking-batch-submit").get_attribute("class") or ""
     )
+    # The only primary action is right-aligned inside the toolbar.
+    submit_box = page.locator("#tracking-batch-submit").bounding_box()
+    panel_box = page.locator(".tracking-list-panel").bounding_box()
+    assert submit_box is not None and panel_box is not None
+    assert abs(
+        (submit_box["x"] + submit_box["width"]) - (panel_box["x"] + panel_box["width"] - 20)
+    ) <= 2
+    toolbar_style = toolbar.evaluate(
+        "el => { const cs = getComputedStyle(el);"
+        " return { height: Math.round(el.getBoundingClientRect().height),"
+        " paddingBlock: cs.paddingTop, background: cs.backgroundColor, border: cs.borderTopWidth } }"
+    )
+    assert toolbar_style["height"] == 60, toolbar_style
+    assert toolbar_style["paddingBlock"] == "8px", toolbar_style
+    assert toolbar_style["background"] == "rgba(0, 0, 0, 0)", toolbar_style
+    assert toolbar_style["border"] == "0px", toolbar_style
+
     # Text actions are plain buttons (no filled/bordered control).
     assert page.evaluate(
         """() => {
@@ -682,6 +836,26 @@ def test_degraded_or_ignoring_sync_stays_in_the_list_status_area(
     assert page.locator(".global-notification").count() == 0
 
 
+def test_complete_sync_with_ignored_strangers_stays_inline(
+    page: Page, live_server_url: str, storage_dir
+) -> None:
+    """B5: even a COMPLETE result that ignored strangers stays in the list area."""
+    caps = _probe_caps()
+    _sync_page(page, live_server_url, storage_dir, {
+        "sync_status": "COMPLETE", "checked_at": "2026-10-21T00:00:00Z",
+        "capabilities": caps,
+        "summary": {"checked": 3, "created": 0, "updated": 1, "unchanged": 1,
+                    "ignored": 2, "failed": 0, "unreadable": 0},
+        "warnings": [], "items": [_item(1)],
+    })
+    _sync_once(page)
+
+    status = page.locator("#tracking-sync-status")
+    expect(status).to_be_visible()
+    expect(status).to_contain_text("忽略 2 条")
+    assert page.locator(".global-notification").count() == 0
+
+
 def _probe_caps() -> dict[str, Any]:
     return {
         "probe_status": "VERIFIED", "version": "3.1.18", "adapter": "legacy_3_1",
@@ -746,6 +920,9 @@ def test_overview_cards_keep_the_server_count_and_clear_the_search(
     expect(page.locator("#tracking-search")).to_have_value("")
     expect(page.locator(".tracking-list-item")).to_have_count(0)
     assert page.locator(".tracking-list-count").inner_text() == "共 0 部"
+    # C7/empty state: no empty list container is left beside the empty state.
+    assert page.locator("#tracking-list-container").count() == 0
+    assert page.locator(".empty-state").count() >= 1
     assert page.locator("#tracking-overview-inactive").get_attribute("aria-pressed") == "true"
 
 

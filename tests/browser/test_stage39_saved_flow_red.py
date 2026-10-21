@@ -410,7 +410,10 @@ def test_saved_verify_external_preserves_unknown_source_lock(page, live_server_u
                         "credential_present": True,
                         "connection_ref": ref,
                         "configuration_revision": 3,
-                        "connection_status": "CONFIGURED",
+                        "connection_status": "VERIFIED",
+                        # Stage 39: loading never probes; the saved summary is the
+                        # only capability source (here: last proven generation).
+                        "capabilities": _probe_capabilities(),
                     },
                 }
             )
@@ -588,8 +591,8 @@ def test_saved_summary_survives_refresh_and_navigation_without_settings_probe(pa
 
 
 @pytest.mark.browser
-def test_tracking_page_loads_capabilities_read_only_without_sync_or_write(page, live_server_url):
-    """B1 retired the probe entry; loading must stay read-only (no sync, no write)."""
+def test_tracking_page_load_never_probes_syncs_or_writes(page, live_server_url):
+    """Stage 39 + B1: loading reads the summary only; no probe, sync or write."""
     ref = "11111111-1111-4111-8111-111111111111"
     calls: list[str] = []
 
@@ -621,10 +624,9 @@ def test_tracking_page_loads_capabilities_read_only_without_sync_or_write(page, 
     page.wait_for_selector("#tracking-overview")
     page.reload()
     page.wait_for_selector("#tracking-overview")
-    # The only automatic POST is the bounded read-only capability probe; loading
-    # never starts a sync or a business action.
-    assert calls, "the read-only capability probe should run"
-    assert set(calls) == {"/settings/autobangumi/probe"}, calls
+    # Loading the page sends no POST at all: no probe, no sync, no business write.
+    assert calls == [], calls
+    expect(page.locator("#tracking-probe-saved")).to_have_count(0)
     expect(page.locator("#tracking-sync")).to_have_count(1)
 
 
@@ -1068,10 +1070,9 @@ def test_submit_is_available_from_the_saved_connection_without_a_probe(page, liv
     page.wait_for_selector("#tracking-submit")
     expect(page.locator("#tracking-submit")).to_be_visible()
     expect(page.locator("#tracking-submit")).to_be_enabled()
-    # The only probe is the automatic read-only capability load; the submit entry
-    # itself never depended on a probe click (issue #86). Capability discovery is
-    # diagnostic, not a submission gate.
-    assert probes == ["/settings/autobangumi/probe"]
+    # Nothing is probed: submission needs only the saved connection, never a
+    # probe click (issue #86), and capability discovery is not a submission gate.
+    assert probes == []
 
 
 @pytest.mark.browser
@@ -1425,7 +1426,8 @@ def test_unknown_operation_after_configuration_change_cannot_verify(page, live_s
         path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
         if request.method == "GET" and path == "/settings/autobangumi":
             reads += 1
-            ref = ref_a if reads <= 2 else ref_b
+            changed = reads > 2
+            ref = ref_b if changed else ref_a
             route.fulfill(
                 json={
                     "ok": True,
@@ -1435,6 +1437,9 @@ def test_unknown_operation_after_configuration_change_cannot_verify(page, live_s
                         "connection_ref": ref,
                         "configuration_revision": reads,
                         "connection_status": "CONFIGURED",
+                        # Only the original generation has an already-proven
+                        # capability; the replacement has a cold cache.
+                        "capabilities": None if changed else _probe_capabilities(),
                     },
                 }
             )
@@ -1444,9 +1449,6 @@ def test_unknown_operation_after_configuration_change_cannot_verify(page, live_s
             return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
             route.fulfill(json={"ok": True, "result": _detail_payload(item)})
-            return
-        if request.method == "POST" and path.endswith("/probe"):
-            route.fulfill(json={"ok": True, "result": _probe_capabilities()})
             return
         if request.method == "POST" and path.endswith("/recover"):
             calls.append(path)
@@ -1458,8 +1460,9 @@ def test_unknown_operation_after_configuration_change_cannot_verify(page, live_s
     page.wait_for_selector("#tracking-recover-verify")
     page.reload()
     page.wait_for_selector("#tracking-overview")
-    # Loading never verifies by itself, even after the saved connection changed:
-    # the read-only entry only sends on an explicit click, and the server's
-    # operation/connection binding guard owns the refusal (covered by
-    # tracking_saved_recovery_service_test).  The button's absence is not a gate.
+    # The replacement generation has no proven capability, so the page does not
+    # offer the read-only verification again after the connection changed, and
+    # it never verifies by itself.  (The server additionally rejects a rebind
+    # request: tracking_saved_recovery_service_test owns that guard.)
+    assert page.locator("#tracking-recover-verify").count() == 0
     assert calls == []

@@ -205,12 +205,14 @@ class TestCrossFeatureResponsive:
         overview = page.locator("#tracking-status-heading").locator("..")
         for label in ("待处理", "追番中", "已停用", "需处理"):
             expect(overview).to_contain_text(label)
-        # The decorative background layer is not a control and carries no text:
-        # the text label is the state signal, not the colour.
+        # The status is carried by text; the decorative background layer cannot
+        # receive focus or pointer events and holds no content of its own.
         background = page.locator(".tracking-row-background").first
-        assert background.inner_text() == ""
+        assert background.evaluate("el => el.tabIndex") == -1
         assert background.evaluate("el => getComputedStyle(el).pointerEvents") == "none"
+        assert background.evaluate("el => el.childElementCount + el.textContent.length") == 0
         assert page.locator('input[type="checkbox"]').count() == 0
+        assert page.locator(".tracking-status-pill").first.inner_text().strip() != ""
         # Selection is announced through aria-current, not only through color.
         expect(page.locator("#tracking-list-container")).to_have_attribute("aria-label", "追番记录列表")
 
