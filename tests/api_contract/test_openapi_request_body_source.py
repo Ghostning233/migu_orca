@@ -80,7 +80,7 @@ def test_every_request_body_declares_the_model_its_route_validates() -> None:
         )
         checked += 1
     # Issue #228 retired the standalone /delete-external request body.
-    assert checked == 28, f"expected 28 documented request bodies, found {checked}"
+    assert checked == 30, f"expected 30 documented request bodies, found {checked}"
 
 
 def test_request_body_overlay_rejects_structural_keys() -> None:

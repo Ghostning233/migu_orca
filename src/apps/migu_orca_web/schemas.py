@@ -538,6 +538,90 @@ class SavedTrackingBatchSubmitInput(BaseModel):
         return self
 
 
+MAX_TRACKING_BATCH_DELETE_ITEMS = MAX_TRACKING_BATCH_SUBMIT_ITEMS
+
+
+class SavedTrackingBatchDeleteItem(BaseModel):
+    """One tracking record inside one explicit batch delete (issue #223)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tracking_id: StrictStr
+    expected_revision: StrictInt = Field(ge=1)
+
+    @field_validator("tracking_id")
+    @classmethod
+    def _clean_batch_delete_tracking_id(cls, value: str) -> str:
+        return _clean_tracking_id_value(value)
+
+
+class SavedTrackingBatchDeleteInput(BaseModel):
+    """Strict handoff for the local-only batch delete (issue #223).
+
+    This body deliberately carries **no** connection fields: a batch that only
+    deletes local plans can never reach Auto Bangumi, so the external write is
+    impossible by construction rather than by a flag.  The external variant
+    subclass is a separate route and requires the saved connection generation.
+
+    ``idempotency_key`` identifies the whole batch: replaying the same key with
+    the same entries returns the stored per-entry result instead of deleting a
+    second time, and the batch-level lease refuses a concurrent second batch.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[SavedTrackingBatchDeleteItem] = Field(
+        min_length=1, max_length=MAX_TRACKING_BATCH_DELETE_ITEMS
+    )
+    confirm: StrictBool = _confirm_true_field()
+    idempotency_key: StrictStr
+    storage_dir: str | None = None
+
+    @field_validator("idempotency_key")
+    @classmethod
+    def _clean_batch_delete_key(cls, value: str) -> str:
+        return _clean_idempotency_key_value(value)
+
+    @model_validator(mode="after")
+    def _require_batch_delete_confirmation(self) -> SavedTrackingBatchDeleteInput:
+        if self.confirm is not True:
+            raise ValueError("confirm must be true")
+        return self
+
+    @model_validator(mode="after")
+    def _require_unique_batch_delete_entries(self) -> SavedTrackingBatchDeleteInput:
+        seen = [item.tracking_id for item in self.items]
+        if len(set(seen)) != len(seen):
+            raise ValueError("batch items must address distinct tracking records")
+        return self
+
+
+class SavedTrackingBatchDeleteExternalInput(SavedTrackingBatchDeleteInput):
+    """The same batch plus the saved connection that authorises the external deletes.
+
+    The external delete is a separate route (not a boolean on the local one), so
+    a client cannot turn a local-only confirmation into an external write by
+    flipping a field.  ``confirm`` still has to be true and ``connection_ref`` /
+    ``configuration_revision`` bind the batch to one immutable saved generation.
+    """
+
+    connection_ref: UUID
+    configuration_revision: StrictInt = Field(ge=0)
+
+    @field_validator("connection_ref", mode="before")
+    @classmethod
+    def _require_canonical_batch_delete_ref(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            raise ValueError("connection_ref 必须是规范 UUID")
+        try:
+            parsed = UUID(value)
+        except (ValueError, AttributeError, TypeError) as exc:
+            raise ValueError("connection_ref 必须是规范 UUID") from exc
+        if str(parsed) != value:
+            raise ValueError("connection_ref 必须是规范 UUID")
+        return value
+
+
 class AutoBangumiCapabilitiesConfigPayload(BaseModel):
     """Strict nested config for the capability endpoint only."""
 
@@ -699,6 +783,17 @@ class TrackingDetailQuery(BaseModel):
     """
 
     tracking_id: str = ""
+    storage_dir: str | None = None
+
+
+class TrackingBatchDeleteStatusQuery(BaseModel):
+    """Query args for ``GET /api/v1/tracking/batch-deletions/{batch_key}``.
+
+    ``batch_key`` comes from the URL path (the client's batch idempotency key);
+    ``storage_dir`` from the query.  Reading a batch is pure local storage.
+    """
+
+    batch_key: str = ""
     storage_dir: str | None = None
 
 

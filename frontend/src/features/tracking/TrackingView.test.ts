@@ -436,12 +436,14 @@ describe('TrackingView page skeleton and row model (#225)', () => {
 
     await toolbar.find('#tracking-batch-select-all').trigger('click')
 
-    expect(wrapper.find('#tracking-batch-count').text()).toContain('已选 1 部')
+    // Issue #223: select-all covers every row a batch may act on, so a
+    // deletable row without a submit action is selected too; only the
+    // in-flight row is skipped and explained.
+    expect(wrapper.find('#tracking-batch-count').text()).toContain('已选 2 部')
     expect(toolbar.find('#tracking-batch-select-all').text()).toBe('全选当前 3 部')
     const skipped = wrapper.find('#tracking-batch-skipped').text()
-    expect(skipped).toContain('已跳过 2 条')
+    expect(skipped).toContain('已跳过 1 条')
     expect(skipped).toContain('正在处理中')
-    expect(skipped).toContain('不可提交')
     // C7: the skip notice must not remove the list container.
     expect(wrapper.find('#tracking-list-container').exists()).toBe(true)
   })
@@ -1190,5 +1192,265 @@ describe('TrackingView selected status card hint (#229 T3 residual)', () => {
     await card().trigger('click')
     expect(card().attributes('aria-pressed')).toBe('false')
     expect(card().attributes('title')).toBeUndefined()
+  })
+})
+
+// -- T7 (#223): explicit batch delete ---------------------------------------
+
+function batchDeleteBody(callIndex = 0) {
+  const calls = apiPost.mock.calls.filter(([path]) => String(path).includes('batch-delete'))
+  const call = calls[callIndex]
+  expect(call).toBeTruthy()
+  return call as [string, { body: Record<string, unknown> }]
+}
+
+function batchDeleteResponse(items: unknown[], summary?: Record<string, number>) {
+  return {
+    batch_key: 'batch-key',
+    kind: 'LOCAL_ONLY',
+    state: 'COMPLETED',
+    items,
+    summary: summary ?? {
+      total: items.length, deleted: 1, external_deleted: 0, skipped: 0, failed: 0, unknown: 0,
+    },
+  }
+}
+
+async function mountBatchRows(
+  rows: unknown[],
+  summary: Record<string, number> = { ...defaultSummary, total: rows.length },
+) {
+  return mountSaved([], null, summary, rows)
+}
+
+async function enterBatchAndSelectAll(wrapper: Awaited<ReturnType<typeof mountBatchRows>>['wrapper']) {
+  await wrapper.find('#tracking-batch-mode').trigger('click')
+  await wrapper.find('#tracking-batch-select-all').trigger('click')
+  await flushPromises()
+}
+
+describe('TrackingView batch delete (#223)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset(); nextSyncFixture = null; localStorage.clear() })
+
+  it('offers exactly the four batch actions and a delete entry', async () => {
+    const items = [rowFor('a', '番 A'), rowFor('b', '番 B')]
+    const { wrapper } = await mountBatchRows(items)
+    await wrapper.find('#tracking-batch-mode').trigger('click')
+
+    const toolbar = wrapper.find('.tracking-batch-toolbar')
+    expect(toolbar.findAll('button').map((button) => button.attributes('id'))).toEqual([
+      'tracking-batch-select-all',
+      'tracking-batch-clear',
+      'tracking-batch-delete',
+      'tracking-batch-submit',
+    ])
+    expect(wrapper.find('#tracking-batch-delete').text()).toBe('删除选中')
+    // Nothing destructive exists before the user selects something.
+    expect(wrapper.find('#tracking-batch-delete').attributes('disabled')).toBeDefined()
+  })
+
+  it('opens a local-only confirmation for the eligible entries', async () => {
+    const items = [rowFor('a', '番 A'), rowFor('b', '番 B')]
+    const { wrapper } = await mountBatchRows(items)
+    await enterBatchAndSelectAll(wrapper)
+
+    await wrapper.find('#tracking-batch-delete').trigger('click')
+
+    const dialog = wrapper.find('.tracking-batch-delete-dialog')
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.find('.confirm-dialog-message').text()).toContain('2 条')
+    expect(dialog.find('#tracking-batch-delete-external').attributes('checked')).toBeUndefined()
+    expect(dialog.text()).toContain('Auto Bangumi 中的订阅会继续运行，MiGuOrca 不再管理它们')
+    expect(apiPost.mock.calls.filter(([path]) => String(path).includes('batch-delete'))).toEqual([])
+  })
+
+  it('posts one local-only batch with the eligible entries and a locked key', async () => {
+    const items = [rowFor('a', '番 A'), rowFor('b', '番 B')]
+    const { wrapper } = await mountBatchRows(items)
+    await enterBatchAndSelectAll(wrapper)
+    apiPost.mockImplementation(async (path) => {
+      if (path === '/api/v1/tracking/batch-delete-plan') {
+        return batchDeleteResponse([
+          { tracking_id: 'a', outcome: 'DELETED', external_deleted: false, skip_reason: null },
+          { tracking_id: 'b', outcome: 'DELETED', external_deleted: false, skip_reason: null },
+        ]) as never
+      }
+      throw new Error(`unexpected POST ${path}`)
+    })
+
+    await wrapper.find('#tracking-batch-delete').trigger('click')
+    await wrapper.find('#tracking-batch-delete-confirm').trigger('click')
+    await flushPromises()
+
+    const [path, options] = batchDeleteBody()
+    expect(path).toBe('/api/v1/tracking/batch-delete-plan')
+    expect(options.body).toMatchObject({ confirm: true })
+    expect(typeof options.body.idempotency_key).toBe('string')
+    expect(options.body).not.toHaveProperty('connection_ref')
+    expect(options.body.items).toEqual([
+      { tracking_id: 'a', expected_revision: 1 },
+      { tracking_id: 'b', expected_revision: 1 },
+    ])
+  })
+
+  it('uses the external endpoint only when the box is ticked', async () => {
+    const items = [rowFor('a', '番 A')]
+    const { wrapper } = await mountBatchRows(items)
+    await enterBatchAndSelectAll(wrapper)
+    apiPost.mockImplementation(async (path) => {
+      if (path === '/api/v1/tracking/batch-delete-plan-external') {
+        return batchDeleteResponse(
+          [{ tracking_id: 'a', outcome: 'DELETED', external_deleted: true, skip_reason: null }],
+          { total: 1, deleted: 1, external_deleted: 1, skipped: 0, failed: 0, unknown: 0 },
+        ) as never
+      }
+      throw new Error(`unexpected POST ${path}`)
+    })
+
+    await wrapper.find('#tracking-batch-delete').trigger('click')
+    await wrapper.find('#tracking-batch-delete-external').setValue(true)
+    await wrapper.find('#tracking-batch-delete-confirm').trigger('click')
+    await flushPromises()
+
+    const [path, options] = batchDeleteBody()
+    expect(path).toBe('/api/v1/tracking/batch-delete-plan-external')
+    expect(options.body).toMatchObject({
+      confirm: true,
+      connection_ref: '11111111-1111-4111-8111-111111111111',
+      configuration_revision: 3,
+    })
+  })
+
+  it('keeps the external scope unavailable without a saved connection', async () => {
+    const router = createRouter({ history: createMemoryHistory('/app/'), routes: [
+      { path: '/tracking', component: TrackingView },
+    ] })
+    await router.push('/tracking'); await router.isReady()
+    apiGet.mockImplementation(async (path) => path === '/api/v1/settings/autobangumi'
+      ? { configured: false, credential_present: false, connection_ref: null, configuration_revision: 0, connection_status: 'UNCONFIGURED', capabilities: null }
+      : { items: [rowFor('a', '番 A')], summary: defaultSummary, status_groups: statusGroups(), warnings: [] })
+    const wrapper = mount(TrackingView, { attachTo: document.body, global: { plugins: [createPinia(), router], stubs: { Teleport: true } } })
+    await flushPromises()
+
+    await wrapper.find('#tracking-batch-mode').trigger('click')
+    await wrapper.find('#tracking-batch-select-all').trigger('click')
+    await flushPromises()
+    // The delete entry exists without a connection (local deletes need none).
+    expect(wrapper.find('#tracking-batch-delete').attributes('disabled')).toBeUndefined()
+
+    await wrapper.find('#tracking-batch-delete').trigger('click')
+    expect(wrapper.find('#tracking-batch-delete-external').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('缺少已保存连接时只能删除本地记录')
+  })
+
+  it('reports an entry the server skipped as unresolved at execution time (AC8)', async () => {
+    const rows = [rowFor('a', '番 A'), rowFor('b', '番 B')]
+    const { wrapper } = await mountBatchRows(rows)
+    await enterBatchAndSelectAll(wrapper)
+    apiPost.mockImplementation(async () => batchDeleteResponse([
+      { tracking_id: 'a', outcome: 'DELETED', external_deleted: false, skip_reason: null },
+      { tracking_id: 'b', outcome: 'SKIPPED', external_deleted: false, skip_reason: 'UNRESOLVED' },
+    ], { total: 2, deleted: 1, external_deleted: 0, skipped: 1, failed: 0, unknown: 0 }) as never)
+
+    await wrapper.find('#tracking-batch-delete').trigger('click')
+    await wrapper.find('#tracking-batch-delete-confirm').trigger('click')
+    await flushPromises()
+
+    const entries = wrapper.findAll('#tracking-batch-delete-result .tracking-batch-entries li').map((entry) => entry.text())
+    expect(entries).toContain('番 B：结果待确认或外部操作进行中：本次跳过，需要逐条处理')
+    // The skipped entry stays selected: it must be handled one by one.
+    const kept = wrapper.findAll('.tracking-list-row.is-batch-selected').map((row) => row.attributes('data-tracking-id'))
+    expect(kept).toEqual(['b'])
+  })
+
+  it('renders per-entry results and keeps failed entries selected (AC3/AC6)', async () => {
+    const rows = [rowFor('a', '番 A'), rowFor('b', '番 B'), rowFor('c', '番 C')]
+    const { wrapper } = await mountBatchRows(rows)
+    await enterBatchAndSelectAll(wrapper)
+    apiPost.mockImplementation(async () => batchDeleteResponse([
+      { tracking_id: 'a', outcome: 'DELETED', external_deleted: true, skip_reason: null },
+      { tracking_id: 'b', outcome: 'EXTERNAL_FAILED', external_deleted: false, skip_reason: null },
+      { tracking_id: 'c', outcome: 'EXTERNAL_UNKNOWN', external_deleted: false, skip_reason: null },
+    ], { total: 3, deleted: 1, external_deleted: 1, skipped: 0, failed: 1, unknown: 1 }) as never)
+
+    await wrapper.find('#tracking-batch-delete').trigger('click')
+    await wrapper.find('#tracking-batch-delete-external').setValue(true)
+    await wrapper.find('#tracking-batch-delete-confirm').trigger('click')
+    await flushPromises()
+
+    const panel = wrapper.find('#tracking-batch-delete-result')
+    expect(panel.exists()).toBe(true)
+    expect(panel.find('#tracking-batch-delete-summary').text()).toContain('已删除 1 条')
+    expect(panel.find('#tracking-batch-delete-summary').text()).toContain('其中 1 条同时删除了受控外部订阅')
+    expect(panel.find('#tracking-batch-delete-summary').text()).toContain('外部删除失败 1 条')
+    const entries = panel.findAll('.tracking-batch-entries li').map((entry) => entry.text())
+    expect(entries).toEqual([
+      '番 A：已删除本地记录，并已删除受控外部订阅',
+      '番 B：外部订阅删除失败：本地方案与记录已保留',
+      '番 C：外部删除结果待确认：本地方案与记录已保留，请先核验',
+    ])
+    // AC6: no retry-all entry; failed entries stay selected for single handling.
+    expect(panel.findAll('button')).toHaveLength(0)
+    const kept = wrapper.findAll('.tracking-list-row.is-batch-selected').map((row) => row.attributes('data-tracking-id'))
+    expect(kept).toEqual(['b', 'c'])
+  })
+
+  it('replays the same batch key after a lost response (AC9)', async () => {
+    const items = [rowFor('a', '番 A')]
+    const { wrapper } = await mountBatchRows(items)
+    await enterBatchAndSelectAll(wrapper)
+    apiPost.mockRejectedValueOnce({ type: 'request_timeout', message: 'timeout' } as never)
+    apiPost.mockResolvedValueOnce(batchDeleteResponse(
+      [{ tracking_id: 'a', outcome: 'DELETED', external_deleted: false, skip_reason: null }],
+    ) as never)
+
+    await wrapper.find('#tracking-batch-delete').trigger('click')
+    await wrapper.find('#tracking-batch-delete-confirm').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#tracking-batch-delete-notice').text()).toContain('同一批次查询/重放')
+
+    await wrapper.find('#tracking-batch-delete').trigger('click')
+    await wrapper.find('#tracking-batch-delete-confirm').trigger('click')
+    await flushPromises()
+
+    const firstKey = batchDeleteBody(0)[1].body.idempotency_key
+    const secondKey = batchDeleteBody(1)[1].body.idempotency_key
+    expect(secondKey).toBe(firstKey)
+  })
+
+  it('starts a new batch key once the selection changes', async () => {
+    const rows = [rowFor('a', '番 A'), rowFor('b', '番 B')]
+    const { wrapper } = await mountBatchRows(rows)
+    await enterBatchAndSelectAll(wrapper)
+    apiPost.mockRejectedValueOnce({ type: 'request_timeout', message: 'timeout' } as never)
+    await wrapper.find('#tracking-batch-delete').trigger('click')
+    await wrapper.find('#tracking-batch-delete-confirm').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('[data-tracking-id="b"] .tracking-list-item').trigger('click')
+    apiPost.mockResolvedValueOnce(batchDeleteResponse(
+      [{ tracking_id: 'a', outcome: 'DELETED', external_deleted: false, skip_reason: null }],
+    ) as never)
+    await wrapper.find('#tracking-batch-delete').trigger('click')
+    await wrapper.find('#tracking-batch-delete-confirm').trigger('click')
+    await flushPromises()
+
+    expect(batchDeleteBody(1)[1].body.idempotency_key).not.toBe(batchDeleteBody(0)[1].body.idempotency_key)
+  })
+
+  it('sends nothing when every selected entry must be handled one by one', async () => {
+    const items = [rowFor('a', '番 A')]
+    const { wrapper } = await mountBatchRows(items)
+    await enterBatchAndSelectAll(wrapper)
+    // Revoke the row's eligibility before opening the confirmation.
+    const rows = wrapper.findAll('.tracking-list-item')
+    expect(rows.length).toBe(1)
+    const { wrapper: second } = await mountBatchRows([rowFor('z', '番 Z', [], 'PROCESSING')])
+    // A processing row is not selectable at all, so the toolbar stays inert.
+    await second.find('#tracking-batch-mode').trigger('click')
+    await second.find('#tracking-batch-select-all').trigger('click')
+    await flushPromises()
+    expect(second.find('#tracking-batch-delete').attributes('disabled')).toBeDefined()
+    expect(apiPost.mock.calls.filter(([path]) => String(path).includes('batch-delete'))).toEqual([])
   })
 })

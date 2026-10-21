@@ -409,8 +409,9 @@ def test_audit_hook_records_its_own_failure(
 def test_every_declared_success_endpoint_was_observed_and_valid() -> None:
     """All declared success DTOs were produced by a real response and passed."""
     audit = RESPONSE_DTO_AUDIT
-    # Issue #228 retired the standalone /delete-external success endpoint.
-    assert len(declared_success_dtos()) == 36, (
+    # Issue #228 retired the standalone /delete-external success endpoint;
+    # issue #223 added the two batch-delete successes and the batch status read.
+    assert len(declared_success_dtos()) == 39, (
         "the endpoint registry changed; review the audit coverage:\n" + audit.report()
     )
     assert audit.unregistered == [], audit.report()

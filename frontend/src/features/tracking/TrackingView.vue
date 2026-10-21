@@ -41,6 +41,7 @@ import {
   type TrackingWriteTarget,
 } from './useTrackingWriteSession'
 import TrackingInspector from './TrackingInspector.vue'
+import TrackingBatchDeleteDialog, { type BatchDeleteSkip } from './TrackingBatchDeleteDialog.vue'
 import TrackingSubmissionModeDialog, { type SubmissionMode } from './TrackingSubmissionModeDialog.vue'
 import TrackingPoster from './TrackingPoster.vue'
 
@@ -72,6 +73,10 @@ type SyncBody = NonNullable<
 type SyncResult = NonNullable<
   operations['syncTrackingItems']['responses']['200']['content']['application/json']['result']
 >
+type BatchDeleteResult = NonNullable<
+  operations['deleteTrackingBatchPlans']['responses']['200']['content']['application/json']['result']
+>
+type BatchDeleteItemResult = BatchDeleteResult['items'][number]
 
 const route = useRoute()
 const router = useRouter()
@@ -143,7 +148,8 @@ const batchLoading = writes.batchLoading
 const batchNotice = writes.batchNotice
 const batchSkippedNotice = writes.batchSkippedNotice
 const isBatchSelected = writes.isBatchSelected
-const batchSkipReason = writes.batchSkipReason
+/** Issue #223: rows the batch selection must exclude (in-flight/undecided). */
+const batchLockedReason = writes.batchLockedReason
 const resetBatch = writes.resetBatch
 const clearBatchSelection = writes.clearBatchSelection
 // List reads and server-confirmed tracking writes have independent lifecycles:
@@ -702,14 +708,18 @@ function toggleBatchMode(): void {
 }
 
 function toggleRow(trackingId: string): void {
+  // A different selection is a different batch: retire the locked batch key.
+  batchDeleteKey.value = ''
   writes.toggleBatchRow(trackingId)
 }
 
 function selectAllCurrent(): void {
+  batchDeleteKey.value = ''
   writes.selectAllBatch(filteredItems.value)
 }
 
 function clearSelection(): void {
+  batchDeleteKey.value = ''
   clearBatchSelection()
 }
 
@@ -784,6 +794,169 @@ async function performBatchSubmit(): Promise<void> {
   } catch (error) {
     if (sequence !== batchSequence) return
     writes.failBatchSubmit(toApiError(error))
+  }
+}
+
+// -- explicit batch delete (issue #223) ------------------------------------
+const batchDeleteOpen = ref(false)
+const batchDeleteBusy = ref(false)
+const batchDeleteNotice = ref('')
+const batchDeleteOutcome = ref<BatchDeleteResult | null>(null)
+/**
+ * Issue #223 AC9: the batch idempotency key is locked for one attempt, so a
+ * transport retry replays/queries the same batch instead of deleting twice. It
+ * is retired once the batch completed or the selection changed.
+ */
+const batchDeleteKey = ref('')
+let batchDeleteSequence = 0
+
+/** One opaque client batch id (same shape the write session uses). */
+function makeOpaqueKey(): string {
+  const candidate = globalThis.crypto?.randomUUID?.()
+  return candidate && /^[A-Za-z0-9-]{8,128}$/.test(candidate)
+    ? candidate
+    : `batch-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`
+}
+
+/**
+ * The local pre-check for a batch delete. It uses only the list evidence the
+ * page already holds (status group + exact status); the server re-verifies every
+ * entry before it writes. Unknown values are treated as locked (fail closed).
+ */
+function batchDeleteSkipReason(item: TrackingItem): string | null {
+  // The selection lock is the session's single source (ADR-0006 states).
+  return writes.batchLockedReason(item)
+}
+
+const batchDeletePreview = computed(() => {
+  const byId = new Map(items.value.map((item) => [item.tracking_id, item]))
+  const deletable: { trackingId: string; revision: number }[] = []
+  const skipped: BatchDeleteSkip[] = []
+  for (const trackingId of writes.batchSelectedIds()) {
+    const item = byId.get(trackingId)
+    const title = item?.title || titleFor(trackingId)
+    if (!item) {
+      skipped.push({ trackingId, title, reason: '不在当前列表中，请刷新后重试' })
+      continue
+    }
+    const reason = batchDeleteSkipReason(item)
+    if (reason) {
+      skipped.push({ trackingId, title, reason })
+      continue
+    }
+    if (!Number.isInteger(item.revision) || item.revision < 1) {
+      skipped.push({ trackingId, title, reason: '缺少可校验的记录版本，请刷新后重试' })
+      continue
+    }
+    deletable.push({ trackingId, revision: item.revision })
+  }
+  return { deletable, skipped }
+})
+
+function openBatchDelete(): void {
+  if (batchDeleteBusy.value || batchLoading.value) return
+  if (!batchSummary.value.selected) return
+  if (!batchDeleteKey.value) batchDeleteKey.value = makeOpaqueKey()
+  batchDeleteNotice.value = ''
+  batchDeleteOutcome.value = null
+  batchDeleteOpen.value = true
+}
+
+function cancelBatchDelete(): void {
+  batchDeleteOpen.value = false
+}
+
+function batchDeleteEntryMessage(entry: BatchDeleteItemResult): string {
+  if (entry.outcome === 'DELETED') {
+    return entry.external_deleted ? '已删除本地记录，并已删除受控外部订阅' : '已删除本地记录'
+  }
+  if (entry.outcome === 'EXTERNAL_FAILED') return '外部订阅删除失败：本地方案与记录已保留'
+  if (entry.outcome === 'EXTERNAL_UNKNOWN') return '外部删除结果待确认：本地方案与记录已保留，请先核验'
+  if (entry.skip_reason === 'UNRESOLVED') return '结果待确认或外部操作进行中：本次跳过，需要逐条处理'
+  if (entry.skip_reason === 'REVISION_CHANGED') return '记录已变化：本次跳过，请刷新后重试'
+  if (entry.skip_reason === 'NOT_FOUND') return '记录已不存在：本次跳过'
+  return '服务端在删除前拒绝了该条目：本次未删除'
+}
+
+function applyBatchDeleteResult(result: BatchDeleteResult): void {
+  batchDeleteOutcome.value = result
+  batchDeleteNotice.value = ''
+  const deleted = result.items
+    .filter((entry) => entry.outcome === 'DELETED')
+    .map((entry) => entry.tracking_id)
+  if (deleted.length) writes.removeBatchRows(deleted)
+  // The batch completed: a later delete is a new batch with a new key.
+  batchDeleteKey.value = ''
+  // The server is authoritative: converge the rows, the detail and the counts.
+  writeGeneration += 1
+  detailRevision.value += 1
+  syncSelection(true)
+  void loadList(true)
+}
+
+/**
+ * Run the whole selection through one explicit batch delete.
+ *
+ * ``deleteExternal`` is the dialog's opt-in; without it the request has no
+ * connection fields at all (local-only). Entries the local pre-check excluded
+ * are never sent; the server re-verifies the rest and can still skip them.
+ */
+async function runBatchDelete(deleteExternal: boolean): Promise<void> {
+  if (batchDeleteBusy.value || batchLoading.value) return
+  const key = batchDeleteKey.value
+  if (!key) return
+  const preview = batchDeletePreview.value
+  if (!preview.deletable.length) {
+    batchDeleteOpen.value = false
+    batchDeleteNotice.value = '没有可删除的条目：所选记录都需要逐条处理。'
+    return
+  }
+  const config = savedRef.value
+  if (deleteExternal && !config?.connection_ref) return
+  batchDeleteBusy.value = true
+  batchDeleteNotice.value = ''
+  batchDeleteOutcome.value = null
+  const sequence = ++batchDeleteSequence
+  const storageDir = storageQuery().storage_dir
+  const items = preview.deletable.map((entry) => ({
+    tracking_id: entry.trackingId,
+    expected_revision: entry.revision,
+  }))
+  try {
+    const result = deleteExternal
+      ? await api.post<BatchDeleteResult>('/api/v1/tracking/batch-delete-plan-external', {
+          body: {
+            confirm: true,
+            idempotency_key: key,
+            items,
+            connection_ref: String(config?.connection_ref ?? ''),
+            configuration_revision: config?.configuration_revision ?? 0,
+            ...(storageDir ? { storage_dir: storageDir } : {}),
+          },
+        })
+      : await api.post<BatchDeleteResult>('/api/v1/tracking/batch-delete-plan', {
+          body: {
+            confirm: true,
+            idempotency_key: key,
+            items,
+            ...(storageDir ? { storage_dir: storageDir } : {}),
+          },
+        })
+    if (sequence !== batchDeleteSequence) return
+    applyBatchDeleteResult(result)
+  } catch (error) {
+    if (sequence !== batchDeleteSequence) return
+    const apiError = toApiError(error)
+    // The locked batch key stays: the next attempt queries/replays the same
+    // batch, so a lost response can never delete something twice.
+    batchDeleteNotice.value = apiError.type === 'request_timeout' || apiError.type === 'request_cancelled'
+      ? '批量删除未收到结果：批次标识已保留，重新提交会按同一批次查询/重放，不会重复删除。'
+      : '批量删除失败，未收到逐条结果；请刷新列表后逐条处理。'
+  } finally {
+    if (sequence === batchDeleteSequence) {
+      batchDeleteBusy.value = false
+      batchDeleteOpen.value = false
+    }
   }
 }
 
@@ -1165,11 +1338,20 @@ onBeforeUnmount(() => {
             >清除选择</button>
           </div>
           <div class="tracking-batch-actions">
+            <!-- Submit stays the rightmost primary action; delete sits before it
+                 as the destructive alternative (issue #223). -->
+            <BaseButton
+              id="tracking-batch-delete"
+              variant="danger"
+              :loading="batchDeleteBusy"
+              :disabled="batchLoading || batchDeleteBusy || !batchSummary.selected"
+              @click="openBatchDelete"
+            >删除选中</BaseButton>
             <BaseButton
               id="tracking-batch-submit"
               variant="primary"
               :loading="batchLoading"
-              :disabled="batchLoading || !batchSummary.selected || !savedRef"
+              :disabled="batchLoading || batchDeleteBusy || !batchSummary.selected || !savedRef"
               @click="runBatchSubmit"
             >提交选中</BaseButton>
           </div>
@@ -1210,7 +1392,7 @@ onBeforeUnmount(() => {
               class="tracking-list-item"
               :data-tracking-id="item.tracking_id"
               :aria-current="selectedTrackingId === item.tracking_id ? 'true' : undefined"
-              :disabled="batchMode && Boolean(batchSkipReason(item))"
+              :disabled="batchMode && Boolean(batchLockedReason(item))"
               @click="activateRow(item)"
             >
               <TrackingPoster :poster-path="item.poster_path" variant="list" />
@@ -1245,6 +1427,32 @@ onBeforeUnmount(() => {
           <ul v-if="batchOutcome" class="tracking-batch-entries">
             <li v-for="entry in batchOutcome.entries" :key="entry.trackingId" :class="entry.ok ? 'is-ok' : 'is-failed'">
               <strong>{{ titleFor(entry.trackingId) }}</strong>：{{ entry.message }}
+            </li>
+          </ul>
+        </section>
+        <!-- Issue #223: per-entry batch delete results stay inside the same
+             bounded area; failed entries are handled one by one (no retry-all). -->
+        <section
+          v-if="batchMode && (batchDeleteOutcome || batchDeleteNotice)"
+          id="tracking-batch-delete-result"
+          class="tracking-batch-result"
+          aria-labelledby="tracking-batch-delete-heading"
+          role="status"
+        >
+          <h2 id="tracking-batch-delete-heading">批量删除结果</h2>
+          <p v-if="batchDeleteNotice" id="tracking-batch-delete-notice" class="tracking-batch-verdict">{{ batchDeleteNotice }}</p>
+          <p v-if="batchDeleteOutcome" id="tracking-batch-delete-summary" class="tracking-batch-verdict">
+            已删除 {{ batchDeleteOutcome.summary.deleted }} 条<template v-if="batchDeleteOutcome.summary.external_deleted">（其中 {{ batchDeleteOutcome.summary.external_deleted }} 条同时删除了受控外部订阅）</template>；
+            跳过 {{ batchDeleteOutcome.summary.skipped }} 条；外部删除失败 {{ batchDeleteOutcome.summary.failed }} 条、结果待确认 {{ batchDeleteOutcome.summary.unknown }} 条。
+            失败项只能逐条处理。
+          </p>
+          <ul v-if="batchDeleteOutcome" class="tracking-batch-entries">
+            <li
+              v-for="entry in batchDeleteOutcome.items"
+              :key="entry.tracking_id"
+              :class="entry.outcome === 'DELETED' ? 'is-ok' : 'is-failed'"
+            >
+              <strong>{{ titleFor(entry.tracking_id) }}</strong>：{{ batchDeleteEntryMessage(entry) }}
             </li>
           </ul>
         </section>
@@ -1299,6 +1507,15 @@ onBeforeUnmount(() => {
       :busy="writeLoading || writePending"
       @choose="chooseSubmissionMode"
       @cancel="cancelSubmissionMode"
+    />
+    <TrackingBatchDeleteDialog
+      :open="batchDeleteOpen"
+      :count="batchDeletePreview.deletable.length"
+      :skipped="batchDeletePreview.skipped"
+      :external-available="Boolean(savedRef?.connection_ref)"
+      :busy="batchDeleteBusy"
+      @confirm="runBatchDelete"
+      @cancel="cancelBatchDelete"
     />
   </section>
 </template>

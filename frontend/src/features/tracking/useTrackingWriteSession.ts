@@ -1565,7 +1565,22 @@ const EMPTY_BATCH_SELECTION: TrackingBatchSelection = { selected: [], skipped: {
 const BATCH_ACTIONS = new Set(['SUBMIT', 'RETRY'])
 
 /**
- * Fixed reason this row cannot join a batch right now, or ``null`` when it can.
+ * Issue #223: why this row cannot join the batch **selection** at all.
+ *
+ * A batch now carries two actions (submit and delete), so "may I select it" is
+ * broader than "may I submit it": a deletable ACTIVE row joins the selection
+ * while submission still asks the narrower ``batchSkipReason`` below.  Only an
+ * in-flight or undecided external write locks a row out entirely (ADR-0006),
+ * and unknown values fail closed into that same lock.
+ */
+function batchLockedReason(item: TrackingItem): string | null {
+  if (item.status_group === 'PROCESSING') return '正在处理中，请等待当前操作完成'
+  if (item.status === 'RECOVERY_REQUIRED') return '结果待确认，请先逐条处理'
+  return null
+}
+
+/**
+ * Fixed reason this row cannot join a batch **submit** right now, or ``null``.
  * Unknown/processing states fail closed: they are never silently submitted.
  */
 function batchSkipReason(item: TrackingItem): string | null {
@@ -1633,7 +1648,10 @@ function selectAllBatch(items: readonly TrackingItem[]): TrackingBatchSelection 
   const selected: string[] = []
   const skipped: Record<string, string> = {}
   for (const item of items) {
-    const reason = batchSkipReason(item)
+    // Issue #223: select every row a batch may act on; submission eligibility is
+    // decided per action, and the delete action must cover deletable rows that
+    // are not submit candidates.
+    const reason = batchLockedReason(item)
     if (reason) skipped[item.tracking_id] = reason
     else selected.push(item.tracking_id)
   }
@@ -1970,6 +1988,11 @@ interface TrackingWriteSessionApi {
   toggleBatchRow: (trackingId: string) => void
   selectAllBatch: (items: readonly TrackingItem[]) => void
   clearBatchSelection: () => void
+  /** Issue #223: the selected ids (newest selection order) for a delete batch. */
+  batchSelectedIds: () => readonly string[]
+  /** Issue #223: drop the entries a batch already resolved. */
+  removeBatchRows: (trackingIds: readonly string[]) => void
+  batchLockedReason: (item: TrackingItem) => string | null
   batchSkipReason: (item: TrackingItem) => string | null
   batchSummary: (visible: readonly TrackingItem[]) => TrackingBatchSelectionSummary
   resetBatch: () => void
@@ -2101,7 +2124,7 @@ function createTrackingWriteCore(): TrackingWriteCore {
     const counts = new Map<string, number>()
     for (const reason of reasons) counts.set(reason, (counts.get(reason) ?? 0) + 1)
     const detail = [...counts].map(([reason, count]) => `${reason}（${count} 条）`).join('；')
-    return `已跳过 ${reasons.length} 条不可提交记录：${detail}。`
+    return `已跳过 ${reasons.length} 条无法批量处理的记录：${detail}。`
   })
 
 
@@ -3505,6 +3528,19 @@ function createBatchFamily(core: BatchFamilyCore) {
     clearBatchSelection() {
       core.batchSelection.value = EMPTY_BATCH_SELECTION
     },
+    batchSelectedIds: () => [...core.batchSelection.value.selected],
+    removeBatchRows(trackingIds: readonly string[]) {
+      const remove = new Set(trackingIds)
+      if (!remove.size) return
+      const current = core.batchSelection.value
+      core.batchSelection.value = {
+        selected: current.selected.filter((id) => !remove.has(id)),
+        skipped: Object.fromEntries(
+          Object.entries(current.skipped).filter(([id]) => !remove.has(id)),
+        ),
+      }
+    },
+    batchLockedReason,
     batchSkipReason,
     batchSummary: (visible: readonly TrackingItem[]) => (
       batchSelectionSummary(core.batchSelection.value, visible)

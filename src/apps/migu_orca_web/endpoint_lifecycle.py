@@ -55,6 +55,21 @@ ENDPOINT_LIFECYCLE: Final[dict[tuple[str, str], EndpointLifecycle]] = {
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/submit"): _entry(_PRIMARY, "可靠外部提交", "TrackingRecord + operation"),
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/retry"): _entry(_PRIMARY, "明确失败的可靠重试", "TrackingRecord + operation"),
     ("POST", "/api/v1/tracking/batch-submit"): _entry(_PRIMARY, "显式批量可靠提交（逐条独立结果）", "TrackingRecord + operation"),
+    ("POST", "/api/v1/tracking/batch-delete-plan"): _entry(
+        _PRIMARY,
+        "显式批量删除本地追番方案（零外部写；未决条目跳过并给原因）",
+        "Request + TrackingRecord",
+    ),
+    ("POST", "/api/v1/tracking/batch-delete-plan-external"): _entry(
+        _PRIMARY,
+        "显式批量删除本地方案并先删除受控外部订阅（逐条确认外部成功后才删本地）",
+        "Request + TrackingRecord + operation",
+    ),
+    ("GET", "/api/v1/tracking/batch-deletions/<path:batch_key>"): _entry(
+        _PRIMARY,
+        "按幂等键查询批量删除的持久化状态与逐条结果（只读）",
+        "Batch delete journal",
+    ),
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/delete-plan"): _entry(_PRIMARY, "删除追番方案（可选同时删除受控外部订阅）", "Request + TrackingRecord + operation"),
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/modify"): _entry(_PRIMARY, "外部方案修改", "TrackingRecord + operation"),
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/set-enabled"): _entry(_PRIMARY, "外部方案启停", "TrackingRecord + operation"),

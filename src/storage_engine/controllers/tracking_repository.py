@@ -34,6 +34,9 @@ from __future__ import annotations
 
 import json
 import re
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -78,6 +81,62 @@ class TrackingListResult:
         return len(self.damaged_tracking_ids)
 
 
+#: Issue #223 (ADR-0007): one batch owns every tracking write for its whole
+#: duration.  The lock is process-wide and non-blocking: a second batch — or a
+#: single external write that would persist an intent — is refused instead of
+#: racing the batch.  The batch's own nested writes pass through because the
+#: owning thread carries a non-zero depth.
+_BATCH_LOCK = threading.Lock()
+_BATCH_STATE = threading.local()
+
+
+def _batch_depth() -> int:
+    return getattr(_BATCH_STATE, "depth", 0)
+
+
+@contextmanager
+def tracking_batch_lease(
+    *, batch_key: str, step: str = "tracking_batch_lease"
+) -> Iterator[str]:
+    """Hold the batch write lease (non-blocking, re-entrant per thread).
+
+    A non-zero depth means the current thread already owns the lease, so the
+    batch service and the single-item services it reuses can nest.  Any other
+    thread's batch or single tracking write fails closed with
+    ``connection_in_use``, which the API maps to 409.
+    """
+    depth = _batch_depth()
+    if depth == 0 and not _BATCH_LOCK.acquire(blocking=False):
+        raise Stage1Error(
+            "connection_in_use",
+            "另一个批量操作正在执行，请稍后再试",
+            step,
+            {"batch_key": batch_key},
+        )
+    _BATCH_STATE.depth = depth + 1
+    try:
+        yield batch_key
+    finally:
+        _BATCH_STATE.depth = depth
+        if depth == 0:
+            _BATCH_LOCK.release()
+
+
+def tracking_batch_active() -> bool:
+    """True while any batch holds the write lease (safe to call anywhere)."""
+    return _BATCH_LOCK.locked()
+
+
+def _require_foreign_batch_allows_write(step: str) -> None:
+    """Refuse a tracking write while another thread's batch owns the store."""
+    if _BATCH_LOCK.locked() and _batch_depth() == 0:
+        raise Stage1Error(
+            "connection_in_use",
+            "批量操作正在执行，请稍后再试",
+            step,
+        )
+
+
 def ensure_tracking_record(
     config: StorageConfig,
     record: TrackingRecord,
@@ -92,14 +151,14 @@ def ensure_tracking_record(
 
     Returns ``(record, created)``.
     """
+    _require_foreign_batch_allows_write("ensure_tracking_record")
     request_id = record.request_id
     if record.origin == TRACKING_ORIGIN_EXTERNAL_SYNC:
         if request_id is not None:
             raise Stage1Error(
                 "invalid_tracking_record",
                 "外部同步记录不得包含 request_id",
-                "delete_tracking_record",
-    "ensure_tracking_record",
+                "ensure_tracking_record",
                 {"field": "request_id"},
             )
         clean_id = _validated_tracking_id(record.tracking_id, "ensure_tracking_record")
@@ -181,6 +240,7 @@ def delete_tracking_record(
     process without a background worker, so this read-then-unlink inside the
     repository is the strongest guarantee the storage layer offers.
     """
+    _require_foreign_batch_allows_write(step)
     clean_id = _validated_tracking_id(tracking_id, step)
     path = _tracking_path(config, clean_id, step)
     # The read → compare → unlink runs under the same per-key lock as every other
@@ -234,6 +294,7 @@ def compare_and_swap_tracking_record(
     repository persists status + audit + revision as one atomic replace
     (D29-05).
     """
+    _require_foreign_batch_allows_write("compare_and_swap_tracking_record")
     clean_id = _validated_tracking_id(tracking_id, "compare_and_swap_tracking_record")
     ensure_storage_layout(config)
 
@@ -454,6 +515,8 @@ def _tracking_path(
 
 
 __all__ = [
+    "tracking_batch_active",
+    "tracking_batch_lease",
     "TrackingListResult",
     "compare_and_swap_tracking_record",
     "delete_tracking_record",

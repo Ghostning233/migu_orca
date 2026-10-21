@@ -1916,7 +1916,10 @@ describe('batch selection rules (issue #87)', () => {
     expect(writes.isBatchSelected('a')).toBe(false)
   })
 
-  it('selects only the submittable rows of the current result and states the rest', () => {
+  it('selects every row a batch may act on and states the locked rest', () => {
+    // Issue #223: the selection serves submit *and* delete, so a deletable row
+    // without a submit action is selectable; only an in-flight/undecided write
+    // locks a row out. Submission eligibility stays a separate question.
     const writes = session()
     writes.selectAllBatch([
       batchItem({ tracking_id: 'a' }),
@@ -1926,13 +1929,26 @@ describe('batch selection rules (issue #87)', () => {
         tracking_id: 'd',
         available_actions: [action({ code: 'RETRY', label: '重试', style: 'SECONDARY' })],
       }),
+      batchItem({ tracking_id: 'e', status: 'RECOVERY_REQUIRED', status_group: 'ATTENTION' }),
     ])
     const selection = writes.batchSelection.value
-    expect(selection.selected).toEqual(['a', 'd'])
-    expect(Object.keys(selection.skipped).sort()).toEqual(['b', 'c'])
+    expect(selection.selected).toEqual(['a', 'c', 'd'])
+    expect(Object.keys(selection.skipped).sort()).toEqual(['b', 'e'])
     expect(selection.skipped.b).toContain('正在处理中')
-    expect(selection.skipped.c).toContain('不可提交')
-    expect(writes.batchSkippedNotice.value).toContain('已跳过 2 条不可提交记录')
+    expect(selection.skipped.e).toContain('结果待确认')
+    expect(writes.batchSkippedNotice.value).toContain('已跳过 2 条无法批量处理的记录')
+    // The submit pre-check is narrower and still refuses the deletable-only row.
+    expect(writes.batchSkipReason(batchItem({ tracking_id: 'c', available_actions: [] }))).toContain('不可提交')
+  })
+
+  it('exposes the selected ids and can drop the rows a batch resolved', () => {
+    const writes = session()
+    for (const id of ['a', 'b', 'c']) writes.toggleBatchRow(id)
+    expect(writes.batchSelectedIds()).toEqual(['a', 'b', 'c'])
+
+    writes.removeBatchRows(['b', 'gone'])
+    expect(writes.batchSelectedIds()).toEqual(['a', 'c'])
+    expect(writes.isBatchSelected('b')).toBe(false)
   })
 
   it('keeps hidden selections visible in the count when a filter hides them', () => {

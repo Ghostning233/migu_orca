@@ -49,6 +49,9 @@ const EXPECTED_OPERATION_IDS = [
   'resubmitTrackingItem',
   'recoverTrackingItem',
   'submitTrackingBatch',
+  'deleteTrackingBatchPlans',
+  'deleteTrackingBatchPlansWithExternal',
+  'getTrackingBatchDeleteStatus',
   'deleteTrackingPlan',
   'syncTrackingItems',
   'modifyTrackingItem',
@@ -93,6 +96,9 @@ describe('generated API client (US-198)', () => {
       | 'resubmitTrackingItem'
       | 'recoverTrackingItem'
       | 'submitTrackingBatch'
+      | 'deleteTrackingBatchPlans'
+      | 'deleteTrackingBatchPlansWithExternal'
+      | 'getTrackingBatchDeleteStatus'
       | 'deleteTrackingPlan'
       | 'syncTrackingItems'
       | 'modifyTrackingItem'
@@ -127,6 +133,9 @@ describe('generated API client (US-198)', () => {
       | '/api/v1/tracking/items/{tracking_id}/revalidate'
       | '/api/v1/tracking/items/{tracking_id}/submit'
       | '/api/v1/tracking/batch-submit'
+      | '/api/v1/tracking/batch-delete-plan'
+      | '/api/v1/tracking/batch-delete-plan-external'
+      | '/api/v1/tracking/batch-deletions/{batch_key}'
       | '/api/v1/tracking/items/{tracking_id}/delete-plan'
       | '/api/v1/tracking/items/{tracking_id}/retry'
       | '/api/v1/tracking/items/{tracking_id}/check'
@@ -171,8 +180,8 @@ describe('generated API client (US-198)', () => {
   })
 
   it('has a non-empty expected operation set (guards the fixture)', () => {
-    // Issue #228 retired ``deleteExternalTrackingItem``, so the fixture and the
-    // generated document both hold 37 operations.
-    expect(EXPECTED_OPERATION_IDS).toHaveLength(37)
+    // Issue #228 retired ``deleteExternalTrackingItem``, issue #223 added the two batch-delete
+    // operations and the batch status read, so the fixture holds 40 operations.
+    expect(EXPECTED_OPERATION_IDS).toHaveLength(40)
   })
 })
