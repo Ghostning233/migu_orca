@@ -1062,7 +1062,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     "POST /api/v1/tracking/items/<path:tracking_id>/delete-plan": {
         "operationId": "deleteTrackingPlan",
         "summary": "删除追番方案（可选同时删除受控外部订阅）",
-        "description": "issue #92：删除本地追番方案与追番记录。存在受控外部订阅时可显式勾选同时删除该外部对象，默认不勾选；未勾选时外部订阅继续运行且 MiGuOrca 放弃管理。勾选时先以可靠管理序列删除精确映射的外部对象，只有明确成功才继续删除本地；明确失败或结果待确认时保留本地方案、追番记录、映射与恢复依据。外部删除固定不删除已下载媒体。",
+        "description": "issue #92：删除本地追番方案与追番记录。删除只有两个作用范围：默认仅删本地（Auto Bangumi 中的订阅继续运行，MiGuOrca 不再管理它们），或显式勾选同时删除受控外部订阅。勾选时先以可靠管理序列删除精确映射的外部对象，只有明确成功才继续删除本地；明确失败或结果待确认时保留本地方案、追番记录、映射与恢复依据。外部删除固定不删除已下载媒体。issue #230（ADR-0006）：当记录存在已退出但结果不可判定的外部操作（OUTCOME_UNKNOWN／RECOVERY_REQUIRED）时，同一端点承载「放弃跟踪并删除」——必须携带 expected_revision + expected_operation_id 绑定，且 delete_external 必须为 false；服务端在删除前再次读取并与绑定比较，任一变化即拒绝过期确认。PREPARED／IN_PROGRESS／操作不可读或状态未知一律拒绝。",
         "requestBody": _rb(
             SavedTrackingPlanDeleteInput,
             overlay={
@@ -1075,9 +1075,21 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                     },
                     'idempotency_key': {
                         'description': 'opaque 幂等键；同键重放复用同一次外部删除。',
+                        # The generic sample is not a legal key (non-ASCII).
+                        'example': 'delete-plan-key-1',
                     },
                     'storage_dir': {
                         'description': '服务端允许根目录下的相对目录 profile。',
+                    },
+                    'expected_revision': {
+                        'description': '风险确认绑定的追番记录 revision（与 expected_operation_id 成对出现；放弃未决操作时必填）。',
+                        # Both examples stay null so the published sample is a
+                        # legal body: the schema rejects a half pair.
+                        'example': None,
+                    },
+                    'expected_operation_id': {
+                        'description': '风险确认绑定的当前外部 operation id（与 expected_revision 成对出现；放弃未决操作时必填）。',
+                        'example': None,
                     },
                 },
             },
@@ -1089,9 +1101,13 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "data_validation_errors": "请求参数校验失败",
                 "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
                 "tracking_confirmation_required": "删除追番方案必须显式确认",
+                "validation_error": "放弃跟踪只能删除本地数据，且必须携带完整的风险确认绑定",
             },
             "404": {"tracking_not_found": "未找到该追番记录"},
-            "409": {"tracking_state_conflict": "当前追番正在进行外部操作或存在未决结果，请先恢复后再删除"},
+            "409": {
+                "tracking_state_conflict": "外部操作仍可能执行，或操作/记录已变化使确认过期",
+                "tracking_revision_conflict": "追番记录版本已变化，请刷新后重试",
+            },
             "500": {
                 "storage_error": "删除本地追番数据失败",
                 "storage_json_error": "追番记录 JSON 损坏",

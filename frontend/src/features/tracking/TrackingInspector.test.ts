@@ -783,6 +783,104 @@ describe('TrackingInspector unified plan delete (issue #92)', () => {
   })
 })
 
+describe('TrackingInspector risk-confirmed abandon (issue #230)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  function unresolved(
+    operationState: string,
+    overrides: Record<string, unknown> = {},
+  ) {
+    return detail({
+      status: 'RECOVERY_REQUIRED',
+      status_label: '需要恢复',
+      status_group: 'ATTENTION',
+      available_actions: [],
+      revision: 7,
+      current_operation: {
+        operation_id: 'op-unresolved', operation: 'REFRESH_RSS', state: operationState,
+        attempt: 1, external_result_id: null, error_type: null,
+        created_at: null, updated_at: null, completed_at: null,
+      },
+      ...overrides,
+    })
+  }
+
+  it('offers the abandon only for an exited-but-undecidable operation', async () => {
+    for (const state of ['OUTCOME_UNKNOWN', 'RECOVERY_REQUIRED']) {
+      apiGet.mockResolvedValue(unresolved(state) as never)
+      const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
+      expect(wrapper.find('#tracking-abandon-plan').text()).toBe('放弃跟踪并删除')
+      // The normal delete never renders for that record.
+      expect(wrapper.find('#tracking-delete-plan').exists()).toBe(false)
+      wrapper.unmount()
+    }
+    for (const state of ['PREPARED', 'IN_PROGRESS', 'SOMETHING_NEW']) {
+      apiGet.mockResolvedValue(unresolved(state) as never)
+      const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
+      expect(wrapper.find('#tracking-abandon-plan').exists()).toBe(false)
+      expect(wrapper.find('#tracking-delete-plan').exists()).toBe(false)
+      wrapper.unmount()
+    }
+  })
+
+  it('states the risk without claiming the remote stopped, and offers no external scope', async () => {
+    apiGet.mockResolvedValue(unresolved('OUTCOME_UNKNOWN') as never)
+    const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
+
+    const risk = wrapper.find('#tracking-abandon-risk').text()
+    expect(risk).toContain('无法确认')
+    expect(risk).toContain('可能已经建立了订阅并会继续下载')
+    expect(risk).toContain('不再跟踪')
+    expect(risk).not.toContain('确定失败')
+    expect(risk).not.toContain('可安全重试')
+
+    await wrapper.find('#tracking-abandon-plan').trigger('click')
+    // No "also delete the external subscription" checkbox may exist here.
+    expect(wrapper.find('#tracking-delete-plan-external').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('同时删除 Auto Bangumi 中的受控外部订阅')
+    expect(wrapper.find('#tracking-abandon-confirm').text()).toBe('确认放弃并删除')
+  })
+
+  it('binds the record revision and the current operation on confirm', async () => {
+    apiGet.mockResolvedValue(unresolved('RECOVERY_REQUIRED') as never)
+    const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
+
+    await wrapper.find('#tracking-abandon-plan').trigger('click')
+    await wrapper.find('#tracking-abandon-cancel').trigger('click')
+    expect(wrapper.emitted('plan-delete-requested')).toBeUndefined()
+
+    await wrapper.find('#tracking-abandon-plan').trigger('click')
+    await wrapper.find('#tracking-abandon-confirm').trigger('click')
+
+    const payload = wrapper.emitted('plan-delete-requested')?.at(-1)?.[0] as {
+      item: { tracking_id: string }
+      deleteExternal: boolean
+      expectedRevision: number
+      expectedOperationId: string
+    }
+    expect(payload).toMatchObject({
+      deleteExternal: false,
+      abandon: true,
+      expectedRevision: 7,
+      expectedOperationId: 'op-unresolved',
+    })
+    expect(payload.item.tracking_id).toBe('tracking-1')
+  })
+
+  it('keeps the read-only verification before the abandon entry (E8)', async () => {
+    apiGet.mockResolvedValue(unresolved('RECOVERY_REQUIRED') as never)
+    const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
+
+    const verify = wrapper.find('#tracking-recover-verify')
+    const abandon = wrapper.find('#tracking-abandon-plan')
+    expect(verify.exists()).toBe(true)
+    expect(abandon.exists()).toBe(true)
+    // DOM order: the verification button comes first.
+    const order = verify.element.compareDocumentPosition(abandon.element)
+    expect(order & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+})
+
 describe('TrackingInspector plan reuse (issue #93)', () => {
   beforeEach(() => { apiGet.mockReset(); apiPost.mockReset(); clearReuseHandoff() })
 
@@ -871,11 +969,27 @@ describe('TrackingInspector settled-operation delete (issue #96)', () => {
     }
   })
 
-  it('still blocks an in-flight or unresolved current operation', async () => {
-    for (const state of ['PREPARED', 'IN_PROGRESS', 'OUTCOME_UNKNOWN', 'RECOVERY_REQUIRED', 'UNKNOWN']) {
+  it('blocks every delete while the write may still run', async () => {
+    // PREPARED / IN_PROGRESS may still write, and an uninterpretable state fails
+    // closed: neither the plain delete nor the abandon is offered.
+    for (const state of ['PREPARED', 'IN_PROGRESS', 'UNKNOWN']) {
       apiGet.mockResolvedValue(withOperation(state) as never)
       const wrapper = await mountInspector()
       expect(wrapper.find('#tracking-delete-plan').exists()).toBe(false)
+      expect(wrapper.find('#tracking-abandon-plan').exists()).toBe(false)
+      wrapper.unmount()
+    }
+  })
+
+  it('turns the delete entry into the risk-confirmed abandon for an exited write', async () => {
+    // Issue #230: the same section renders the abandon (issue #230 covered in its
+    // own describe); the plain delete must not be offered for these states.
+    for (const state of ['OUTCOME_UNKNOWN', 'RECOVERY_REQUIRED']) {
+      apiGet.mockResolvedValue(withOperation(state) as never)
+      const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
+      expect(wrapper.find('#tracking-delete-plan').exists()).toBe(false)
+      expect(wrapper.find('#tracking-abandon-plan').exists()).toBe(true)
+      wrapper.unmount()
     }
   })
 })

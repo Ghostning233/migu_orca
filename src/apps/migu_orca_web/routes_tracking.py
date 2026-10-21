@@ -221,6 +221,15 @@ class TrackingItemDeletePlanView(PostView):
     delete runs first through the reliable management sequence and only a
     confirmed success is followed by the local plan/record delete; a failure or
     an unknown outcome removes nothing local.
+
+    Issue #230 (T5b, ADR-0006): an unresolved operation
+    (``OUTCOME_UNKNOWN``/``RECOVERY_REQUIRED``) can only be removed through a
+    **risk-confirmed abandon** — the same request with ``delete_external=false``
+    plus ``expected_revision`` + ``expected_operation_id``.  The server re-reads
+    both right before the delete, so a stale confirmation removes nothing.  A
+    write that may still run (``PREPARED``/``IN_PROGRESS``), an unreadable or
+    unknown operation state, and any abandon carrying ``delete_external=true``
+    are refused.
     """
 
     request_validator_model = None

@@ -1060,6 +1060,14 @@ class SavedTrackingPlanDeleteInput(BaseModel):
     ``delete_external`` defaults to false: the external subscription keeps
     running and MiGuOrca simply stops managing it. Only the checkbox the user
     explicitly ticked can ask for the external object to be removed too.
+
+    Issue #230 (T5b, ADR-0006): abandoning an unresolved operation is the same
+    local delete, confirmed as a risk.  The confirmation binds the record
+    ``expected_revision`` **and** the ``expected_operation_id`` the user saw, so a
+    stale confirmation is refused.  Both are optional (a plain delete needs
+    neither) but always travel together; the service requires them on the abandon
+    path.  The abandon path also refuses ``delete_external`` — it must never add
+    an external write.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -1072,6 +1080,9 @@ class SavedTrackingPlanDeleteInput(BaseModel):
     connection_ref: UUID | None = None
     configuration_revision: StrictInt | None = Field(default=None, ge=0)
     storage_dir: str | None = None
+    # Risk-confirmation binding (issue #230); both or neither.
+    expected_revision: StrictInt | None = Field(default=None, ge=1)
+    expected_operation_id: StrictStr | None = None
 
     @field_validator("tracking_id")
     @classmethod
@@ -1102,6 +1113,26 @@ class SavedTrackingPlanDeleteInput(BaseModel):
     def _require_delete_confirmation(self) -> SavedTrackingPlanDeleteInput:
         if self.confirm is not True:
             raise ValueError("confirm must be true")
+        return self
+
+    @field_validator("expected_operation_id")
+    @classmethod
+    def _clean_expected_operation_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("expected_operation_id cannot be empty")
+        return cleaned
+
+    @model_validator(mode="after")
+    def _risk_binding_travels_together(self) -> SavedTrackingPlanDeleteInput:
+        # A half binding cannot identify one operation, so it is never
+        # accepted: the pair is what makes a stale confirmation detectable.
+        if (self.expected_revision is None) != (self.expected_operation_id is None):
+            raise ValueError(
+                "风险确认必须同时绑定 expected_revision 与 expected_operation_id"
+            )
         return self
 
     @model_validator(mode="after")

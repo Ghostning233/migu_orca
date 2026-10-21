@@ -110,6 +110,9 @@ def test_delete_plan_documents_when_the_connection_is_required() -> None:
         "connection_ref",
         "configuration_revision",
         "storage_dir",
+        # Issue #230: the risk-confirmation binding (both optional, paired).
+        "expected_revision",
+        "expected_operation_id",
     }
 
 
@@ -147,6 +150,23 @@ def test_resubmit_documents_both_branches() -> None:
             ]
         }
     }
+
+
+def test_delete_plan_example_is_a_valid_request_body() -> None:
+    """Issue #230: the published sample must not be rejected by the model.
+
+    The risk-confirmation binding is a paired rule, so a sample that carries only
+    one half would teach callers an invalid body.
+    """
+    from apps.migu_orca_web.schemas import SavedTrackingPlanDeleteInput
+
+    spec = generate_openapi()
+    body = spec["paths"]["/api/v1/tracking/items/{tracking_id}/delete-plan"]["post"]["requestBody"]["content"]["application/json"]
+    example = body.get("examples", {}).get("", {}).get("value") or body.get("example")
+    assert isinstance(example, dict)
+    assert example["expected_revision"] is None
+    assert example["expected_operation_id"] is None
+    SavedTrackingPlanDeleteInput.model_validate({**example, "tracking_id": "trk-1"})
 
 
 def test_conditional_rules_do_not_change_the_generated_types() -> None:

@@ -1484,6 +1484,133 @@ describe('tracking plan delete session (issue #92)', () => {
     expect(effects).toEqual([{ kind: 'recheck', trackingId: 'tracking-1', refreshList: true }])
   })
 
+  it('carries the risk binding and never the external scope on an abandon', () => {
+    const abandon = session()
+    const started = abandon.beginPlanDelete(
+      {
+        item: item(), deleteExternal: false, abandon: true,
+        expectedRevision: 7, expectedOperationId: 'op-unresolved',
+      },
+      { connection: null },
+    )
+    expect(started.accepted).toBe(true)
+    expect(bodyOf(started)).toMatchObject({
+      confirm: true,
+      delete_external: false,
+      expected_revision: 7,
+      expected_operation_id: 'op-unresolved',
+    })
+    // A local-only abandon carries no credential at all.
+    expect(Object.keys(bodyOf(started))).not.toContain('connection_ref')
+
+    // An abandon that also asks to delete the external object is refused:
+    // ADR-0006 forbids turning the last exit into a new external write.
+    const mixed = session()
+    expect(mixed.beginPlanDelete(
+      { item: item(), deleteExternal: true, abandon: true, expectedRevision: 7, expectedOperationId: 'op-unresolved' },
+      { connection: CONNECTION },
+    ).accepted).toBe(false)
+    expect(mixed.planDelete.value).toBeNull()
+
+    // Half a binding is not a confirmation: the request is refused instead of
+    // degrading into a plain delete without the compare-and-swap.
+    const half = session()
+    expect(half.beginPlanDelete(
+      { item: item(), deleteExternal: false, abandon: true, expectedRevision: 7 },
+      { connection: null },
+    ).accepted).toBe(false)
+    expect(half.planDelete.value).toBeNull()
+    expect(session().beginPlanDelete(
+      { item: item(), deleteExternal: false, abandon: true, expectedOperationId: 'op-unresolved' },
+      { connection: null },
+    ).accepted).toBe(false)
+  })
+
+  it('never describes an abandoned request as an external delete failure', () => {
+    // A stale confirmation (409) and an incomplete binding (400) both mean the
+    // abandon did not run: no external system was contacted, so its copy must
+    // not mention the external object at all.
+    for (const status of [409, 400]) {
+      const writes = session()
+      writes.beginPlanDelete(
+        { item: item(), deleteExternal: false, abandon: true, expectedRevision: 7, expectedOperationId: 'op-unresolved' },
+        { connection: null },
+      )
+      writes.failPlanDelete({ status, httpError: true })
+      const result = writes.planDelete.value!
+      expect(result.state).toBe('ABANDON_FAILED')
+      expect(result.message).toContain('本次放弃未生效')
+      expect(result.message).not.toContain('外部订阅')
+      expect(result.message).not.toContain('外部删除')
+      expect(result.message).not.toContain('确定失败')
+    }
+
+    // A missing record is its own outcome: nothing was preserved because
+    // nothing is there any more.
+    const missing = session()
+    missing.beginPlanDelete(
+      { item: item(), deleteExternal: false, abandon: true, expectedRevision: 7, expectedOperationId: 'op-unresolved' },
+      { connection: null },
+    )
+    missing.failPlanDelete({ status: 404, httpError: true })
+    expect(missing.planDelete.value!.state).toBe('ABANDON_MISSING')
+    expect(missing.planDelete.value!.message).toContain('已不存在')
+
+    // A plain local delete never borrows the external wording either.
+    const local = session()
+    local.beginPlanDelete({ item: item(), deleteExternal: false }, { connection: null })
+    local.failPlanDelete({ status: 409, httpError: true })
+    expect(local.planDelete.value!.state).toBe('LOCAL_FAILED')
+    expect(local.planDelete.value!.message).toContain('本次删除未生效')
+    expect(local.planDelete.value!.message).not.toContain('外部订阅')
+
+    const localUnknown = session()
+    localUnknown.beginPlanDelete({ item: item(), deleteExternal: false }, { connection: null })
+    localUnknown.failPlanDelete({ status: 500, httpError: true })
+    expect(localUnknown.planDelete.value!.state).toBe('LOCAL_UNKNOWN')
+    expect(localUnknown.planDelete.value!.message).toContain('删除结果待确认')
+    expect(localUnknown.planDelete.value!.message).not.toContain('外部订阅')
+
+    // An unreadable answer leaves the local outcome unknown instead of claiming
+    // a verdict about the remote system.
+    const unknown = session()
+    unknown.beginPlanDelete(
+      { item: item(), deleteExternal: false, abandon: true, expectedRevision: 7, expectedOperationId: 'op-unresolved' },
+      { connection: null },
+    )
+    unknown.failPlanDelete({ status: 503, httpError: true })
+    expect(unknown.planDelete.value!.state).toBe('ABANDON_UNKNOWN')
+    expect(unknown.planDelete.value!.message).toContain('放弃结果待确认')
+    expect(unknown.planDelete.value!.message).not.toContain('外部订阅')
+
+    // The ordinary external delete keeps its own wording.
+    const external = session()
+    external.beginPlanDelete({ item: item(), deleteExternal: true }, { connection: CONNECTION })
+    external.failPlanDelete({ status: 409, httpError: true })
+    expect(external.planDelete.value!.state).toBe('EXTERNAL_FAILED')
+    expect(external.planDelete.value!.message).toContain('未删除该受控外部订阅')
+  })
+
+  it('reports the abandon without claiming the remote stopped', () => {
+    const wanderer = session()
+    wanderer.beginPlanDelete(
+      { item: item(), deleteExternal: false, abandon: true, expectedRevision: 7, expectedOperationId: 'op-unresolved' },
+      { connection: null },
+    )
+    wanderer.finishPlanDelete(planDeleteResult({ external_deleted: false }))
+    const feedback = wanderer.planDelete.value!
+    expect(feedback.state).toBe('DELETED')
+    const effects = wanderer.finishPlanDelete(planDeleteResult({ external_deleted: false }))
+    const notify = effects.find((effect) => effect.kind === 'notify') as {
+      feedback: { title: string; message: string }
+    }
+    expect(notify.feedback.title).toBe('已放弃跟踪并删除追番方案')
+    expect(notify.feedback.message).toContain('已放弃跟踪并删除本地方案')
+    expect(notify.feedback.message).toContain('继续下载')
+    expect(notify.feedback.message).not.toContain('确定失败')
+    expect(notify.feedback.message).not.toContain('可安全重试')
+  })
+
   it('keeps the local plan on a definite external failure and on an unreadable one', () => {
     const failed = session()
     failed.beginPlanDelete({ item: item(), deleteExternal: true }, { connection: CONNECTION })
