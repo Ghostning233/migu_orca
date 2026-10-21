@@ -184,34 +184,6 @@ def test_saved_management_actions_send_only_bound_connection_fields(page, live_s
                 }
             )
             return
-        if request.method == "POST" and path.startswith("/settings/autobangumi/probe"):
-            route.fulfill(
-                json={
-                    "ok": True,
-                    "result": {
-                        "probe_status": "VERIFIED",
-                        "version": "3.1.18",
-                        "adapter": "legacy_3_1",
-                        "subscription_list": "SUPPORTED",
-                        "subscription_detail": "SUPPORTED",
-                        "subscription_submit": "SUPPORTED",
-                        "subscription_modify": "SUPPORTED",
-                        "subscription_enable": "SUPPORTED",
-                        "subscription_disable": "SUPPORTED",
-                        "subscription_delete": "SUPPORTED",
-                        "rss_list": "SUPPORTED",
-                        "rss_modify": "SUPPORTED",
-                        "rss_enable": "SUPPORTED",
-                        "rss_disable": "SUPPORTED",
-                        "rss_delete": "SUPPORTED",
-                        "rss_refresh": "SUPPORTED",
-                        "external_verify": "SUPPORTED",
-                        "checked_at": None,
-                        "safe_message": "ok",
-                    },
-                }
-            )
-            return
         if request.method == "POST" and "/tracking/items/tracking-a/" in path:
             captured.append(request.post_data_json or {})
             route.fulfill(
@@ -301,39 +273,6 @@ def test_saved_sync_uses_the_saved_connection_and_sends_ref_revision(page, live_
                         },
                         "status_groups": _status_groups_for([item]),
                         "warnings": [],
-                    },
-                }
-            )
-            return
-        if request.method == "POST" and path.startswith("/settings/autobangumi/probe"):
-            route.fulfill(
-                json={
-                    "ok": True,
-                    "result": {
-                        "probe_status": "VERIFIED",
-                        "version": "3.1.18",
-                        "adapter": "legacy_3_1",
-                        **{
-                            name: "SUPPORTED"
-                            for name in (
-                                "subscription_list",
-                                "subscription_detail",
-                                "subscription_submit",
-                                "subscription_modify",
-                                "subscription_enable",
-                                "subscription_disable",
-                                "subscription_delete",
-                                "rss_list",
-                                "rss_modify",
-                                "rss_enable",
-                                "rss_disable",
-                                "rss_delete",
-                                "rss_refresh",
-                                "external_verify",
-                            )
-                        },
-                        "checked_at": None,
-                        "safe_message": "ok",
                     },
                 }
             )
@@ -440,9 +379,6 @@ def test_saved_verify_external_preserves_unknown_source_lock(page, live_server_u
                     },
                 }
             )
-            return
-        if request.method == "POST" and path.startswith("/settings/autobangumi/probe"):
-            route.fulfill(json={"ok": True, "result": _probe_capabilities()})
             return
         if request.method == "POST" and path.endswith("/recover"):
             calls.append(request.post_data_json or {})
@@ -1185,9 +1121,6 @@ def test_generation_switch_does_not_reuse_old_management_intent(page, live_serve
         if request.method == "GET" and path == "/tracking/items/tracking-a":
             route.fulfill(json={"ok": True, "result": _detail_payload(item)})
             return
-        if request.method == "POST" and path.endswith("/probe"):
-            route.fulfill(json={"ok": True, "result": _probe_capabilities()})
-            return
         if request.method == "POST" and "/tracking/items/tracking-a/" in path:
             writes.append(request.post_data_json or {})
             route.continue_()
@@ -1287,9 +1220,6 @@ def test_submit_retry_singleflight_holds_unknown_lock_across_generation(page, li
             return
         if request.method == "GET" and path == "/tracking/items/tracking-a":
             route.fulfill(json={"ok": True, "result": _detail_payload(item)})
-            return
-        if request.method == "POST" and path.endswith("/probe"):
-            route.fulfill(json={"ok": True, "result": _probe_capabilities()})
             return
         if request.method == "POST" and (path.endswith("/submit") or path.endswith("/retry")):
             posts.append(request.post_data_json or {})

@@ -558,6 +558,7 @@ class TestReducedMotionAndFeedback:
         _require_dist()
         page.emulate_media(reduced_motion="reduce")
         held: list[Any] = []
+        probes: list[str] = []
 
         def handler(route: Any, request: Any) -> None:
             path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
@@ -572,17 +573,9 @@ class TestReducedMotionAndFeedback:
                 }})
                 return
             if request.method == "POST" and path == "/settings/autobangumi/probe":
-                route.fulfill(json={"ok": True, "result": {
-                    "probe_status": "VERIFIED", "version": "3.1.18", "adapter": "legacy_3_1",
-                    "subscription_list": "SUPPORTED", "subscription_detail": "SUPPORTED",
-                    "subscription_submit": "SUPPORTED", "subscription_modify": "SUPPORTED",
-                    "subscription_enable": "SUPPORTED", "subscription_disable": "SUPPORTED",
-                    "subscription_delete": "SUPPORTED", "rss_list": "SUPPORTED",
-                    "rss_modify": "SUPPORTED", "rss_enable": "SUPPORTED",
-                    "rss_disable": "SUPPORTED", "rss_delete": "SUPPORTED",
-                    "rss_refresh": "SUPPORTED", "external_verify": "SUPPORTED",
-                    "checked_at": None, "safe_message": "ok",
-                }})
+                # A reintroduced probe must be visible to the assertion below.
+                probes.append(path)
+                route.fulfill(json={"ok": True, "result": {}})
                 return
             if request.method == "GET" and path == "/tracking/items":
                 route.fulfill(json={"ok": True, "result": {
@@ -628,6 +621,7 @@ class TestReducedMotionAndFeedback:
             "warnings": [], "items": [],
         }})
         expect(sync).to_be_enabled()
+        assert probes == [], "loading or syncing must never probe"
 
 
 class TestRuntimeQuality:

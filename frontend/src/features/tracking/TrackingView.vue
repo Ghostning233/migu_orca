@@ -1126,14 +1126,14 @@ onBeforeUnmount(() => {
             <span v-if="batchSummary.hidden" class="tracking-batch-hidden">
               （其中 {{ batchSummary.hidden }} 部不在当前筛选内）
             </span>
-            <span class="tracking-batch-dot" aria-hidden="true">·</span>
+            <span class="tracking-batch-dot">·</span>
             <button
               id="tracking-batch-select-all"
               type="button"
               class="tracking-text-button"
               @click="selectAllCurrent"
             >全选当前 {{ filteredItems.length }} 部</button>
-            <span class="tracking-batch-dot" aria-hidden="true">·</span>
+            <span class="tracking-batch-dot">·</span>
             <button
               id="tracking-batch-clear"
               type="button"
@@ -1182,7 +1182,7 @@ onBeforeUnmount(() => {
             :data-tracking-id="item.tracking_id"
           >
             <!-- 共享背景/色条装饰层：detail 选中决定唯一左条，批量选中与悬停只改底色。 -->
-            <span class="tracking-row-background" aria-hidden="true" />
+            <span class="tracking-row-background" />
             <button
               type="button"
               class="tracking-list-item"

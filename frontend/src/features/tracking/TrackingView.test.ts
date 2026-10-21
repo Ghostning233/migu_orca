@@ -220,7 +220,6 @@ describe('TrackingView page skeleton and row model (#225)', () => {
           }
     })
     apiPost.mockImplementation(async (path) => {
-      if (path === '/api/v1/settings/autobangumi/probe') return caps as never
       if (path !== '/api/v1/tracking/sync') throw new Error(`unexpected POST ${path}`)
       return {
         sync_status: 'COMPLETE', checked_at: '2026-09-14T00:00:00Z', capabilities: caps,
@@ -528,9 +527,7 @@ describe('TrackingView bounded read-only check (issue #183)', () => {
     } as never)
     await mountPending()
 
-    const families = apiPost.mock.calls
-      .map((call) => call[0])
-      .filter((path) => path !== '/api/v1/settings/autobangumi/probe')
+    const families = apiPost.mock.calls.map((call) => call[0])
     expect(families).toEqual(['/api/v1/tracking/items/{tracking_id}/check'])
   })
 })
@@ -723,7 +720,6 @@ describe('TrackingView risk-confirmed resubmission (issue #184)', () => {
   it('treats a stale confirmation as a conflict and starts over from a new check', async () => {
     let offers = 0
     apiPost.mockImplementation(async (path: string, options?: { body?: unknown }) => {
-      if (path === '/api/v1/settings/autobangumi/probe') return caps as never
       if (path.endsWith('/check')) {
         return {
           tracking_id: 'tracking-1', action: 'VERIFY_EXTERNAL', outcome: 'RECOVERY_REQUIRED',

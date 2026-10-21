@@ -470,7 +470,10 @@ def test_low_height_with_multi_select_keeps_the_list_reachable(
     assert metrics["listHeight"] > 0
     if metrics["panelScrollable"]:
         page.evaluate("() => { const p = document.querySelector('.tracking-list-panel'); p.scrollTop = p.scrollHeight }")
-        assert page.locator(".tracking-list-row").last.is_visible()
+        last = page.locator(".tracking-list-row").last.bounding_box()
+        panel = page.locator(".tracking-list-panel").bounding_box()
+        assert last is not None and panel is not None
+        assert last["y"] >= panel["y"] and last["y"] + last["height"] <= panel["y"] + panel["height"]
 
 
 def test_row_spec_structure_and_visual_tokens(
@@ -500,7 +503,10 @@ def test_row_spec_structure_and_visual_tokens(
     assert abs(g["poster"]["width"] - 60) <= 1
     assert abs(g["poster"]["height"] - 90) <= 1
     assert g["arrow"]["width"] == 44
-    assert g["arrow"]["height"] >= 44
+    # The arrow fills the whole row content area (the standard poster height is
+    # 90px), so the entire rectangle is the hit area.
+    assert g["arrow"]["height"] == g["body"]["height"]
+    assert g["arrow"]["height"] >= 90
     assert g["title"]["width"] > 0
     assert g["body"]["width"] <= g["row"]["width"] - 44
     # Hovering the arrow never squeezes or moves the title column.
@@ -741,7 +747,7 @@ def test_batch_toolbar_is_its_own_row_with_the_single_primary_action(
 
 
 
-def _sync_page(page: Page, live_server_url: str, storage_dir, sync_result: dict[str, Any]) -> None:
+def _sync_page(page: Page, live_server_url: str, storage_dir, sync_result: dict[str, Any]) -> list[str]:
     """Open the tracking page with a saved connection and a fixed sync result."""
     ref = "11111111-1111-4111-8111-111111111111"
     probes: list[str] = []
@@ -755,18 +761,9 @@ def _sync_page(page: Page, live_server_url: str, storage_dir, sync_result: dict[
             }})
             return
         if request.method == "POST" and path == "/settings/autobangumi/probe":
+            # B1/Stage 39: loading must not probe; keep a visible counter.
             probes.append(path)
-            route.fulfill(json={"ok": True, "result": {
-                "probe_status": "VERIFIED", "version": "3.1.18", "adapter": "legacy_3_1",
-                "subscription_list": "SUPPORTED", "subscription_detail": "SUPPORTED",
-                "subscription_submit": "SUPPORTED", "subscription_modify": "SUPPORTED",
-                "subscription_enable": "SUPPORTED", "subscription_disable": "SUPPORTED",
-                "subscription_delete": "SUPPORTED", "rss_list": "SUPPORTED",
-                "rss_modify": "SUPPORTED", "rss_enable": "SUPPORTED",
-                "rss_disable": "SUPPORTED", "rss_delete": "SUPPORTED",
-                "rss_refresh": "SUPPORTED", "external_verify": "SUPPORTED",
-                "checked_at": None, "safe_message": "ok",
-            }})
+            route.fulfill(json={"ok": True, "result": {}})
             return
         if request.method == "GET" and path == "/tracking/items":
             item = _item(1)
@@ -786,6 +783,7 @@ def _sync_page(page: Page, live_server_url: str, storage_dir, sync_result: dict[
     set_storage_preferences(page, storage_dir)
     page.goto(f"{live_server_url}/app/tracking")
     page.wait_for_selector("#tracking-sync")
+    return probes
 
 
 def _sync_once(page: Page) -> None:
@@ -799,7 +797,7 @@ def test_clean_sync_success_uses_the_global_notification(
 ) -> None:
     """B5: a clean sync success is a global toast, not an inline page region."""
     caps = _probe_caps()
-    _sync_page(page, live_server_url, storage_dir, {
+    probes = _sync_page(page, live_server_url, storage_dir, {
         "sync_status": "COMPLETE", "checked_at": "2026-10-21T00:00:00Z",
         "capabilities": caps,
         "summary": {"checked": 1, "created": 0, "updated": 1, "unchanged": 0,
@@ -808,6 +806,7 @@ def test_clean_sync_success_uses_the_global_notification(
     })
     _sync_once(page)
 
+    assert probes == [], "loading must never probe; the summary is the only source"
     expect(page.locator(".global-notification")).to_contain_text("同步完成")
     # The list-module status area stays empty for a clean success.
     assert page.locator("#tracking-sync-status").count() == 0
@@ -819,7 +818,7 @@ def test_degraded_or_ignoring_sync_stays_in_the_list_status_area(
 ) -> None:
     """B5: incomplete / ignored sync results stay in the bounded list toolbar area."""
     caps = _probe_caps()
-    _sync_page(page, live_server_url, storage_dir, {
+    probes = _sync_page(page, live_server_url, storage_dir, {
         "sync_status": "PARTIAL", "checked_at": "2026-10-21T00:00:00Z",
         "capabilities": caps,
         "summary": {"checked": 3, "created": 0, "updated": 1, "unchanged": 1,
@@ -828,6 +827,7 @@ def test_degraded_or_ignoring_sync_stays_in_the_list_status_area(
     })
     _sync_once(page)
 
+    assert probes == [], "loading must never probe; the summary is the only source"
     status = page.locator("#tracking-sync-status")
     expect(status).to_be_visible()
     expect(status).to_contain_text("同步部分完成")
@@ -841,7 +841,7 @@ def test_complete_sync_with_ignored_strangers_stays_inline(
 ) -> None:
     """B5: even a COMPLETE result that ignored strangers stays in the list area."""
     caps = _probe_caps()
-    _sync_page(page, live_server_url, storage_dir, {
+    probes = _sync_page(page, live_server_url, storage_dir, {
         "sync_status": "COMPLETE", "checked_at": "2026-10-21T00:00:00Z",
         "capabilities": caps,
         "summary": {"checked": 3, "created": 0, "updated": 1, "unchanged": 1,
@@ -850,6 +850,7 @@ def test_complete_sync_with_ignored_strangers_stays_inline(
     })
     _sync_once(page)
 
+    assert probes == [], "loading must never probe; the summary is the only source"
     status = page.locator("#tracking-sync-status")
     expect(status).to_be_visible()
     expect(status).to_contain_text("忽略 2 条")
