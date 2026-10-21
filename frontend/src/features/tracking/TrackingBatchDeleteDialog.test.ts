@@ -96,7 +96,7 @@ describe('TrackingBatchDeleteDialog (issue #223)', () => {
     wrapper.unmount()
   })
 
-  it('cancels with 取消 and Escape without deleting', async () => {
+  it('cancels with 取消, Escape or a backdrop click, never deleting', async () => {
     const wrapper = mountDialog()
     await wrapper.find('#tracking-batch-delete-cancel').trigger('click')
     expect(wrapper.emitted('cancel')).toHaveLength(1)
@@ -104,6 +104,10 @@ describe('TrackingBatchDeleteDialog (issue #223)', () => {
 
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     expect(wrapper.emitted('cancel')).toHaveLength(2)
+
+    // The scrim behaves like the shared ConfirmDialog scrim.
+    await wrapper.find('.confirm-dialog-backdrop').trigger('click')
+    expect(wrapper.emitted('cancel')).toHaveLength(3)
     expect(wrapper.emitted('confirm')).toBeUndefined()
     wrapper.unmount()
   })

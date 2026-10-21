@@ -341,23 +341,36 @@ class TestBatchLocalPreCheck:
     def test_only_the_submittable_plans_are_sent(
         self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:
+        """#223: deletable ACTIVE rows are selectable, but submit stays narrow."""
         bodies = _open(
             page,
             live_server_url,
             storage_dir,
-            [_pending("tracking-a", "可提交 A"), _processing("tracking-b", "处理中 B")],
+            [
+                _pending("tracking-a", "可提交 A"),
+                _processing("tracking-b", "处理中 B"),
+                _deletable("tracking-c", "追番中 C", "ACTIVE"),
+            ],
         )
 
         page.locator("#tracking-batch-mode").click()
         page.locator("#tracking-batch-select-all").click()
-        expect(page.locator("#tracking-batch-count")).to_contain_text("已选 1 部")
+        # A + the ACTIVE row (deletable) are selected; the in-flight row is not.
+        expect(page.locator("#tracking-batch-count")).to_contain_text("已选 2 部")
+        expect(page.locator("#tracking-batch-skipped")).to_contain_text("正在处理中")
         page.locator("#tracking-batch-submit").click()
         page.wait_for_selector("#tracking-mode-continue", timeout=10_000)
         page.locator("#tracking-mode-continue").click()
 
+        # Submit eligibility did not widen: the ACTIVE row is reported as a
+        # pre-check skip and never reaches the batch request.
+        page.wait_for_selector(".confirm-dialog", timeout=10_000)
+        expect(page.locator(".confirm-dialog")).to_contain_text("追番中 C")
+        expect(page.locator(".confirm-dialog")).to_contain_text("当前状态不可提交")
+        page.locator(".confirm-dialog .primary-button").click()
+
         page.wait_for_selector("#tracking-batch-result", timeout=10_000)
         assert len(bodies) == 1
-        # The skipped plan is never part of the batch request.
         assert [entry["tracking_id"] for entry in bodies[0]["items"]] == ["tracking-a"]
 
 
@@ -536,12 +549,12 @@ class TestBatchDeleteJourney:
         expect(page.locator("#tracking-batch-delete-summary")).to_contain_text("已删除 2 条")
         entries = page.locator("#tracking-batch-delete-result .tracking-batch-entries li")
         expect(entries).to_have_count(2)
-        expect(entries.first).to_contain_text("已删除本地记录")
+        # AC3: the deleted entry keeps its title after the refresh removed the row.
+        expect(entries.first).to_contain_text("番 A：已删除本地记录")
         # AC6: no retry-all entry exists in the result panel.
         assert page.locator("#tracking-batch-delete-result button").count() == 0
         # Deleted rows leave the list on the post-batch refresh.
-        page.wait_for_timeout(300)
-        assert page.locator(".tracking-list-item").count() == 0
+        expect(page.locator(".tracking-list-item")).to_have_count(0)
 
     def test_external_scope_is_opt_in_and_keeps_a_failed_entry(
         self, page: Page, live_server_url: str, storage_dir: Path

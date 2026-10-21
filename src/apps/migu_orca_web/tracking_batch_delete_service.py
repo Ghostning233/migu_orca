@@ -36,18 +36,29 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
 from apps.migu_orca_web.schemas import (
+    _IDEMPOTENCY_KEY_RE,
     SavedTrackingBatchDeleteExternalInput,
     SavedTrackingBatchDeleteInput,
     SavedTrackingBatchDeleteItem,
     SavedTrackingPlanDeleteInput,
 )
-from apps.migu_orca_web.tracking_plan_delete_service import run_saved_tracking_plan_delete
+from apps.migu_orca_web.tracking_plan_delete_service import (
+    # ADR-0006 matrix, imported from the single composite-delete authority so
+    # the batch can never drift from it.  The authoritative verdict is still
+    # that service's own re-read; these only classify the skip reason.
+    _ABANDONABLE_OPERATION_STATES,
+    _IN_FLIGHT_OPERATION_STATES,
+    _SETTLED_OPERATION_STATES,
+    _UNDELETABLE_STATUSES,
+    run_saved_tracking_plan_delete,
+)
 from shared.errors import Stage1Error
 from storage_engine.controllers.operation_repository import load_tracking_operation
 from storage_engine.controllers.storage_config import (
@@ -58,20 +69,6 @@ from storage_engine.controllers.storage_primitives import write_text_atomic
 from storage_engine.controllers.tracking_repository import (
     load_tracking_record,
     tracking_batch_lease,
-)
-from tracking_engine.models.operation import (
-    TRACKING_OPERATION_STATE_FAILED,
-    TRACKING_OPERATION_STATE_IN_PROGRESS,
-    TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN,
-    TRACKING_OPERATION_STATE_PREPARED,
-    TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
-    TRACKING_OPERATION_STATE_SUCCEEDED,
-)
-from tracking_engine.models.tracking import (
-    TRACKING_STATUS_RECOVERY_REQUIRED,
-    TRACKING_STATUS_REVALIDATING,
-    TRACKING_STATUS_SUBMITTING,
-    TRACKING_STATUS_VERIFYING_EXTERNAL,
 )
 
 _STEP = "run_saved_tracking_batch_delete"
@@ -100,36 +97,66 @@ _SKIP_BY_ERROR = {
 }
 
 #: ADR-0006/ADR-0007: an entry in one of these states may still own an external
-#: write (or an undecidable outcome), so a batch must not touch it.  The verdict
-#: is re-derived from the current operation at execution time; this set only
-#: classifies the skip reason *before* the authoritative single-delete call.
-_UNRESOLVED_OPERATION_STATES = frozenset(
-    {
-        TRACKING_OPERATION_STATE_PREPARED,
-        TRACKING_OPERATION_STATE_IN_PROGRESS,
-        TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN,
-        TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
-    }
-)
+#: write (or an undecidable outcome), so a batch must not touch it.  The sets are
+#: the single composite-delete service's own matrix (imported above), so this
+#: module can never disagree with the authority that finally guards the delete.
+_UNRESOLVED_OPERATION_STATES = _IN_FLIGHT_OPERATION_STATES | _ABANDONABLE_OPERATION_STATES
+_LOCKED_STATUSES = _UNDELETABLE_STATUSES
 
-#: Finished history: shown in the operation log but never a delete lock.
-_SETTLED_OPERATION_STATES = frozenset(
-    {TRACKING_OPERATION_STATE_SUCCEEDED, TRACKING_OPERATION_STATE_FAILED}
-)
 
-#: Statuses that lock a delete when the record has no operation pointer.
-_LOCKED_STATUSES = frozenset(
-    {
-        TRACKING_STATUS_SUBMITTING,
-        TRACKING_STATUS_REVALIDATING,
-        TRACKING_STATUS_VERIFYING_EXTERNAL,
-        TRACKING_STATUS_RECOVERY_REQUIRED,
-    }
-)
+def ensure_no_racing_single_writes(config: StorageConfig, tracking_ids: set[str]) -> None:
+    """Refuse a batch while another record already owns an external write.
 
-#: Same shape the request schemas accept; kept here so a query/replay of a
+    ADR-0007 decision 3 applies to every batch, so both batch routes call this
+    before taking the batch lease.  An entry of this batch is excluded (its own
+    unresolved write is a per-entry skip, AC4/AC8).
+    """
+    if _racing_single_writes(config, tracking_ids):
+        raise Stage1Error(
+            "connection_in_use",
+            "另一个外部操作正在执行，请稍后再试",
+            _STEP,
+        )
+
+
+def _racing_single_writes(config: StorageConfig, batch_ids: set[str]) -> list[str]:
+    """Operation ids of **other** records that may still be writing externally.
+
+    ADR-0007 decision 3 excludes a batch from overlapping another batch *or a
+    single external write*.  The batch holds the write lease for its whole run,
+    which stops any later single write; this check closes the other direction: a
+    single write that already persisted its intent (PREPARED can still be resumed
+    into IN_PROGRESS, ADR-0006) keeps the batch away instead of letting the batch
+    become the later, uninvited side.  An unreadable operation file fails closed.
+    """
+    directory = config.tracking_operations_dir
+    if not directory.is_dir():
+        return []
+    racing: list[str] = []
+    try:
+        candidates = sorted(directory.glob("*.json"))
+    except OSError:
+        return ["<unreadable>"]
+    for candidate in candidates:
+        try:
+            operation = load_tracking_operation(config, candidate.stem)
+        except Stage1Error:
+            return ["<unreadable>"]
+        if getattr(operation, "state", None) not in _IN_FLIGHT_OPERATION_STATES:
+            continue
+        if getattr(operation, "tracking_id", None) in batch_ids:
+            # This entry's own unresolved write is skipped per entry, not a
+            # reason to refuse the whole batch (AC4/AC8).
+            continue
+        racing.append(operation.operation_id)
+    return racing
+
+
+#: Same shape the request schemas accept (imported), so a query/replay of a
 #: hand-crafted key can never become a path segment.
-_BATCH_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-:=]{0,199}$")
+_BATCH_KEY_RE = _IDEMPOTENCY_KEY_RE
+#: The query path parameter is named ``batch_key``; keep its 400 detail honest.
+_BATCH_KEY_FIELD = "batch_key"
 _RECORD_VERSION = 1
 _RECORD_FILENAME_PREFIX = "tracking_batch_delete_"
 _MAX_RECORD_BYTES = 256 * 1024
@@ -146,7 +173,7 @@ def _validated_batch_key(batch_key: str, step: str = _STEP) -> str:
             "validation_error",
             "批量删除的幂等键不合法",
             step,
-            {"field": "idempotency_key"},
+            {"field": _BATCH_KEY_FIELD},
         )
     return key
 
@@ -206,8 +233,15 @@ def _fingerprint(kind: str, items: list[SavedTrackingBatchDeleteItem]) -> str:
 
 
 def _item_key(batch_key: str, tracking_id: str) -> str:
-    """Deterministic per-entry idempotency key, so a replay never re-writes."""
-    return f"{batch_key[:120]}-{tracking_id}"
+    """Deterministic per-entry idempotency key, so a replay never re-writes.
+
+    The batch key is folded through a digest instead of a prefix truncation: two
+    long batch keys can never collapse onto one management key (and the derived
+    key stays inside the single-delete contract's 200-character bound no matter
+    how long the tracking id is).
+    """
+    digest = hashlib.sha256(f"{batch_key}\x00{tracking_id}".encode()).hexdigest()
+    return f"{batch_key[:80]}-{digest}"
 
 
 def _summary(total: int, items: list[dict[str, Any]]) -> dict[str, int]:
@@ -265,6 +299,8 @@ def run_saved_tracking_batch_delete(
         if existing.get("state") == STATE_COMPLETED:
             # Same key + same entries: return the stored outcome, write nothing.
             return _public(existing)
+
+    ensure_no_racing_single_writes(config, {entry.tracking_id for entry in payload.items})
 
     # ADR-0007 decision 3: the whole batch owns the tracking store while it
     # runs.  A concurrent batch or single external write fails closed here.
@@ -351,29 +387,37 @@ def _delete_one(
             "external_deleted": False,
             "skip_reason": skip_reason,
         }
-    single = SavedTrackingPlanDeleteInput(
-        tracking_id=entry.tracking_id,
-        confirm=True,
-        delete_external=delete_external,
-        idempotency_key=_item_key(batch_key, entry.tracking_id),
-        # The single delete contract takes the canonical string form.
-        connection_ref=(
-            str(payload.connection_ref)
-            if isinstance(payload, SavedTrackingBatchDeleteExternalInput)
-            else None
-        ),
-        configuration_revision=(
-            payload.configuration_revision
-            if isinstance(payload, SavedTrackingBatchDeleteExternalInput)
-            else None
-        ),
-        storage_dir=payload.storage_dir,
-        # NOT the single-delete risk-confirmation pair: the batch already
-        # re-read the revision and the current operation in `_skip_reason`, and
-        # the batch lease makes that read authoritative until the delete runs.
-    )
     try:
+        single = SavedTrackingPlanDeleteInput(
+            tracking_id=entry.tracking_id,
+            confirm=True,
+            delete_external=delete_external,
+            idempotency_key=_item_key(batch_key, entry.tracking_id),
+            # The single delete contract takes the canonical string form.
+            connection_ref=(
+                str(payload.connection_ref)
+                if isinstance(payload, SavedTrackingBatchDeleteExternalInput)
+                else None
+            ),
+            configuration_revision=(
+                payload.configuration_revision
+                if isinstance(payload, SavedTrackingBatchDeleteExternalInput)
+                else None
+            ),
+            storage_dir=payload.storage_dir,
+            # NOT the single-delete risk-confirmation pair: the batch already
+            # re-read the revision and the current operation in `_skip_reason`,
+            # and the batch lease makes that read authoritative until it runs.
+        )
         result = run_saved_tracking_plan_delete(config, payload=single)
+    except ValidationError:
+        return {
+            "tracking_id": entry.tracking_id,
+            "outcome": OUTCOME_SKIPPED,
+            "external_deleted": False,
+            "skip_reason": None,
+            "error_type": "validation_error",
+        }
     except Stage1Error as exc:
         skip_reason = _SKIP_BY_ERROR.get(exc.error_type)
         item: dict[str, Any] = {
@@ -409,7 +453,11 @@ def _skip_reason(
     try:
         record = load_tracking_record(config, entry.tracking_id)
     except Stage1Error as exc:
-        return SKIP_NOT_FOUND if exc.error_type == "tracking_not_found" else SKIP_UNRESOLVED
+        if exc.error_type == "tracking_not_found":
+            return SKIP_NOT_FOUND
+        # A storage fault is not a business refusal: it must not be disguised as
+        # "unresolved, handle it one by one" (it would hide a damaged store).
+        raise
     if record.revision != entry.expected_revision:
         return SKIP_REVISION_CHANGED
     if not record.current_operation_id:
@@ -451,11 +499,16 @@ def get_saved_tracking_batch_delete(
 __all__ = [
     "KIND_LOCAL_AND_EXTERNAL",
     "KIND_LOCAL_ONLY",
+    "OUTCOME_DELETED",
+    "OUTCOME_EXTERNAL_FAILED",
+    "OUTCOME_EXTERNAL_UNKNOWN",
+    "OUTCOME_SKIPPED",
     "STATE_COMPLETED",
     "STATE_IN_PROGRESS",
     "SKIP_NOT_FOUND",
     "SKIP_REVISION_CHANGED",
     "SKIP_UNRESOLVED",
+    "ensure_no_racing_single_writes",
     "get_saved_tracking_batch_delete",
     "run_saved_tracking_batch_delete",
 ]

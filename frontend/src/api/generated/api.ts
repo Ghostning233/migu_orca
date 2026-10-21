@@ -5006,7 +5006,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / validation_error: 批量删除的幂等键不合法 */
+            /** @description data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -5272,7 +5272,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / validation_error: 批量外部删除需要已保存连接或幂等键不合法 / config_error: Auto Bangumi 配置未配置或引用无效 */
+            /** @description data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -5308,7 +5308,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description idempotency_conflict: 该幂等键已绑定到另一批删除 / connection_in_use: 另一个批量操作或单条外部写正在执行 / connection_ref_conflict: Auto Bangumi 连接已变化，请重新确认 / configuration_revision_conflict: Auto Bangumi 配置版本已变化，请重新确认 */
+            /** @description idempotency_conflict: 该幂等键已绑定到另一批删除 / connection_in_use: 另一个批量操作或单条外部写正在执行 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5690,6 +5690,42 @@ export interface operations {
                      *       "ok": false,
                      *       "error_type": "data_validation_errors",
                      *       "error_message": "请求参数校验失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description connection_in_use: 另一个批量操作或外部写正在执行，请稍后再试 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "connection_in_use",
+                     *       "error_message": "另一个批量操作或外部写正在执行，请稍后再试",
                      *       "error_data": {
                      *         "failed_step": "示例步骤"
                      *       }
@@ -10026,7 +10062,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / validation_error: 批量删除的幂等键不合法 */
+            /** @description invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11104,7 +11140,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 当前追番记录没有可核验的待确认提交 / tracking_check_in_progress: 该追番记录的只读检查正在进行 */
+            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 当前追番记录没有可核验的待确认提交 / tracking_check_in_progress: 该追番记录的只读检查正在进行 / connection_in_use: 另一个批量操作或外部写正在执行，请稍后再试 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -11353,7 +11389,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description tracking_state_conflict: 外部操作仍可能执行，或操作/记录已变化使确认过期 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 */
+            /** @description tracking_state_conflict: 外部操作仍可能执行，或操作/记录已变化使确认过期 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / connection_in_use: 另一个批量操作或外部写正在执行，请稍后再试 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -12028,7 +12064,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description tracking_management_capability_unknown: 当前 Auto Bangumi 管理能力未验证 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复 */
+            /** @description tracking_management_capability_unknown: 当前 Auto Bangumi 管理能力未验证 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复 / connection_in_use: 另一个批量操作或外部写正在执行，请稍后再试 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -12389,7 +12425,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 当前追番记录状态不允许恢复 */
+            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 当前追番记录状态不允许恢复 / connection_in_use: 另一个批量操作或外部写正在执行，请稍后再试 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -12790,7 +12826,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description tracking_management_capability_unknown: 当前 Auto Bangumi 管理能力未验证 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复 */
+            /** @description tracking_management_capability_unknown: 当前 Auto Bangumi 管理能力未验证 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复 / connection_in_use: 另一个批量操作或外部写正在执行，请稍后再试 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -13247,7 +13283,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重新检查 / tracking_state_conflict: 当前追番记录没有可核验的待确认提交 / tracking_check_in_progress: 该追番记录的只读检查正在进行 / tracking_resubmit_binding_conflict: 本次重新提交绑定的操作或连接已变化，请重新检查后再确认 / tracking_operation_in_progress: 存在尚未完成的提交操作，请先恢复后再提交 / tracking_idempotency_conflict: 同一幂等键已绑定不同的提交内容，不能复用 */
+            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重新检查 / tracking_state_conflict: 当前追番记录没有可核验的待确认提交 / tracking_check_in_progress: 该追番记录的只读检查正在进行 / tracking_resubmit_binding_conflict: 本次重新提交绑定的操作或连接已变化，请重新检查后再确认 / tracking_operation_in_progress: 存在尚未完成的提交操作，请先恢复后再提交 / tracking_idempotency_conflict: 同一幂等键已绑定不同的提交内容，不能复用 / connection_in_use: 另一个批量操作或外部写正在执行，请稍后再试 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -13697,7 +13733,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 只有明确提交失败的记录可以重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的提交内容，不能复用 / tracking_operation_in_progress: 存在尚未完成的提交操作，请先恢复后再提交 */
+            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 只有明确提交失败的记录可以重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的提交内容，不能复用 / tracking_operation_in_progress: 存在尚未完成的提交操作，请先恢复后再提交 / connection_in_use: 另一个批量操作或外部写正在执行，请稍后再试 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -14082,7 +14118,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 当前追番记录状态不允许复核 */
+            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 当前追番记录状态不允许复核 / connection_in_use: 另一个批量操作或外部写正在执行，请稍后再试 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -14485,7 +14521,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description tracking_management_capability_unknown: 当前 Auto Bangumi 管理能力未验证 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复 */
+            /** @description tracking_management_capability_unknown: 当前 Auto Bangumi 管理能力未验证 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复 / connection_in_use: 另一个批量操作或外部写正在执行，请稍后再试 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -14899,7 +14935,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 当前追番记录状态不允许提交 / tracking_idempotency_conflict: 同一幂等键已绑定不同的提交内容，不能复用 / tracking_operation_in_progress: 存在尚未完成的提交操作，请先恢复后再提交 */
+            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 当前追番记录状态不允许提交 / tracking_idempotency_conflict: 同一幂等键已绑定不同的提交内容，不能复用 / tracking_operation_in_progress: 存在尚未完成的提交操作，请先恢复后再提交 / connection_in_use: 另一个批量操作或外部写正在执行，请稍后再试 */
             409: {
                 headers: {
                     [name: string]: unknown;

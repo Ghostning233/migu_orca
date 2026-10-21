@@ -316,7 +316,7 @@ interface TrackingWriteIntent {
   readonly idempotencyKey: string
 }
 
-function makeOpaqueKey(): string {
+export function makeOpaqueKey(): string {
   const candidate = globalThis.crypto?.randomUUID?.()
   return candidate && /^[A-Za-z0-9-]{8,128}$/.test(candidate)
     ? candidate

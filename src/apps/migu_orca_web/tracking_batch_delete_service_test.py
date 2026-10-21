@@ -19,6 +19,7 @@ import pytest
 import apps.migu_orca_web.services as web_services
 import apps.migu_orca_web.tracking_batch_delete_service as batch_delete
 import apps.migu_orca_web.tracking_saved_management_service as saved_management
+import storage_engine.controllers.tracking_repository as tracking_repository
 from ab_engine.models.management import AutoBangumiCapabilities, ExternalSubscription
 from apps.migu_orca_web.schemas import (
     SavedTrackingBatchDeleteExternalInput,
@@ -26,19 +27,27 @@ from apps.migu_orca_web.schemas import (
     SavedTrackingBatchDeleteItem,
     SavedTrackingPlanDeleteInput,
 )
-from apps.migu_orca_web.tracking_plan_delete_service import run_saved_tracking_plan_delete
+from apps.migu_orca_web.tracking_plan_delete_service import _IN_FLIGHT_OPERATION_STATES, run_saved_tracking_plan_delete
 from shared.errors import Stage1Error
 from storage_engine.controllers.autobangumi_config_repository import (
     AutoBangumiConfigRepository,
     build_stored_autobangumi_config,
 )
-from storage_engine.controllers.operation_repository import bind_tracking_operation
+from storage_engine.controllers.operation_repository import (
+    bind_tracking_operation,
+    compare_and_swap_tracking_operation,
+    load_tracking_operation,
+)
 from storage_engine.controllers.storage_config import StorageConfig, load_storage_config
 from storage_engine.controllers.tracking_repository import (
     compare_and_swap_tracking_record,
     ensure_tracking_record,
     load_tracking_record,
     tracking_batch_lease,
+)
+from tracking_engine.models.operation import (
+    tracking_operation_id_for_idempotency_key,
+    transition_tracking_operation,
 )
 from tracking_engine.models.tracking import (
     TRACKING_STATUS_ACTIVE,
@@ -97,6 +106,12 @@ class _FakeAb:
             return {"status_code": 200}
         finally:
             self._in_flight -= 1
+
+
+@pytest.fixture(autouse=True)
+def _fast_batch_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the bounded "later side waits" seam short inside the test suite."""
+    monkeypatch.setattr(tracking_repository, "_BATCH_WAIT_SECONDS", 0.05)
 
 
 @pytest.fixture()
@@ -185,6 +200,9 @@ def test_local_only_batch_deletes_plans_without_any_external_write(
         "total": 3, "deleted": 3, "external_deleted": 0, "skipped": 0, "failed": 0, "unknown": 0,
     }
     assert fake.calls == [], "a local-only delete must never contact Auto Bangumi"
+    # AC7: the mapped subscriptions keep running in Auto Bangumi (MiGuOrca only
+    # stops managing them), so the external surface is byte-identical.
+    assert {item.external_id for item in fake.subscriptions} >= {"sub-1", "sub-2", "sub-3"}
     for record in records:
         with pytest.raises(Stage1Error) as failure:
             load_tracking_record(config, record.tracking_id)
@@ -412,39 +430,79 @@ def test_a_second_batch_is_refused_while_one_runs(
     load_tracking_record(config, second_records[0].tracking_id)
 
 
-def test_a_single_composite_delete_is_refused_while_a_batch_runs(
+def test_a_single_write_queues_behind_a_batch_and_leaves_no_orphan_intent(
     roots: tuple[StorageConfig, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """ADR-0007: a batch excludes single tracking writes, not only batches."""
+    """ADR-0007 + B1: the single write waits for the batch instead of failing.
+
+    A refusal after the intent was persisted would leave a resumable operation
+    that no record points at (permanent same-key conflict).  The single write is
+    therefore queued: it starts no external call while the batch runs, completes
+    afterwards, and its intent ends as normal history — not an orphan.
+    """
     config, saved = roots
     fake = _FakeAb()
     fake.gate = threading.Event()
     _install_fake(monkeypatch, fake)
-    first_records = [_seed_record(config, 1, connection_ref=str(saved.connection_ref))]
+    batch_record = _seed_record(config, 1, connection_ref=str(saved.connection_ref))
     other = _seed_record(config, 2, connection_ref=str(saved.connection_ref))
+    batch_outcome: dict[str, Any] = {}
+    single_outcome: dict[str, Any] = {}
+    single_key = "single-during-batch"
 
-    thread = threading.Thread(
-        target=lambda: batch_delete.run_saved_tracking_batch_delete(
+    def run_batch() -> None:
+        batch_outcome["result"] = batch_delete.run_saved_tracking_batch_delete(
             config,
-            payload=_external_payload(first_records, saved, key="batch-exclusive"),
+            payload=_external_payload([batch_record], saved, key="batch-queue"),
             delete_external=True,
         )
-    )
-    thread.start()
-    assert fake.entered.wait(timeout=10)
 
-    with pytest.raises(Stage1Error) as failure:
-        run_saved_tracking_plan_delete(
-            config,
-            payload=SavedTrackingPlanDeleteInput(
-                tracking_id=other.tracking_id, confirm=True, idempotency_key="single-during-batch"
-            ),
-        )
-    assert failure.value.error_type == "connection_in_use"
+    batch_thread = threading.Thread(target=run_batch)
+    batch_thread.start()
+    assert fake.entered.wait(timeout=10), "the batch never reached Auto Bangumi"
+
+    single_done = threading.Event()
+
+    def run_single() -> None:
+        try:
+            single_outcome["result"] = run_saved_tracking_plan_delete(
+                config,
+                payload=SavedTrackingPlanDeleteInput(
+                    tracking_id=other.tracking_id,
+                    confirm=True,
+                    delete_external=True,
+                    idempotency_key=single_key,
+                    connection_ref=str(saved.connection_ref),
+                    configuration_revision=saved.configuration_revision,
+                ),
+            )
+        except BaseException as exc:  # pragma: no cover - surfaced below
+            single_outcome["error"] = exc
+        single_done.set()
+
+    single_thread = threading.Thread(target=run_single)
+    single_thread.start()
+    # Queued: it must not reach the external boundary while the batch runs.
+    assert not single_done.wait(timeout=0.3), "the single write was not serialized"
+    assert "delete:sub-2" not in fake.calls
 
     fake.gate.set()
-    thread.join(timeout=20)
-    load_tracking_record(config, other.tracking_id)
+    batch_thread.join(timeout=20)
+    assert single_done.wait(timeout=20), "the single write never completed"
+    single_thread.join(timeout=20)
+    assert "error" not in single_outcome, single_outcome
+    assert single_outcome["result"]["outcome"] == "DELETED"
+    assert batch_outcome["result"]["items"][0]["outcome"] == "DELETED"
+    assert [call for call in fake.calls if call.startswith("delete:")][-1] == "delete:sub-2"
+
+    # No orphan intent: the operation the single write persisted is finished
+    # history, and the record it deleted is gone.
+    operation = load_tracking_operation(
+        config, tracking_operation_id_for_idempotency_key(single_key)
+    )
+    assert operation.state not in _IN_FLIGHT_OPERATION_STATES
+    with pytest.raises(Stage1Error):
+        load_tracking_record(config, other.tracking_id)
 
 
 def test_status_query_returns_partial_progress_and_unknown_keys_are_not_found(
@@ -558,3 +616,195 @@ def test_lease_is_released_after_a_failed_batch(
 
     with tracking_batch_lease(batch_key="after-failure"):
         pass
+
+
+def _operation_in_state(
+    config: StorageConfig,
+    record: TrackingRecord,
+    state: str,
+    *,
+    key: str = "pending-op",
+) -> Any:
+    """Bind one operation for ``record`` and move it to ``state``."""
+    operation, _created = bind_tracking_operation(
+        config,
+        tracking_id=record.tracking_id,
+        operation="SUBMIT",
+        idempotency_key=key,
+        expected_revision=record.revision,
+        request_fingerprint="fingerprint",
+    )
+    # Walk the legal state machine: PREPARED -> IN_PROGRESS -> outcome.
+    path = {
+        "PREPARED": [],
+        "FAILED": ["FAILED"],
+    }.get(state, ["IN_PROGRESS"] if state == "IN_PROGRESS" else ["IN_PROGRESS", state])
+    for step in path:
+        operation = compare_and_swap_tracking_operation(
+            config,
+            operation.operation_id,
+            operation.state,
+            transition_tracking_operation(operation, state=step),
+        )
+    return operation
+
+
+def _point_record_at(config: StorageConfig, record: TrackingRecord, operation: Any) -> TrackingRecord:
+    return compare_and_swap_tracking_record(
+        config,
+        record.tracking_id,
+        record.revision,
+        replace(
+            record,
+            current_operation_id=operation.operation_id,
+            revision=record.revision + 1,
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "state",
+    ["PREPARED", "IN_PROGRESS", "OUTCOME_UNKNOWN", "RECOVERY_REQUIRED"],
+)
+def test_every_unresolved_operation_state_is_skipped_never_abandoned(
+    roots: tuple[StorageConfig, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    state: str,
+) -> None:
+    """AC4/AC8: all four unresolved states skip with a reason and write nothing."""
+    config, _saved = roots
+    fake = _FakeAb()
+    _install_fake(monkeypatch, fake)
+    record = _seed_record(config, 1, connection_ref=REF)
+    operation = _operation_in_state(config, record, state, key=f"pending-{state.lower()}")
+    guarded = _point_record_at(config, record, operation)
+
+    result = batch_delete.run_saved_tracking_batch_delete(
+        config,
+        payload=_local_payload([guarded], key=f"batch-{state.lower()}"),
+        delete_external=False,
+    )
+
+    item = result["items"][0]
+    assert item["outcome"] == "SKIPPED"
+    assert item["skip_reason"] == batch_delete.SKIP_UNRESOLVED
+    assert fake.calls == []
+    kept = load_tracking_record(config, record.tracking_id)
+    assert kept.current_operation_id == operation.operation_id
+
+
+def test_a_settled_operation_does_not_block_the_delete(
+    roots: tuple[StorageConfig, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Finished history is not a delete lock (issue #96 semantics stay intact)."""
+    config, _saved = roots
+    _install_fake(monkeypatch, _FakeAb())
+    record = _seed_record(config, 1, connection_ref=REF)
+    operation = _operation_in_state(config, record, "SUCCEEDED", key="settled-op")
+    guarded = _point_record_at(config, record, operation)
+
+    result = batch_delete.run_saved_tracking_batch_delete(
+        config, payload=_local_payload([guarded], key="batch-settled"), delete_external=False
+    )
+
+    assert result["items"][0]["outcome"] == "DELETED"
+    with pytest.raises(Stage1Error):
+        load_tracking_record(config, record.tracking_id)
+
+
+def test_an_operation_of_another_record_is_skipped(
+    roots: tuple[StorageConfig, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pointer naming another record's operation proves nothing (fail closed)."""
+    config, _saved = roots
+    _install_fake(monkeypatch, _FakeAb())
+    record = _seed_record(config, 1, connection_ref=REF)
+    other = _seed_record(config, 2, connection_ref=REF)
+    foreign = _operation_in_state(config, other, "SUCCEEDED", key="foreign-op")
+    # Point record 1 at record 2's operation.
+    guarded = compare_and_swap_tracking_record(
+        config,
+        record.tracking_id,
+        record.revision,
+        replace(
+            record,
+            current_operation_id=foreign.operation_id,
+            revision=record.revision + 1,
+        ),
+    )
+
+    result = batch_delete.run_saved_tracking_batch_delete(
+        config, payload=_local_payload([guarded], key="batch-foreign"), delete_external=False
+    )
+
+    assert result["items"][0]["skip_reason"] == batch_delete.SKIP_UNRESOLVED
+    load_tracking_record(config, record.tracking_id)
+
+
+def test_a_batch_is_refused_while_another_records_write_is_in_flight(
+    roots: tuple[StorageConfig, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0007 decision 3, batch-as-later-side: a running single write wins."""
+    config, _saved = roots
+    fake = _FakeAb()
+    _install_fake(monkeypatch, fake)
+    busy_other = _seed_record(config, 1, connection_ref=REF)
+    target = _seed_record(config, 2, connection_ref=REF)
+    _operation_in_state(config, busy_other, "IN_PROGRESS", key="single-in-flight")
+
+    with pytest.raises(Stage1Error) as failure:
+        batch_delete.run_saved_tracking_batch_delete(
+            config, payload=_local_payload([target], key="batch-refused"), delete_external=False
+        )
+
+    assert failure.value.error_type == "connection_in_use"
+    assert fake.calls == []
+    load_tracking_record(config, target.tracking_id)
+
+
+def test_lease_is_released_when_the_batch_fails_inside_it(
+    roots: tuple[StorageConfig, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A crash in the middle of a batch must not leave the store locked."""
+    config, _saved = roots
+    _install_fake(monkeypatch, _FakeAb())
+    records = [_seed_record(config, index, connection_ref=REF) for index in (1, 2)]
+    calls: list[str] = []
+
+    def explode(config_arg: Any, *, payload: Any) -> dict[str, Any]:
+        calls.append(payload.tracking_id)
+        raise RuntimeError("simulated crash inside the batch")
+
+    monkeypatch.setattr(batch_delete, "run_saved_tracking_plan_delete", explode)
+
+    with pytest.raises(RuntimeError):
+        batch_delete.run_saved_tracking_batch_delete(
+            config, payload=_local_payload(records, key="batch-crash"), delete_external=False
+        )
+
+    assert calls, "the crash must happen inside the batch"
+    # The store is free again: a new lease and a normal write both work.
+    with tracking_batch_lease(batch_key="after-crash"):
+        ensure_tracking_record(
+            config,
+            replace(
+                create_external_tracking_record(
+                    adapter="legacy_3_1", object_kind="subscription",
+                    external_id="sub-9", subscription_id="sub-9", title="After", season=1,
+                    connection_ref=REF,
+                ),
+                status=TRACKING_STATUS_ACTIVE,
+            ),
+        )
+
+
+def test_derived_item_keys_stay_bounded_and_distinct() -> None:
+    """A long batch key or tracking id can never collide or break validation."""
+    first = batch_delete._item_key("k" * 200, "trk_" + "a" * 500)
+    second = batch_delete._item_key("k" * 200, "trk_" + "b" * 500)
+    assert first != second
+    assert len(first) <= 200
+    # The single delete contract accepts the derived key unchanged.
+    SavedTrackingPlanDeleteInput(
+        tracking_id="trk_a", confirm=True, delete_external=False, idempotency_key=first
+    )

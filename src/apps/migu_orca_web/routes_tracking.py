@@ -40,6 +40,7 @@ from apps.migu_orca_web.schemas import (
 )
 from apps.migu_orca_web.services import _storage_dir
 from apps.migu_orca_web.tracking_batch_delete_service import (
+    ensure_no_racing_single_writes,
     get_saved_tracking_batch_delete,
     run_saved_tracking_batch_delete,
 )
@@ -210,12 +211,13 @@ class TrackingBatchSubmitView(PostView):
     def save(self) -> dict[str, object]:
         payload = self.request_validator_model
         assert isinstance(payload, SavedTrackingBatchSubmitInput)
-        # ADR-0007: every batch holds the batch lease, so two batches (submit or
-        # delete) and single tracking writes never run at the same time.
-        with tracking_batch_lease(batch_key=payload.items[0].idempotency_key):
-            return run_saved_tracking_batch_submit(
-                load_storage_config(_storage_dir(payload.storage_dir)), payload=payload
-            )
+        config = load_storage_config(_storage_dir(payload.storage_dir))
+        # ADR-0007 decision 3 applies to every batch: refuse while another
+        # record already owns an external write, then hold the batch lease so a
+        # later batch or single write cannot overlap this one.
+        ensure_no_racing_single_writes(config, {entry.tracking_id for entry in payload.items})
+        with tracking_batch_lease(batch_key=f"submit:{payload.items[0].idempotency_key}"):
+            return run_saved_tracking_batch_submit(config, payload=payload)
 
 
 @class_route(

@@ -1601,7 +1601,6 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             "400": {
                 "data_validation_errors": "请求参数校验失败",
                 "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
-                "validation_error": "批量删除的幂等键不合法",
             },
             "409": {
                 "idempotency_conflict": "该幂等键已绑定到另一批删除",
@@ -1648,14 +1647,10 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             "400": {
                 "data_validation_errors": "请求参数校验失败",
                 "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
-                "validation_error": "批量外部删除需要已保存连接或幂等键不合法",
-                "config_error": "Auto Bangumi 配置未配置或引用无效",
             },
             "409": {
                 "idempotency_conflict": "该幂等键已绑定到另一批删除",
                 "connection_in_use": "另一个批量操作或单条外部写正在执行",
-                "connection_ref_conflict": "Auto Bangumi 连接已变化，请重新确认",
-                "configuration_revision_conflict": "Auto Bangumi 配置版本已变化，请重新确认",
             },
             "500": {
                 "storage_error": "写入/读取追番记录失败",
@@ -1686,7 +1681,6 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "errors": {
             "400": {
                 "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
-                "validation_error": "批量删除的幂等键不合法",
             },
             "404": {"tracking_not_found": "未找到该批量删除批次"},
             "500": {
@@ -2196,6 +2190,29 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         },
     },
 }
+
+#: Issue #223 (ADR-0007): the batch lease refuses a tracking write while a
+#: batch owns the store, so every route that persists one can answer with this
+#: exact envelope error.  Declared in one place so the contract cannot drift
+#: endpoint by endpoint.
+_TRACKING_WRITE_ENDPOINTS: tuple[str, ...] = (
+    "POST /api/v1/tracking/batch-submit",
+    "POST /api/v1/tracking/items/<path:tracking_id>/delete-plan",
+    "POST /api/v1/tracking/items/<path:tracking_id>/submit",
+    "POST /api/v1/tracking/items/<path:tracking_id>/retry",
+    "POST /api/v1/tracking/items/<path:tracking_id>/recover",
+    "POST /api/v1/tracking/items/<path:tracking_id>/check",
+    "POST /api/v1/tracking/items/<path:tracking_id>/revalidate",
+    "POST /api/v1/tracking/items/<path:tracking_id>/resubmit",
+    "POST /api/v1/tracking/items/<path:tracking_id>/modify",
+    "POST /api/v1/tracking/items/<path:tracking_id>/set-enabled",
+    "POST /api/v1/tracking/items/<path:tracking_id>/refresh",
+)
+for _write_key in _TRACKING_WRITE_ENDPOINTS:
+    _ENDPOINTS[_write_key]["errors"].setdefault("409", {}).setdefault(
+        "connection_in_use", "另一个批量操作或外部写正在执行，请稍后再试"
+    )
+
 
 def _normalized_path(path: str) -> str:
     """Convert url_map <...> placeholders to OpenAPI {param} form."""

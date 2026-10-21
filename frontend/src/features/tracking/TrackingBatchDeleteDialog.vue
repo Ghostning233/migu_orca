@@ -81,7 +81,7 @@ onBeforeUnmount(() => deactivate())
 
 <template>
   <Teleport to="body">
-    <div v-if="props.open" ref="dialogEl" class="confirm-dialog-backdrop">
+    <div v-if="props.open" ref="dialogEl" class="confirm-dialog-backdrop" @click.self="cancel">
       <div
         class="confirm-dialog tracking-batch-delete-dialog"
         role="alertdialog"
@@ -170,6 +170,8 @@ onBeforeUnmount(() => deactivate())
   display: grid;
   gap: var(--space-3);
   width: 100%;
+  /* Wider than a two-action confirm because it carries the affected count and
+   * the pre-check skip list; still inside the 760px shell reflow tier. */
   max-width: 560px;
   max-height: calc(100vh - 2 * var(--space-4));
   overflow-y: auto;
@@ -216,7 +218,7 @@ onBeforeUnmount(() => deactivate())
 
 .tracking-batch-delete-skipped ul {
   margin: 0;
-  padding-inline-start: 1.2rem;
+  padding-inline-start: 1.25rem;
   max-height: 8rem;
   overflow-y: auto;
   color: var(--color-text-muted);

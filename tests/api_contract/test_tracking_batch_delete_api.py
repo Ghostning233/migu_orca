@@ -38,6 +38,14 @@ EXTERNAL_URL = "/api/v1/tracking/batch-delete-plan-external"
 STATUS_URL = "/api/v1/tracking/batch-deletions/{}"
 
 
+@pytest.fixture(autouse=True)
+def _fast_batch_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the ADR-0007 bounded wait short so refusals stay fast in tests."""
+    import storage_engine.controllers.tracking_repository as tracking_repository
+
+    monkeypatch.setattr(tracking_repository, "_BATCH_WAIT_SECONDS", 0.05)
+
+
 def _config(tmp_path: Path) -> StorageConfig:
     return load_storage_config(tmp_path / "storage")
 
@@ -312,6 +320,52 @@ def test_a_second_batch_is_refused_while_one_runs(
     assert refused.get_json()["error_type"] == "connection_in_use"
     # The refused batch wrote nothing.
     load_tracking_record(_config(tmp_path), second.tracking_id)
+
+
+def test_batch_submit_is_refused_while_a_batch_owns_the_store(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0007: batches exclude each other across both batch families."""
+    from storage_engine.controllers.tracking_repository import tracking_batch_lease
+
+    _stub_management(monkeypatch)
+    record = _seed(tmp_path, 1)
+    held = threading.Event()
+    release = threading.Event()
+
+    def hold_batch() -> None:
+        with tracking_batch_lease(batch_key="held-batch"):
+            held.set()
+            assert release.wait(timeout=10)
+
+    holder = threading.Thread(target=hold_batch)
+    holder.start()
+    assert held.wait(timeout=10)
+
+    try:
+        response = client.post(
+            "/api/v1/tracking/batch-submit",
+            json={
+                "confirm": True,
+                "submission_mode": "CONTINUE_TRACKING",
+                "connection_ref": REF,
+                "configuration_revision": 3,
+                "storage_dir": "storage",
+                "items": [{
+                    "tracking_id": record.tracking_id,
+                    "expected_revision": record.revision,
+                    "idempotency_key": "submit-during-batch",
+                }],
+            },
+        )
+    finally:
+        release.set()
+        holder.join(timeout=10)
+
+    assert response.status_code == 409, response.get_json()
+    assert response.get_json()["error_type"] == "connection_in_use"
+    # The refused batch persisted nothing for its entry.
+    load_tracking_record(_config(tmp_path), record.tracking_id)
 
 
 @pytest.mark.parametrize(

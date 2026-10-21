@@ -31,6 +31,7 @@ import {
   type TrackingStatusGroup,
 } from './trackingProjection'
 import {
+  makeOpaqueKey,
   useTrackingWriteSession,
   type TrackingManagementScope,
   type TrackingRecoveryActionCode,
@@ -704,6 +705,12 @@ const batchSummary = computed(() => writes.batchSummary(filteredItems.value))
 
 function toggleBatchMode(): void {
   batchMode.value = !batchMode.value
+  // A new multi-select session starts clean: the previous batch's result,
+  // notice, titles and locked key must not leak into it.
+  batchDeleteOutcome.value = null
+  batchDeleteNotice.value = ''
+  batchDeleteTitles.value = {}
+  batchDeleteKey.value = ''
   resetBatch()
 }
 
@@ -802,6 +809,9 @@ const batchDeleteOpen = ref(false)
 const batchDeleteBusy = ref(false)
 const batchDeleteNotice = ref('')
 const batchDeleteOutcome = ref<BatchDeleteResult | null>(null)
+/** Issue #223: titles of the entries this batch resolved, captured before the
+ * post-batch refresh removes their rows (the result must stay readable). */
+const batchDeleteTitles = ref<Record<string, string>>({})
 /**
  * Issue #223 AC9: the batch idempotency key is locked for one attempt, so a
  * transport retry replays/queries the same batch instead of deleting twice. It
@@ -809,14 +819,6 @@ const batchDeleteOutcome = ref<BatchDeleteResult | null>(null)
  */
 const batchDeleteKey = ref('')
 let batchDeleteSequence = 0
-
-/** One opaque client batch id (same shape the write session uses). */
-function makeOpaqueKey(): string {
-  const candidate = globalThis.crypto?.randomUUID?.()
-  return candidate && /^[A-Za-z0-9-]{8,128}$/.test(candidate)
-    ? candidate
-    : `batch-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`
-}
 
 /**
  * The local pre-check for a batch delete. It uses only the list evidence the
@@ -866,6 +868,10 @@ function cancelBatchDelete(): void {
   batchDeleteOpen.value = false
 }
 
+function batchDeleteTitle(trackingId: string): string {
+  return batchDeleteTitles.value[trackingId] || titleFor(trackingId)
+}
+
 function batchDeleteEntryMessage(entry: BatchDeleteItemResult): string {
   if (entry.outcome === 'DELETED') {
     return entry.external_deleted ? '已删除本地记录，并已删除受控外部订阅' : '已删除本地记录'
@@ -875,10 +881,21 @@ function batchDeleteEntryMessage(entry: BatchDeleteItemResult): string {
   if (entry.skip_reason === 'UNRESOLVED') return '结果待确认或外部操作进行中：本次跳过，需要逐条处理'
   if (entry.skip_reason === 'REVISION_CHANGED') return '记录已变化：本次跳过，请刷新后重试'
   if (entry.skip_reason === 'NOT_FOUND') return '记录已不存在：本次跳过'
+  if (entry.error_type === 'connection_ref_conflict'
+    || entry.error_type === 'configuration_revision_conflict') {
+    return 'Auto Bangumi 连接已变化：本次跳过，请重新确认后再删除'
+  }
+  if (entry.error_type === 'config_error') {
+    return 'Auto Bangumi 连接不可用：本次跳过，请先在设置中检查连接'
+  }
   return '服务端在删除前拒绝了该条目：本次未删除'
 }
 
 function applyBatchDeleteResult(result: BatchDeleteResult): void {
+  // The refresh below removes the deleted rows, so their titles are captured now.
+  batchDeleteTitles.value = Object.fromEntries(
+    result.items.map((entry) => [entry.tracking_id, titleFor(entry.tracking_id)]),
+  )
   batchDeleteOutcome.value = result
   batchDeleteNotice.value = ''
   const deleted = result.items
@@ -1313,7 +1330,7 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- 批量工具栏：仅多选态，标题行下方另起一行（#218 补充澄清 + 行规格）。 -->
-        <div v-if="batchMode" class="tracking-batch-toolbar" aria-label="批量提交">
+        <div v-if="batchMode" class="tracking-batch-toolbar" aria-label="批量操作">
           <div class="tracking-batch-selection">
             <span id="tracking-batch-count" class="tracking-batch-count" role="status">
               已选 <strong class="tracking-batch-number">{{ batchSummary.selected }}</strong> 部
@@ -1452,7 +1469,7 @@ onBeforeUnmount(() => {
               :key="entry.tracking_id"
               :class="entry.outcome === 'DELETED' ? 'is-ok' : 'is-failed'"
             >
-              <strong>{{ titleFor(entry.tracking_id) }}</strong>：{{ batchDeleteEntryMessage(entry) }}
+              <strong>{{ batchDeleteTitle(entry.tracking_id) }}</strong>：{{ batchDeleteEntryMessage(entry) }}
             </li>
           </ul>
         </section>
