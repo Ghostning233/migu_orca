@@ -950,7 +950,9 @@ def test_unknown_episode_counts_never_infer_from_resources(
     assert rows["总集数"] == "未开发"
     assert rows["已更新集数"] == "未开发"
     # 有效资源数 7 只作为资源计数呈现，绝不被当成集数。
-    assert rows["有效资源"] == "7"
+    # Issue #227 D2（2026-10-20 修订）把摘要字段固定为「有效资源数」，只改这一处
+    # 取值键；本文件的其余断言与结构留给 T6/#229。
+    assert rows["有效资源数"] == "7"
 
 
 @pytest.mark.parametrize("width", [1280, 1920])

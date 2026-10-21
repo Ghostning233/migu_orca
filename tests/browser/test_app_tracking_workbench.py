@@ -14,6 +14,7 @@ Real Chromium over a mocked tracking DTO boundary. It proves the workbench host:
 """
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -80,7 +81,7 @@ def _detail_payload(item: dict[str, Any]) -> dict[str, Any]:
         "created_at": "2026-09-01T00:00:00Z",
         "last_synced_at": None,
         "safe_info": None,
-        "current_operation": {"operation_id": "op-1", "state": "UNKNOWN", "operation": "SUBMIT", "attempt": 1},
+        "current_operation": {"operation_id": "op-1", "state": "OUTCOME_UNKNOWN", "operation": "SUBMIT", "attempt": 1},
         "revalidation_issues": [],
         "external_mapping": {"match_reason": "标题", "enabled": True, "external_deleted": False},
         "audit_events": [{"action": "SUBMIT", "safe_message": "已提交", "created_at": "2026-09-13T00:00:00Z"}],
@@ -236,7 +237,7 @@ class TestTrackingWorkbench:
         assert diagnostics.evaluate("el => el.open") is False
 
         # Everyday summary data is visible without expanding anything.
-        assert "有效资源" in page.locator(".tracking-inspector-summary").inner_text()
+        assert "有效资源数" in page.locator(".tracking-inspector-summary").inner_text()
 
         # Operator detail is reachable on demand.
         activity.locator("summary").click()
@@ -913,6 +914,406 @@ class TestSubmissionModeLabels:
         assert "持续追番" not in page.locator(".tracking-list-row").first.inner_text()
 
         page.locator('[data-tracking-id="tracking-active"] .tracking-list-item').click()
-        page.wait_for_selector(".tracking-inspector-content")
-        expect(page.locator(".tracking-inspector")).to_contain_text("提交方式")
-        expect(page.locator(".tracking-inspector")).to_contain_text("持续追番")
+        page.wait_for_selector(".tracking-inspector-facts")
+        # Issue #227 / #218 D2 (2026-10-20 revision): 提交方式 is the semantic of
+        # one operation, not a record attribute, so it is no longer a detail field
+        # either — the pre-submit dialog owns that choice.
+        expect(page.locator(".tracking-inspector")).not_to_contain_text("提交方式")
+        expect(page.locator(".tracking-inspector-facts")).not_to_contain_text("提交方式")
+
+
+def _verified_capabilities() -> dict[str, Any]:
+    """The proven 3.1.18 capability projection a saved connection publishes."""
+    return {
+        "probe_status": "VERIFIED", "version": "3.1.18", "adapter": "legacy_3_1",
+        "subscription_list": "SUPPORTED", "subscription_detail": "SUPPORTED",
+        "subscription_submit": "SUPPORTED", "subscription_modify": "SUPPORTED",
+        "subscription_enable": "SUPPORTED", "subscription_disable": "SUPPORTED",
+        "subscription_delete": "SUPPORTED", "rss_list": "SUPPORTED",
+        "rss_modify": "SUPPORTED", "rss_enable": "SUPPORTED",
+        "rss_disable": "SUPPORTED", "rss_delete": "SUPPORTED",
+        "rss_refresh": "SUPPORTED", "external_verify": "SUPPORTED",
+        "checked_at": None, "safe_message": "ok",
+    }
+
+
+class TestDetailSummaryIssue227:
+    """Issue #227 (T4a): the detail summary, the reason card and the records.
+
+    Four fixtures (追番中 / 待提交 / 未决 / 提交前复核失败) pin the adjudicated
+    D2 field list, the two left-aligned columns, the status pill beside the title
+    and the first-screen reason card; AC6 pins the focus transfer.
+    """
+
+    @staticmethod
+    def _detail(item: dict[str, Any], **overrides: Any) -> dict[str, Any]:
+        return {
+            **item,
+            "origin": "single",
+            "batch_id": None,
+            "created_at": "2026-10-18T02:00:00Z",
+            "last_synced_at": None,
+            "safe_info": None,
+            "current_operation": None,
+            "revalidation_issues": [],
+            "external_mapping": None,
+            "audit_events": [],
+            "warnings": [],
+            **overrides,
+        }
+
+    @staticmethod
+    def _serve(page: Page, items: list[dict[str, Any]], details: dict[str, dict[str, Any]]) -> None:
+        def handler(route: Any, request: Any) -> None:
+            path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+            if request.method == "GET" and path == "/settings/autobangumi":
+                # B1 retired the manual probe entry: the saved summary itself
+                # publishes the deployment's last proven capability projection.
+                route.fulfill(json={"ok": True, "result": {
+                    "configured": True, "credential_present": True,
+                    "connection_ref": "11111111-1111-4111-8111-111111111111",
+                    "configuration_revision": 1, "connection_status": "CONFIGURED",
+                    "capabilities": _verified_capabilities(),
+                }})
+                return
+            if request.method == "GET" and path == "/tracking/items":
+                route.fulfill(json={"ok": True, "result": {
+                    "items": items,
+                    "summary": _summary(
+                        len(items),
+                        pending=sum(1 for item in items if item["status_group"] == "PENDING"),
+                        active=sum(1 for item in items if item["status_group"] == "ACTIVE"),
+                        needs_attention=sum(1 for item in items if item["status_group"] == "ATTENTION"),
+                    ),
+                    "status_groups": _status_groups_for(items),
+                    "warnings": [],
+                }})
+                return
+            if request.method == "GET" and path.startswith("/tracking/items/"):
+                tracking_id = path.rsplit("/", 1)[-1]
+                route.fulfill(json={"ok": True, "result": details[tracking_id]})
+                return
+            route.continue_()
+
+        page.route("**/api/v1/**", handler)
+
+    def test_summary_is_unframed_two_left_aligned_columns_with_a_status_pill(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        active = {**_item("tracking-active", "星海旅途"), "total_episodes": None}
+        self._serve(page, [active], {"tracking-active": self._detail(active)})
+        page.goto(f"{live_server_url}/app/tracking")
+        page.wait_for_selector(".tracking-list-item")
+        page.locator(".tracking-list-item").first.click()
+        page.wait_for_selector(".tracking-inspector-facts")
+
+        summary = page.locator(".tracking-inspector-summary")
+        # D1: no inner frame and no 「安全追番摘要」 heading.
+        box = summary.evaluate(
+            """el => {
+                const style = getComputedStyle(el);
+                return {
+                    padding: [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft],
+                    border: [style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth],
+                };
+            }"""
+        )
+        assert box["padding"] == ["0px"] * 4, box
+        assert box["border"] == ["0px"] * 4, box
+        assert "安全追番摘要" not in summary.inner_text()
+
+        # D2: exactly the adjudicated field list, in order.
+        labels = page.locator(".tracking-inspector-facts dt")
+        values = page.locator(".tracking-inspector-facts dd")
+        assert labels.all_inner_texts() == [
+            "季度", "字幕组", "有效资源数", "总集数", "已更新集数", "创建时间",
+        ]
+        assert values.count() == 6
+
+        # D1: two columns, both left aligned (never space-between/right aligned).
+        label_style = labels.first.evaluate("el => getComputedStyle(el).textAlign")
+        value_style = values.first.evaluate("el => getComputedStyle(el).textAlign")
+        assert label_style in ("left", "start"), label_style
+        assert value_style in ("left", "start"), value_style
+        label_xs = {round(labels.nth(index).bounding_box()["x"]) for index in range(6)}
+        value_xs = {round(values.nth(index).bounding_box()["x"]) for index in range(6)}
+        # One label column and one value column; the value column starts after the
+        # widest label (「已更新集数」 is four characters wide).
+        assert len(label_xs) == 1, label_xs
+        assert len(value_xs) == 1, value_xs
+        assert value_xs.pop() > label_xs.pop() + 60
+
+        # D1: the status pill sits beside the title, not in a summary row.
+        title_box = page.locator("#tracking-inspector-title").bounding_box()
+        pill = page.locator("#tracking-inspector-status")
+        expect(pill).to_have_text("追番中")
+        pill_box = pill.bounding_box()
+        # The pill starts at or after the title's right edge (1px rounding) and is
+        # vertically centred on the same row.
+        assert pill_box["x"] >= title_box["x"] + title_box["width"] - 1, (title_box, pill_box)
+        assert abs((pill_box["y"] + pill_box["height"] / 2) - (title_box["y"] + title_box["height"] / 2)) <= 2
+
+        # D2: 创建时间 comes from created_at and is formatted, never the raw ISO.
+        facts_text = page.locator(".tracking-inspector-facts").inner_text()
+        # Formatted (YYYY/MM/DD HH:mm), never the raw ISO.  The exact day depends
+        # on the host timezone, so assert the shape and the year only.
+        assert re.search(r"\d{4}/\d{2}/\d{2} \d{2}:\d{2}", facts_text), facts_text
+        assert "2026/" in facts_text, facts_text
+        assert "2026-10-18T02:00:00Z" not in facts_text
+        assert "提交方式" not in facts_text and "最近更新" not in facts_text
+        # Both untrusted counts stay 「未开发」.
+        assert facts_text.count("未开发") == 2, facts_text
+
+    def test_pending_record_shows_its_own_status_and_unknown_counts(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        pending = {
+            **_item(
+                "tracking-pending", "云境之下",
+                status="PENDING_SUBMIT", status_label="待提交", status_group="PENDING",
+            ),
+            "available_actions": [],
+        }
+        self._serve(page, [pending], {"tracking-pending": self._detail(pending)})
+        page.goto(f"{live_server_url}/app/tracking")
+        page.wait_for_selector(".tracking-list-item")
+        page.locator(".tracking-list-item").first.click()
+        page.wait_for_selector(".tracking-inspector-facts")
+
+        expect(page.locator("#tracking-inspector-status")).to_have_text("待提交")
+        assert page.locator(".tracking-inspector-facts").inner_text().count("未开发") == 2
+
+    def test_unresolved_record_reads_pending_and_keeps_the_verification_entry(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        unresolved = {
+            **_item(
+                "tracking-unresolved", "黄昏与山丘",
+                status="RECOVERY_REQUIRED", status_label="需要恢复", status_group="ATTENTION",
+            ),
+            "available_actions": [],
+        }
+        # A management operation: an unresolved SUBMIT is owned by the pending
+        # check flow, while a verify-only record shows the 「结果待确认」 panel.
+        detail = self._detail(unresolved, current_operation={
+            "operation_id": "op-unresolved", "operation": "REFRESH_RSS",
+            "state": "OUTCOME_UNKNOWN", "attempt": 1, "external_result_id": None,
+            "error_type": None, "created_at": None, "updated_at": None, "completed_at": None,
+        })
+        self._serve(page, [unresolved], {"tracking-unresolved": detail})
+        page.goto(f"{live_server_url}/app/tracking")
+        page.wait_for_selector(".tracking-list-item")
+        page.locator(".tracking-list-item").first.click()
+        page.wait_for_selector("#tracking-recovery-heading")
+
+        inspector = page.locator(".tracking-inspector")
+        expect(page.locator("#tracking-recovery-heading")).to_have_text("结果待确认")
+        assert "提交失败" not in inspector.inner_text()
+        assert "确定失败" not in inspector.inner_text()
+
+        # The read-only verification stays reachable without touching the action
+        # hierarchy (T4b): the saved summary's proven capability is enough.
+        page.wait_for_selector("#tracking-recover-verify")
+        expect(page.locator("#tracking-recover-verify")).to_be_visible()
+        expect(page.locator("#tracking-recover-verify")).to_be_enabled()
+
+    def test_revalidation_failure_is_on_the_first_screen_with_the_real_api_shape(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        """AC5/D8 with the response the server actually sends.
+
+        `tracking_read_service` still stubs `revalidation_issues` to `[]`, so the
+        reloaded record must state the verdict and the next step without a reason
+        list — the reason list comes from a live submit result (see the next
+        case).
+        """
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        pending = {
+            **_item(
+                "tracking-reconfirm", "云境之下",
+                status="NEEDS_RECONFIRM", status_label="待重新确认", status_group="PENDING",
+            ),
+            "available_actions": [{
+                "code": "SUBMIT", "label": "提交方案", "style": "PRIMARY",
+                "requires_confirmation": True, "target_scopes": [],
+            }],
+        }
+        detail = self._detail(pending, revalidation_issues=[])
+        self._serve(page, [pending], {"tracking-reconfirm": detail})
+        page.goto(f"{live_server_url}/app/tracking")
+        page.wait_for_selector(".tracking-list-item")
+        page.locator(".tracking-list-item").first.click()
+        page.wait_for_selector("#tracking-feedback")
+
+        # No fold has to be opened: the card is already there.
+        assert page.locator("#tracking-activity-log").evaluate("el => el.open") is False
+        feedback = page.locator("#tracking-feedback")
+        expect(feedback).to_be_visible()
+        expect(page.locator("#tracking-feedback-title")).to_have_text("提交前复核未通过")
+        assert "本次尚未创建 Auto Bangumi 外部订阅" in feedback.inner_text()
+        assert "下一步" in feedback.inner_text()
+        assert feedback.locator(".tracking-submit-issues").count() == 0
+
+        # It is the first screen: above the action entry and outside every fold.
+        assert feedback.evaluate("el => el.closest('details')") is None
+        assert feedback.bounding_box()["y"] < page.locator("#tracking-submit").bounding_box()["y"]
+
+    def test_revalidation_issues_render_under_原因_when_the_server_publishes_them(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        """Forward contract: the same card shows the documented issue messages."""
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        pending = {
+            **_item(
+                "tracking-reconfirm", "云境之下",
+                status="NEEDS_RECONFIRM", status_label="待重新确认", status_group="PENDING",
+            ),
+            "available_actions": [{
+                "code": "SUBMIT", "label": "提交方案", "style": "PRIMARY",
+                "requires_confirmation": True, "target_scopes": [],
+            }],
+        }
+        detail = self._detail(pending, revalidation_issues=[
+            {
+                "code": "NO_VALID_RESOURCES",
+                "field": "filter_rule",
+                "message": "当前方案需要重新核对资源筛选。",
+            },
+        ])
+        self._serve(page, [pending], {"tracking-reconfirm": detail})
+        page.goto(f"{live_server_url}/app/tracking")
+        page.wait_for_selector(".tracking-list-item")
+        page.locator(".tracking-list-item").first.click()
+        page.wait_for_selector("#tracking-feedback")
+
+        feedback = page.locator("#tracking-feedback")
+        assert "原因" in feedback.inner_text()
+        assert "当前方案需要重新核对资源筛选" in feedback.inner_text()
+        expect(feedback.locator(".tracking-submit-issues")).to_have_count(1)
+
+    def test_a_failure_lands_in_view_even_when_the_actions_are_scrolled(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        """D8: the card is scrolled into the detail pane when it appears.
+
+        The detail pane has its own scroll container; a user who scrolled down to
+        the submit button would otherwise get a result above the visible area.
+        """
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        pending = {
+            **_item(
+                "tracking-a", "云境之下",
+                status="PENDING_SUBMIT", status_label="待提交", status_group="PENDING",
+            ),
+            "available_actions": [{
+                "code": "SUBMIT", "label": "提交方案", "style": "PRIMARY",
+                "requires_confirmation": True, "target_scopes": [],
+            }],
+        }
+        detail = self._detail(pending)
+        failed = {
+            **pending, "status": "SUBMIT_FAILED", "status_label": "提交失败",
+            "status_group": "ATTENTION", "revision": 2, "available_actions": [],
+        }
+
+        def handler(route: Any, request: Any) -> None:
+            path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+            if request.method == "GET" and path == "/settings/autobangumi":
+                route.fulfill(json={"ok": True, "result": {
+                    "configured": True, "credential_present": True,
+                    "connection_ref": "11111111-1111-4111-8111-111111111111",
+                    "configuration_revision": 1, "connection_status": "CONFIGURED",
+                }})
+                return
+            if request.method == "GET" and path == "/tracking/items":
+                route.fulfill(json={"ok": True, "result": {
+                    "items": [pending], "summary": _summary(1, pending=1),
+                    "status_groups": _status_groups_for([pending]), "warnings": [],
+                }})
+                return
+            if request.method == "GET" and path.startswith("/tracking/items/"):
+                route.fulfill(json={"ok": True, "result": detail})
+                return
+            if request.method == "POST" and path.endswith("/submit"):
+                route.fulfill(json={"ok": True, "result": {
+                    "tracking_id": "tracking-a", "outcome": "SUBMIT_FAILED",
+                    "checked_revision": 1, "next_revision": 2,
+                    "checked_at": "2026-09-14T00:00:00Z", "operation_id": "op-1",
+                    "failure_category": "VALIDATION",
+                    "issues": [{
+                        "code": "NO_VALID_RESOURCES",
+                        "field": "filter_rule",
+                        "message": "当前方案需要重新核对资源筛选。",
+                    }],
+                    "tracking": failed,
+                }})
+                return
+            route.continue_()
+
+        page.route("**/api/v1/**", handler)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-submit")
+        expect(page.locator("#tracking-submit")).to_be_enabled()
+
+        # Scroll the detail pane to the bottom, where the submit button is.
+        page.locator(".tracking-inspector").evaluate("el => { el.scrollTop = el.scrollHeight }")
+        page.wait_for_timeout(100)
+        assert page.locator(".tracking-inspector").evaluate("el => el.scrollTop") > 0
+
+        page.locator("#tracking-submit").click()
+        page.wait_for_selector("#tracking-mode-continue")
+        page.locator("#tracking-mode-continue").click()
+        page.wait_for_selector("#tracking-feedback")
+
+        # The card is inside the pane's visible rect, and it carries this
+        # category's next step (validation → edit the plan, not the connection).
+        inside = page.evaluate(
+            """() => {
+                const pane = document.querySelector('.tracking-inspector')
+                const card = document.querySelector('#tracking-feedback')
+                const paneBox = pane.getBoundingClientRect()
+                const cardBox = card.getBoundingClientRect()
+                return cardBox.top >= paneBox.top - 1 && cardBox.bottom <= paneBox.bottom + 1
+            }"""
+        )
+        assert inside is True
+        assert "修改追番方案" in page.locator(".tracking-feedback-next").inner_text()
+        assert "当前方案需要重新核对资源筛选" in page.locator("#tracking-feedback").inner_text()
+
+    def test_switching_records_moves_focus_to_the_detail_summary(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        """AC6: after the new detail loads, focus lands on the detail summary.
+
+        The list's own selection focus runs first; the inspector then focuses its
+        summary once the newly selected detail is rendered, so the accessible
+        reading position is the freshly loaded detail.
+        """
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        first = _item("tracking-first", "葬送的芙莉莲")
+        second = _item("tracking-second", "咒术回战")
+        self._serve(
+            page,
+            [first, second],
+            {"tracking-first": self._detail(first), "tracking-second": self._detail(second)},
+        )
+        page.goto(f"{live_server_url}/app/tracking")
+        page.wait_for_selector(".tracking-list-item")
+
+        page.locator('[data-tracking-id="tracking-second"] .tracking-list-item').click()
+        page.wait_for_function(
+            "() => document.activeElement?.classList?.contains('tracking-inspector-summary')"
+        )
+        assert page.evaluate("() => document.activeElement?.innerText").find("咒术回战") >= 0
+        # The summary is a single target that also carries the title it announces.
+        assert page.locator(".tracking-inspector-summary").count() == 1

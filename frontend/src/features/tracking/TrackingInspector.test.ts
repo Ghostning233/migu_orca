@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '@/api/client'
 import { clearReuseHandoff, consumeReuseHandoff } from '@/features/requests/reuseHandoff'
 import TrackingInspector from './TrackingInspector.vue'
-import { createCheckSession, createResubmitSession } from './trackingProjection'
+import { createCheckSession, createResubmitSession, formatTrackingCreatedAt } from './trackingProjection'
 import type { CapabilityResult, TrackingCheckSession } from './trackingProjection'
 import type {
   TrackingWriteSession,
@@ -83,6 +83,101 @@ async function mountInspector(trackingId = 'tracking-1', props: Record<string, u
   return wrapper
 }
 
+describe('TrackingInspector detail focus (US-306 AC6)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  it('keeps focusing the detail summary after a newly selected detail loads (AC6)', async () => {
+    // jsdom only moves focus for attached nodes, so this case mounts into the
+    // document; every other assertion in the file runs detached.
+    apiGet.mockResolvedValue(detail() as never)
+    const wrapper = mount(TrackingInspector, {
+      props: { trackingId: 'tracking-1' },
+      global: { plugins: [inspectorRouter()] },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    const firstSummary = wrapper.find('.tracking-inspector-summary')
+    expect(document.activeElement).toBe(firstSummary.element)
+
+    apiGet.mockResolvedValue(detail({ tracking_id: 'tracking-2', title: '咒术回战' }) as never)
+    await wrapper.setProps({ trackingId: 'tracking-2' })
+    await flushPromises()
+    const secondSummary = wrapper.find('.tracking-inspector-summary')
+    expect(secondSummary.text()).toContain('咒术回战')
+    expect(document.activeElement).toBe(secondSummary.element)
+    wrapper.unmount()
+  })
+})
+
+describe('TrackingInspector detail summary (issue #227)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  function summaryOf(wrapper: { find: (selector: string) => { text: () => string } }) {
+    return wrapper.find('.tracking-inspector-summary')
+  }
+
+  it('drops the inner summary title and keeps the status pill beside the title (D1)', async () => {
+    apiGet.mockResolvedValue(detail() as never)
+    const wrapper = await mountInspector()
+
+    const summary = summaryOf(wrapper)
+    expect(summary.text()).not.toContain('安全追番摘要')
+    // The pill lives next to the title, in the identity block.
+    const pill = wrapper.find('.tracking-inspector-identity .tracking-status-pill')
+    expect(pill.exists()).toBe(true)
+    expect(pill.text()).toBe('追番中')
+    expect(pill.classes()).toContain('is-info')
+    // 本地状态 is the pill now, not another summary row.
+    expect(summary.text()).not.toContain('本地状态')
+  })
+
+  it('lists exactly the D2 fields in the adjudicated order', async () => {
+    apiGet.mockResolvedValue(detail() as never)
+    const wrapper = await mountInspector()
+
+    const facts = wrapper.find('.tracking-inspector-facts')
+    expect(facts.exists()).toBe(true)
+    expect(facts.findAll('dt').map((node) => node.text())).toEqual([
+      '季度', '字幕组', '有效资源数', '总集数', '已更新集数', '创建时间',
+    ])
+    // The 2026-10-20 revision removed these two meanings from the record.
+    expect(facts.text()).not.toContain('提交方式')
+    expect(facts.text()).not.toContain('最近更新')
+    expect(facts.text()).not.toContain('最后刷新')
+  })
+
+  it('reads 创建时间 from created_at, never from updated_at', async () => {
+    apiGet.mockResolvedValue(detail({
+      created_at: '2026-09-12T00:00:00Z',
+      updated_at: '2026-09-13T00:00:00Z',
+    }) as never)
+    const wrapper = await mountInspector()
+
+    const facts = wrapper.find('.tracking-inspector-facts')
+    expect(facts.text()).toContain(formatTrackingCreatedAt('2026-09-12T00:00:00Z'))
+    expect(facts.text()).not.toContain(formatTrackingCreatedAt('2026-09-13T00:00:00Z'))
+    // A raw ISO string is never rendered.
+    expect(facts.text()).not.toContain('2026-09-12T00:00:00Z')
+
+    apiGet.mockResolvedValue(detail({ created_at: null }) as never)
+    const missing = await mountInspector()
+    expect(missing.find('.tracking-inspector-facts').text()).toContain('未设置')
+  })
+
+  it('shows 未开发 for an untrusted total and for the updated count', async () => {
+    apiGet.mockResolvedValue(detail({ total_episodes: null }) as never)
+    const untrusted = await mountInspector()
+    expect(untrusted.find('.tracking-inspector-facts').text()).toContain('未开发')
+
+    apiGet.mockResolvedValue(detail({ total_episodes: 12 }) as never)
+    const trusted = await mountInspector()
+    const facts = trusted.find('.tracking-inspector-facts')
+    expect(facts.text()).toContain('12')
+    // The updated count is still an unimplemented capability.
+    expect(facts.text()).toContain('未开发')
+  })
+})
+
 describe('TrackingInspector secure detail (US-306)', () => {
   beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
 
@@ -92,7 +187,7 @@ describe('TrackingInspector secure detail (US-306)', () => {
     expect(apiGet).toHaveBeenCalledWith('/api/v1/tracking/items/{tracking_id}', expect.objectContaining({
       path: { tracking_id: 'tracking-1' }, query: {}, signal: expect.any(AbortSignal),
     }))
-    expect(wrapper.text()).toContain('有效资源')
+    expect(wrapper.text()).toContain('有效资源数')
     expect(wrapper.text()).toContain('已更新集数')
     expect(wrapper.text()).toContain('未开发')
     // Issue #93: the retired 追番方案 page is gone; reuse travels through the
@@ -153,7 +248,7 @@ describe('TrackingInspector secure detail (US-306)', () => {
 
     // Everyday essentials stay directly visible.
     const summary = wrapper.find('.tracking-inspector-summary')
-    expect(summary.text()).toContain('有效资源')
+    expect(summary.text()).toContain('有效资源数')
     expect(summary.text()).toContain('字幕组')
     expect(summary.text()).toContain('追番中')
   })
@@ -226,6 +321,275 @@ async function mountSubmittable(
   await flushPromises()
   return wrapper
 }
+
+describe('TrackingInspector main feedback card (issue #227 D8)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  it('lifts a submit failure and its reason above the actions, outside every fold', async () => {
+    const wrapper = await mountSubmittable({ sessions: sessions({ submit: writeSession({
+      state: 'SUBMIT_FAILED',
+      message: '提交明确失败，尚未创建外部订阅；可在确认后显式重试。',
+      issues: [{ code: 'SUBTITLE_GROUP_MISSING', message: '字幕组未选择，无法提交。' }],
+    }) }) })
+
+    const feedback = wrapper.find('#tracking-feedback')
+    expect(feedback.exists()).toBe(true)
+    expect(feedback.text()).toContain('提交失败')
+    expect(feedback.text()).toContain('尚未创建外部订阅')
+    expect(feedback.text()).toContain('字幕组未选择，无法提交。')
+    expect(feedback.text()).toContain('下一步')
+    // First screen: never inside a disclosure, and above the action entry.
+    expect(feedback.element.closest('details')).toBeNull()
+    const order = feedback.element.compareDocumentPosition(
+      wrapper.find('#tracking-submit').element,
+    )
+    expect(order & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('calls an undecidable result 结果待确认, never a failure', async () => {
+    const wrapper = await mountSubmittable({ sessions: sessions({ submit: writeSession({
+      state: 'VERIFYING_EXTERNAL',
+      message: '外部提交结果待确认，正在只读回查；请勿重复提交。',
+    }) }) })
+
+    const feedback = wrapper.find('#tracking-feedback')
+    expect(feedback.find('#tracking-feedback-title').text()).toBe('本次提交结果待确认')
+    expect(feedback.text()).toContain('请勿重复提交')
+    expect(feedback.text()).toContain('下一步')
+    // The card explains the safe next step, and never claims a definite failure.
+    expect(feedback.text()).toContain('只读核验')
+    expect(feedback.text()).not.toContain('提交失败')
+    expect(feedback.text()).not.toContain('确定失败')
+    expect(feedback.text()).not.toContain('安全重试')
+  })
+
+  it('shows the pre-submit revalidation failure without a live write session', async () => {
+    apiGet.mockResolvedValue(detail({
+      status: 'NEEDS_RECONFIRM', status_label: '待重新确认', status_group: 'PENDING',
+      available_actions: [submitAction],
+      revalidation_issues: [
+        { code: 'RESOURCE_FILTER_UNSATISFIED', field: 'filter_rule', message: '当前方案需要重新核对资源筛选。' },
+      ],
+    }) as never)
+    const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
+
+    const feedback = wrapper.find('#tracking-feedback')
+    expect(feedback.find('#tracking-feedback-title').text()).toBe('提交前复核未通过')
+    expect(feedback.text()).toContain('尚未创建 Auto Bangumi 外部订阅')
+    expect(feedback.text()).toContain('当前方案需要重新核对资源筛选。')
+    expect(feedback.text()).toContain('修改方案')
+    expect(feedback.element.closest('details')).toBeNull()
+  })
+
+  it('answers a credential failure with the settings step, not a flat retry', async () => {
+    const wrapper = await mountSubmittable({ sessions: sessions({ submit: writeSession({
+      state: 'SUBMIT_FAILED',
+      failureCategory: 'AUTHENTICATION',
+      message: '保存的连接凭据被 Auto Bangumi 拒绝。请前往设置更新账号或密码后重试；本次未创建外部订阅。',
+    }) }) })
+
+    const feedback = wrapper.find('#tracking-feedback')
+    expect(feedback.text()).toContain('提交失败')
+    expect(feedback.text()).toContain('前往设置更新账号或密码')
+    expect(feedback.find('.tracking-feedback-next').text()).toContain('前往设置')
+    expect(feedback.find('.tracking-feedback-next').text()).not.toContain('可重试提交')
+  })
+
+  it('follows a validation failure with the plan-editing step', async () => {
+    const wrapper = await mountSubmittable({ sessions: sessions({ submit: writeSession({
+      state: 'SUBMIT_FAILED',
+      failureCategory: 'VALIDATION',
+      message: '本地方案未通过提交前检查，本次未创建外部订阅。请按提示修改追番方案后重新提交。',
+    }) }) })
+
+    const next = wrapper.find('#tracking-feedback .tracking-feedback-next').text()
+    expect(next).toContain('修改追番方案')
+    expect(next).not.toContain('前往设置')
+  })
+
+  it('keeps a reloaded submit failure on the first screen without a live session', async () => {
+    apiGet.mockResolvedValue(detail({
+      status: 'SUBMIT_FAILED', status_label: '提交失败', status_group: 'ATTENTION',
+      available_actions: [retryAction],
+    }) as never)
+    const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
+
+    const feedback = wrapper.find('#tracking-feedback')
+    expect(feedback.exists()).toBe(true)
+    expect(feedback.find('#tracking-feedback-title').text()).toBe('提交失败')
+    // CONTEXT: 提交失败 allows another submit but never proves the absence of
+    // partial side effects, so the card must not promise either.
+    expect(feedback.text()).toContain('不证明没有产生部分副作用')
+    expect(feedback.text()).toContain('下一步')
+    expect(feedback.text()).not.toContain('安全重试')
+    // A record-level card borrows no live write-result id.
+    expect(wrapper.find('#tracking-submit-result').exists()).toBe(false)
+  })
+
+  it('keeps a reloaded 复核未通过 on the first screen even with the stubbed issue list', async () => {
+    // The read service still stubs revalidation_issues to [], which is the real
+    // API shape: the card must still state the verdict and the next step.
+    apiGet.mockResolvedValue(detail({
+      status: 'NEEDS_RECONFIRM', status_label: '待重新确认', status_group: 'PENDING',
+      available_actions: [submitAction], revalidation_issues: [],
+    }) as never)
+    const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
+
+    const feedback = wrapper.find('#tracking-feedback')
+    expect(feedback.exists()).toBe(true)
+    expect(feedback.find('#tracking-feedback-title').text()).toBe('提交前复核未通过')
+    expect(feedback.text()).toContain('本次尚未创建 Auto Bangumi 外部订阅')
+    expect(feedback.find('.tracking-submit-issues').exists()).toBe(false)
+    expect(feedback.element.closest('details')).toBeNull()
+  })
+
+  it('never turns an accepted one-time download into a failure diagnostic', async () => {
+    const wrapper = await mountSubmittable({
+      sessions: sessions({ submit: writeSession({
+        state: 'ADDED_TO_DOWNLOAD',
+        message: '已加入下载：Auto Bangumi 已接受本次下载现有资源的请求，不代表资源已下载完成。',
+        diagnostics: { httpStatus: 200, messageZh: 'accepted', messageEn: null },
+      }) }),
+    }, { safe_info: null, external_mapping: null })
+
+    expect(wrapper.find('#tracking-feedback').exists()).toBe(false)
+    // D7: a success leaves no failure diagnostics behind, so the fold is gone.
+    expect(wrapper.find('#tracking-tech-diagnostics').exists()).toBe(false)
+  })
+
+  it('binds the live id and status role only to a live write result', async () => {
+    const live = await mountSubmittable({ sessions: sessions({ submit: writeSession({ state: 'SUBMIT_FAILED' }) }) })
+    const livePanel = live.find('#tracking-feedback .tracking-submit-result')
+    expect(livePanel.attributes('id')).toBe('tracking-submit-result')
+    expect(livePanel.attributes('role')).toBe('status')
+
+    apiGet.mockResolvedValue(detail({
+      status: 'SUBMIT_FAILED', status_label: '提交失败', status_group: 'ATTENTION',
+      available_actions: [retryAction],
+    }) as never)
+    const record = await mountInspector('tracking-1', LIVE_SESSION)
+    const recordPanel = record.find('#tracking-feedback .tracking-submit-result')
+    // A record-level card borrows neither the live id nor a status role.
+    expect(recordPanel.attributes('id')).toBeUndefined()
+    expect(recordPanel.attributes('role')).toBeUndefined()
+  })
+
+  it('brings a repeated failure of the same kind back into view', async () => {
+    const scroll = vi.fn()
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      value: scroll, configurable: true, writable: true,
+    })
+    try {
+      const failure = {
+        state: 'SUBMIT_FAILED' as const,
+        message: '提交明确失败，尚未创建外部订阅；可在确认后显式重试。',
+      }
+      // The watcher reacts to a *new* result, not to the initial render.
+      const wrapper = await mountSubmittable()
+      await wrapper.setProps({ sessions: sessions({ submit: writeSession(failure) }) })
+      await flushPromises()
+      const first = scroll.mock.calls.length
+      expect(first).toBeGreaterThan(0)
+
+      // A second failure of the same kind keeps the same title, so the watcher
+      // must key on the new session object instead of the title.
+      await wrapper.setProps({ sessions: sessions({ submit: writeSession(failure) }) })
+      await flushPromises()
+      expect(scroll.mock.calls.length).toBeGreaterThan(first)
+    } finally {
+      delete (Element.prototype as unknown as { scrollIntoView?: unknown }).scrollIntoView
+    }
+  })
+
+  it('keeps a decided success out of the feedback card', async () => {
+    const wrapper = await mountSubmittable({ sessions: sessions({ submit: writeSession() }) })
+
+    expect(wrapper.find('#tracking-feedback').exists()).toBe(false)
+    // The in-section result panel still reports the success where it always did.
+    expect(wrapper.find('.tracking-submit #tracking-submit-result').exists()).toBe(true)
+  })
+})
+
+describe('TrackingInspector technical diagnostics (issue #227 D7)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  it('does not render the disclosure when it has no content at all', async () => {
+    apiGet.mockResolvedValue(detail({
+      safe_info: null, external_mapping: null, audit_events: [],
+    }) as never)
+    const wrapper = await mountInspector()
+
+    // The name is unchanged (D7 arbitration): the block simply is not there.
+    expect(wrapper.find('#tracking-tech-diagnostics').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('技术诊断')
+  })
+
+  it('keeps the same collapsed disclosure whenever it has any content', async () => {
+    apiGet.mockResolvedValue(detail({
+      external_mapping: { match_reason: '标题', enabled: true, external_deleted: false },
+    }) as never)
+    const wrapper = await mountInspector()
+
+    const diagnostics = wrapper.find('#tracking-tech-diagnostics')
+    expect(diagnostics.exists()).toBe(true)
+    expect(diagnostics.find('summary').text()).toBe('技术诊断')
+    expect(diagnostics.attributes('open')).toBeUndefined()
+    expect(diagnostics.text()).toContain('外部安全摘要')
+  })
+})
+
+describe('TrackingInspector operation record wording (issue #227 D6)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  it('renders the operation and state enums in Chinese', async () => {
+    apiGet.mockResolvedValue(detail({
+      current_operation: {
+        operation_id: 'op-1', operation: 'MODIFY', state: 'OUTCOME_UNKNOWN', attempt: 2,
+      },
+    }) as never)
+    const wrapper = await mountInspector()
+
+    const activity = wrapper.find('#tracking-activity-log')
+    expect(activity.text()).toContain('修改')
+    expect(activity.text()).toContain('结果待确认')
+    expect(activity.text()).toContain('第 2 次')
+    expect(activity.text()).not.toContain('MODIFY')
+    expect(activity.text()).not.toContain('OUTCOME_UNKNOWN')
+  })
+
+  it('keeps an unrecognized enum value visible instead of hiding the evidence', async () => {
+    apiGet.mockResolvedValue(detail({
+      current_operation: {
+        operation_id: 'op-1', operation: 'MYSTERY_KIND', state: 'SOMETHING_NEW', attempt: 1,
+      },
+    }) as never)
+    const wrapper = await mountInspector()
+
+    const activity = wrapper.find('#tracking-activity-log')
+    // Fail-open for display: an unknown value is shown verbatim, never dropped.
+    expect(activity.text()).toContain('MYSTERY_KIND')
+    expect(activity.text()).toContain('SOMETHING_NEW')
+  })
+
+  it('maps the audit action when the server sends no safe message', async () => {
+    apiGet.mockResolvedValue(detail({
+      audit_events: [
+        { action: 'SUBMIT_SUCCEEDED', safe_message: null, created_at: '2026-09-13T00:00:00Z' },
+        { action: 'MYSTERY_EVENT', safe_message: null, created_at: '2026-09-13T00:01:00Z' },
+        { action: 'SUBMIT_FAILED', safe_message: '服务端安全文案', created_at: '2026-09-13T00:02:00Z' },
+      ],
+    }) as never)
+    const wrapper = await mountInspector()
+
+    const audit = wrapper.find('#tracking-activity-log')
+    expect(audit.text()).toContain('提交成功')
+    // An unknown action stays visible as its raw code, and a server safe message
+    // always wins over the local label.
+    expect(audit.text()).toContain('MYSTERY_EVENT')
+    expect(audit.text()).toContain('服务端安全文案')
+    expect(audit.text()).not.toContain('SUBMIT_SUCCEEDED')
+  })
+})
 
 describe('TrackingInspector explicit submission (US-310)', () => {
   beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })

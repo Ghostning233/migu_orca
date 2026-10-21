@@ -10,7 +10,10 @@ import { storageQuery } from '@/features/requests/requestStorage'
 import {
   canVerifyExternally,
   executableTrackingActions,
-  formatSubmissionMode,
+  formatTrackingAuditAction,
+  formatTrackingCreatedAt,
+  formatTrackingOperation,
+  formatTrackingOperationState,
   isRecoverableStatus,
   isPendingSubmission,
   MANAGEMENT_ACTIONS_HELP,
@@ -276,6 +279,149 @@ function requestResubmit(): void {
 // it is offered for a record whose exact status is unresolved, only while the
 // page session has proven `external_verify`, and it never writes upstream.  The
 // page owns the request; this component renders the flow and its result.
+// -- main feedback (D8, issue #227) -----------------------------------------
+/**
+ * The failure / undecidable reason belongs to the first-screen main feedback
+ * area, not to a fold or to the bottom of the action section.
+ *
+ * ``title`` says what happened in plain words («结果待确认» is never a failure),
+ * ``verdict`` is the server-projected sentence, ``reasons`` are the documented
+ * issue messages, and ``nextStep`` names the safe next move without performing
+ * any of it (the action hierarchy belongs to T4b).
+ */
+interface MainFeedback {
+  readonly source: 'write' | 'revalidation'
+  readonly tone: 'warning' | 'danger'
+  readonly title: string
+  readonly verdict: string
+  readonly reasons: string[]
+  readonly nextStep: string
+}
+
+/** Write outcomes that must be surfaced as the page's main feedback. */
+const FEEDBACK_STATES = [
+  'SUBMIT_FAILED', 'NEEDS_RECONFIRM', 'VERIFYING_EXTERNAL', 'RECOVERY_REQUIRED',
+  'CONFLICT', 'REJECTED', 'UNKNOWN',
+] as const
+type FeedbackState = (typeof FEEDBACK_STATES)[number]
+
+const WRITE_FEEDBACK: Record<FeedbackState, { title: string; tone: 'warning' | 'danger' }> = {
+  SUBMIT_FAILED: { title: '提交失败', tone: 'danger' },
+  NEEDS_RECONFIRM: { title: '提交前复核未通过', tone: 'warning' },
+  // The record-level 「结果待确认」 panel (with its 只读核验 entry) keeps that
+  // heading; this card names the *write* it is talking about so the two never
+  // read as one duplicated title.
+  VERIFYING_EXTERNAL: { title: '本次提交结果待确认', tone: 'warning' },
+  RECOVERY_REQUIRED: { title: '本次提交结果待确认', tone: 'warning' },
+  CONFLICT: { title: '提交未执行', tone: 'danger' },
+  REJECTED: { title: '提交被拒绝', tone: 'danger' },
+  UNKNOWN: { title: '本次提交结果待确认', tone: 'warning' },
+}
+
+/**
+ * The next step per server-published failure class.  A credential, version or
+ * capability failure needs the saved connection fixed before another submit, so
+ * it must never be answered with a flat «retry» (the session copy already says so).
+ */
+const FAILURE_NEXT_STEPS: Record<string, string> = {
+  CONNECTION: '先前往设置检查地址与网络，再回来提交。',
+  AUTHENTICATION: '先前往设置更新账号或密码，再回来提交。',
+  VERSION: '先前往设置确认 Auto Bangumi 版本，再回来提交。',
+  CAPABILITY: '先前往设置改用已验证的账号密码连接，再回来提交。',
+  DUPLICATE_SUBSCRIPTION: '先核对 Auto Bangumi 中的既有订阅，再决定是否继续。',
+  VALIDATION: '按提示修改追番方案后重新提交。',
+  REJECTED: '检查方案内容后重新确认提交。',
+  OUTCOME_UNKNOWN: '先做只读核验；未确认前不要重复提交。',
+}
+
+const STATE_NEXT_STEPS: Record<FeedbackState, string> = {
+  SUBMIT_FAILED: '先按提示处理失败原因，再决定是否重新提交；重新提交会再次发起一次外部写。',
+  NEEDS_RECONFIRM: '修改方案后重新确认提交。',
+  VERIFYING_EXTERNAL: '先做只读核验；能定论即定论，未确认前不要重复提交。',
+  RECOVERY_REQUIRED: '先做只读核验；无法定论时再在服务端允许的出路中选择主动重发或放弃跟踪。',
+  CONFLICT: '刷新详情后重新确认。',
+  REJECTED: '刷新详情后按提示修正再提交。',
+  UNKNOWN: '先做只读核验；未确认前不要重复提交。',
+}
+
+function isFeedbackState(state: string): state is FeedbackState {
+  return (FEEDBACK_STATES as readonly string[]).includes(state)
+}
+
+/** The current write result when it is a failure or an undecidable outcome. */
+const failingWrite = computed(() => {
+  const session = thisWrite.value
+  if (!session || session.family !== 'SUBMIT') return null
+  return isFeedbackState(session.state) ? session : null
+})
+
+/**
+ * Record-level feedback for a reloaded page that has no live write session.
+ *
+ * The read DTO does not persist a failure reason, so these entries only state
+ * what the status itself proves and point at the safe next move.  They keep AC5
+ * (reason/next step on the first screen) true after a refresh; the reason list
+ * still comes from a live result or from ``revalidation_issues`` when present.
+ */
+const RECORD_FEEDBACK: Record<string, { title: string; tone: 'warning' | 'danger'; verdict: string; nextStep: string }> = {
+  SUBMIT_FAILED: {
+    title: '提交失败',
+    tone: 'danger',
+    // CONTEXT: 提交失败 allows another submit, but never proves there were no
+    // partial side effects.
+    verdict: '上次提交没有收到 Auto Bangumi 的成功结果；不证明没有产生部分副作用。',
+    nextStep: '确认原因后可重新提交；重试会再次发起一次外部写。',
+  },
+  NEEDS_RECONFIRM: {
+    title: '提交前复核未通过',
+    tone: 'warning',
+    verdict: '本次尚未创建 Auto Bangumi 外部订阅。',
+    nextStep: '修改方案后重新确认提交。',
+  },
+}
+
+const mainFeedback = computed<MainFeedback | null>(() => {
+  const session = failingWrite.value
+  if (session) {
+    const state = session.state as FeedbackState
+    const category = session.failureCategory
+    return {
+      source: 'write',
+      tone: WRITE_FEEDBACK[state].tone,
+      title: WRITE_FEEDBACK[state].title,
+      verdict: session.message,
+      reasons: session.issues.map((issue) => issue.message),
+      nextStep: (category ? FAILURE_NEXT_STEPS[category] : undefined) ?? STATE_NEXT_STEPS[state],
+    }
+  }
+  const record = detail.value ? RECORD_FEEDBACK[detail.value.status] : undefined
+  if (!record) return null
+  return {
+    source: 'revalidation',
+    tone: record.tone,
+    title: record.title,
+    verdict: record.verdict,
+    reasons: (detail.value?.revalidation_issues ?? []).map((issue) => issue.message),
+    nextStep: record.nextStep,
+  }
+})
+
+const feedbackCard = ref<HTMLElement | null>(null)
+
+// The detail pane scrolls on its own: when a failure lands while the user is
+// down at the action buttons, bring the card into view without stealing focus.
+// A repeated failure of the same kind carries the same title, so key the watch
+// on the session object (a new object per result) and fall back to the record
+// title for a reloaded record.
+watch(
+  () => failingWrite.value ?? mainFeedback.value?.title ?? null,
+  async (next) => {
+    if (!next) return
+    await nextTick()
+    feedbackCard.value?.scrollIntoView?.({ block: 'nearest' })
+  },
+)
+
 /** True while the record's exact status is one only the server can settle. */
 const recoveryRecord = computed(() => (
   !!detail.value && isRecoverableStatus(detail.value.status)
@@ -308,13 +454,53 @@ const thisManagementAction = computed(() => (
  * one. An empty diagnostic object still renders, so the page can honestly say
  * 未提供具体原因 instead of inventing a cause.
  */
+
 const writeDiagnostics = computed(() => (
-  thisWrite.value && thisWrite.value.state !== 'IN_FLIGHT' && thisWrite.value.state !== 'ACTIVE'
-    ? thisWrite.value.diagnostics
-    : null
+  failingWrite.value ? thisWrite.value!.diagnostics : null
 ))
 
-const submissionModeLabel = computed(() => formatSubmissionMode(detail.value?.submission_mode))
+/**
+ * D7 (issue #227): 技术诊断 renders only when it actually has something to show.
+ * The name stays as it is (arbitration); an empty fold would be a dead control.
+ */
+const hasTechnicalDiagnostics = computed(() => Boolean(
+  writeDiagnostics.value
+  || detail.value?.external_mapping
+  || detail.value?.safe_info?.resources?.valid_file_names?.length
+))
+
+/**
+ * Summary values for D2 (issue #227).  The 2026-10-20 revision fixed the field
+ * list to 季度/字幕组/有效资源数/总集数/已更新集数/创建时间: 提交方式 is an
+ * operation semantic rather than a record attribute, and 「最近更新」 became
+ * 创建时间 (created_at) because updated_at moves on every write.
+ */
+const seasonLabel = computed(() => (
+  detail.value?.season ? `第 ${detail.value.season} 季` : '未设置'
+))
+const createdAtLabel = computed(() => formatTrackingCreatedAt(detail.value?.created_at))
+
+/**
+ * Semantic tone of the summary's status pill.
+ *
+ * Mirrors TrackingView's list-row pill tones so one status never gets two
+ * colours.  TrackingView is owned by the T6 ticket, so the mapping is duplicated
+ * here instead of exported from it; T6 can unify both into one helper.
+ */
+const STATUS_PILL_TONES: Record<string, 'info' | 'unknown' | 'warning' | 'danger'> = {
+  ACTIVE: 'info',
+  PENDING_SUBMIT: 'unknown',
+  ADDED_TO_DOWNLOAD: 'unknown',
+  DISABLED: 'unknown',
+  NEEDS_RECONFIRM: 'warning',
+  RECOVERY_REQUIRED: 'warning',
+  EXTERNAL_DELETED: 'warning',
+  SUBMIT_FAILED: 'danger',
+}
+
+function statusPillTone(status: string): string {
+  return `is-${STATUS_PILL_TONES[status] ?? 'unknown'}`
+}
 
 const itemActionInFlight = computed(() => (
   writeInFlight.value || recoveryInFlight.value || managementInFlight.value || checkInFlight.value
@@ -625,6 +811,10 @@ async function fetchDetail(preserve: boolean): Promise<void> {
     if (sequence !== requestSequence || requestController.signal.aborted) return
     detail.value = nextDetail
     if (preserve) return
+    // The summary only exists once the loading branch is gone, so clear it
+    // before the focus step — otherwise ``inspectorHeading`` is still null and
+    // the AC6 focus transfer silently does nothing.
+    loading.value = false
     await nextTick()
     if (sequence === requestSequence) inspectorHeading.value?.focus({ preventScroll: true })
   } catch (error) {
@@ -660,20 +850,58 @@ defineExpose({ reload: () => fetchDetail(true) })
     <ErrorState v-else-if="failed" title="追番详情读取失败" message="暂时无法读取该追番详情，请稍后重试。" retry-label="重试详情" @retry="loadDetail" />
     <div v-else-if="detail" class="tracking-inspector-detail">
       <section ref="inspectorHeading" tabindex="-1" class="tracking-inspector-summary" aria-labelledby="tracking-inspector-title">
-        <p class="field-help">安全追番摘要</p>
         <div class="tracking-inspector-identity">
           <TrackingPoster :poster-path="detail.poster_path" variant="detail" />
-          <h3 id="tracking-inspector-title">{{ detail.title || '未命名番剧' }}</h3>
+          <div class="tracking-inspector-headline">
+            <div class="tracking-inspector-title-row">
+              <h3 id="tracking-inspector-title">{{ detail.title || '未命名番剧' }}</h3>
+              <span
+                id="tracking-inspector-status"
+                class="tracking-status-pill"
+                :class="statusPillTone(detail.status)"
+              >{{ detail.status_label }}</span>
+            </div>
+            <dl class="tracking-inspector-facts">
+              <div><dt>季度</dt><dd>{{ seasonLabel }}</dd></div>
+              <div><dt>字幕组</dt><dd>{{ detail.subtitle_group || '未设置' }}</dd></div>
+              <div><dt>有效资源数</dt><dd>{{ detail.valid_resource_count }}</dd></div>
+              <div><dt>总集数</dt><dd>{{ hasTrustedEpisodeCount(detail.total_episodes) ? detail.total_episodes : EPISODE_PLACEHOLDER }}</dd></div>
+              <div><dt>已更新集数</dt><dd>{{ EPISODE_PLACEHOLDER }}</dd></div>
+              <div><dt>创建时间</dt><dd>{{ createdAtLabel }}</dd></div>
+            </dl>
+          </div>
         </div>
-        <dl>
-          <div><dt>季度</dt><dd>{{ detail.season ?? '未设置' }}</dd></div>
-          <div><dt>字幕组</dt><dd>{{ detail.subtitle_group || '未设置' }}</dd></div>
-          <div><dt>本地状态</dt><dd>{{ detail.status_label }}</dd></div>
-          <div v-if="submissionModeLabel"><dt>提交方式</dt><dd>{{ submissionModeLabel }}</dd></div>
-          <div><dt>有效资源</dt><dd>{{ detail.valid_resource_count }}</dd></div>
-          <div><dt>总集数</dt><dd>{{ hasTrustedEpisodeCount(detail.total_episodes) ? detail.total_episodes : EPISODE_PLACEHOLDER }}</dd></div>
-          <div><dt>已更新集数</dt><dd>{{ EPISODE_PLACEHOLDER }}</dd></div>
-        </dl>
+      </section>
+
+      <section
+        v-if="mainFeedback"
+        id="tracking-feedback"
+        ref="feedbackCard"
+        class="tracking-feedback-card"
+        :class="`is-${mainFeedback.tone}`"
+      >
+        <h4 id="tracking-feedback-title">{{ mainFeedback.title }}</h4>
+        <!--
+          Failure/undecidable write results render here (first screen); decided
+          successes keep rendering in the submit section below.  The two
+          conditions are mutually exclusive, so ``#tracking-submit-result`` is
+          only ever in the DOM once.  A record-level card keeps the same shape
+          without borrowing that id or a live status role.
+        -->
+        <div
+          :id="mainFeedback.source === 'write' ? 'tracking-submit-result' : undefined"
+          class="tracking-submit-result"
+          :role="mainFeedback.source === 'write' ? 'status' : undefined"
+        >
+          <p class="tracking-submit-verdict">{{ mainFeedback.verdict }}</p>
+          <template v-if="mainFeedback.reasons.length">
+            <p v-if="mainFeedback.source === 'revalidation'" class="field-help">原因</p>
+            <ul class="tracking-submit-issues" aria-label="提交问题">
+              <li v-for="reason in mainFeedback.reasons" :key="reason">{{ reason }}</li>
+            </ul>
+          </template>
+        </div>
+        <p class="field-help tracking-feedback-next">下一步：{{ mainFeedback.nextStep }}</p>
       </section>
 
       <p
@@ -855,7 +1083,7 @@ defineExpose({ reload: () => fetchDetail(true) })
           {{ connectionRequiredHint }}
         </p>
         <div
-          v-if="thisWrite"
+          v-if="thisWrite && !failingWrite"
           id="tracking-submit-result"
           class="tracking-submit-result"
           :class="`is-${thisWrite.state.toLowerCase()}`"
@@ -1022,7 +1250,11 @@ defineExpose({ reload: () => fetchDetail(true) })
         <div class="tracking-inspector-disclosure-body">
           <section v-if="detail.current_operation" class="tracking-inspector-section" aria-labelledby="tracking-operation-heading">
             <h4 id="tracking-operation-heading">最近操作</h4>
-            <p>{{ detail.current_operation.operation }} · {{ detail.current_operation.state }} · 第 {{ detail.current_operation.attempt }} 次</p>
+            <p>
+              {{ formatTrackingOperation(detail.current_operation.operation) }}
+              · {{ formatTrackingOperationState(detail.current_operation.state) }}
+              · 第 {{ detail.current_operation.attempt }} 次
+            </p>
           </section>
 
           <section v-if="detail.revalidation_issues?.length" class="tracking-inspector-section" aria-labelledby="tracking-issues-heading">
@@ -1032,14 +1264,14 @@ defineExpose({ reload: () => fetchDetail(true) })
 
           <section v-if="detail.audit_events?.length" class="tracking-inspector-section" aria-labelledby="tracking-audit-heading">
             <h4 id="tracking-audit-heading">安全审计</h4>
-            <ul><li v-for="event in detail.audit_events" :key="`${event.action}-${event.created_at}`">{{ event.safe_message || event.action }} · {{ event.created_at }}</li></ul>
+            <ul><li v-for="event in detail.audit_events" :key="`${event.action}-${event.created_at}`">{{ event.safe_message || formatTrackingAuditAction(event.action) }} · {{ event.created_at }}</li></ul>
           </section>
 
           <p v-if="!detail.current_operation && !detail.revalidation_issues?.length && !detail.audit_events?.length" class="field-help">暂无操作记录。</p>
         </div>
       </details>
 
-      <details id="tracking-tech-diagnostics" class="tracking-inspector-disclosure">
+      <details v-if="hasTechnicalDiagnostics" id="tracking-tech-diagnostics" class="tracking-inspector-disclosure">
         <summary>技术诊断</summary>
         <div class="tracking-inspector-disclosure-body">
           <section
@@ -1092,21 +1324,89 @@ defineExpose({ reload: () => fetchDetail(true) })
 .tracking-inspector-content { display: grid; gap: var(--space-3); }
 .tracking-inspector-content h2, .tracking-inspector-content h3, .tracking-inspector-content h4, .tracking-inspector-content p { margin: 0; }
 .tracking-inspector-detail, .tracking-inspector-summary, .tracking-inspector-section { display: grid; gap: .55rem; }
-.tracking-inspector-summary, .tracking-inspector-section { padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); }
+.tracking-inspector-section { padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); }
+/* D1 (issue #227): the summary is not a card — no inner frame, no padding. */
+.tracking-inspector-summary { padding: 0; border: 0; border-radius: 0; }
 .tracking-inspector-summary:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
-.tracking-inspector-identity { display: flex; align-items: center; gap: var(--space-3); }
+.tracking-inspector-identity { display: flex; align-items: flex-start; gap: var(--space-4); }
 .tracking-inspector-identity h3 { margin: 0; }
+.tracking-inspector-headline { display: grid; gap: var(--space-2); min-width: 0; }
+.tracking-inspector-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+/* Same pill vocabulary as the list row (D1: reuse the semantic tone). */
+.tracking-status-pill {
+  align-self: center;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  font-size: var(--type-label);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-tight);
+  white-space: nowrap;
+}
+.tracking-status-pill.is-info { color: var(--color-info); background: var(--color-info-surface); }
+.tracking-status-pill.is-unknown { color: var(--color-unknown); background: var(--color-unknown-surface); }
+.tracking-status-pill.is-warning { color: var(--color-warning); background: var(--color-warning-surface); }
+.tracking-status-pill.is-danger { color: var(--color-danger); background: var(--color-danger-surface); }
+/* D1/D2: two columns, both left aligned (never space-between / right aligned). */
+.tracking-inspector-summary .tracking-inspector-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: .35rem var(--space-4);
+  margin: 0;
+}
+.tracking-inspector-summary .tracking-inspector-facts > div { display: contents; }
+.tracking-inspector-summary .tracking-inspector-facts dt { color: var(--color-text-muted); }
+.tracking-inspector-summary .tracking-inspector-facts dd { margin: 0; text-align: left; font-weight: 600; }
 .tracking-inspector-disclosure { padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); }
 .tracking-inspector-disclosure > summary { cursor: pointer; font-weight: 600; }
 .tracking-inspector-disclosure > summary:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .tracking-inspector-disclosure-body { display: grid; gap: var(--space-3); margin-top: var(--space-3); }
-.tracking-inspector-detail dl { display: grid; gap: .35rem; margin: 0; }
-.tracking-inspector-detail dl div { display: flex; justify-content: space-between; gap: 1rem; }
-.tracking-inspector-detail dt { color: var(--color-text-muted); }
-.tracking-inspector-detail dd { margin: 0; text-align: right; font-weight: 600; }
+.tracking-inspector-section dl { display: grid; gap: .35rem; margin: 0; }
+.tracking-inspector-section dl div { display: flex; justify-content: space-between; gap: 1rem; }
+.tracking-inspector-section dt { color: var(--color-text-muted); }
+.tracking-inspector-section dd { margin: 0; text-align: right; font-weight: 600; }
 .tracking-inspector-section ul, .tracking-resource-names { display: grid; gap: .3rem; margin: 0; padding-left: 1.2rem; }
 .tracking-plan-link { font-weight: 600; }
 .tracking-inspector-loading { min-height: 8rem; }
+/* D8 (issue #227): the first-screen reason card, orange like design image 16. */
+.tracking-feedback-card {
+  display: grid;
+  gap: .4rem;
+  padding: var(--space-3);
+  border: 1px solid var(--color-warning-border);
+  border-left: 0.3rem solid var(--color-warning);
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-surface);
+}
+.tracking-feedback-card.is-danger {
+  border-color: var(--color-danger-border);
+  border-left-color: var(--color-danger);
+  background: var(--color-danger-surface);
+}
+.tracking-feedback-card > h4 { color: var(--color-warning); }
+.tracking-feedback-card.is-danger > h4 { color: var(--color-danger); }
+/* The design's warning badge, drawn in CSS so no DOM/ARIA is added. */
+.tracking-feedback-card > h4::before {
+  content: "!";
+  display: inline-grid;
+  place-items: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-right: .4rem;
+  border-radius: 50%;
+  background: var(--color-warning);
+  color: var(--color-surface-raised);
+  font-size: .78rem;
+  font-weight: 700;
+  vertical-align: .05rem;
+}
+.tracking-feedback-card.is-danger > h4::before { background: var(--color-danger); }
+/* The card is one visual unit: the nested write result keeps its semantics but
+   drops the extra frame it had when it lived inside the action section. */
+.tracking-feedback-card #tracking-submit-result {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
 .tracking-intent-notice { padding: var(--space-3); border: 1px solid var(--color-border-subtle); border-left: 0.3rem solid var(--color-accent-emphasis); border-radius: var(--radius-sm); background: var(--color-surface-raised); font-weight: 600; }
 .tracking-submit { gap: .65rem; }
 .tracking-submit-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }

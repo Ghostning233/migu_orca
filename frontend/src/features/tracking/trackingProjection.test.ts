@@ -21,6 +21,10 @@ import {
   executableTrackingActions,
   filterTrackingItems,
   formatSubmissionMode,
+  formatTrackingAuditAction,
+  formatTrackingCreatedAt,
+  formatTrackingOperation,
+  formatTrackingOperationState,
   formatTrackingUpdatedAt,
   MANAGEMENT_ACTIONS_HELP,
   MODIFY_FORM_HELP,
@@ -311,6 +315,43 @@ function checkResult(overrides: Partial<TrackingCheckResult> = {}): TrackingChec
     tracking: recoverableItem({ revision: 4 }), ...overrides,
   }
 }
+
+describe('detail summary wording (issue #227)', () => {
+  it('reads 创建时间 from the timestamp and falls back to 未设置', () => {
+    const formatted = formatTrackingCreatedAt('2026-09-12T00:00:00Z')
+    expect(formatted).toMatch(/^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}$/)
+    expect(formatTrackingCreatedAt(null)).toBe('未设置')
+    expect(formatTrackingCreatedAt(undefined)).toBe('未设置')
+    expect(formatTrackingCreatedAt('')).toBe('未设置')
+    expect(formatTrackingCreatedAt('not-a-date')).toBe('未设置')
+  })
+
+  it('translates the operation record enums and keeps unknown codes visible', () => {
+    expect(formatTrackingOperation('SUBMIT')).toBe('提交')
+    expect(formatTrackingOperation('MODIFY')).toBe('修改')
+    expect(formatTrackingOperation('SET_ENABLED')).toBe('启停')
+    expect(formatTrackingOperation('DELETE_EXTERNAL')).toBe('删除外部订阅')
+    expect(formatTrackingOperation('REFRESH_RSS')).toBe('刷新资源')
+    expect(formatTrackingOperation('MYSTERY')).toBe('MYSTERY')
+    expect(formatTrackingOperation(null)).toBe('未知操作')
+
+    expect(formatTrackingOperationState('PREPARED')).toBe('已准备')
+    expect(formatTrackingOperationState('IN_PROGRESS')).toBe('进行中')
+    expect(formatTrackingOperationState('SUCCEEDED')).toBe('成功')
+    expect(formatTrackingOperationState('FAILED')).toBe('失败')
+    expect(formatTrackingOperationState('OUTCOME_UNKNOWN')).toBe('结果待确认')
+    expect(formatTrackingOperationState('RECOVERY_REQUIRED')).toBe('需要恢复')
+    expect(formatTrackingOperationState('SOMETHING_NEW')).toBe('SOMETHING_NEW')
+
+    expect(formatTrackingAuditAction('SUBMIT_SUCCEEDED')).toBe('提交成功')
+    expect(formatTrackingAuditAction('REVALIDATION_FAILED')).toBe('提交前复核未通过')
+    expect(formatTrackingAuditAction('RECOVERY_EXTERNAL_VERIFIED')).toBe('只读核验外部状态')
+    // Issue #227 D6: the risk-confirmed resubmit is a public audit action too.
+    expect(formatTrackingAuditAction('RESUBMIT_RISK_CONFIRMED')).toBe('已确认主动重发风险')
+    expect(formatTrackingAuditAction('MYSTERY_EVENT')).toBe('MYSTERY_EVENT')
+    expect(formatTrackingAuditAction(null)).toBe('未知操作记录')
+  })
+})
 
 describe('bounded read-only check projection (issue #183)', () => {
   it('binds one read-only endpoint and one proven reason vocabulary', () => {
