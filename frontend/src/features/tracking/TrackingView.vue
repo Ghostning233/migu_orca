@@ -11,19 +11,12 @@ import LoadingState from '@/components/feedback/LoadingState.vue'
 import ConfirmDialog from '@/components/feedback/ConfirmDialog.vue'
 import BaseButton from '@/components/forms/BaseButton.vue'
 import BaseInput from '@/components/forms/BaseInput.vue'
-import BaseSelect from '@/components/forms/BaseSelect.vue'
-import PanelSection from '@/components/layout/PanelSection.vue'
 import { routeLocation } from '@/app/router/catalog'
 import { useNotificationStore } from '@/app/stores/notification'
 import { refreshConnectionStatus } from '@/app/stores/connectionStatus'
 import { storageQuery } from '@/features/requests/requestStorage'
 import {
-  capabilityStateLabel,
-  capabilityVersionLabel,
   filterTrackingItems,
-  formatSubmissionMode,
-  formatTrackingUpdatedAt,
-  probeStatusLabel,
   projectCapabilitySummary,
   projectStatusGroups,
   projectTrackingOverview,
@@ -104,8 +97,9 @@ const savedRef = computed<SavedConnection | null>(() => {
 })
 const syncLoading = ref(false)
 const syncPending = ref(false)
-const syncMessage = ref('')
-const syncSummary = ref<SyncResult['summary'] | null>(null)
+// B5: only degraded / incomplete / ignored sync results stay on the page (in a
+// bounded status region inside the list panel); a clean success is a toast.
+const syncStatus = ref('')
 const confirmDialog = ref<InstanceType<typeof ConfirmDialog> | null>(null)
 const detailRevision = ref(0)
 const inspector = ref<InstanceType<typeof TrackingInspector> | null>(null)
@@ -160,31 +154,35 @@ let writeGeneration = 0
 let syncSequence = 0
 let syncController: AbortController | null = null
 
+/**
+ * Read the saved connection summary, which already carries the deployment's last
+ * proven capability projection (Stage 39 PRD: loading the page must never probe
+ * by itself). B1 retires the manual probe entry, so the page only adopts what
+ * the summary publishes — a cold cache simply leaves the read-only external
+ * check unavailable until the next explicit sync (T6/#229 owns automatic
+ * refresh). No extra network call and no capability write happen here.
+ */
 async function loadSavedConnection(): Promise<void> {
   try {
     const summary = await api.get<SavedConnection>('/api/v1/settings/autobangumi')
+    savedConnection.value = summary
+    const capabilities = summary.capabilities
+    const usable = Boolean(
+      summary.connection_ref && summary.credential_present && capabilities,
+    )
     const changed = savedState.value && (savedState.value.connection_ref !== summary.connection_ref
       || savedState.value.configuration_revision !== summary.configuration_revision)
-    savedConnection.value = summary
-    if (changed) savedState.value = null
-  } catch {
-    savedConnection.value = null
-    savedState.value = null
-  }
-}
-
-async function probeSavedConnection(): Promise<void> {
-  const summary = savedConnection.value
-  if (!summary?.connection_ref) return
-  try {
-    const capabilities = await api.post<CapabilityResult>('/api/v1/settings/autobangumi/probe', {
-      body: { connection_ref: summary.connection_ref, configuration_revision: summary.configuration_revision },
-    })
-    if (savedConnection.value?.connection_ref === summary.connection_ref
-      && savedConnection.value.configuration_revision === summary.configuration_revision) {
-      savedState.value = { connection_ref: summary.connection_ref, configuration_revision: summary.configuration_revision, capabilities }
+    if (!usable) {
+      savedState.value = null
+    } else if (!savedState.value || changed) {
+      savedState.value = {
+        connection_ref: summary.connection_ref!,
+        configuration_revision: summary.configuration_revision,
+        capabilities: capabilities as CapabilityResult,
+      }
     }
   } catch {
+    savedConnection.value = null
     savedState.value = null
   }
 }
@@ -235,13 +233,6 @@ const listCountText = computed(() => {
   }
   return total === null ? '共 — 部' : `共 ${total} 部`
 })
-const statusFilterOptions = computed(() => [
-  { value: '', label: '全部状态' },
-  ...statusGroups.value.map((group) => ({ value: group.group, label: group.label })),
-])
-const capabilitySummary = computed(() => (
-  savedState.value ? projectCapabilitySummary(savedState.value.capabilities) : []
-))
 const selectedItem = computed(() => items.value.find(
   (item) => item.tracking_id === selectedTrackingId.value,
 ) ?? null)
@@ -319,11 +310,6 @@ async function loadList(silent = false): Promise<void> {
   }
 }
 
-async function refreshTracking(): Promise<void> {
-  await loadSavedConnection()
-  await loadList()
-}
-
 /**
  * Converge one list item with the server-returned tracking summary (US-309).
  *
@@ -346,25 +332,37 @@ function selectItem(trackingId: string): void {
   void router.push(routeLocation('tracking', { tracking_id: trackingId }))
 }
 
-function clearFilters(): void {
-  searchTerm.value = ''
-  statusFilter.value = ''
+/**
+ * Row body action follows the mode (D0 row spec): browsing opens the detail,
+ * multi-select toggles the batch selection and never changes the detail. The
+ * arrow is the one control that always opens the detail.
+ */
+function activateRow(item: TrackingItem): void {
+  if (batchMode.value) {
+    toggleRow(item.tracking_id)
+    return
+  }
+  selectItem(item.tracking_id)
 }
 
 /**
- * Clearing the page session destroys credentials while preserving unresolved
- * intents as non-replayable tombstones. The server record remains authoritative
- * and can only be settled through read-only verification or recovery.
+ * Status-pill tone (D0 row spec §状态药丸). Only existing semantic tokens are
+ * used; an unmapped exact status falls back to the neutral `unknown` pair
+ * instead of inventing a colour.
  */
-function clearConnection(): void {
-  savedState.value = null
-  cancelSync()
-  writeSequence += 1
-  writeController?.abort()
-  writeController = null
-  writes.preserveAfterClear()
-  syncMessage.value = ''
-  syncSummary.value = null
+const STATUS_PILL_TONES: Record<string, 'info' | 'unknown' | 'warning' | 'danger'> = {
+  ACTIVE: 'info',
+  PENDING_SUBMIT: 'unknown',
+  ADDED_TO_DOWNLOAD: 'unknown',
+  DISABLED: 'unknown',
+  NEEDS_RECONFIRM: 'warning',
+  RECOVERY_REQUIRED: 'warning',
+  EXTERNAL_DELETED: 'warning',
+  SUBMIT_FAILED: 'danger',
+}
+
+function statusPillClass(status: string): string {
+  return `is-${STATUS_PILL_TONES[status] ?? 'unknown'}`
 }
 
 /** Drop every session and invalidate whatever transport is still outstanding. */
@@ -414,7 +412,7 @@ async function syncTracking(): Promise<void> {
   syncController = controller
   loading.value = false
   syncLoading.value = true
-  syncMessage.value = ''
+  syncStatus.value = ''
   try {
     const body: SyncBody = { connection_ref: config.connection_ref!, configuration_revision: config.configuration_revision, confirm: true }
     const result = await api.post<SyncResult>('/api/v1/tracking/sync', { body, signal: controller.signal })
@@ -423,7 +421,6 @@ async function syncTracking(): Promise<void> {
     if (sequence !== syncSequence) return
     const incomplete = result.sync_status !== 'COMPLETE'
     const degraded = incomplete || hasUnknownCapability(result.capabilities)
-    syncSummary.value = result.summary
     refreshConnectionStatus()
     if (!degraded && result.items) {
       // Writing the synced revision invalidates list responses already in flight.
@@ -440,20 +437,27 @@ async function syncTracking(): Promise<void> {
       // page now: never restore the old summary or its success message.
       if (sequence !== syncSequence) return
       // Issue #88: strangers in Auto Bangumi are counted, never imported.
-      syncMessage.value = result.summary.ignored
+      const message = result.summary.ignored
         ? `同步完成：检查 ${result.summary.checked} 条，新增 ${result.summary.created} 条，更新 ${result.summary.updated} 条；忽略 ${result.summary.ignored} 条不属于 MiGuOrca 管理的外部订阅。`
         : `同步完成：检查 ${result.summary.checked} 条，新增 ${result.summary.created} 条，更新 ${result.summary.updated} 条。`
+      if (result.summary.ignored) {
+        // B5: a result carrying ignored strangers stays in the bounded list
+        // status area instead of disappearing into a toast.
+        syncStatus.value = message
+      } else {
+        notification.show('success', '同步完成', message)
+      }
     } else if (incomplete) {
-      syncMessage.value = result.sync_status === 'PARTIAL'
+      syncStatus.value = result.sync_status === 'PARTIAL'
         ? '同步部分完成，已保留原有本地列表；可重连或再次同步。'
         : '同步未完成，已保留原有本地列表；可重连、重探测或再次同步。'
     } else {
-      syncMessage.value = '同步已完成，但当前连接能力未知，已降级为只读并保留原有本地列表；可重新探测或再次同步。'
+      syncStatus.value = '同步已完成，但当前连接能力未知，已降级为只读并保留原有本地列表；可重连或再次同步。'
     }
     savedState.value = { ...config, capabilities: result.capabilities }
   } catch (error) {
     if (sequence !== syncSequence) return
-    syncMessage.value = '同步 Auto Bangumi 失败，已保留原有本地列表；可重连或再次同步。'
+    syncStatus.value = '同步 Auto Bangumi 失败，已保留原有本地列表；可重连或再次同步。'
     void error
   } finally {
     if (sequence === syncSequence) {
@@ -1045,20 +1049,27 @@ onBeforeUnmount(() => {
 
 <template>
   <section id="tracking-overview" class="tracking-overview" aria-labelledby="tracking-heading">
-    <PanelSection title="我的追番" class="tracking-header">
-      <template #actions>
-        <BaseButton id="tracking-probe-saved" variant="secondary" :disabled="!savedConnection?.connection_ref" @click="probeSavedConnection">测试已保存连接</BaseButton>
-        <BaseButton v-if="savedRef" id="tracking-sync" variant="secondary" :loading="syncLoading" :disabled="syncLoading || syncPending" @click="syncTracking">同步 Auto Bangumi</BaseButton>
-        <BaseButton id="tracking-refresh" variant="secondary" :loading="loading" @click="refreshTracking">刷新列表</BaseButton>
-        <BaseButton v-if="savedRef" id="tracking-batch-mode" variant="secondary" @click="toggleBatchMode">
-          {{ batchMode ? '退出批量提交模式' : '批量提交模式' }}
-        </BaseButton>
-      </template>
-      <p id="tracking-heading" class="tracking-lede">管理待提交任务和正在运行的追番。</p>
-    </PanelSection>
+    <!-- B1: the page title/subtitle live in the page header area (like the
+         other primary pages), not in a page-level PanelSection card. -->
+    <header class="tracking-page-header">
+      <div class="tracking-page-heading">
+        <h1 id="tracking-heading" class="tracking-page-title">我的追番</h1>
+        <p class="tracking-lede">管理待提交任务和正在运行的追番。</p>
+      </div>
+      <!-- B1 keeps the manual sync entry until T6 (#229) retires it; only the
+           page-level header card, the probe entry and the connection module go. -->
+      <BaseButton
+        v-if="savedRef"
+        id="tracking-sync"
+        variant="secondary"
+        :loading="syncLoading"
+        :disabled="syncLoading || syncPending"
+        @click="syncTracking"
+      >同步 Auto Bangumi</BaseButton>
+    </header>
 
     <section class="tracking-status-overview" aria-labelledby="tracking-status-heading">
-      <h2 id="tracking-status-heading">状态总览</h2>
+      <h2 id="tracking-status-heading" class="tracking-visually-hidden">状态总览</h2>
       <div class="tracking-status-cards">
         <button
           v-for="group in overviewCards"
@@ -1076,69 +1087,149 @@ onBeforeUnmount(() => {
     </section>
 
     <section class="tracking-workspace" aria-label="追番记录与追番详情">
-      <PanelSection title="追番列表" class="tracking-list-panel">
-        <div class="tracking-filters">
-          <label for="tracking-search">搜索标题或字幕组</label>
-          <BaseInput id="tracking-search" v-model="searchTerm" type="search" placeholder="输入公开标题或字幕组" />
-          <label for="tracking-status-filter">状态筛选</label>
-          <BaseSelect id="tracking-status-filter" v-model="statusFilter" label="状态筛选"
-            :options="statusFilterOptions" />
-          <BaseButton v-if="hasSearch || statusFilter" variant="secondary" @click="clearFilters">清除筛选</BaseButton>
+      <section class="panel tracking-list-panel" aria-labelledby="tracking-list-heading">
+        <!-- 标题行：左侧标题，右侧「多选/完成」→搜索（搜索靠右）。状态下拉、
+             全部、清除筛选、刷新列表都不再出现（C1/C5/2026-10-20 修订）。 -->
+        <div class="tracking-list-heading-row">
+          <h2 id="tracking-list-heading" class="tracking-list-heading">追番列表</h2>
+          <div class="tracking-list-tools">
+            <BaseButton id="tracking-batch-mode" variant="secondary" @click="toggleBatchMode">
+              {{ batchMode ? '完成' : '多选' }}
+            </BaseButton>
+            <BaseInput
+              id="tracking-search"
+              v-model="searchTerm"
+              class="tracking-search-input"
+              type="search"
+              aria-label="搜索标题或字幕组"
+              placeholder="搜索番剧名称"
+            />
+          </div>
         </div>
+
+        <!-- B5: 降级／未完成／含忽略项的同步结果留在列表工具区的有界状态区；
+             成功且干净的结果走全局通知。 -->
+        <div
+          v-if="syncStatus || (batchMode && batchSkippedNotice)"
+          class="tracking-toolbar-status"
+        >
+          <p v-if="syncStatus" id="tracking-sync-status" role="status">{{ syncStatus }}</p>
+          <p v-if="batchMode && batchSkippedNotice" id="tracking-batch-skipped" role="status">{{ batchSkippedNotice }}</p>
+        </div>
+
+        <!-- 批量工具栏：仅多选态，标题行下方另起一行（#218 补充澄清 + 行规格）。 -->
+        <div v-if="batchMode" class="tracking-batch-toolbar" aria-label="批量提交">
+          <div class="tracking-batch-selection">
+            <span id="tracking-batch-count" class="tracking-batch-count" role="status">
+              已选 <strong class="tracking-batch-number">{{ batchSummary.selected }}</strong> 部
+            </span>
+            <span v-if="batchSummary.hidden" class="tracking-batch-hidden">
+              （其中 {{ batchSummary.hidden }} 部不在当前筛选内）
+            </span>
+            <span class="tracking-batch-dot">·</span>
+            <button
+              id="tracking-batch-select-all"
+              type="button"
+              class="tracking-text-button"
+              @click="selectAllCurrent"
+            >全选当前 {{ filteredItems.length }} 部</button>
+            <span class="tracking-batch-dot">·</span>
+            <button
+              id="tracking-batch-clear"
+              type="button"
+              class="tracking-text-button"
+              :disabled="!batchSummary.selected"
+              @click="clearSelection"
+            >清除选择</button>
+          </div>
+          <div class="tracking-batch-actions">
+            <BaseButton
+              id="tracking-batch-submit"
+              variant="primary"
+              :loading="batchLoading"
+              :disabled="batchLoading || !batchSummary.selected || !savedRef"
+              @click="runBatchSubmit"
+            >提交选中</BaseButton>
+          </div>
+        </div>
+        <!-- Issue 116：缺少已保存连接时批量提交可见但禁用，并就地说明下一步。 -->
+        <p v-if="batchMode && !savedRef" id="tracking-batch-connection-required" class="tracking-batch-help" role="status">
+          先在设置中连接 Auto Bangumi；缺少已保存连接时不会发起任何外部提交。
+        </p>
+
         <div v-if="loading" class="tracking-list-state"><LoadingState message="正在读取追番列表…" /></div>
         <ErrorState v-else-if="failed" title="追番列表读取失败" message="暂时无法读取本地追番列表，请稍后重试。" retry-label="重试读取" @retry="loadList()" />
         <EmptyState v-else-if="!items.length" message="还没有本地追番记录。" />
         <EmptyState v-else-if="!filteredItems.length" message="没有符合当前搜索或状态筛选的记录。" />
-        <div v-if="batchMode" class="tracking-batch-toolbar" aria-label="批量提交">
-          <span id="tracking-batch-count" class="tracking-batch-count" role="status">
-            已选 {{ batchSummary.selected }} 条<template v-if="batchSummary.hidden">（其中 {{ batchSummary.hidden }} 条不在当前筛选内）</template>
-          </span>
-          <BaseButton id="tracking-batch-select-all" variant="secondary" @click="selectAllCurrent">全选当前结果</BaseButton>
-          <BaseButton id="tracking-batch-clear" variant="secondary" :disabled="!batchSummary.selected" @click="clearSelection">清除选择</BaseButton>
-          <BaseButton id="tracking-batch-submit" :loading="batchLoading" :disabled="batchLoading || !batchSummary.selected || !savedRef" @click="runBatchSubmit">
-            提交选中方案
-          </BaseButton>
-          <!-- Issue 116：缺少已保存连接时批量提交可见但禁用，并就地说明下一步。 -->
-          <p v-if="!savedRef" id="tracking-batch-connection-required" class="field-help" role="status">
-            先在设置中连接 Auto Bangumi；缺少已保存连接时不会发起任何外部提交。
-          </p>
-        </div>
-        <p v-if="batchMode && batchSkippedNotice" id="tracking-batch-skipped" class="tracking-batch-skipped" role="status">{{ batchSkippedNotice }}</p>
-        <div v-else id="tracking-list-container" ref="listContainer" class="tracking-list" tabindex="-1" aria-label="追番记录列表">
-          <button v-for="item in filteredItems" :key="item.tracking_id" type="button" class="tracking-list-item"
-            :class="{ 'is-selected': selectedTrackingId === item.tracking_id, 'is-batch': batchMode }" :data-tracking-id="item.tracking_id"
-            :aria-current="selectedTrackingId === item.tracking_id ? 'true' : undefined" @click="selectItem(item.tracking_id)">
-            <input
-              v-if="batchMode"
-              type="checkbox"
-              class="base-checkbox tracking-list-checkbox"
-              :checked="isBatchSelected(item.tracking_id)"
-              :disabled="Boolean(batchSkipReason(item))"
-              :aria-label="`选择提交 ${item.title || '未命名番剧'}`"
-              @click.stop
-              @change="toggleRow(item.tracking_id)"
+
+        <!-- C7：提示是独立兄弟节点，绝不因为批量提示而移除列表容器。 -->
+        <div
+          v-if="!loading && !failed && items.length && filteredItems.length"
+          id="tracking-list-container"
+          ref="listContainer"
+          class="tracking-list"
+          tabindex="-1"
+          aria-label="追番记录列表"
+        >
+          <div
+            v-for="item in filteredItems"
+            :key="item.tracking_id"
+            class="tracking-list-row"
+            :class="{
+              'is-selected': selectedTrackingId === item.tracking_id,
+              'is-batch-selected': isBatchSelected(item.tracking_id),
+            }"
+            :data-tracking-id="item.tracking_id"
+          >
+            <!-- 共享背景/色条装饰层：detail 选中决定唯一左条，批量选中与悬停只改底色。 -->
+            <span class="tracking-row-background" />
+            <button
+              type="button"
+              class="tracking-list-item"
+              :data-tracking-id="item.tracking_id"
+              :aria-current="selectedTrackingId === item.tracking_id ? 'true' : undefined"
+              :disabled="batchMode && Boolean(batchSkipReason(item))"
+              @click="activateRow(item)"
             >
-            <span class="tracking-list-indicator" aria-hidden="true" />
-            <TrackingPoster :poster-path="item.poster_path" variant="list" />
-            <span class="tracking-list-copy">
-              <strong>{{ item.title || '未命名番剧' }}</strong>
-              <span>{{ item.season ? `第 ${item.season} 季` : '季度未设置' }}</span>
-            </span>
-            <span class="tracking-list-meta">
-              <span>{{ item.status_label }}</span>
-              <span
-                v-if="formatSubmissionMode(item.submission_mode)"
-                class="tracking-list-mode"
-              >{{ formatSubmissionMode(item.submission_mode) }}</span>
-              <small>{{ formatTrackingUpdatedAt(item.updated_at) }}</small>
-            </span>
-          </button>
+              <TrackingPoster :poster-path="item.poster_path" variant="list" />
+              <span class="tracking-list-copy">
+                <strong class="tracking-list-title">{{ item.title || '未命名番剧' }}</strong>
+                <span class="tracking-list-season">{{ item.season ? `第 ${item.season} 季` : '季度未设置' }}</span>
+              </span>
+              <span class="tracking-status-pill" :class="statusPillClass(item.status)">{{ item.status_label }}</span>
+            </button>
+            <button
+              type="button"
+              class="tracking-list-arrow"
+              tabindex="-1"
+              aria-hidden="true"
+              @click="selectItem(item.tracking_id)"
+            >
+              <span class="tracking-list-chevron" />
+            </button>
+          </div>
         </div>
         <p v-if="selectedHidden" class="tracking-selection-note" role="status">当前选择被筛选条件隐藏，未自动切换记录。</p>
+        <!-- B5：批量结果搬进列表模块内部有界区域，不再作为工作区兄弟节点。 -->
+        <section
+          v-if="batchMode && (batchOutcome || batchNotice)"
+          id="tracking-batch-result"
+          class="tracking-batch-result"
+          aria-labelledby="tracking-batch-result-heading"
+          role="status"
+        >
+          <h2 id="tracking-batch-result-heading">批量提交结果</h2>
+          <p v-if="batchNotice" id="tracking-batch-notice" class="tracking-batch-verdict">{{ batchNotice }}</p>
+          <ul v-if="batchOutcome" class="tracking-batch-entries">
+            <li v-for="entry in batchOutcome.entries" :key="entry.trackingId" :class="entry.ok ? 'is-ok' : 'is-failed'">
+              <strong>{{ titleFor(entry.trackingId) }}</strong>：{{ entry.message }}
+            </li>
+          </ul>
+        </section>
         <!-- Issue #224 A5: the count lives at the list bottom; N stays the
              server's whole-library category count and never a frontend recount. -->
         <p v-if="!loading && !failed" class="tracking-list-count" role="status">{{ listCountText }}</p>
-      </PanelSection>
+      </section>
 
       <aside class="tracking-inspector" aria-labelledby="tracking-inspector-heading">
         <TrackingInspector
@@ -1171,39 +1262,7 @@ onBeforeUnmount(() => {
         </template>
       </aside>
     </section>
-    <section
-      v-if="batchMode && (batchOutcome || batchNotice)"
-      id="tracking-batch-result"
-      class="tracking-batch-result"
-      aria-labelledby="tracking-batch-result-heading"
-      role="status"
-    >
-      <h2 id="tracking-batch-result-heading">批量提交结果</h2>
-      <p v-if="batchNotice" id="tracking-batch-notice" class="tracking-batch-verdict">{{ batchNotice }}</p>
-      <ul v-if="batchOutcome" class="tracking-batch-entries">
-        <li v-for="entry in batchOutcome.entries" :key="entry.trackingId" :class="entry.ok ? 'is-ok' : 'is-failed'">
-          <strong>{{ titleFor(entry.trackingId) }}</strong>：{{ entry.message }}
-        </li>
-      </ul>
-    </section>
 
-    <section v-if="savedState" class="tracking-connection-status" aria-labelledby="tracking-connection-heading">
-      <h2 id="tracking-connection-heading">Auto Bangumi 页面连接</h2>
-      <p role="status">
-        当前页面已连接 Auto Bangumi（{{ probeStatusLabel(savedState.capabilities.probe_status) }}），仅在用户明确操作时使用。
-        <button type="button" class="tracking-clear-connection" @click="clearConnection">清除连接</button>
-      </p>
-      <dl id="tracking-capability-summary" class="tracking-capability-summary">
-        <div><dt>版本</dt><dd>{{ capabilityVersionLabel(savedState.capabilities) }}</dd></div>
-        <div><dt>探测状态</dt><dd>{{ probeStatusLabel(savedState.capabilities.probe_status) }}</dd></div>
-        <div v-for="entry in capabilitySummary" :key="entry.key">
-          <dt>{{ entry.label }}</dt><dd>{{ capabilityStateLabel(entry.state) }}</dd>
-        </div>
-      </dl>
-      <p class="field-help">以上仅为本次探测到的安全能力摘要，管理写能力仍需服务端按当前认证与版本逐项确认。</p>
-    </section>
-    <p v-if="syncMessage" id="tracking-sync-status" class="tracking-sync-status" role="status">{{ syncMessage }}</p>
-    <p v-if="syncSummary" class="tracking-sync-summary" role="status">本次安全同步摘要：检查 {{ syncSummary.checked }}，新增 {{ syncSummary.created }}，更新 {{ syncSummary.updated }}，未变化 {{ syncSummary.unchanged }}。</p>
     <ConfirmDialog ref="confirmDialog" />
     <TrackingSubmissionModeDialog
       :open="batchModeOpen"
@@ -1223,74 +1282,371 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.tracking-overview { display: grid; gap: var(--space-5); }
+/* 页面骨架（B1/B3/B4）：标题回到页头，状态总览留在模块外，工作区占满剩余
+ * 视口高度；两栏等高、各自内滚。低于 320px 保底时允许整页滚动（降级）。 */
+.tracking-overview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-height: 0;
+}
+
+@media (min-width: 761px) {
+  .tracking-overview {
+    /* The shell owns the header height and the main padding; 2px is the
+       sub-pixel safety slack that keeps a fractional viewport from producing a
+       document scrollbar on the acceptance canvas. */
+    height: calc(100vh - var(--size-shell-header) - 2 * var(--space-6) - 2px);
+  }
+}
+
+.tracking-page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.tracking-page-heading { display: grid; gap: var(--space-1); }
+.tracking-page-title {
+  margin: 0;
+  font-size: var(--type-display);
+  line-height: var(--type-display-line-height);
+  font-weight: var(--font-weight-bold);
+}
 .tracking-lede { margin: 0; color: var(--color-text-muted); }
+
+.tracking-visually-hidden {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .tracking-status-overview { display: grid; gap: var(--space-3); }
 .tracking-status-overview h2, .tracking-inspector h2 { margin: 0; font-size: 1.05rem; }
 .tracking-status-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3); }
 .tracking-status-card { display: grid; gap: .35rem; text-align: left; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text); cursor: pointer; }
 .tracking-status-card:hover, .tracking-status-card:focus-visible, .tracking-status-card.is-selected { border-color: var(--color-primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 18%, transparent); }
 .tracking-status-card strong { font-size: 1.35rem; }
-.tracking-list-count { margin: 0; color: var(--color-text-muted); }
-.tracking-compat-notice { margin: var(--space-3) 0 0; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-subtle); color: var(--color-text-muted); }
-/* Issue 115：状态总览与导航留在外侧；列表与详情各自在固定可用高度内滚动，
- * 展开记录或操作不会拉长整页，也不会移动另一列。 */
+
+/* 工作区：两栏等高；列表与详情的滚动互不影响。 */
 .tracking-workspace {
-  --tracking-panel-max-height: clamp(320px, calc(100vh - 420px), 640px);
+  flex: 1 1 auto;
+  min-height: 320px;
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(18rem, 2fr);
   gap: var(--space-5);
-  align-items: start;
+  align-items: stretch;
 }
-.tracking-list-panel { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
-#tracking-list-container {
-  max-height: var(--tracking-panel-max-height);
+
+.tracking-list-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  margin-bottom: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.tracking-list-heading-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5) var(--space-2);
+}
+.tracking-list-heading {
+  margin: 0;
+  font-size: var(--type-section-title);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+.tracking-list-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-inline-start: auto;
+}
+.tracking-list-tools :deep(.base-button:hover:not(:disabled)) { transform: none; }
+.tracking-search-input {
+  inline-size: var(--tracking-search-width);
+  min-inline-size: var(--tracking-search-min-width);
+  flex: 0 1 auto;
+}
+
+/* B5 有界状态区：降级/未完成/含忽略项的同步结果与批量跳过提示。 */
+.tracking-toolbar-status {
+  display: grid;
+  gap: var(--space-1);
+  max-block-size: 5.5rem;
+  overflow-y: auto;
+  margin: 0 var(--space-5) var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-subtle);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+.tracking-toolbar-status p { margin: 0; }
+
+/* 批量工具栏：无边框/阴影/卡片底；标题行下方独立一行。 */
+.tracking-batch-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-5);
+}
+.tracking-batch-selection {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0;
+  min-inline-size: 0;
+}
+.tracking-batch-count {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+}
+.tracking-batch-number { font-weight: var(--font-weight-semibold); }
+.tracking-batch-hidden { color: var(--color-text-muted); font-size: var(--font-size-sm); }
+.tracking-batch-dot { color: var(--color-text-disabled); margin-inline: var(--space-2); }
+.tracking-text-button {
+  min-block-size: var(--control-target-min);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+}
+.tracking-text-button:hover:not(:disabled) { background: var(--color-primary-subtle); }
+.tracking-text-button:disabled { color: var(--color-text-disabled); cursor: not-allowed; }
+.tracking-batch-actions { margin-inline-start: auto; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.tracking-batch-help {
+  margin: 0 var(--space-5) var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+/* 列表：单列、无卡片间距；行内滚动由容器负责。 */
+.tracking-list {
+  display: grid;
+  gap: 0;
+  flex: 1 1 auto;
+  min-block-size: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding-right: var(--space-1);
 }
-.tracking-filters { display: grid; grid-template-columns: auto minmax(10rem, 1fr) auto minmax(8rem, .7fr) auto; gap: .65rem; align-items: center; margin-bottom: var(--space-4); }
-.tracking-filters label { font-size: .85rem; font-weight: 600; }
-.tracking-list { display: grid; gap: .55rem; }
-.tracking-list-item { display: grid; grid-template-columns: .35rem auto minmax(0, 1fr) auto; gap: .8rem; align-items: center; width: 100%; padding: .85rem .9rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text); text-align: left; cursor: pointer; }
-.tracking-list-item:hover, .tracking-list-item:focus-visible, .tracking-list-item.is-selected { border-color: var(--color-primary); background: var(--color-surface-subtle); }
-.tracking-list-item.is-selected .tracking-list-indicator { background: var(--color-primary); }
-.tracking-list-indicator { align-self: stretch; min-height: 2rem; border-radius: 99px; background: var(--color-border); }
-.tracking-list-item.is-batch { grid-template-columns: auto .35rem auto minmax(0, 1fr) auto; }
-.tracking-list-checkbox { align-self: center; }
-.tracking-batch-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-subtle); }
-.tracking-batch-count { margin-inline-end: auto; font-weight: 600; }
-.tracking-batch-skipped { margin: var(--space-2) 0 0; color: var(--color-text-muted); }
-.tracking-batch-result { display: grid; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); }
+.tracking-list-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--control-target-min);
+  align-items: stretch;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  /* 底部 1px 线槽由行自身保留，末行无线也不跳高度。 */
+  padding-block-end: calc(var(--space-3) + var(--control-border-width));
+  min-block-size: var(--tracking-row-min-height);
+}
+.tracking-list-row::after {
+  content: '';
+  position: absolute;
+  inset-inline: var(--space-4);
+  inset-block-end: 0;
+  block-size: var(--control-border-width);
+  background: var(--color-border-subtle);
+}
+.tracking-list-row:last-child::after { background: transparent; }
+
+/* 共享背景/色条装饰层：只过渡 background-color；左条只由 detail 选中决定。 */
+.tracking-row-background {
+  position: absolute;
+  inset: 0 0 var(--control-border-width) 0;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  pointer-events: none;
+  background-color: transparent;
+  transition: background-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+.tracking-list-row:hover .tracking-row-background,
+.tracking-list-row.is-selected .tracking-row-background,
+.tracking-list-row.is-batch-selected .tracking-row-background {
+  background-color: var(--color-info-surface);
+}
+.tracking-list-row.is-selected .tracking-row-background::before {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inline-size: var(--space-1);
+  background: var(--color-primary);
+}
+
+/* 行体：原生 button，包含封面/标题/季度/状态药丸；自身无 padding/border/背景。 */
+.tracking-list-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--tracking-poster-width) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  min-inline-size: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  text-align: start;
+  cursor: pointer;
+}
+.tracking-list-item:disabled { cursor: not-allowed; }
+.tracking-list-item:focus-visible,
+.tracking-list-arrow:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: calc(-1 * var(--focus-ring-width));
+  border-radius: var(--radius-sm);
+}
+.tracking-list-copy { display: grid; gap: var(--space-1); min-inline-size: 0; }
+.tracking-list-title {
+  font-size: var(--type-card-title);
+  line-height: var(--line-height-tight);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tracking-list-season {
+  font-size: var(--type-label);
+  font-weight: var(--font-weight-regular);
+  color: var(--color-text-muted);
+}
+.tracking-status-pill {
+  align-self: center;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  font-size: var(--type-label);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-tight);
+  white-space: nowrap;
+}
+.tracking-status-pill.is-info { color: var(--color-info); background: var(--color-info-surface); }
+.tracking-status-pill.is-unknown { color: var(--color-unknown); background: var(--color-unknown-surface); }
+.tracking-status-pill.is-warning { color: var(--color-warning); background: var(--color-warning-surface); }
+.tracking-status-pill.is-danger { color: var(--color-danger); background: var(--color-danger-surface); }
+
+/* 箭头：固定末列 44px 矩形热区，两种模式都看详情，不进入 Tab 序列。 */
+.tracking-list-arrow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: var(--control-target-min);
+  min-block-size: var(--control-target-min);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.tracking-list-chevron {
+  position: relative;
+  inline-size: var(--icon-md);
+  block-size: var(--icon-md);
+}
+.tracking-list-chevron::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 6px;
+  inset-block-start: 7px;
+  inline-size: 8px;
+  block-size: 8px;
+  border-block-start: 2px solid var(--color-text-muted);
+  border-inline-end: 2px solid var(--color-text-muted);
+  transform: rotate(45deg);
+}
+
+.tracking-list-state { flex: 1 1 auto; min-block-size: 8rem; }
+.tracking-selection-note {
+  margin: 0;
+  padding: var(--space-1) var(--space-5);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+.tracking-list-count {
+  margin: 0;
+  padding: var(--space-3) var(--space-5);
+  color: var(--color-text-muted);
+}
+
+/* 批量结果：列表模块内部有界区域（不再拉长整页）。 */
+.tracking-batch-result {
+  display: grid;
+  gap: var(--space-2);
+  max-block-size: 9rem;
+  overflow-y: auto;
+  margin: 0 var(--space-5) var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-subtle);
+}
 .tracking-batch-result h2 { margin: 0; font-size: 1.05rem; }
-.tracking-batch-verdict { margin: 0; font-weight: 600; }
-.tracking-batch-entries { display: grid; gap: .3rem; margin: 0; padding-left: 1.2rem; }
+.tracking-batch-verdict { margin: 0; font-weight: var(--font-weight-semibold); }
+.tracking-batch-entries { display: grid; gap: .3rem; margin: 0; padding-inline-start: 1.2rem; }
 .tracking-batch-entries li.is-failed { color: var(--color-danger); }
-.tracking-list-copy, .tracking-list-meta { display: grid; gap: .25rem; min-width: 0; }
-.tracking-list-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tracking-list-copy span, .tracking-list-meta small { color: var(--color-text-muted); }
-.tracking-list-meta { text-align: right; white-space: nowrap; }
-.tracking-list-state { min-height: 8rem; }
-.tracking-selection-note { margin: var(--space-3) 0 0; color: var(--color-text-muted); }
-.tracking-inspector { position: sticky; top: var(--space-4); display: grid; gap: var(--space-3); min-height: 15rem; max-height: var(--tracking-panel-max-height); overflow-y: auto; overscroll-behavior: contain; padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); }
-.tracking-inspector-placeholder { display: grid; gap: .5rem; padding: var(--space-4); border: 1px dashed var(--color-border); border-radius: var(--radius-md); }
-.tracking-inspector-placeholder h3, .tracking-inspector-placeholder p { margin: 0; }
-.tracking-connection-status { display: grid; gap: .5rem; margin: 0; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text-muted); }
-.tracking-connection-status h2 { margin: 0; font-size: 1.05rem; color: var(--color-text); }
-.tracking-connection-status p { margin: 0; }
-.tracking-capability-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: .35rem var(--space-4); margin: 0; }
-.tracking-capability-summary div { display: flex; justify-content: space-between; gap: .5rem; border-bottom: 1px dashed var(--color-border); }
-.tracking-capability-summary dt { color: var(--color-text-muted); }
-.tracking-capability-summary dd { margin: 0; font-weight: 600; color: var(--color-text); }
-.tracking-clear-connection { margin-left: .5rem; color: var(--color-primary); text-decoration: underline; }
-.tracking-sync-status, .tracking-sync-summary { margin: 0; color: var(--color-text-muted); }
-@media (max-width: 1280px) { .tracking-workspace { grid-template-columns: minmax(0, 1.35fr) minmax(16rem, 1fr); } }
-@media (max-width: 800px) {
+
+/* 详情栏与列表等高，自己内滚；导航/标题/状态总览留在模块外。 */
+.tracking-inspector {
+  display: block;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg);
+}
+
+/* 低高度降级（B4）：两栏保底 320px 后，批量工具栏/状态区/结果区可能挤占列表；
+ * 此时让整块列表面板滚动（列表本身不再二次内滚），内容始终可达。 */
+@media (max-height: 640px) {
+  .tracking-list-panel { overflow-y: auto; }
+  .tracking-list { flex: 0 0 auto; overflow-y: visible; min-block-size: 0; }
+}
+
+/* ≤760px：只用壳层断点纵向重排；标题与多选/完成同一行、搜索独占下一行；批量
+ * 左组先排、提交选中独占下一行占满宽度；无横向滚动、允许整页滚动。 */
+@media (max-width: 760px) {
+  .tracking-overview { height: auto; }
   .tracking-status-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .tracking-workspace { --tracking-panel-max-height: 320px; grid-template-columns: 1fr; }
-  .tracking-inspector { position: static; }
-  .tracking-filters { grid-template-columns: 1fr; }
-  .tracking-filters label { margin-top: .25rem; }
-  .tracking-list-meta { white-space: normal; }
+  .tracking-workspace {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+  .tracking-list-panel, .tracking-inspector { min-block-size: 320px; }
+  .tracking-list-heading-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+  .tracking-list-tools { display: contents; }
+  .tracking-list-tools :deep(.base-button) { grid-column: 2; grid-row: 1; }
+  .tracking-search-input {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    inline-size: 100%;
+    min-inline-size: 0;
+  }
+  .tracking-batch-toolbar { align-items: flex-start; }
+  .tracking-batch-selection { inline-size: 100%; }
+  .tracking-batch-actions { inline-size: 100%; margin-inline-start: 0; }
+  .tracking-batch-actions :deep(.base-button) { inline-size: 100%; }
 }
 </style>

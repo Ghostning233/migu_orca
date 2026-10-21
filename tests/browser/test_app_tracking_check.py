@@ -338,7 +338,7 @@ class TestPendingSubmissionJourney:
         assert len(calls["check"]) == 1
 
         # Issue #183 review: the settled intent no longer blocks another record.
-        page.locator('[data-tracking-id="tracking-b"]').click()
+        page.locator('.tracking-list-item[data-tracking-id="tracking-b"]').click()
         page.wait_for_selector("#tracking-submit", timeout=10_000)
         expect(page.locator("#tracking-submit")).to_be_enabled()
         expect(page.locator("body")).not_to_contain_text("存在尚未完成的外部写意图")

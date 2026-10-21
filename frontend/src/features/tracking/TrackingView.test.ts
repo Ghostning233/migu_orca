@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
@@ -76,45 +79,78 @@ function rowFor(
   }
 }
 
-function probeCall() {
-  return apiPost.mock.calls.find((call) => call[0] === '/api/v1/settings/autobangumi/probe')
-}
+describe('TrackingView page skeleton and row model (#225)', () => {
+  it('registers the five row geometry aliases in the shared token file', () => {
+    const tokens = readFileSync(resolve(process.cwd(), 'src/styles/tokens.css'), 'utf8')
+    expect(tokens).toContain('--tracking-poster-width: calc(var(--space-10) + var(--space-5))')
+    expect(tokens).toContain('--tracking-poster-height: calc(var(--tracking-poster-width) * 1.5)')
+    expect(tokens).toContain(
+      '--tracking-row-min-height: calc(\n    var(--tracking-poster-height) + 2 * var(--space-3) + var(--control-border-width)\n  )',
+    )
+    expect(tokens).toContain('--tracking-search-min-width: calc(4 * var(--space-10))')
+    expect(tokens).toContain('--tracking-search-width: calc(6 * var(--space-10))')
+    // No new colour or interaction-state token came with the row spec.
+    expect(tokens.match(/--tracking-[a-z-]+:/g)?.sort()).toEqual([
+      '--tracking-poster-height:',
+      '--tracking-poster-width:',
+      '--tracking-row-min-height:',
+      '--tracking-search-min-width:',
+      '--tracking-search-width:',
+    ])
+  })
 
-describe('TrackingView saved connection flow', () => {
   beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
 
-  it('loads safe summary without probing or external business actions', async () => {
-    await mountSaved(); expect(apiPost).not.toHaveBeenCalled()
-    expect(apiGet.mock.calls[0]?.[0]).toBe('/api/v1/settings/autobangumi')
-  })
-  it('probes only after explicit user action and sends ref/revision only', async () => {
-    apiPost.mockResolvedValue(caps as never)
-    const { wrapper } = await mountSaved()
-    await wrapper.find('#tracking-probe-saved').trigger('click'); await flushPromises()
-    expect(probeCall()?.[1]).toEqual({ body: { connection_ref: '11111111-1111-4111-8111-111111111111', configuration_revision: 3 } })
-    expect(JSON.stringify(probeCall()?.[1])).not.toContain('password')
-  })
-  it('keeps local recovery connection-free and never lets a probe result disable sync', async () => {
-    apiPost.mockResolvedValue({ ...caps, probe_status: 'UNKNOWN', subscription_submit: 'UNKNOWN' } as never)
-    const { wrapper } = await mountSaved([{ code: 'AUTO', label: '本地恢复', style: 'SECONDARY', requires_confirmation: false, target_scopes: [] }])
-    await wrapper.find('#tracking-probe-saved').trigger('click'); await flushPromises()
-    // Issue #86: the probe is diagnostic; the saved connection still offers the
-    // server-validated external action, and no business request was sent.
-    expect(wrapper.find('#tracking-sync').attributes('disabled')).toBeUndefined()
-    expect(apiPost.mock.calls.filter((c) => c[0] !== '/api/v1/settings/autobangumi/probe')).toHaveLength(0)
-  })
-  it('changing the saved generation clears the prior capability summary only', async () => {
-    apiPost.mockResolvedValue(caps as never)
-    const { wrapper } = await mountSaved(); await wrapper.find('#tracking-probe-saved').trigger('click'); await flushPromises()
-    expect(wrapper.find('#tracking-sync').exists()).toBe(true)
-    expect(wrapper.find('#tracking-capability-summary').exists()).toBe(true)
+  it('adopts the summary capability projection without probing (#225 B1)', async () => {
+    const router = createRouter({ history: createMemoryHistory('/app/'), routes: [
+      { path: '/tracking', component: TrackingView },
+    ] })
+    await router.push('/tracking'); await router.isReady()
     apiGet.mockImplementation(async (path) => path === '/api/v1/settings/autobangumi'
-      ? { configured: true, credential_present: true, connection_ref: '22222222-2222-4222-8222-222222222222', configuration_revision: 4, connection_status: 'CONFIGURED', capabilities: null }
-      : { items: [row()], summary: {}, warnings: [] })
-    await wrapper.find('#tracking-refresh').trigger('click'); await flushPromises()
-    // The stale diagnostic summary is dropped, but the saved connection keeps
-    // offering the server-validated action (issue #86).
+      ? {
+          configured: true, credential_present: true,
+          connection_ref: '11111111-1111-4111-8111-111111111111',
+          configuration_revision: 3, connection_status: 'VERIFIED', capabilities: caps,
+        }
+      : { items: [row()], summary: defaultSummary, status_groups: statusGroups(), warnings: [] })
+    const wrapper = mount(TrackingView, { attachTo: document.body, global: { plugins: [createPinia(), router], stubs: { Teleport: true } } })
+    await flushPromises()
+
+    // Stage 39: loading the page never probes by itself; the published summary
+    // is the only capability source, and it is not rendered as a module.
+    expect(apiPost).not.toHaveBeenCalled()
+    expect(wrapper.find('#tracking-probe-saved').exists()).toBe(false)
+    expect(wrapper.find('.tracking-connection-status').exists()).toBe(false)
     expect(wrapper.find('#tracking-capability-summary').exists()).toBe(false)
+  })
+
+  it('does not probe when no connection is saved', async () => {
+    const router = createRouter({ history: createMemoryHistory('/app/'), routes: [
+      { path: '/tracking', component: TrackingView },
+    ] })
+    await router.push('/tracking'); await router.isReady()
+    apiGet.mockImplementation(async (path) => path === '/api/v1/settings/autobangumi'
+      ? { configured: false, credential_present: false, connection_ref: null, configuration_revision: 0, connection_status: 'UNCONFIGURED', capabilities: null }
+      : { items: [row()], summary: defaultSummary, status_groups: statusGroups(), warnings: [] })
+    const wrapper = mount(TrackingView, { attachTo: document.body, global: { plugins: [createPinia(), router], stubs: { Teleport: true } } })
+    await flushPromises()
+
+    expect(apiPost).not.toHaveBeenCalled()
+    expect(wrapper.find('#tracking-sync').exists()).toBe(false)
+  })
+
+  it('retires the header card and the old toolbar entries (#225 B1/C5)', async () => {
+    const { wrapper } = await mountSaved()
+
+    expect(wrapper.find('.tracking-header').exists()).toBe(false)
+    expect(wrapper.find('#tracking-probe-saved').exists()).toBe(false)
+    expect(wrapper.find('#tracking-refresh').exists()).toBe(false)
+    expect(wrapper.find('#tracking-status-filter').exists()).toBe(false)
+    expect(wrapper.find('#tracking-all').exists()).toBe(false)
+    // The status overview is the only filter entry; the page title is the page
+    // header, not a panel heading.
+    expect(wrapper.find('#tracking-heading').element.tagName).toBe('H1')
+    expect(wrapper.find('.tracking-list-heading').text()).toBe('追番列表')
     expect(wrapper.find('#tracking-sync').exists()).toBe(true)
   })
 
@@ -217,14 +253,6 @@ describe('TrackingView saved connection flow', () => {
     ])
   })
 
-  it('builds the status filter from server-provided group labels (#224 A7)', async () => {
-    const { wrapper } = await mountSaved([], null, defaultSummary, undefined, statusGroups())
-
-    const options = wrapper.find('#tracking-status-filter').findAll('option')
-      .map((option) => option.text())
-    expect(options).toEqual(['全部状态', '待处理', '处理中', '追番中', '需处理', '已停用'])
-  })
-
   it('clicking a card clears the search box and keeps the card count authoritative (#224 A5)', async () => {
     const rows = [
       rowFor('a', '芙莉莲'),
@@ -245,20 +273,20 @@ describe('TrackingView saved connection flow', () => {
     )
 
     // 全部 keeps the retired archive visible with its real label.
-    expect(wrapper.findAll('.tracking-list-item')).toHaveLength(5)
+    expect(wrapper.findAll('.tracking-list-row')).toHaveLength(5)
     expect(wrapper.text()).toContain('仅外部')
     expect(wrapper.find('.tracking-list-count').text()).toBe('共 5 部')
 
     // 追番中 card: rows == server card count without a search condition.
     await wrapper.findAll('.tracking-status-card')[1]!.trigger('click')
     await flushPromises()
-    expect(wrapper.findAll('.tracking-list-item')).toHaveLength(2)
+    expect(wrapper.findAll('.tracking-list-row')).toHaveLength(2)
     expect(wrapper.find('.tracking-list-count').text()).toBe('共 2 部')
 
     // A search narrows the rows but never the authoritative card count.
     await wrapper.find('#tracking-search').setValue('咒术')
     await flushPromises()
-    expect(wrapper.findAll('.tracking-list-item')).toHaveLength(1)
+    expect(wrapper.findAll('.tracking-list-row')).toHaveLength(1)
     expect(wrapper.find('.tracking-list-count').text()).toBe('筛选出 1 部 · 共 2 部')
 
     // Clicking another card clears the search box (user decision, A5).
@@ -266,71 +294,144 @@ describe('TrackingView saved connection flow', () => {
     await flushPromises()
     expect((wrapper.find('#tracking-search').element as HTMLInputElement).value).toBe('')
     // The retired EXTERNAL_ONLY archive never joins the 已停用 card.
-    expect(wrapper.findAll('.tracking-list-item')).toHaveLength(1)
+    expect(wrapper.findAll('.tracking-list-row')).toHaveLength(1)
     expect(wrapper.find('.tracking-list-count').text()).toBe('共 1 部')
   })
 
-  it('shows checkboxes only in batch mode and keeps row selection separate', async () => {
+  it('renders each row as two sibling buttons with only the five fixed elements', async () => {
+    const { wrapper } = await mountSaved()
+    const row = wrapper.find('.tracking-list-row')
+    const buttons = row.findAll('button')
+
+    expect(buttons).toHaveLength(2)
+    expect(buttons[0]!.classes()).toContain('tracking-list-item')
+    expect(buttons[1]!.classes()).toContain('tracking-list-arrow')
+    // Siblings never nested: the body button contains no second button.
+    expect(buttons[0]!.findAll('button')).toHaveLength(0)
+    expect(buttons[0]!.find('.tracking-poster').exists()).toBe(true)
+    expect(buttons[0]!.find('.tracking-list-title').text()).toBe('测试番')
+    expect(buttons[0]!.find('.tracking-list-season').text()).toBe('第 1 季')
+    expect(buttons[0]!.find('.tracking-status-pill').text()).toBe('待提交')
+    expect(buttons[1]!.find('.tracking-list-chevron').exists()).toBe(true)
+    // No checkbox/selection column, submission mode, timestamp or legacy bar.
+    expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false)
+    expect(wrapper.find('.tracking-list-mode').exists()).toBe(false)
+    expect(wrapper.find('.tracking-list-indicator').exists()).toBe(false)
+    expect(row.text()).not.toMatch(/\d{4}-\d{2}-\d{2}/)
+  })
+
+  it('never puts the arrow in the tab order and keeps the row body as the keyboard path', async () => {
+    const { wrapper } = await mountSaved()
+    const arrow = wrapper.find('.tracking-list-arrow')
+    const body = wrapper.find('.tracking-list-item')
+
+    expect(arrow.attributes('tabindex')).toBe('-1')
+    expect(arrow.attributes('aria-hidden')).toBe('true')
+    expect(body.attributes('tabindex')).toBeUndefined()
+    expect(body.attributes('aria-current')).toBeUndefined()
+  })
+
+  it('maps each exact status to the documented pill tone', async () => {
+    const rows = [
+      { ...rowFor('a', 'A'), status: 'ACTIVE', status_label: '追番中' },
+      { ...rowFor('b', 'B'), status: 'SUBMIT_FAILED', status_label: '提交失败' },
+      { ...rowFor('c', 'C'), status: 'RECOVERY_REQUIRED', status_label: '需要恢复' },
+      { ...rowFor('d', 'D'), status: 'DISABLED', status_label: '已停用' },
+      { ...rowFor('e', 'E'), status: 'ADDED_TO_DOWNLOAD', status_label: '已加入下载' },
+    ]
+    const { wrapper } = await mountSaved([], null, { ...defaultSummary, total: 5 }, rows)
+
+    const tones = wrapper.findAll('.tracking-status-pill').map(
+      (pill) => pill.classes().find((name) => name.startsWith('is-')),
+    )
+    expect(tones).toEqual(['is-info', 'is-danger', 'is-warning', 'is-unknown', 'is-unknown'])
+  })
+
+  it('uses the shared row background for multi-select and the arrow only for the detail', async () => {
     const items = [rowFor('a', '番 A'), rowFor('b', '番 B')]
     const { wrapper } = await mountSaved([], null, { ...defaultSummary, total: 2 }, items)
 
-    // Ordinary browsing never renders bulk controls.
-    expect(wrapper.find('.tracking-list-checkbox').exists()).toBe(false)
-
     await wrapper.find('#tracking-batch-mode').trigger('click')
-    expect(wrapper.findAll('.tracking-list-checkbox')).toHaveLength(2)
+    expect(wrapper.find('#tracking-batch-mode').text()).toBe('完成')
+    const rows = wrapper.findAll('.tracking-list-row')
 
-    // Checking a box changes the batch selection only.
-    await wrapper.findAll('.tracking-list-checkbox')[0]!.setValue(true)
-    expect(wrapper.find('#tracking-batch-count').text()).toContain('已选 1 条')
-    expect(wrapper.find('.tracking-list-item.is-selected').exists()).toBe(false)
+    // Row body in multi-select toggles the selection only.
+    await rows[0]!.find('.tracking-list-item').trigger('click')
+    expect(rows[0]!.classes()).toContain('is-batch-selected')
+    expect(rows[0]!.classes()).not.toContain('is-selected')
+    expect(wrapper.find('#tracking-batch-count').text()).toContain('已选 1 部')
 
-    // Clicking the row body switches the detail and leaves the selection alone.
-    await wrapper.findAll('.tracking-list-item')[1]!.trigger('click')
+    // The arrow always opens the detail and never changes the selection.
+    await rows[1]!.find('.tracking-list-arrow').trigger('click')
     await flushPromises()
-    const selected = wrapper.find('.tracking-list-item.is-selected')
-    expect(selected.attributes('data-tracking-id')).toBe('b')
-    expect(wrapper.find('#tracking-batch-count').text()).toContain('已选 1 条')
+    expect(rows[1]!.classes()).toContain('is-selected')
+    expect(rows[1]!.classes()).not.toContain('is-batch-selected')
+    expect(wrapper.find('#tracking-batch-count').text()).toContain('已选 1 部')
+
+    // Browse mode: the row body opens the detail.
+    await wrapper.find('#tracking-batch-mode').trigger('click')
+    await rows[0]!.find('.tracking-list-item').trigger('click')
+    await flushPromises()
+    expect(rows[0]!.classes()).toContain('is-selected')
   })
 
-  it('selects every submittable row of the current result and states the skips', async () => {
-    const items = [
-      rowFor('a', '番 A'),
-      rowFor('b', '番 B', [], 'PROCESSING'),
-      rowFor('c', '番 C', []),
-    ]
+  it('puts the batch toolbar on its own row and never moves the list away (C7)', async () => {
+    const items = [rowFor('a', '番 A'), rowFor('b', '番 B', [], 'PROCESSING'), rowFor('c', '番 C', [])]
     const { wrapper } = await mountSaved([], null, { ...defaultSummary, total: 3 }, items)
 
     await wrapper.find('#tracking-batch-mode').trigger('click')
-    await wrapper.find('#tracking-batch-select-all').trigger('click')
+    const panel = wrapper.find('.tracking-list-panel')
+    const heading = panel.find('.tracking-list-heading-row')
+    const toolbar = panel.find('.tracking-batch-toolbar')
+    const children = Array.from(panel.element.children)
+    expect(children.indexOf(heading.element)).toBeLessThan(children.indexOf(toolbar.element))
 
-    expect(wrapper.find('#tracking-batch-count').text()).toContain('已选 1 条')
+    // Left selection group + the single primary submit action.
+    expect(toolbar.find('#tracking-batch-count').text()).toContain('已选 0 部')
+    expect(toolbar.find('#tracking-batch-submit').classes()).toContain('primary-button')
+    expect(toolbar.find('#tracking-batch-select-all').element.tagName).toBe('BUTTON')
+    expect(toolbar.find('#tracking-batch-clear').element.tagName).toBe('BUTTON')
+
+    await toolbar.find('#tracking-batch-select-all').trigger('click')
+
+    expect(wrapper.find('#tracking-batch-count').text()).toContain('已选 1 部')
+    expect(toolbar.find('#tracking-batch-select-all').text()).toBe('全选当前 3 部')
     const skipped = wrapper.find('#tracking-batch-skipped').text()
     expect(skipped).toContain('已跳过 2 条')
     expect(skipped).toContain('正在处理中')
     expect(skipped).toContain('不可提交')
+    // C7: the skip notice must not remove the list container.
+    expect(wrapper.find('#tracking-list-container').exists()).toBe(true)
   })
 
-  it('clears the selection when leaving batch mode', async () => {
+  it('offers multi-select without a saved connection but keeps submit disabled and explained', async () => {
+    const router = createRouter({ history: createMemoryHistory('/app/'), routes: [
+      { path: '/tracking', component: TrackingView },
+    ] })
+    await router.push('/tracking'); await router.isReady()
+    apiGet.mockImplementation(async (path) => path === '/api/v1/settings/autobangumi'
+      ? { configured: false, credential_present: false, connection_ref: null, configuration_revision: 0, connection_status: 'UNCONFIGURED', capabilities: null }
+      : { items: [rowFor('a', '番 A')], summary: defaultSummary, status_groups: statusGroups(), warnings: [] })
+    const wrapper = mount(TrackingView, { attachTo: document.body, global: { plugins: [createPinia(), router], stubs: { Teleport: true } } })
+    await flushPromises()
+
+    await wrapper.find('#tracking-batch-mode').trigger('click')
+    expect(wrapper.find('#tracking-batch-submit').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('#tracking-batch-connection-required').text()).toContain('先在设置中连接 Auto Bangumi')
+  })
+
+  it('clears the selection when leaving multi-select', async () => {
     const items = [rowFor('a', '番 A')]
     const { wrapper } = await mountSaved([], null, defaultSummary, items)
 
     await wrapper.find('#tracking-batch-mode').trigger('click')
     await wrapper.find('#tracking-batch-select-all').trigger('click')
-    expect(wrapper.find('#tracking-batch-count').text()).toContain('已选 1 条')
+    expect(wrapper.find('#tracking-batch-count').text()).toContain('已选 1 部')
 
     await wrapper.find('#tracking-batch-mode').trigger('click')
-    expect(wrapper.find('.tracking-list-checkbox').exists()).toBe(false)
+    expect(wrapper.find('#tracking-batch-mode').text()).toBe('多选')
+    expect(wrapper.find('.tracking-batch-toolbar').exists()).toBe(false)
     expect(wrapper.find('#tracking-batch-count').exists()).toBe(false)
-  })
-
-  it('shows season and last-updated columns from the server summary row', async () => {
-    const { wrapper } = await mountSaved()
-
-    const items = wrapper.findAll('.tracking-list-item')
-    expect(items[0]!.text()).toContain('第 1 季')
-    expect(items[0]!.text()).toContain('待提交')
-    expect(items[0]!.text()).toContain('2026')
   })
 })
 

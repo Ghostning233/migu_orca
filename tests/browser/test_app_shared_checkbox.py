@@ -227,9 +227,12 @@ def test_settings_checkboxes_use_the_shared_box_at_desktop_viewports(
     assert _box(page, "#preference-filter-use-regex")["checked"] is False
 
 
-def test_tracking_list_checkbox_uses_the_shared_box_and_respects_disabled(
+def test_tracking_list_uses_no_checkbox_after_the_row_spec_revision(
     page: Page, live_server_url: str, storage_dir: Path
 ) -> None:
+    """#225/D0 2026-10-20: the tracking list retired the shared checkbox and the
+    selection column; multi-select is expressed only by the shared row background.
+    The shared checkbox itself stays untouched for every other screen."""
     page.emulate_media(reduced_motion="reduce")
     _open_tracking(
         page,
@@ -237,22 +240,24 @@ def test_tracking_list_checkbox_uses_the_shared_box_and_respects_disabled(
         storage_dir,
         [_pending("tracking-a", "番 A"), _processing("tracking-b", "番 B")],
     )
+    assert page.locator(".tracking-list-checkbox").count() == 0
+    assert page.locator('input[type="checkbox"]').count() == 0
+
     page.locator("#tracking-batch-mode").click()
-    checkboxes = page.locator(".tracking-list-checkbox")
-    expect(checkboxes).to_have_count(2)
-    _assert_shared_box(_box(page, ".tracking-list-checkbox"), "tracking-list")
+    assert page.locator(".tracking-list-checkbox").count() == 0
+    assert page.locator('input[type="checkbox"]').count() == 0
 
-    # 可提交行勾选只改变批量选择，不改变当前查看项（勾选自身 stop 冒泡）。
-    checkboxes.nth(0).check()
-    expect(page.locator("#tracking-batch-count")).to_contain_text("已选 1 条")
-    assert page.locator(".tracking-list-item.is-selected").count() == 0
+    rows = page.locator(".tracking-list-row")
+    # The body toggles the selection; the detail identity stays independent.
+    rows.nth(0).locator(".tracking-list-item").click()
+    expect(page.locator("#tracking-batch-count")).to_contain_text("已选 1 部")
+    assert "is-batch-selected" in (rows.nth(0).get_attribute("class") or "")
+    assert page.locator(".tracking-list-row.is-selected").count() == 0
 
-    # 禁用行（提交中）的方框不可选：点击该行只切换查看项，不会把它加入批量选择。
-    disabled = checkboxes.nth(1)
-    expect(disabled).to_be_disabled()
-    page.locator(".tracking-list-item").nth(1).click()
-    expect(disabled).not_to_be_checked()
-    expect(page.locator("#tracking-batch-count")).to_contain_text("已选 1 条")
+    # A transient row's body is disabled and cannot join the selection.
+    expect(rows.nth(1).locator(".tracking-list-item")).to_be_disabled()
+    rows.nth(1).locator(".tracking-list-item").click(force=True)
+    expect(page.locator("#tracking-batch-count")).to_contain_text("已选 1 部")
 
 def test_candidate_season_confirmation_uses_the_shared_box(page: Page, live_server_url: str) -> None:
     """候选季数确认（CandidateCard 原生 checkbox）也使用共享 18px 方框。"""

@@ -103,11 +103,12 @@ def test_settings_draft_test_save_locks_and_tracking_summary_is_non_sensitive(pa
     )
     assert secret not in str(stored)
 
-    # A new page reads only the safe summary. It does not automatically probe or act.
+    # A new page retires the probe entry but keeps the read-only capability
+    # current automatically; it never triggers a business action.
     page.goto(f"{live_server_url}/app/tracking")
     page.wait_for_selector("#tracking-overview")
-    expect(page.locator("#tracking-probe-saved")).to_be_visible()
-    assert page.locator("#tracking-probe-saved").is_visible()
+    expect(page.locator("#tracking-probe-saved")).to_have_count(0)
+    expect(page.locator("#tracking-overview")).to_be_visible()
     assert secret not in page.locator("body").inner_text()
 
 
@@ -179,34 +180,6 @@ def test_saved_management_actions_send_only_bound_connection_fields(page, live_s
                         },
                         "status_groups": _status_groups(active=1),
                         "warnings": [],
-                    },
-                }
-            )
-            return
-        if request.method == "POST" and path.startswith("/settings/autobangumi/probe"):
-            route.fulfill(
-                json={
-                    "ok": True,
-                    "result": {
-                        "probe_status": "VERIFIED",
-                        "version": "3.1.18",
-                        "adapter": "legacy_3_1",
-                        "subscription_list": "SUPPORTED",
-                        "subscription_detail": "SUPPORTED",
-                        "subscription_submit": "SUPPORTED",
-                        "subscription_modify": "SUPPORTED",
-                        "subscription_enable": "SUPPORTED",
-                        "subscription_disable": "SUPPORTED",
-                        "subscription_delete": "SUPPORTED",
-                        "rss_list": "SUPPORTED",
-                        "rss_modify": "SUPPORTED",
-                        "rss_enable": "SUPPORTED",
-                        "rss_disable": "SUPPORTED",
-                        "rss_delete": "SUPPORTED",
-                        "rss_refresh": "SUPPORTED",
-                        "external_verify": "SUPPORTED",
-                        "checked_at": None,
-                        "safe_message": "ok",
                     },
                 }
             )
@@ -304,39 +277,6 @@ def test_saved_sync_uses_the_saved_connection_and_sends_ref_revision(page, live_
                 }
             )
             return
-        if request.method == "POST" and path.startswith("/settings/autobangumi/probe"):
-            route.fulfill(
-                json={
-                    "ok": True,
-                    "result": {
-                        "probe_status": "VERIFIED",
-                        "version": "3.1.18",
-                        "adapter": "legacy_3_1",
-                        **{
-                            name: "SUPPORTED"
-                            for name in (
-                                "subscription_list",
-                                "subscription_detail",
-                                "subscription_submit",
-                                "subscription_modify",
-                                "subscription_enable",
-                                "subscription_disable",
-                                "subscription_delete",
-                                "rss_list",
-                                "rss_modify",
-                                "rss_enable",
-                                "rss_disable",
-                                "rss_delete",
-                                "rss_refresh",
-                                "external_verify",
-                            )
-                        },
-                        "checked_at": None,
-                        "safe_message": "ok",
-                    },
-                }
-            )
-            return
         if request.method == "POST" and path.startswith("/tracking/sync"):
             calls.append(request.post_data_json or {})
             route.fulfill(
@@ -409,7 +349,10 @@ def test_saved_verify_external_preserves_unknown_source_lock(page, live_server_u
                         "credential_present": True,
                         "connection_ref": ref,
                         "configuration_revision": 3,
-                        "connection_status": "CONFIGURED",
+                        "connection_status": "VERIFIED",
+                        # Stage 39: loading never probes; the saved summary is the
+                        # only capability source (here: last proven generation).
+                        "capabilities": _probe_capabilities(),
                     },
                 }
             )
@@ -436,9 +379,6 @@ def test_saved_verify_external_preserves_unknown_source_lock(page, live_server_u
                     },
                 }
             )
-            return
-        if request.method == "POST" and path.startswith("/settings/autobangumi/probe"):
-            route.fulfill(json={"ok": True, "result": _probe_capabilities()})
             return
         if request.method == "POST" and path.endswith("/recover"):
             calls.append(request.post_data_json or {})
@@ -469,7 +409,6 @@ def test_saved_verify_external_preserves_unknown_source_lock(page, live_server_u
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
     page.wait_for_selector("#tracking-overview")
     page.wait_for_selector(".tracking-inspector-detail")
-    page.locator("#tracking-probe-saved").click()
     page.wait_for_selector("#tracking-recover-verify")
     page.locator("#tracking-recover-verify").click()
     expect(page.locator(".confirm-dialog-message")).to_contain_text("只读核对")
@@ -576,8 +515,11 @@ def test_saved_summary_survives_refresh_and_navigation_without_settings_probe(pa
     page.reload()
     expect(page.locator("#settings-ab-delete")).to_be_enabled()
     page.goto(f"{live_server_url}/app/tracking")
-    page.wait_for_selector("#tracking-probe-saved")
-    expect(page.locator("#tracking-probe-saved")).to_be_enabled()
+    page.wait_for_selector("#tracking-overview")
+    # B1: no probe entry on the tracking page any more; only the safe saved
+    # connection summary (and its read-only capability) is loaded.
+    expect(page.locator("#tracking-probe-saved")).to_have_count(0)
+    expect(page.locator("#tracking-overview")).to_be_visible()
     assert secret not in page.locator("body").inner_text()
     assert secret not in page.evaluate(
         "() => location.href + JSON.stringify(history.state) + JSON.stringify(localStorage) + JSON.stringify(sessionStorage)"
@@ -585,8 +527,8 @@ def test_saved_summary_survives_refresh_and_navigation_without_settings_probe(pa
 
 
 @pytest.mark.browser
-def test_tracking_refresh_does_not_probe_or_sync_saved_connection(page, live_server_url):
-    """Loading and refreshing tracking remains read-only until the explicit probe."""
+def test_tracking_page_load_never_probes_syncs_or_writes(page, live_server_url):
+    """Stage 39 + B1: loading reads the summary only; no probe, sync or write."""
     ref = "11111111-1111-4111-8111-111111111111"
     calls: list[str] = []
 
@@ -615,12 +557,12 @@ def test_tracking_refresh_does_not_probe_or_sync_saved_connection(page, live_ser
 
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking")
-    page.wait_for_selector("#tracking-probe-saved")
+    page.wait_for_selector("#tracking-overview")
     page.reload()
-    page.wait_for_selector("#tracking-probe-saved")
-    # Read-only until the user acts: no POST was sent by loading or refreshing,
-    # even though the saved connection already offers sync.
-    assert calls == []
+    page.wait_for_selector("#tracking-overview")
+    # Loading the page sends no POST at all: no probe, no sync, no business write.
+    assert calls == [], calls
+    expect(page.locator("#tracking-probe-saved")).to_have_count(0)
     expect(page.locator("#tracking-sync")).to_have_count(1)
 
 
@@ -701,7 +643,6 @@ def test_tracking_capability_degrade_does_not_hide_management_actions(page, live
     assert writes == []
 
     # A diagnostic "unsupported" probe does not hide them either.
-    page.locator("#tracking-probe-saved").click()
     page.wait_for_timeout(150)
     expect(page.locator("#tracking-set-enabled-submit")).to_be_enabled()
     expect(page.locator("#tracking-refresh-rss-submit")).to_be_enabled()
@@ -774,8 +715,7 @@ def test_saved_submit_and_retry_use_one_explicit_generation(page, live_server_ur
 
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
-    page.wait_for_selector("#tracking-probe-saved")
-    page.locator("#tracking-probe-saved").click()
+    page.wait_for_selector("#tracking-overview")
     page.wait_for_selector(selector)
     page.locator(selector).click()
     expect(page.locator(".confirm-dialog")).to_be_visible()
@@ -1014,8 +954,11 @@ def test_settings_delete_requires_confirmation_and_then_tracking_degrades(page, 
     page.wait_for_timeout(100)
     assert deletes == 1
     page.goto(f"{live_server_url}/app/tracking")
-    page.wait_for_selector("#tracking-probe-saved")
-    assert page.locator("#tracking-probe-saved").is_disabled()
+    page.wait_for_selector("#tracking-overview")
+    # Unconfigured: no probe entry, no sync entry, and no automatic POST.
+    assert page.locator("#tracking-probe-saved").count() == 0
+    assert page.locator("#tracking-sync").count() == 0
+    assert deletes == 1
 
 
 @pytest.mark.browser
@@ -1063,7 +1006,8 @@ def test_submit_is_available_from_the_saved_connection_without_a_probe(page, liv
     page.wait_for_selector("#tracking-submit")
     expect(page.locator("#tracking-submit")).to_be_visible()
     expect(page.locator("#tracking-submit")).to_be_enabled()
-    # Nothing was probed: capability discovery is diagnostic, not a gate.
+    # Nothing is probed: submission needs only the saved connection, never a
+    # probe click (issue #86), and capability discovery is not a submission gate.
     assert probes == []
 
 
@@ -1130,8 +1074,7 @@ def test_management_unknown_keeps_lock_and_does_not_resend(page, live_server_url
 
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
-    page.wait_for_selector("#tracking-probe-saved")
-    page.locator("#tracking-probe-saved").click()
+    page.wait_for_selector("#tracking-overview")
     page.wait_for_selector("#tracking-modify-subscription-submit")
     page.locator("#tracking-modify-title-enabled").check()
     page.locator("#tracking-modify-title").fill("未知管理更新")
@@ -1142,7 +1085,7 @@ def test_management_unknown_keeps_lock_and_does_not_resend(page, live_server_url
     assert len(calls) == 1 and calls[0]["connection_ref"] == ref and "password" not in str(calls[0])
     expect(page.locator("#tracking-modify-subscription-submit")).to_be_disabled()
     page.reload()
-    page.wait_for_selector("#tracking-probe-saved")
+    page.wait_for_selector("#tracking-overview")
     assert len(calls) == 1
 
 
@@ -1178,9 +1121,6 @@ def test_generation_switch_does_not_reuse_old_management_intent(page, live_serve
         if request.method == "GET" and path == "/tracking/items/tracking-a":
             route.fulfill(json={"ok": True, "result": _detail_payload(item)})
             return
-        if request.method == "POST" and path.endswith("/probe"):
-            route.fulfill(json={"ok": True, "result": _probe_capabilities()})
-            return
         if request.method == "POST" and "/tracking/items/tracking-a/" in path:
             writes.append(request.post_data_json or {})
             route.continue_()
@@ -1189,11 +1129,11 @@ def test_generation_switch_does_not_reuse_old_management_intent(page, live_serve
 
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
-    page.wait_for_selector("#tracking-probe-saved")
+    page.wait_for_selector("#tracking-overview")
     page.reload()
-    page.wait_for_selector("#tracking-probe-saved")
+    page.wait_for_selector("#tracking-overview")
     page.reload()
-    page.wait_for_selector("#tracking-probe-saved")
+    page.wait_for_selector("#tracking-overview")
     assert (
         page.locator("#tracking-modify-subscription-submit").count() == 0
         or page.locator("#tracking-modify-subscription-submit").is_disabled()
@@ -1232,10 +1172,12 @@ def test_management_generation_refresh_keeps_external_id_unbound(page, live_serv
 
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking")
-    page.wait_for_selector("#tracking-probe-saved")
+    page.wait_for_selector("#tracking-overview")
     page.reload()
-    page.wait_for_selector("#tracking-probe-saved")
-    assert calls == []
+    page.wait_for_selector("#tracking-overview")
+    # Only automatic read-only capability probes may run on load; no recovery,
+    # sync or management write does.
+    assert [call for call in calls if not call.endswith("/probe")] == []
 
 
 @pytest.mark.browser
@@ -1279,9 +1221,6 @@ def test_submit_retry_singleflight_holds_unknown_lock_across_generation(page, li
         if request.method == "GET" and path == "/tracking/items/tracking-a":
             route.fulfill(json={"ok": True, "result": _detail_payload(item)})
             return
-        if request.method == "POST" and path.endswith("/probe"):
-            route.fulfill(json={"ok": True, "result": _probe_capabilities()})
-            return
         if request.method == "POST" and (path.endswith("/submit") or path.endswith("/retry")):
             posts.append(request.post_data_json or {})
             time.sleep(0.35)
@@ -1302,8 +1241,7 @@ def test_submit_retry_singleflight_holds_unknown_lock_across_generation(page, li
 
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
-    page.wait_for_selector("#tracking-probe-saved")
-    page.locator("#tracking-probe-saved").click()
+    page.wait_for_selector("#tracking-overview")
     selector = "#tracking-submit" if code == "SUBMIT" else "#tracking-retry"
     page.wait_for_selector(selector)
     page.locator(selector).click()
@@ -1315,7 +1253,7 @@ def test_submit_retry_singleflight_holds_unknown_lock_across_generation(page, li
     assert posts[0]["connection_ref"] == ref_a and posts[0]["configuration_revision"] == 1
     assert "ab_config" not in posts[0] and "password" not in str(posts[0])
     page.reload()
-    page.wait_for_selector("#tracking-probe-saved")
+    page.wait_for_selector("#tracking-overview")
     assert len(posts) == 1
 
 
@@ -1418,7 +1356,8 @@ def test_unknown_operation_after_configuration_change_cannot_verify(page, live_s
         path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
         if request.method == "GET" and path == "/settings/autobangumi":
             reads += 1
-            ref = ref_a if reads <= 2 else ref_b
+            changed = reads > 2
+            ref = ref_b if changed else ref_a
             route.fulfill(
                 json={
                     "ok": True,
@@ -1428,6 +1367,9 @@ def test_unknown_operation_after_configuration_change_cannot_verify(page, live_s
                         "connection_ref": ref,
                         "configuration_revision": reads,
                         "connection_status": "CONFIGURED",
+                        # Only the original generation has an already-proven
+                        # capability; the replacement has a cold cache.
+                        "capabilities": None if changed else _probe_capabilities(),
                     },
                 }
             )
@@ -1438,19 +1380,19 @@ def test_unknown_operation_after_configuration_change_cannot_verify(page, live_s
         if request.method == "GET" and path == "/tracking/items/tracking-a":
             route.fulfill(json={"ok": True, "result": _detail_payload(item)})
             return
-        if request.method == "POST" and path.endswith("/probe"):
-            route.fulfill(json={"ok": True, "result": _probe_capabilities()})
-            return
         if request.method == "POST" and path.endswith("/recover"):
             calls.append(path)
         route.continue_()
 
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
-    page.wait_for_selector("#tracking-probe-saved")
-    page.locator("#tracking-probe-saved").click()
+    page.wait_for_selector("#tracking-overview")
     page.wait_for_selector("#tracking-recover-verify")
     page.reload()
-    page.wait_for_selector("#tracking-probe-saved")
+    page.wait_for_selector("#tracking-overview")
+    # The replacement generation has no proven capability, so the page does not
+    # offer the read-only verification again after the connection changed, and
+    # it never verifies by itself.  (The server additionally rejects a rebind
+    # request: tracking_saved_recovery_service_test owns that guard.)
     assert page.locator("#tracking-recover-verify").count() == 0
     assert calls == []

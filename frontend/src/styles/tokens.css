@@ -89,6 +89,15 @@
   --control-padding-inline: var(--space-3);
   --control-padding-block: var(--space-2);
   --control-border-width: 1px;
+  /* 我的追番列表行（#225 / D0 2026-10-20 行规格）：只登记组件几何别名，
+   * 不新增颜色或交互状态变量。60×90 封面、115px 最低行高、160/240px 搜索框。 */
+  --tracking-poster-width: calc(var(--space-10) + var(--space-5));
+  --tracking-poster-height: calc(var(--tracking-poster-width) * 1.5);
+  --tracking-row-min-height: calc(
+    var(--tracking-poster-height) + 2 * var(--space-3) + var(--control-border-width)
+  );
+  --tracking-search-min-width: calc(4 * var(--space-10));
+  --tracking-search-width: calc(6 * var(--space-10));
   /* 全站复选框（票 156）：可见方框固定 18px、选中态用现行 primary 色；方框不因点击
    * 目标被放大，未放大前的可点区域仍由标签/外层布局提供（共享 44px 目标 Token）。 */
   --control-checkbox-size: 18px;

@@ -131,7 +131,7 @@ def test_app_spa_navigation_between_routes(page: Page, live_server_url: str) -> 
     # retired queue view.
     page.wait_for_selector("#tracking-overview")
     assert page.locator("#tracking-status-heading").count() >= 1
-    assert page.locator("#tracking-refresh").count() >= 1
+    assert page.locator("#tracking-batch-mode").count() >= 1
     assert page.locator("#batch-queue-list").count() == 0
 
     page.get_by_role("link", name="设置", exact=True).click()

@@ -235,31 +235,33 @@ class TestBatchSubmit:
             ],
         )
 
-        # Ordinary browsing has no bulk controls.
+        # No checkbox or selection column exists, in browse or in multi-select.
         assert page.locator(".tracking-list-checkbox").count() == 0
+        assert page.locator('input[type="checkbox"]').count() == 0
 
         page.locator("#tracking-batch-mode").click()
-        checkboxes = page.locator(".tracking-list-checkbox")
-        expect(checkboxes).to_have_count(3)
-        # A transient row cannot be selected.
-        expect(checkboxes.nth(2)).to_be_disabled()
+        assert page.locator(".tracking-list-checkbox").count() == 0
+        rows = page.locator(".tracking-list-row")
+        # A transient row cannot be selected: its row body is disabled.
+        expect(rows.nth(2).locator(".tracking-list-item")).to_be_disabled()
 
-        # Checking a box changes the batch selection only.
-        checkboxes.nth(0).check()
-        expect(page.locator("#tracking-batch-count")).to_contain_text("已选 1 条")
-        assert page.locator(".tracking-list-item.is-selected").count() == 0
+        # The row body toggles the batch selection only (background, not detail).
+        rows.nth(0).locator(".tracking-list-item").click()
+        expect(page.locator("#tracking-batch-count")).to_contain_text("已选 1 部")
+        assert "is-batch-selected" in (rows.nth(0).get_attribute("class") or "")
+        assert page.locator(".tracking-list-row.is-selected").count() == 0
 
-        # Clicking a row body switches the detail and leaves the selection alone.
-        page.locator(".tracking-list-item").nth(1).click()
+        # The arrow opens the detail and leaves the selection alone.
+        rows.nth(1).locator(".tracking-list-arrow").click()
         page.wait_for_selector(".tracking-inspector-content")
-        expect(page.locator(".tracking-list-item.is-selected")).to_have_attribute(
+        expect(page.locator(".tracking-list-row.is-selected")).to_have_attribute(
             "data-tracking-id", "tracking-b"
         )
-        expect(page.locator("#tracking-batch-count")).to_contain_text("已选 1 条")
+        expect(page.locator("#tracking-batch-count")).to_contain_text("已选 1 部")
 
         # Select-all covers only the submittable rows and states the rest.
         page.locator("#tracking-batch-select-all").click()
-        expect(page.locator("#tracking-batch-count")).to_contain_text("已选 2 条")
+        expect(page.locator("#tracking-batch-count")).to_contain_text("已选 2 部")
         expect(page.locator("#tracking-batch-skipped")).to_contain_text("已跳过 1 条")
         expect(page.locator("#tracking-batch-skipped")).to_contain_text("正在处理中")
 
@@ -275,7 +277,7 @@ class TestBatchSubmit:
 
         page.locator("#tracking-batch-mode").click()
         page.locator("#tracking-batch-select-all").click()
-        expect(page.locator("#tracking-batch-count")).to_contain_text("已选 2 条")
+        expect(page.locator("#tracking-batch-count")).to_contain_text("已选 2 部")
 
         page.locator("#tracking-batch-submit").click()
         # Issue #100: one mode choice for the whole batch, with the count stated.
@@ -299,10 +301,16 @@ class TestBatchSubmit:
         # No credential or endpoint ever leaves the page.
         assert "secret-password" not in json.dumps(bodies, ensure_ascii=False)
 
+        # B5: the batch result lives inside the list module (bounded), not as a
+        # workspace sibling that could grow the page.
+        assert page.evaluate(
+            "() => !!document.querySelector('.tracking-list-panel #tracking-batch-result')"
+        )
+
         # The succeeded row leaves the selection; the failed one stays selected.
-        expect(page.locator("#tracking-batch-count")).to_contain_text("已选 1 条")
+        expect(page.locator("#tracking-batch-count")).to_contain_text("已选 1 部")
         expect(page.locator("#tracking-batch-result")).to_contain_text("番 B")
-        expect(page.locator(".tracking-list-item").nth(0)).to_contain_text("追番中")
+        expect(page.locator(".tracking-list-row").nth(0)).to_contain_text("追番中")
 
         # Nothing is resent on its own.
         page.wait_for_timeout(300)
@@ -325,7 +333,7 @@ class TestBatchLocalPreCheck:
         page.locator("#tracking-batch-select-all").click()
 
         # AC 8: 全选只依赖服务端广告的可提交动作 —— 处理中的条目根本选不上。
-        expect(page.locator("#tracking-batch-count")).to_contain_text("已选 0 条")
+        expect(page.locator("#tracking-batch-count")).to_contain_text("已选 0 部")
         expect(page.locator("#tracking-batch-submit")).to_be_disabled()
         assert bodies == [], "nothing submittable must never reach Auto Bangumi"
 
@@ -341,7 +349,7 @@ class TestBatchLocalPreCheck:
 
         page.locator("#tracking-batch-mode").click()
         page.locator("#tracking-batch-select-all").click()
-        expect(page.locator("#tracking-batch-count")).to_contain_text("已选 1 条")
+        expect(page.locator("#tracking-batch-count")).to_contain_text("已选 1 部")
         page.locator("#tracking-batch-submit").click()
         page.wait_for_selector("#tracking-mode-continue", timeout=10_000)
         page.locator("#tracking-mode-continue").click()
