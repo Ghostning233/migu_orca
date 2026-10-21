@@ -600,6 +600,9 @@ onMounted(() => {
     <PanelSection title="Auto Bangumi 连接">
       <div id="settings-ab-context" class="settings-ab-context">
         <p class="field-help">已保存连接：{{ savedConnection?.credential_present ? '已配置' : '未配置' }}；配置版本 {{ savedConnection?.configuration_revision ?? 0 }}。</p>
+        <!-- F3 (#229): one plain-language capability sentence. It is not a
+             field table and never becomes a submit condition. -->
+        <p id="settings-ab-capability-note" class="field-help">已保存连接可读取并管理受控外部订阅；提交前仍需逐次确认。</p>
       </div>
 
       <form id="settings-ab-save-form" class="settings-form" @submit.prevent="saveAbConnection">

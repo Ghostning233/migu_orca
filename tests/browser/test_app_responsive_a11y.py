@@ -549,79 +549,56 @@ class TestReducedMotionAndFeedback:
         )
         page.wait_for_selector(".empty-state")
 
-    def test_reduced_motion_sync_button_spinner_still_disabled(
+    def test_reduced_motion_loading_button_keeps_its_state(
         self, page: Page, live_server_url: str
     ) -> None:
-        """A loading button shows aria-busy + disabled text even when the
-        spinner animation is suppressed by reduced-motion (#225 retires the
-        refresh entry; the sync button is the remaining loading control)."""
+        """A loading button keeps aria-busy, disabled and its label even when
+        reduced-motion suppresses the spinner. #229 retires the manual tracking
+        sync button, so the settings connection test carries this check."""
         _require_dist()
         page.emulate_media(reduced_motion="reduce")
         held: list[Any] = []
-        probes: list[str] = []
 
         def handler(route: Any, request: Any) -> None:
             path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
-            if request.method == "POST" and path == "/tracking/sync":
-                held.append(route)
-                return
             if request.method == "GET" and path == "/settings/autobangumi":
+                # Keep the case hermetic: the shared browser session may already
+                # hold a saved connection, which would lock the form.
                 route.fulfill(json={"ok": True, "result": {
-                    "configured": True, "credential_present": True,
-                    "connection_ref": "11111111-1111-4111-8111-111111111111",
-                    "configuration_revision": 3, "connection_status": "CONFIGURED",
+                    "configured": False, "credential_present": False,
+                    "connection_ref": None, "configuration_revision": 0,
+                    "connection_status": "UNCONFIGURED",
                 }})
                 return
-            if request.method == "POST" and path == "/settings/autobangumi/probe":
-                # A reintroduced probe must be visible to the assertion below.
-                probes.append(path)
-                route.fulfill(json={"ok": True, "result": {}})
-                return
-            if request.method == "GET" and path == "/tracking/items":
-                route.fulfill(json={"ok": True, "result": {
-                    "items": [], "summary": {"total": 0},
-                    "status_groups": _status_groups_for([]), "warnings": [],
-                }})
+            if request.method == "POST" and path == "/settings/autobangumi/test":
+                held.append(route)
                 return
             route.continue_()
 
         page.route("**/api/v1/**", handler)
-        page.goto(f"{live_server_url}/app/tracking")
-        page.wait_for_selector("#tracking-sync")
-        page.locator("#tracking-sync").click()
-        page.locator(".confirm-dialog .danger-button, .confirm-dialog .primary-button").last.click()
-        page.wait_for_timeout(100)
+        page.goto(f"{live_server_url}/app/settings")
+        page.fill("#settings-ab-endpoint", "192.168.1.20")
+        page.fill("#settings-ab-username", "browser-user")
+        page.fill("#settings-ab-password", "browser-secret")
+        page.locator("#settings-ab-test").click()
+        page.wait_for_timeout(150)
 
-        sync = page.locator("#tracking-sync")
-        expect(sync).to_be_disabled()
-        expect(sync).to_have_attribute("aria-busy", "true")
-        assert sync.inner_text().strip() != ""
+        testing = page.locator("#settings-ab-test")
+        expect(testing).to_be_disabled()
+        expect(testing).to_have_attribute("aria-busy", "true")
+        assert testing.inner_text().strip() != ""
         # The shared reduced-motion rule zeroes the spinner's duration; the
-        # loading text stays the signal.
+        # loading label stays the signal.
         assert page.evaluate(
             "() => getComputedStyle(document.querySelector('.base-button-spinner')).animationDuration"
         ) in {"0s", "0ms"}
 
-        assert held, "the sync request was never issued"
+        assert held, "the connection test request was never issued"
         held[0].fulfill(json={"ok": True, "result": {
-            "sync_status": "COMPLETE", "checked_at": "2026-10-21T00:00:00Z",
-            "capabilities": {
-                "probe_status": "VERIFIED", "version": "3.1.18", "adapter": "legacy_3_1",
-                "subscription_list": "SUPPORTED", "subscription_detail": "SUPPORTED",
-                "subscription_submit": "SUPPORTED", "subscription_modify": "SUPPORTED",
-                "subscription_enable": "SUPPORTED", "subscription_disable": "SUPPORTED",
-                "subscription_delete": "SUPPORTED", "rss_list": "SUPPORTED",
-                "rss_modify": "SUPPORTED", "rss_enable": "SUPPORTED",
-                "rss_disable": "SUPPORTED", "rss_delete": "SUPPORTED",
-                "rss_refresh": "SUPPORTED", "external_verify": "SUPPORTED",
-                "checked_at": None, "safe_message": "ok",
-            },
-            "summary": {"checked": 0, "created": 0, "updated": 0, "unchanged": 0,
-                        "ignored": 0, "failed": 0, "unreadable": 0},
-            "warnings": [], "items": [],
+            "success": False, "summary": {"reachable": False},
+            "error": {"type": "ab_unreachable", "message": "外部连接失败"},
         }})
-        expect(sync).to_be_enabled()
-        assert probes == [], "loading or syncing must never probe"
+        expect(testing).to_be_enabled()
 
 
 class TestRuntimeQuality:
