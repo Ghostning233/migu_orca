@@ -1583,9 +1583,14 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "properties": {
                     "items": {
                         "description": "显式选择的追番记录；每条携带自己的 expected_revision。",
+                        "example": [{
+                            "tracking_id": "trk_0123456789abcdef0123456789abcdef",
+                            "expected_revision": 1,
+                        }],
                     },
                     "idempotency_key": {
                         "description": "opaque 客户端批次 id；同键重放返回同一逐条结果，不重复删除。",
+                        "example": "batch-delete-key-1",
                     },
                     "confirm": {
                         "description": "必须为 true：用户显式确认这一批本地删除。",
@@ -1623,15 +1628,21 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "properties": {
                     "items": {
                         "description": "显式选择的追番记录；每条携带自己的 expected_revision。",
+                        "example": [{
+                            "tracking_id": "trk_0123456789abcdef0123456789abcdef",
+                            "expected_revision": 1,
+                        }],
                     },
                     "idempotency_key": {
                         "description": "opaque 客户端批次 id；同键重放返回同一逐条结果，不重复外部写。",
+                        "example": "batch-delete-external-key-1",
                     },
                     "confirm": {
                         "description": "必须为 true：用户显式确认这一批删除（含受控外部订阅）。",
                     },
                     "connection_ref": {
                         "description": "已保存 Auto Bangumi 连接引用；服务端在此 generation 上解析秘密。",
+                        "example": "11111111-1111-4111-8111-111111111111",
                     },
                     "configuration_revision": {
                         "description": "已保存连接的配置版本；变化即拒绝该批次。",

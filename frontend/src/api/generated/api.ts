@@ -4873,16 +4873,24 @@ export interface operations {
                  * @example {
                  *       "items": [
                  *         {
-                 *           "tracking_id": "示例",
+                 *           "tracking_id": "trk_0123456789abcdef0123456789abcdef",
                  *           "expected_revision": 1
                  *         }
                  *       ],
                  *       "confirm": true,
-                 *       "idempotency_key": "示例"
+                 *       "idempotency_key": "batch-delete-key-1"
                  *     }
                  */
                 "application/json": {
-                    /** @description 显式选择的追番记录；每条携带自己的 expected_revision。 */
+                    /**
+                     * @description 显式选择的追番记录；每条携带自己的 expected_revision。
+                     * @example [
+                     *       {
+                     *         "tracking_id": "trk_0123456789abcdef0123456789abcdef",
+                     *         "expected_revision": 1
+                     *       }
+                     *     ]
+                     */
                     items: {
                         tracking_id: string;
                         expected_revision: number;
@@ -4892,7 +4900,10 @@ export interface operations {
                      * @constant
                      */
                     confirm: true;
-                    /** @description opaque 客户端批次 id；同键重放返回同一逐条结果，不重复删除。 */
+                    /**
+                     * @description opaque 客户端批次 id；同键重放返回同一逐条结果，不重复删除。
+                     * @example batch-delete-key-1
+                     */
                     idempotency_key: string;
                     /** @description 存储目录（服务端允许根目录下的相对目录 profile）。 */
                     storage_dir?: string | null;
@@ -5130,18 +5141,26 @@ export interface operations {
                  * @example {
                  *       "items": [
                  *         {
-                 *           "tracking_id": "示例",
+                 *           "tracking_id": "trk_0123456789abcdef0123456789abcdef",
                  *           "expected_revision": 1
                  *         }
                  *       ],
                  *       "confirm": true,
-                 *       "idempotency_key": "示例",
-                 *       "connection_ref": "示例",
+                 *       "idempotency_key": "batch-delete-external-key-1",
+                 *       "connection_ref": "11111111-1111-4111-8111-111111111111",
                  *       "configuration_revision": 1
                  *     }
                  */
                 "application/json": {
-                    /** @description 显式选择的追番记录；每条携带自己的 expected_revision。 */
+                    /**
+                     * @description 显式选择的追番记录；每条携带自己的 expected_revision。
+                     * @example [
+                     *       {
+                     *         "tracking_id": "trk_0123456789abcdef0123456789abcdef",
+                     *         "expected_revision": 1
+                     *       }
+                     *     ]
+                     */
                     items: {
                         tracking_id: string;
                         expected_revision: number;
@@ -5151,13 +5170,17 @@ export interface operations {
                      * @constant
                      */
                     confirm: true;
-                    /** @description opaque 客户端批次 id；同键重放返回同一逐条结果，不重复外部写。 */
+                    /**
+                     * @description opaque 客户端批次 id；同键重放返回同一逐条结果，不重复外部写。
+                     * @example batch-delete-external-key-1
+                     */
                     idempotency_key: string;
                     /** @description 存储目录（服务器允许根目录下的相对目录 profile）。 */
                     storage_dir?: string | null;
                     /**
                      * Format: uuid
                      * @description 已保存 Auto Bangumi 连接引用；服务端在此 generation 上解析秘密。
+                     * @example 11111111-1111-4111-8111-111111111111
                      */
                     connection_ref: string;
                     /** @description 已保存连接的配置版本；变化即拒绝该批次。 */

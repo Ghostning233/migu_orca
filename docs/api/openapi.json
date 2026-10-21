@@ -10368,7 +10368,13 @@
                     "maxItems": 36,
                     "minItems": 1,
                     "type": "array",
-                    "description": "显式选择的追番记录；每条携带自己的 expected_revision。"
+                    "description": "显式选择的追番记录；每条携带自己的 expected_revision。",
+                    "example": [
+                      {
+                        "tracking_id": "trk_0123456789abcdef0123456789abcdef",
+                        "expected_revision": 1
+                      }
+                    ]
                   },
                   "confirm": {
                     "const": true,
@@ -10377,7 +10383,8 @@
                   },
                   "idempotency_key": {
                     "type": "string",
-                    "description": "opaque 客户端批次 id；同键重放返回同一逐条结果，不重复删除。"
+                    "description": "opaque 客户端批次 id；同键重放返回同一逐条结果，不重复删除。",
+                    "example": "batch-delete-key-1"
                   },
                   "storage_dir": {
                     "type": [
@@ -10397,12 +10404,12 @@
               "example": {
                 "items": [
                   {
-                    "tracking_id": "示例",
+                    "tracking_id": "trk_0123456789abcdef0123456789abcdef",
                     "expected_revision": 1
                   }
                 ],
                 "confirm": true,
-                "idempotency_key": "示例"
+                "idempotency_key": "batch-delete-key-1"
               }
             }
           },
@@ -10796,7 +10803,13 @@
                     "maxItems": 36,
                     "minItems": 1,
                     "type": "array",
-                    "description": "显式选择的追番记录；每条携带自己的 expected_revision。"
+                    "description": "显式选择的追番记录；每条携带自己的 expected_revision。",
+                    "example": [
+                      {
+                        "tracking_id": "trk_0123456789abcdef0123456789abcdef",
+                        "expected_revision": 1
+                      }
+                    ]
                   },
                   "confirm": {
                     "const": true,
@@ -10805,7 +10818,8 @@
                   },
                   "idempotency_key": {
                     "type": "string",
-                    "description": "opaque 客户端批次 id；同键重放返回同一逐条结果，不重复外部写。"
+                    "description": "opaque 客户端批次 id；同键重放返回同一逐条结果，不重复外部写。",
+                    "example": "batch-delete-external-key-1"
                   },
                   "storage_dir": {
                     "type": [
@@ -10817,7 +10831,8 @@
                   "connection_ref": {
                     "format": "uuid",
                     "type": "string",
-                    "description": "已保存 Auto Bangumi 连接引用；服务端在此 generation 上解析秘密。"
+                    "description": "已保存 Auto Bangumi 连接引用；服务端在此 generation 上解析秘密。",
+                    "example": "11111111-1111-4111-8111-111111111111"
                   },
                   "configuration_revision": {
                     "minimum": 0,
@@ -10837,13 +10852,13 @@
               "example": {
                 "items": [
                   {
-                    "tracking_id": "示例",
+                    "tracking_id": "trk_0123456789abcdef0123456789abcdef",
                     "expected_revision": 1
                   }
                 ],
                 "confirm": true,
-                "idempotency_key": "示例",
-                "connection_ref": "示例",
+                "idempotency_key": "batch-delete-external-key-1",
+                "connection_ref": "11111111-1111-4111-8111-111111111111",
                 "configuration_revision": 1
               }
             }
