@@ -359,6 +359,8 @@ def test_saved_plan_and_external_delete_checkboxes_use_the_shared_box(
 
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+    # Issue #233: the local plan view/edit lives in the 本地追番方案 fold.
+    page.locator("#tracking-local-plan summary").click()
     page.wait_for_selector("#tracking-edit-plan")
     page.locator("#tracking-edit-plan").click()
     page.wait_for_selector("#tracking-plan-editor")
@@ -388,6 +390,8 @@ def test_saved_plan_and_external_delete_checkboxes_use_the_shared_box(
     assert _box(page, "#tracking-plan-use-regex")["checked"] is True
 
     # 「同时删除 Auto Bangumi 中的受控外部订阅」也在盘点范围内。
+    # Issue #233: the delete entry lives in 更多操作 and starts folded.
+    page.locator("#tracking-more-actions summary").click()
     page.locator("#tracking-delete-plan").click()
     page.wait_for_selector("#tracking-delete-plan-external")
     _assert_shared_box(_box(page, "#tracking-delete-plan-external"), "tracking-delete-plan-external")

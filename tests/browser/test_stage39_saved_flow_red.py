@@ -224,6 +224,9 @@ def test_saved_management_actions_send_only_bound_connection_fields(page, live_s
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
     page.wait_for_selector("#tracking-overview")
+    if action == "MODIFY":
+        # Issue #233: the external modify form starts folded inside 管理操作.
+        page.locator("#tracking-modify-open").click()
     # #229 retires the manual sync entry; the action itself only renders once the
     # saved connection summary is adopted.
     page.wait_for_selector(selector)
@@ -1116,6 +1119,8 @@ def test_management_unknown_keeps_lock_and_does_not_resend(page, live_server_url
     page.route("**/api/v1/**", handler)
     page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
     page.wait_for_selector("#tracking-overview")
+    # Issue #233: the external modify form starts folded inside 管理操作.
+    page.locator("#tracking-modify-open").click()
     page.wait_for_selector("#tracking-modify-subscription-submit")
     page.locator("#tracking-modify-title-enabled").check()
     page.locator("#tracking-modify-title").fill("未知管理更新")

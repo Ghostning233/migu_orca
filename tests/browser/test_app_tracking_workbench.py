@@ -33,6 +33,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 pytestmark = pytest.mark.browser
 
 
+def _open_disclosure(page: Page, disclosure_id: str) -> None:
+    """Open one detail disclosure (issue #233: dangerous actions start folded)."""
+    disclosure = page.locator(f"#{disclosure_id}")
+    if disclosure.evaluate("el => el.open") is False:
+        disclosure.locator("summary").first.click()
+    assert disclosure.evaluate("el => el.open") is True
+
+
 def _dist_built() -> bool:
     return (REPO_ROOT / "frontend" / "dist" / "index.html").is_file()
 
@@ -375,6 +383,7 @@ class TestPendingPlanEditing:
 
         page.route("**/api/v1/**", handler)
         page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        _open_disclosure(page, "tracking-local-plan")
         page.wait_for_selector("#tracking-edit-plan")
 
         # The entry point names the business action and stays collapsed.
@@ -465,6 +474,7 @@ class TestActivePlanApply:
 
         page.route("**/api/v1/**", handler)
         page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        _open_disclosure(page, "tracking-local-plan")
         page.wait_for_selector("#tracking-apply-plan")
         expect(page.locator("#tracking-apply-plan")).to_have_text("保存并应用到 Auto Bangumi")
 
@@ -548,6 +558,7 @@ class TestPlanDelete:
 
         page.route("**/api/v1/**", handler)
         page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        _open_disclosure(page, "tracking-more-actions")
         page.wait_for_selector("#tracking-delete-plan")
 
         page.locator("#tracking-delete-plan").click()
@@ -611,6 +622,7 @@ class TestPlanDelete:
 
         page.route("**/api/v1/**", handler)
         page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        _open_disclosure(page, "tracking-more-actions")
         page.wait_for_selector("#tracking-delete-plan")
 
         page.locator("#tracking-delete-plan").click()
@@ -689,6 +701,7 @@ class TestPlanDelete:
 
         page.route("**/api/v1/**", handler)
         page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        _open_disclosure(page, "tracking-more-actions")
         page.wait_for_selector("#tracking-abandon-plan")
 
         # E8: the read-only verification comes first. B1 retires the probe entry;
@@ -768,6 +781,7 @@ class TestPlanReuse:
 
         page.route("**/api/v1/**", handler)
         page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        _open_disclosure(page, "tracking-more-actions")
         page.wait_for_selector("#tracking-reuse-plan")
 
         expect(page.locator("#tracking-reuse-plan")).to_have_text("复制并重新添加")
@@ -834,12 +848,14 @@ class TestPlanReuse:
 
         page.route("**/api/v1/**", handler)
         page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        _open_disclosure(page, "tracking-more-actions")
         page.wait_for_selector("#tracking-delete-plan")
 
         page.locator("#tracking-delete-plan").click()
         page.locator("#tracking-delete-plan-cancel").click()
         page.wait_for_timeout(200)
         assert deletes == []
+        _open_disclosure(page, "tracking-more-actions")
 
         page.locator("#tracking-delete-plan").click()
         page.locator("#tracking-delete-plan-confirm").click()
@@ -936,6 +952,274 @@ def _verified_capabilities() -> dict[str, Any]:
         "checked_at": None, "safe_message": "ok",
     }
 
+
+class TestDetailActionGrouping:
+    """Issue #233 (D3/D4): one primary next step, external-only management row.
+
+    Four state fixtures pin the visible button set, the single primary entry, the
+    folded dangerous actions and the fold-without-growth invariant.  Every
+    rendered entry still comes from the server's available_actions; the UI never
+    adds a button the server withheld.
+    """
+
+    @staticmethod
+    def _serve(page: Page, item: dict[str, Any], detail: dict[str, Any]) -> None:
+        def handler(route: Any, request: Any) -> None:
+            path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+            if request.method == "GET" and path == "/settings/autobangumi":
+                route.fulfill(json={"ok": True, "result": {
+                    "configured": True, "credential_present": True,
+                    "connection_ref": "11111111-1111-4111-8111-111111111111",
+                    "configuration_revision": 1, "connection_status": "CONFIGURED",
+                    "capabilities": _verified_capabilities(),
+                }})
+                return
+            if request.method == "GET" and path == "/tracking/items":
+                route.fulfill(json={"ok": True, "result": {
+                    "items": [item],
+                    "summary": _summary(1),
+                    "status_groups": _status_groups_for([item]),
+                    "warnings": [],
+                }})
+                return
+            if request.method == "GET" and path.startswith("/tracking/items/"):
+                route.fulfill(json={"ok": True, "result": detail})
+                return
+            route.continue_()
+
+        page.route("**/api/v1/**", handler)
+
+    @staticmethod
+    def _visible_buttons(page: Page) -> list[str]:
+        return page.locator(".tracking-inspector button:visible").all_inner_texts()
+
+    def _open(self, page: Page, live_server_url: str, storage_dir: Path) -> None:
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        page.goto(f"{live_server_url}/app/tracking")
+        page.wait_for_selector(".tracking-list-item")
+        page.locator(".tracking-list-item").first.click()
+        page.wait_for_selector(".tracking-inspector-facts")
+
+    def test_following_record_shows_only_the_external_management_row(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        item = {**_item("tracking-active", "星海旅途"), "status": "ACTIVE"}
+        detail = {
+            **item, "origin": "single", "batch_id": None,
+            "created_at": "2026-10-18T12:00:00Z", "last_synced_at": None,
+            # A safe suggestion makes 复制并重新添加 reachable inside 更多操作.
+            "safe_info": {
+                "request_id": "request-tracking-active", "status": "ACCEPTED",
+                "raw_title": "安全标题", "title": "星海旅途", "aliases": [], "season": 1,
+                "season_raw": None, "season_evidence": None,
+                "mikan_collection": {"bangumi_id": "mikan-1", "title": "星海旅途", "season": 1},
+                "subtitle_groups": [], "selected_subtitle_group": "喵萌奶茶屋",
+                "filter_rule": {"must_contain": "", "must_not_contain": "", "use_regex": False,
+                                "case_sensitive": False},
+                "resources": {"selected_subtitle_group": "喵萌奶茶屋", "valid_resource_count": 2,
+                              "invalid_resource_count": 0, "complete_resource_count": 2,
+                              "valid_file_names": [], "excluded_file_names": []},
+                "folder_name": "安全文件夹", "storage_profile": "profile", "total_episodes": None,
+                "updated_episode": None, "updated_episode_status": "NOT_IMPLEMENTED",
+                "history_summary": [], "ab_status": None,
+            },
+            "current_operation": None, "revalidation_issues": [],
+            "external_mapping": {"match_reason": "标题", "enabled": True, "external_deleted": False},
+            "audit_events": [], "warnings": [],
+            "available_actions": [
+                {"code": "MODIFY", "label": "修改外部订阅", "style": "SECONDARY",
+                 "requires_confirmation": True, "target_scopes": ["SUBSCRIPTION", "ASSOCIATED_RSS"]},
+                {"code": "SET_ENABLED", "label": "停用追番", "style": "SECONDARY",
+                 "requires_confirmation": True, "target_scopes": ["SUBSCRIPTION"]},
+                {"code": "REFRESH_RSS", "label": "立即刷新资源", "style": "SECONDARY",
+                 "requires_confirmation": True, "target_scopes": ["ASSOCIATED_RSS"]},
+            ],
+        }
+        self._serve(page, item, detail)
+        self._open(page, live_server_url, storage_dir)
+
+        assert self._visible_buttons(page) == ["修改外部订阅", "停用追番", "立即刷新资源"]
+        # No primary next step for 追番中, and no forbidden entry.
+        assert page.locator("#tracking-submit").count() == 0
+        assert page.locator("#tracking-recover-verify").count() == 0
+        # Dangerous entries are folded by default.
+        for fold in ("tracking-local-plan", "tracking-more-actions", "tracking-activity-log"):
+            assert page.locator(f"#{fold}").evaluate("el => el.open") is False
+
+        _open_disclosure(page, "tracking-more-actions")
+        expect(page.locator("#tracking-reuse-plan")).to_be_visible()
+        expect(page.locator("#tracking-delete-plan")).to_be_visible()
+
+    def test_pending_record_has_one_full_width_primary_submit(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        item = {
+            **_item("tracking-pending", "云境之下"),
+            "status": "PENDING_SUBMIT", "status_label": "待提交", "status_group": "PENDING",
+        }
+        detail = {
+            **item, "origin": "single", "batch_id": None,
+            "created_at": "2026-10-18T12:00:00Z", "last_synced_at": None, "safe_info": None,
+            "current_operation": None, "revalidation_issues": [], "external_mapping": None,
+            "audit_events": [], "warnings": [],
+            "available_actions": [{
+                "code": "SUBMIT", "label": "提交到 Auto Bangumi", "style": "PRIMARY",
+                "requires_confirmation": True, "target_scopes": [],
+            }],
+        }
+        self._serve(page, item, detail)
+        self._open(page, live_server_url, storage_dir)
+
+        assert self._visible_buttons(page) == ["提交方案"]
+        # One primary, full width like the design.
+        submit = page.locator("#tracking-submit")
+        inspector = page.locator(".tracking-inspector").bounding_box()
+        box = submit.bounding_box()
+        assert box["width"] > inspector["width"] * 0.9, (box, inspector)
+        assert page.locator("#tracking-management-section").count() == 0
+        assert page.locator("#tracking-more-actions").evaluate("el => el.open") is False
+
+    def test_unresolved_record_has_one_verification_entry_and_folded_abandon(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        item = {
+            **_item("tracking-unresolved", "黄昏与山丘"),
+            "status": "RECOVERY_REQUIRED", "status_label": "需要恢复", "status_group": "ATTENTION",
+        }
+        detail = {
+            **item, "origin": "single", "batch_id": None,
+            "created_at": "2026-10-18T12:00:00Z", "last_synced_at": None, "safe_info": None,
+            "current_operation": {
+                "operation_id": "op-unresolved", "operation": "REFRESH_RSS",
+                "state": "OUTCOME_UNKNOWN", "attempt": 1, "external_result_id": None,
+                "error_type": None, "created_at": None, "updated_at": None, "completed_at": None,
+            },
+            "revalidation_issues": [], "external_mapping": None, "audit_events": [], "warnings": [],
+            "available_actions": [],
+        }
+        self._serve(page, item, detail)
+        self._open(page, live_server_url, storage_dir)
+
+        assert self._visible_buttons(page) == ["核验结果"]
+        expect(page.locator("#tracking-recovery-heading")).to_have_text("结果待确认")
+        assert page.locator("#tracking-submit").count() == 0
+        # The danger entry exists but starts folded, so it is not visible yet.
+        assert page.locator("#tracking-abandon-plan:visible").count() == 0
+        _open_disclosure(page, "tracking-more-actions")
+        expect(page.locator("#tracking-abandon-plan")).to_be_visible()
+
+    def test_one_time_download_record_offers_no_external_action(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        item = {
+            **_item("tracking-download", "雪原彼方"),
+            "status": "ADDED_TO_DOWNLOAD", "status_label": "已加入下载", "status_group": "ACTIVE",
+        }
+        detail = {
+            **item, "origin": "single", "batch_id": None,
+            "created_at": "2026-10-18T12:00:00Z", "last_synced_at": None, "safe_info": None,
+            "current_operation": None, "revalidation_issues": [], "external_mapping": None,
+            "audit_events": [], "warnings": [], "available_actions": [],
+        }
+        self._serve(page, item, detail)
+        self._open(page, live_server_url, storage_dir)
+
+        # No management row, no submit, no verification: the server allows nothing.
+        assert page.locator("#tracking-management-section").count() == 0
+        assert page.locator("#tracking-primary-actions").count() == 0
+        assert page.locator("#tracking-local-plan").count() == 0
+        assert self._visible_buttons(page) == []
+        _open_disclosure(page, "tracking-more-actions")
+        expect(page.locator("#tracking-delete-plan")).to_be_visible()
+
+    def test_disabled_record_only_offers_its_enable_action(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        item = {
+            **_item("tracking-disabled", "春日信箱"),
+            "status": "DISABLED", "status_label": "已停用", "status_group": "INACTIVE",
+        }
+        detail = {
+            **item, "origin": "single", "batch_id": None,
+            "created_at": "2026-10-18T12:00:00Z", "last_synced_at": None, "safe_info": None,
+            "current_operation": None, "revalidation_issues": [],
+            "external_mapping": {"match_reason": "标题", "enabled": False, "external_deleted": False},
+            "audit_events": [], "warnings": [],
+            "available_actions": [{
+                "code": "SET_ENABLED", "label": "启用追番", "style": "PRIMARY",
+                "requires_confirmation": True, "target_scopes": ["SUBSCRIPTION"],
+            }],
+        }
+        self._serve(page, item, detail)
+        self._open(page, live_server_url, storage_dir)
+
+        assert self._visible_buttons(page) == ["启用追番"]
+        assert page.locator("#tracking-modify-open").count() == 0
+        assert page.locator("#tracking-refresh-rss-submit").count() == 0
+        # AC2: no folded entry for a write the server refuses (SET_ENABLED only) —
+        # the local+sync apply is a subscription MODIFY and must not exist here.
+        assert page.locator("#tracking-local-plan").count() == 0
+        assert page.locator("#tracking-apply-plan").count() == 0
+
+    def test_opening_the_folds_never_grows_the_page(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        item = {
+            **_item("tracking-active", "星海旅途"),
+            "status": "ACTIVE",
+        }
+        detail = {
+            **item, "origin": "single", "batch_id": None,
+            "created_at": "2026-10-18T12:00:00Z", "last_synced_at": None,
+            "safe_info": {
+                "request_id": "request-tracking-active", "status": "ACCEPTED", "raw_title": "安全标题",
+                "title": "星海旅途", "aliases": [], "season": 1, "season_raw": None,
+                "season_evidence": None,
+                "mikan_collection": {"bangumi_id": "mikan-1", "title": "星海旅途", "season": 1},
+                "subtitle_groups": [], "selected_subtitle_group": "喵萌奶茶屋",
+                "filter_rule": {"must_contain": "", "must_not_contain": "", "use_regex": False,
+                                "case_sensitive": False},
+                "resources": {"selected_subtitle_group": "喵萌奶茶屋", "valid_resource_count": 1,
+                              "invalid_resource_count": 0, "complete_resource_count": 1,
+                              "valid_file_names": ["第一集.mkv"], "excluded_file_names": []},
+                "folder_name": "安全文件夹", "storage_profile": "profile", "total_episodes": None,
+                "updated_episode": None, "updated_episode_status": "NOT_IMPLEMENTED",
+                "history_summary": [], "ab_status": None,
+            },
+            "current_operation": None, "revalidation_issues": [],
+            "external_mapping": {"match_reason": "标题", "enabled": True, "external_deleted": False},
+            "audit_events": [{"action": "TRACKING_CREATED", "safe_message": "已创建", "created_at": "2026-10-18T12:00:00Z"}],
+            "warnings": [],
+            "available_actions": [
+                {"code": "MODIFY", "label": "修改外部订阅", "style": "SECONDARY",
+                 "requires_confirmation": True, "target_scopes": ["SUBSCRIPTION"]},
+                {"code": "REFRESH_RSS", "label": "立即刷新资源", "style": "SECONDARY",
+                 "requires_confirmation": True, "target_scopes": ["ASSOCIATED_RSS"]},
+            ],
+        }
+        self._serve(page, item, detail)
+        self._open(page, live_server_url, storage_dir)
+
+        before = page.evaluate(
+            "() => ({ pane: document.querySelector('.tracking-inspector').getBoundingClientRect().height,"
+            " doc: document.documentElement.scrollHeight })"
+        )
+        for fold in ("tracking-local-plan", "tracking-more-actions", "tracking-activity-log",
+                     "tracking-tech-diagnostics"):
+            _open_disclosure(page, fold)
+        after = page.evaluate(
+            "() => ({ pane: document.querySelector('.tracking-inspector').getBoundingClientRect().height,"
+            " doc: document.documentElement.scrollHeight })"
+        )
+        # T2 invariant: expanding a disclosure scrolls inside the pane.
+        assert after["pane"] == before["pane"], (before, after)
+        assert after["doc"] == before["doc"], (before, after)
+        # ...and the opened content really does overflow the pane, so the equality
+        # above is not vacuous.
+        assert page.locator(".tracking-inspector").evaluate(
+            "el => el.scrollHeight > el.clientHeight"
+        ) is True
 
 class TestDetailSummaryIssue227:
     """Issue #227 (T4a): the detail summary, the reason card and the records.

@@ -178,6 +178,405 @@ describe('TrackingInspector detail summary (issue #227)', () => {
   })
 })
 
+describe('TrackingInspector action grouping (issue #233 D3/D4)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  const setEnabledAction = {
+    code: 'SET_ENABLED', label: '停用追番', style: 'SECONDARY',
+    requires_confirmation: true, target_scopes: ['SUBSCRIPTION'],
+  }
+  const refreshAction = {
+    code: 'REFRESH_RSS', label: '立即刷新资源', style: 'SECONDARY',
+    requires_confirmation: true, target_scopes: ['ASSOCIATED_RSS'],
+  }
+  const mapping = { match_reason: '标题', enabled: true, external_deleted: false }
+
+  function pendingRecord(actions: unknown[] = [submitAction], overrides: Record<string, unknown> = {}) {
+    return detail({
+      status: 'PENDING_SUBMIT', status_label: '待提交', status_group: 'PENDING',
+      available_actions: actions, ...overrides,
+    })
+  }
+
+  function zoneIds(wrapper: Awaited<ReturnType<typeof mountInspector>>, selector: string) {
+    return wrapper.findAll(`${selector} button`).map((button) => button.attributes('id'))
+  }
+
+  it('gives 待提交 exactly one primary 提交方案 and folds everything else', async () => {
+    apiGet.mockResolvedValue(pendingRecord() as never)
+    const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
+
+    const primary = wrapper.find('#tracking-primary-actions')
+    expect(primary.exists()).toBe(true)
+    expect(zoneIds(wrapper, '#tracking-primary-actions')).toEqual(['tracking-submit'])
+    expect(primary.text()).toContain('提交方案')
+    // Nothing state-changing is a peer of the primary any more.
+    expect(wrapper.find('#tracking-management-section').exists()).toBe(false)
+    expect(wrapper.find('#tracking-recovery-heading').exists()).toBe(false)
+  })
+
+  it('makes 修改方案 primary for 需重新确认 and keeps 提交方案 reachable', async () => {
+    apiGet.mockResolvedValue(pendingRecord([submitAction], {
+      status: 'NEEDS_RECONFIRM', status_label: '待重新确认',
+    }) as never)
+    const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
+
+    const primary = wrapper.find('#tracking-primary-actions')
+    expect(primary.find('#tracking-primary-edit-plan').exists()).toBe(true)
+    // The server still allows SUBMIT, so it is offered — as a secondary entry,
+    // never as a second primary.
+    expect(primary.find('#tracking-submit').exists()).toBe(true)
+    // The editor itself lives in the 本地追番方案 fold.
+    expect(wrapper.find('#tracking-local-plan #tracking-edit-plan').exists()).toBe(true)
+  })
+
+  it('keeps 重试提交 as the only primary entry for 提交失败', async () => {
+    apiGet.mockResolvedValue(detail({
+      status: 'SUBMIT_FAILED', status_label: '提交失败', status_group: 'ATTENTION',
+      available_actions: [retryAction], external_mapping: mapping,
+    }) as never)
+    const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
+
+    expect(zoneIds(wrapper, '#tracking-primary-actions')).toEqual(['tracking-retry'])
+    expect(wrapper.find('#tracking-submit').exists()).toBe(false)
+    expect(wrapper.find('#tracking-recovery-heading').exists()).toBe(false)
+  })
+
+  it('makes 核验结果 the only primary entry for an unresolved record', async () => {
+    apiGet.mockResolvedValue(detail({
+      status: 'RECOVERY_REQUIRED', status_label: '需要恢复', status_group: 'ATTENTION',
+      available_actions: [],
+      current_operation: {
+        operation_id: 'op-1', operation: 'REFRESH_RSS', state: 'OUTCOME_UNKNOWN', attempt: 1,
+      },
+    }) as never)
+    const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
+
+    const primary = wrapper.find('#tracking-primary-actions')
+    expect(primary.find('#tracking-recovery-heading').text()).toBe('结果待确认')
+    expect(zoneIds(wrapper, '#tracking-primary-actions')).toEqual(['tracking-recover-verify'])
+    expect(primary.find('#tracking-recover-verify').text()).toBe('核验结果')
+    expect(wrapper.find('#tracking-submit').exists()).toBe(false)
+    expect(wrapper.find('#tracking-retry').exists()).toBe(false)
+  })
+
+  it('groups the external-only management actions under 管理操作 for 追番中', async () => {
+    apiGet.mockResolvedValue(detail({
+      status: 'ACTIVE', status_label: '追番中',
+      available_actions: [applyModifyAction, setEnabledAction, refreshAction],
+      external_mapping: mapping,
+    }) as never)
+    const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
+
+    const management = wrapper.find('#tracking-management-section')
+    expect(management.exists()).toBe(true)
+    expect(management.find('#tracking-management-heading').text()).toBe('管理操作')
+    expect(management.find('#tracking-modify-open').exists()).toBe(true)
+    expect(management.find('#tracking-set-enabled-submit').text()).toBe('停用追番')
+    expect(management.find('#tracking-refresh-rss-submit').text()).toBe('立即刷新资源')
+    // 追番中 has no primary next step.
+    expect(wrapper.find('#tracking-primary-actions').exists()).toBe(false)
+  })
+
+  it('never invents a forbidden button for 已停用', async () => {
+    apiGet.mockResolvedValue(detail({
+      status: 'DISABLED', status_label: '已停用', status_group: 'INACTIVE',
+      available_actions: [{ ...setEnabledAction, label: '启用追番' }],
+      external_mapping: mapping,
+    }) as never)
+    const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
+
+    const management = wrapper.find('#tracking-management-section')
+    expect(management.find('#tracking-set-enabled-submit').text()).toBe('启用追番')
+    // Disabled subscriptions may only be re-enabled: no modify, no refresh.
+    expect(management.find('#tracking-modify-open').exists()).toBe(false)
+    expect(management.find('#tracking-refresh-rss-submit').exists()).toBe(false)
+    expect(wrapper.find('#tracking-submit').exists()).toBe(false)
+    expect(wrapper.find('#tracking-recover-verify').exists()).toBe(false)
+  })
+
+  it('renders no management entry for a one-time download record', async () => {
+    apiGet.mockResolvedValue(detail({
+      status: 'ADDED_TO_DOWNLOAD', status_label: '已加入下载', status_group: 'ACTIVE',
+      available_actions: [],
+    }) as never)
+    const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
+
+    expect(wrapper.find('#tracking-management-section').exists()).toBe(false)
+    expect(wrapper.find('#tracking-primary-actions').exists()).toBe(false)
+  })
+
+  it('folds the local plan and the more-actions entries closed by default', async () => {
+    apiGet.mockResolvedValue(detail({
+      status: 'ACTIVE', status_label: '追番中',
+      available_actions: [applyModifyAction, setEnabledAction, refreshAction],
+      external_mapping: mapping,
+      safe_info: {
+        request_id: 'request-1', status: 'ACCEPTED', raw_title: '安全标题', title: '葬送的芙莉莲',
+        aliases: [], season: 1, season_raw: null, season_evidence: null,
+        mikan_collection: { bangumi_id: 'mikan-1234', title: '葬送的芙莉莲', season: 1 },
+        subtitle_groups: [], selected_subtitle_group: '喵萌奶茶屋', filter_rule: {
+          must_contain: '', must_not_contain: '', use_regex: false, case_sensitive: false,
+        }, resources: { selected_subtitle_group: '喵萌奶茶屋', valid_resource_count: 2,
+          invalid_resource_count: 0, complete_resource_count: 2, valid_file_names: [],
+          excluded_file_names: [] },
+        folder_name: '安全文件夹', storage_profile: 'profile', total_episodes: null,
+        updated_episode: null, updated_episode_status: 'NOT_IMPLEMENTED', history_summary: [], ab_status: null,
+      },
+    }) as never)
+    const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
+
+    const local = wrapper.find('#tracking-local-plan')
+    expect(local.exists()).toBe(true)
+    expect(local.attributes('open')).toBeUndefined()
+    expect(local.find('summary').text()).toBe('本地追番方案')
+    expect(local.find('#tracking-apply-plan').exists()).toBe(true)
+
+    const more = wrapper.find('#tracking-more-actions')
+    expect(more.exists()).toBe(true)
+    expect(more.attributes('open')).toBeUndefined()
+    expect(more.find('summary').text()).toBe('更多操作')
+    expect(more.find('#tracking-reuse-plan').exists()).toBe(true)
+    expect(more.find('#tracking-delete-plan').exists()).toBe(true)
+    // No state-changing entry escaped into the fold.
+    expect(more.find('#tracking-submit').exists()).toBe(false)
+    expect(more.find('#tracking-retry').exists()).toBe(false)
+  })
+
+  it('keeps 主动重发 reachable inside 更多操作', async () => {
+    apiGet.mockResolvedValue(detail({
+      status: 'VERIFYING_EXTERNAL', status_label: '核验外部结果中', status_group: 'PROCESSING',
+      submission_mode: 'CONTINUE_TRACKING',
+      current_operation: {
+        operation_id: 'operation-1', operation: 'SUBMIT', state: 'OUTCOME_UNKNOWN', attempt: 1,
+        external_result_id: null, error_type: null, created_at: null, updated_at: null, completed_at: null,
+      },
+      available_actions: [],
+    }) as never)
+    const wrapper = await mountInspector('tracking-1', {
+      ...LIVE_SESSION, resubmitSession: createResubmitSession('tracking-1', 'CONFIRMED', null, 3),
+    })
+
+    const more = wrapper.find('#tracking-more-actions')
+    expect(more.exists()).toBe(true)
+    expect(more.find('#tracking-resubmit').exists()).toBe(true)
+    expect(more.find('#tracking-resubmit-result').exists()).toBe(true)
+    // The read-only verification stays the single primary entry.
+    expect(zoneIds(wrapper, '#tracking-primary-actions')).toEqual(['tracking-check'])
+  })
+
+  it('keeps 放弃跟踪并删除 reachable inside 更多操作', async () => {
+    apiGet.mockResolvedValue(detail({
+      status: 'RECOVERY_REQUIRED', status_label: '需要恢复', status_group: 'ATTENTION',
+      available_actions: [],
+      current_operation: {
+        operation_id: 'op-1', operation: 'REFRESH_RSS', state: 'OUTCOME_UNKNOWN', attempt: 1,
+      },
+    }) as never)
+    const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
+
+    const more = wrapper.find('#tracking-more-actions')
+    expect(more.find('#tracking-abandon-plan').exists()).toBe(true)
+    expect(more.find('#tracking-abandon-risk').text()).toContain('结果无法确认')
+  })
+
+  it('states both modify scopes explicitly (D4)', async () => {
+    // ACTIVE has no editable local plan, so it shows the local+sync scope only.
+    apiGet.mockResolvedValue(detail({
+      status: 'ACTIVE', status_label: '追番中',
+      available_actions: [applyModifyAction, setEnabledAction, refreshAction],
+      external_mapping: mapping,
+    }) as never)
+    const active = await mountInspector('tracking-1', LIVE_SESSION)
+    expect(active.find('#tracking-local-plan').text()).toContain('改本地并同步到 Auto Bangumi')
+    expect(active.find('#tracking-management-section').text())
+      .toContain('只改 Auto Bangumi，不改本地')
+
+    // 需重新确认 has an editable local plan: local-only scope.
+    apiGet.mockResolvedValue(pendingRecord([submitAction], {
+      status: 'NEEDS_RECONFIRM', status_label: '待重新确认',
+    }) as never)
+    const reconfirm = await mountInspector('tracking-1', LIVE_SESSION)
+    expect(reconfirm.find('#tracking-local-plan').text())
+      .toContain('只改本地追番方案，不改 Auto Bangumi')
+  })
+
+  it('keeps a converged verification result visible after the record settles', async () => {
+    // The verify succeeded, so the record is ACTIVE and offers no primary entry;
+    // its result must not disappear with the state.
+    apiGet.mockResolvedValue(detail({
+      status: 'ACTIVE', status_label: '追番中',
+      available_actions: [applyModifyAction], external_mapping: mapping,
+    }) as never)
+    const wrapper = await mountInspector('tracking-1', {
+      ...LIVE_SESSION,
+      sessions: sessions({ recovery: recoverySessionFixture({ state: 'SUCCEEDED', message: '已确认订阅存在。' }) }),
+    })
+
+    const primary = wrapper.find('#tracking-primary-actions')
+    expect(primary.exists()).toBe(true)
+    expect(primary.find('#tracking-recovery-result').text()).toContain('已确认订阅存在')
+    expect(primary.find('#tracking-recover-verify').exists()).toBe(false)
+  })
+
+  it('keeps a settled submit result visible without offering another write', async () => {
+    apiGet.mockResolvedValue(detail({
+      status: 'ACTIVE', status_label: '追番中',
+      available_actions: [applyModifyAction], external_mapping: mapping,
+    }) as never)
+    const wrapper = await mountInspector('tracking-1', {
+      ...LIVE_SESSION,
+      sessions: sessions({ submit: writeSession({ state: 'ACTIVE' }) }),
+    })
+
+    const primary = wrapper.find('#tracking-primary-actions')
+    expect(primary.find('#tracking-submit-result').text()).toContain('提交成功')
+    expect(primary.find('#tracking-submit').exists()).toBe(false)
+  })
+
+  it('never offers the local+sync apply without a subscription-scoped MODIFY', async () => {
+    // 已停用 only allows SET_ENABLED, so the apply entry must not exist at all —
+    // classification (status + mapping) is not a permission (AC2).
+    apiGet.mockResolvedValue(detail({
+      status: 'DISABLED', status_label: '已停用', status_group: 'INACTIVE',
+      available_actions: [{ ...setEnabledAction, label: '启用追番' }],
+      external_mapping: mapping,
+    }) as never)
+    const disabled = await mountInspector('tracking-1', LIVE_SESSION)
+    expect(disabled.find('#tracking-local-plan').exists()).toBe(false)
+    expect(disabled.find('#tracking-apply-plan').exists()).toBe(false)
+
+    // A MODIFY that only carries the associated-RSS scope cannot write the
+    // subscription either.
+    apiGet.mockResolvedValue(detail({
+      status: 'ACTIVE', status_label: '追番中',
+      available_actions: [{ ...applyModifyAction, target_scopes: ['ASSOCIATED_RSS'] }],
+      external_mapping: mapping,
+    }) as never)
+    const rssOnly = await mountInspector('tracking-1', LIVE_SESSION)
+    expect(rssOnly.find('#tracking-apply-plan').exists()).toBe(false)
+
+    // The exact intersection still offers it.
+    apiGet.mockResolvedValue(detail({
+      status: 'ACTIVE', status_label: '追番中',
+      available_actions: [applyModifyAction],
+      external_mapping: mapping,
+    }) as never)
+    const allowed = await mountInspector('tracking-1', LIVE_SESSION)
+    expect(allowed.find('#tracking-apply-plan').exists()).toBe(true)
+  })
+
+  it('keeps the resubmit result after the record converges', async () => {
+    // The risk-confirmed resubmit converges the record; its read-only verdict
+    // must not disappear with the pending state (old template kept it too).
+    apiGet.mockResolvedValue(detail({
+      status: 'ACTIVE', status_label: '追番中',
+      available_actions: [applyModifyAction], external_mapping: mapping,
+    }) as never)
+    const wrapper = await mountInspector('tracking-1', {
+      ...LIVE_SESSION, resubmitSession: createResubmitSession('tracking-1', 'CONFIRMED', null, 3),
+    })
+
+    const more = wrapper.find('#tracking-more-actions')
+    expect(more.exists()).toBe(true)
+    expect(more.find('#tracking-resubmit-result').text()).toContain('已确认订阅存在')
+    expect(more.find('#tracking-resubmit').exists()).toBe(false)
+  })
+
+  it('reports a management-origin modify result in the management row only', async () => {
+    apiGet.mockResolvedValue(detail({
+      status: 'ACTIVE', status_label: '追番中',
+      available_actions: [applyModifyAction], external_mapping: mapping,
+    }) as never)
+    const wrapper = await mountInspector('tracking-1', {
+      ...LIVE_SESSION,
+      sessions: sessions({ management: sessionFixture({
+        family: 'MANAGEMENT', operation: 'MODIFY', state: 'SUCCEEDED',
+        message: '外部订阅已修改。',
+      }) }),
+    })
+
+    expect(wrapper.find('#tracking-modify-result').text()).toContain('外部订阅已修改')
+    // It is not the local+sync result, so the fold must not claim it.
+    expect(wrapper.find('#tracking-apply-result').exists()).toBe(false)
+  })
+
+  it('reports a local+sync apply result under its own entry only', async () => {
+    apiGet.mockImplementation(async (path: string) => (
+      path === '/api/v1/requests/{request_id}' ? requestSnapshot() : activeRecord() as never
+    ))
+    const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
+    await wrapper.find('#tracking-apply-plan').trigger('click')
+    await flushPromises()
+    wrapper.findComponent({ name: 'AnimeDraftEditor' }).vm.$emit('apply', {
+      expected_folder_name: '新目录',
+    })
+    await flushPromises()
+
+    await wrapper.setProps({
+      sessions: sessions({ management: sessionFixture({
+        family: 'MANAGEMENT', operation: 'MODIFY', state: 'SUCCEEDED',
+        message: '本地方案与外部订阅已同步。',
+      }) }),
+    })
+    await flushPromises()
+
+    expect(wrapper.find('#tracking-apply-result').text()).toContain('本地方案与外部订阅已同步')
+    expect(wrapper.find('#tracking-modify-result').exists()).toBe(false)
+  })
+
+  it('keeps one real heading on the primary region for a pending submission', async () => {
+    apiGet.mockResolvedValue(detail({
+      status: 'VERIFYING_EXTERNAL', status_label: '核验外部结果中', status_group: 'PROCESSING',
+      submission_mode: 'CONTINUE_TRACKING',
+      current_operation: {
+        operation_id: 'op-1', operation: 'SUBMIT', state: 'OUTCOME_UNKNOWN', attempt: 1,
+        external_result_id: null, error_type: null, created_at: null, updated_at: null, completed_at: null,
+      },
+      available_actions: [],
+    }) as never)
+    const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
+
+    const zone = wrapper.find('#tracking-primary-actions')
+    expect(zone.exists()).toBe(true)
+    const labelledBy = zone.attributes('aria-labelledby')
+    expect(labelledBy).toBeTruthy()
+    // The reference resolves inside this component: no dangling aria-labelledby.
+    expect(zone.find(`#${labelledBy}`).exists()).toBe(true)
+    expect(zone.find('#tracking-recovery-heading').exists()).toBe(false)
+    expect(zone.find('#tracking-submit-heading').exists()).toBe(true)
+  })
+
+  it('opens the local plan fold from the primary 修改方案 entry', async () => {
+    apiGet.mockResolvedValue(pendingRecord([submitAction], {
+      status: 'NEEDS_RECONFIRM', status_label: '待重新确认',
+    }) as never)
+    const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
+    const fold = wrapper.find('#tracking-local-plan')
+    expect(fold.attributes('open')).toBeUndefined()
+
+    await wrapper.find('#tracking-primary-edit-plan').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#tracking-local-plan').attributes('open')).toBeDefined()
+    expect(wrapper.find('#tracking-edit-plan').attributes('aria-expanded')).toBe('true')
+  })
+
+  it('renders no action group at all when the server allows no action', async () => {
+    apiGet.mockResolvedValue(detail({
+      status: 'SUBMITTING', status_label: '提交中', status_group: 'PROCESSING',
+      available_actions: [], safe_info: null, external_mapping: null,
+    }) as never)
+    const wrapper = await mountInspector()
+
+    expect(wrapper.find('#tracking-primary-actions').exists()).toBe(false)
+    expect(wrapper.find('#tracking-management-section').exists()).toBe(false)
+    expect(wrapper.find('#tracking-local-plan').exists()).toBe(false)
+    expect(wrapper.find('#tracking-more-actions').exists()).toBe(false)
+    expect(wrapper.find('#tracking-submit').exists()).toBe(false)
+  })
+})
+
 describe('TrackingInspector secure detail (US-306)', () => {
   beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
 
@@ -506,7 +905,7 @@ describe('TrackingInspector main feedback card (issue #227 D8)', () => {
 
     expect(wrapper.find('#tracking-feedback').exists()).toBe(false)
     // The in-section result panel still reports the success where it always did.
-    expect(wrapper.find('.tracking-submit #tracking-submit-result').exists()).toBe(true)
+    expect(wrapper.find('#tracking-primary-actions #tracking-submit-result').exists()).toBe(true)
   })
 })
 
@@ -782,7 +1181,9 @@ describe('TrackingInspector explicit retry (US-311)', () => {
     }) as never)
     const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
     expect(wrapper.find('#tracking-retry').exists()).toBe(false)
-    expect(wrapper.text()).toContain('当前状态不可提交或重试外部订阅')
+    // Issue #233: an unrecognized action never becomes a disabled button and has
+    // no primary entry of its own, so the primary zone stays absent.
+    expect(wrapper.find('#tracking-primary-actions').exists()).toBe(false)
   })
 })
 
@@ -823,7 +1224,7 @@ describe('TrackingInspector unknown-result recovery (US-312 / issue #228)', () =
     expect(withoutSession.text()).toContain('只读外部核验需要先在页面连接 Auto Bangumi')
 
     const withSession = await mountRecoverable(LIVE_SESSION)
-    expect(withSession.find('#tracking-recover-verify').text()).toBe('只读核验外部状态')
+    expect(withSession.find('#tracking-recover-verify').text()).toBe('核验结果')
     await withSession.find('#tracking-recover-verify').trigger('click')
     await flushPromises()
     // The inspector never performs a recovery itself.
@@ -866,7 +1267,8 @@ describe('TrackingInspector unknown-result recovery (US-312 / issue #228)', () =
         { code: 'SUBMIT', label: '提交追番', style: 'PRIMARY', requires_confirmation: true, target_scopes: [] },
       ],
     })
-    expect(decided.find('.tracking-recovery').exists()).toBe(false)
+    expect(decided.find('#tracking-recovery-heading').exists()).toBe(false)
+    expect(decided.find('#tracking-recover-verify').exists()).toBe(false)
     expect(apiPost).not.toHaveBeenCalled()
   })
 

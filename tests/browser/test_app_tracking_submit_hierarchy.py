@@ -206,8 +206,11 @@ def test_active_record_management_actions_are_disabled_without_connection(
     item = _item(status="ACTIVE", status_label="追番中", status_group="ACTIVE", actions=[MODIFY_ACTION])
     _open(page, live_server_url, storage_dir, item, _unconfigured_summary())
 
-    expect(page.locator("#tracking-modify-heading")).to_be_visible()
-    expect(page.locator("#tracking-modify-connection-required")).to_be_visible()
-    expect(page.locator("#tracking-modify-connection-required")).to_contain_text(
+    # Issue #233: external subscription writes are the 管理操作 peers; without a
+    # saved connection every entry is present but disabled, with one in-place hint.
+    expect(page.locator("#tracking-management-heading")).to_have_text("管理操作")
+    expect(page.locator("#tracking-modify-open")).to_be_disabled()
+    expect(page.locator("#tracking-management-connection-required")).to_be_visible()
+    expect(page.locator("#tracking-management-connection-required")).to_contain_text(
         "先在设置中连接 Auto Bangumi"
     )
