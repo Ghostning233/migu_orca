@@ -11,6 +11,11 @@
  *
  * The refresh action has exactly one legitimate target (this record's own
  * associated RSS), so it needs no scope choice and no scope is emitted for it.
+ *
+ * Issue #233 D3/D4: these are the 管理操作 peer entries.  An action the server
+ * did not offer renders nothing at all (no fake disabled button, no "not
+ * available" filler); the parent section only exists when at least one entry
+ * does.
  */
 import { computed } from 'vue'
 
@@ -33,10 +38,6 @@ const props = defineProps<{
   refreshRss?: TrackingAction | null
   /** Page-level management result for this item; the page owns the request. */
   result?: TrackingWriteSession | null
-  /** Fixed read-only degradation copy for a SET_ENABLED this page cannot send. */
-  setEnabledHint: string
-  /** Fixed read-only degradation copy for a REFRESH_RSS this page cannot send. */
-  refreshHint: string
   /** Page-level single-flight/blocked state; the page owns the request. */
   busy?: boolean
   /** This item's own management request is in flight. */
@@ -87,41 +88,35 @@ function submitRefresh(): void {
   <div class="tracking-management-actions">
     <form
       v-if="setEnabled && setEnabledScope"
-      class="tracking-management-form"
+      class="tracking-management-entry"
       aria-labelledby="tracking-set-enabled-heading"
       @submit.prevent="submitSetEnabled"
     >
-      <h5 id="tracking-set-enabled-heading">{{ setEnabled.label }}</h5>
-      <p class="field-help">
-        该操作只改变 Auto Bangumi 中的外部对象是否启用，不删除任何外部对象，也不修改 MiGuOrca 本地方案。
-      </p>
+      <h5 id="tracking-set-enabled-heading" class="tracking-visually-hidden">{{ setEnabled.label }}</h5>
       <BaseButton
         id="tracking-set-enabled-submit"
         type="submit"
+        variant="secondary"
         :disabled="busy"
         :loading="loading"
       >{{ setEnabled.label }}</BaseButton>
     </form>
-    <p v-else class="field-help">{{ setEnabledHint }}</p>
 
     <form
       v-if="refreshRss && refreshScope"
-      class="tracking-management-form"
+      class="tracking-management-entry"
       aria-labelledby="tracking-refresh-rss-heading"
       @submit.prevent="submitRefresh"
     >
-      <h5 id="tracking-refresh-rss-heading">{{ refreshRss.label }}</h5>
-      <p class="field-help">
-        只让 Auto Bangumi 重新拉取当前追番的关联 RSS；不会刷新全局 RSS，也不会修改或删除任何外部对象。
-      </p>
+      <h5 id="tracking-refresh-rss-heading" class="tracking-visually-hidden">{{ refreshRss.label }}</h5>
       <BaseButton
         id="tracking-refresh-rss-submit"
         type="submit"
+        variant="secondary"
         :disabled="busy"
         :loading="loading"
       >{{ refreshRss.label }}</BaseButton>
     </form>
-    <p v-else class="field-help">{{ refreshHint }}</p>
 
     <div
       v-if="result"
@@ -139,13 +134,24 @@ function submitRefresh(): void {
 </template>
 
 <style scoped>
-.tracking-management-actions { display: grid; gap: .65rem; }
-.tracking-management-form { display: grid; gap: .55rem; padding: var(--space-3); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-sm); }
-.tracking-management-form h5 { margin: 0; font-size: .95rem; }
+.tracking-management-actions { display: contents; }
+/* Labelled peer entries: the h5 keeps the form's accessible name, visually
+   hidden so the row stays compact (no new ARIA, no deleted attribute). */
+.tracking-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
 .tracking-management-scopes { display: grid; gap: .35rem; margin: 0; padding: var(--space-2) var(--space-3); border: 1px dashed var(--color-border); border-radius: var(--radius-sm); }
 .tracking-management-scopes legend { font-size: .85rem; font-weight: 600; }
 .tracking-management-scope { display: flex; align-items: center; gap: .45rem; font-size: .85rem; font-weight: 600; }
-.tracking-management-result { display: grid; gap: .4rem; padding: var(--space-3); border: 1px solid var(--color-border-subtle); border-left: 0.3rem solid var(--color-text-muted); border-radius: var(--radius-sm); background: var(--color-surface-raised); }
+.tracking-management-result { flex: 1 0 100%; display: grid; gap: .4rem; padding: var(--space-3); border: 1px solid var(--color-border-subtle); border-left: 0.3rem solid var(--color-text-muted); border-radius: var(--radius-sm); background: var(--color-surface-raised); }
 .tracking-management-result.is-succeeded { border-left-color: var(--color-feedback-success-border); }
 .tracking-management-result.is-failed, .tracking-management-result.is-conflict, .tracking-management-result.is-rejected, .tracking-management-result.is-unknown { border-left-color: var(--color-feedback-error-border); }
 .tracking-management-verdict, .tracking-management-manual { font-weight: 600; }

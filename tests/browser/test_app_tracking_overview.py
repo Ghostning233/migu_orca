@@ -333,6 +333,10 @@ def test_columns_scroll_independently_and_folds_keep_page_height(
     _open(page, live_server_url, storage_dir, [_item(index) for index in range(40)], audits=40)
     page.locator(".tracking-list-item").first.click()
     _wait_for_loaded_detail(page)
+    # Issue #233: the grouped detail no longer flows ten flat sections, so the 40
+    # audit events only make the column overflow once 操作记录 is expanded.  The
+    # scroll invariants below are about a really overflowing column.
+    page.locator("#tracking-activity-log summary").click()
     page_height = page.evaluate("() => document.scrollingElement.scrollHeight")
 
     before = page.evaluate(
@@ -375,9 +379,8 @@ def test_columns_scroll_independently_and_folds_keep_page_height(
     assert after_inspector["list"] == after_list["list"]
     assert after_inspector["inspector"] > 0
 
-    # Expand every detail fold: the bounded columns grow inside, not the page.
-    for disclosure in ("#tracking-activity-log", "#tracking-tech-diagnostics"):
-        page.locator(f"{disclosure} summary").click()
+    # Expand the remaining detail fold: the bounded columns grow inside, not the page.
+    page.locator("#tracking-tech-diagnostics summary").click()
     assert page.evaluate("() => document.scrollingElement.scrollHeight") == page_height
 
 

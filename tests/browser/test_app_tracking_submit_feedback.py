@@ -458,7 +458,9 @@ class TestAddedToDownloadLifecycle:
         # AC 26: no in-place resubmit or retry for the completed record.
         assert page.locator("#tracking-submit").count() == 0
         assert page.locator("#tracking-retry").count() == 0
-        # AC 23/25: the local history can still be deleted or reused.
+        # AC 23/25: the local history can still be deleted or reused.  Issue #233
+        # folds both behind 更多操作, so they are reachable rather than flat.
+        page.locator("#tracking-more-actions summary").click()
         expect(page.locator("#tracking-delete-plan")).to_be_visible()
         expect(page.locator("#tracking-reuse-plan")).to_be_visible()
 
