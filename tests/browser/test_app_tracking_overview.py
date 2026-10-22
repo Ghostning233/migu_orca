@@ -446,9 +446,17 @@ def test_low_height_with_multi_select_keeps_the_list_reachable(
     """B4: at 1280×600 the panel keeps 320px and scrolls as a whole when the
     batch toolbar and status area would otherwise crush the list."""
     page.set_viewport_size({"width": 1280, "height": 600})
+    # Issue #223: the batch selection now covers every deletable row, so the
+    # "skipped" status area needs a row a batch really cannot touch (an
+    # in-flight write) instead of an ACTIVE row, which is now selectable.
     _open(page, live_server_url, storage_dir, [
         _submittable_item(index) for index in range(3)
-    ] + [_item(9)])
+    ] + [{
+        **_item(9),
+        "status": "SUBMITTING",
+        "status_label": "提交中",
+        "status_group": "PROCESSING",
+    }])
     page.locator("#tracking-batch-mode").click()
     page.locator("#tracking-batch-select-all").click()
 

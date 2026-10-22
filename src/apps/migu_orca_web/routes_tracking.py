@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from flask import request
 
 """Tracking-items family API routes (US-223).
@@ -18,12 +20,15 @@ local storage is read — no external system is ever contacted.
 
 from apps.migu_orca_web.blueprints import api_blueprint
 from apps.migu_orca_web.schemas import (
+    SavedTrackingBatchDeleteExternalInput,
+    SavedTrackingBatchDeleteInput,
     SavedTrackingBatchSubmitInput,
     SavedTrackingManagementInput,
     SavedTrackingPlanDeleteInput,
     SavedTrackingRecoveryInput,
     SavedTrackingSubmitInput,
     SavedTrackingSyncInput,
+    TrackingBatchDeleteStatusQuery,
     TrackingCheckPayload,
     TrackingDetailQuery,
     TrackingListQuery,
@@ -36,6 +41,11 @@ from apps.migu_orca_web.schemas import (
     TrackingSyncPayload,
 )
 from apps.migu_orca_web.services import _storage_dir
+from apps.migu_orca_web.tracking_batch_delete_service import (
+    ensure_no_racing_single_writes,
+    get_saved_tracking_batch_delete,
+    run_saved_tracking_batch_delete,
+)
 from apps.migu_orca_web.tracking_check_service import run_saved_tracking_check
 from apps.migu_orca_web.tracking_management_service import management_writer
 from apps.migu_orca_web.tracking_plan_delete_service import run_saved_tracking_plan_delete
@@ -55,11 +65,55 @@ from apps.migu_orca_web.tracking_submission_service import (
     run_saved_tracking_submit,
 )
 from extensions.flask_api import class_route
+from extensions.flask_api.api import failed_response
 from extensions.flask_api.views import GetView, PostView
 from storage_engine.controllers.operation_repository import load_tracking_operation
 from storage_engine.controllers.storage_config import load_storage_config
-from storage_engine.controllers.tracking_repository import load_tracking_record
+from storage_engine.controllers.tracking_repository import (
+    load_tracking_record,
+    tracking_batch_active,
+    tracking_batch_lease,
+)
 from tracking_engine.models.operation import TRACKING_OPERATION_STATE_SUCCEEDED
+
+#: Issue #223 (ADR-0007): single tracking writes that must not start while a
+#: batch owns the store.  The refusal happens at the request boundary — before
+#: any service persists an operation intent — so it can never leave an orphan
+#: PREPARED operation behind; the repository serialization stays as the ordering
+#: fallback for the race window between this check and the service.
+_SINGLE_TRACKING_WRITE_RULES: frozenset[tuple[str, str]] = frozenset({
+    ("POST", "/api/v1/tracking/items/<path:tracking_id>/submit"),
+    ("POST", "/api/v1/tracking/items/<path:tracking_id>/retry"),
+    ("POST", "/api/v1/tracking/items/<path:tracking_id>/delete-plan"),
+    ("POST", "/api/v1/tracking/items/<path:tracking_id>/recover"),
+    ("POST", "/api/v1/tracking/items/<path:tracking_id>/check"),
+    ("POST", "/api/v1/tracking/items/<path:tracking_id>/revalidate"),
+    ("POST", "/api/v1/tracking/items/<path:tracking_id>/resubmit"),
+    ("POST", "/api/v1/tracking/items/<path:tracking_id>/modify"),
+    ("POST", "/api/v1/tracking/items/<path:tracking_id>/set-enabled"),
+    ("POST", "/api/v1/tracking/items/<path:tracking_id>/refresh"),
+})
+
+
+@api_blueprint.before_request
+def _refuse_single_tracking_write_during_batch() -> Any | None:
+    """ADR-0007: a batch excludes single external writes in both directions.
+
+    A later single write is refused **before** its service persists anything, so
+    the published ``connection_in_use`` (409) is the real outcome and no orphan
+    intent can appear.  A request that already passed this check only races the
+    batch for milliseconds; the repository serializer then queues it.
+    """
+    if not tracking_batch_active():
+        return None
+    rule = request.url_rule
+    if rule is None or (request.method.upper(), rule.rule) not in _SINGLE_TRACKING_WRITE_RULES:
+        return None
+    return failed_response(
+        "connection_in_use",
+        "批量操作正在执行，请稍后再试",
+        {"failed_step": "tracking_batch_exclusion"},
+    )
 
 
 @class_route(api_blueprint, "/api/v1/tracking/items", methods=["GET"])
@@ -203,9 +257,13 @@ class TrackingBatchSubmitView(PostView):
     def save(self) -> dict[str, object]:
         payload = self.request_validator_model
         assert isinstance(payload, SavedTrackingBatchSubmitInput)
-        return run_saved_tracking_batch_submit(
-            load_storage_config(_storage_dir(payload.storage_dir)), payload=payload
-        )
+        config = load_storage_config(_storage_dir(payload.storage_dir))
+        # ADR-0007 decision 3 applies to every batch: refuse while another
+        # record already owns an external write, then hold the batch lease so a
+        # later batch or single write cannot overlap this one.
+        ensure_no_racing_single_writes(config, {entry.tracking_id for entry in payload.items})
+        with tracking_batch_lease(batch_key=f"submit:{payload.items[0].idempotency_key}"):
+            return run_saved_tracking_batch_submit(config, payload=payload)
 
 
 @class_route(
@@ -241,6 +299,86 @@ class TrackingItemDeletePlanView(PostView):
         )
         return run_saved_tracking_plan_delete(
             load_storage_config(_storage_dir(payload.storage_dir)), payload=payload
+        )
+
+
+@class_route(
+    api_blueprint,
+    "/api/v1/tracking/batch-delete-plan",
+    methods=["POST"],
+)
+class TrackingBatchDeletePlanView(PostView):
+    """Delete 1..36 local plans/records, never touching Auto Bangumi (#223).
+
+    The body carries no connection fields at all, so this route physically
+    cannot start an external write: the controlled external subscription keeps
+    running and MiGuOrca simply stops managing it.  Entries whose current
+    operation is unresolved are skipped with a reason (never abandoned), the
+    batch holds the batch-level lease, and the client's ``idempotency_key``
+    makes a replay return the stored per-entry result.
+    """
+
+    request_validator_model = SavedTrackingBatchDeleteInput
+
+    def save(self) -> dict[str, object]:
+        payload = self.request_validator_model
+        assert isinstance(payload, SavedTrackingBatchDeleteInput)
+        return run_saved_tracking_batch_delete(
+            load_storage_config(_storage_dir(payload.storage_dir)),
+            payload=payload,
+            delete_external=False,
+        )
+
+
+@class_route(
+    api_blueprint,
+    "/api/v1/tracking/batch-delete-plan-external",
+    methods=["POST"],
+)
+class TrackingBatchDeletePlanExternalView(PostView):
+    """The same batch, removing each controlled external subscription first (#223).
+
+    A separate route (not a flag on the local one) keeps the external write
+    explicit.  Each entry runs the single composite delete: only a confirmed
+    external success is followed by that entry's local delete, while an external
+    failure or unknown outcome leaves the plan, record and mapping untouched and
+    the remaining entries still run.  Sequential; the batch-level lease excludes
+    other batches and single tracking writes.
+    """
+
+    request_validator_model = SavedTrackingBatchDeleteExternalInput
+
+    def save(self) -> dict[str, object]:
+        payload = self.request_validator_model
+        assert isinstance(payload, SavedTrackingBatchDeleteExternalInput)
+        return run_saved_tracking_batch_delete(
+            load_storage_config(_storage_dir(payload.storage_dir)),
+            payload=payload,
+            delete_external=True,
+        )
+
+
+@class_route(
+    api_blueprint,
+    "/api/v1/tracking/batch-deletions/<path:batch_key>",
+    methods=["GET"],
+)
+class TrackingBatchDeleteStatusView(GetView):
+    """Read one batch's stored status by its client idempotency key (#223).
+
+    A client timeout is answerable: the per-entry outcome is persisted after
+    every entry, so this returns ``IN_PROGRESS`` with the entries finished so far
+    or ``COMPLETED`` with the final result.  Reading never starts a write.
+    """
+
+    request_validator_model = TrackingBatchDeleteStatusQuery
+
+    def get_object(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, TrackingBatchDeleteStatusQuery)
+        query = self.request_validator_model
+        return get_saved_tracking_batch_delete(
+            load_storage_config(_storage_dir(query.storage_dir)),
+            batch_key=query.batch_key,
         )
 
 

@@ -203,6 +203,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tracking/batch-delete-plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 批量删除本地追番方案（零外部写）
+         * @description issue #223 / ADR-0007：一次显式批量删除 1～36 条互不相同的本地追番方案与记录。请求体没有任何连接字段，因此这一动作在契约层面就不可能访问 Auto Bangumi：受控外部订阅继续运行，MiGuOrca 只是不再管理它们。每条在执行时重新校验 revision 与当前 operation；已进入未决（PREPARED/IN_PROGRESS/OUTCOME_UNKNOWN/RECOVERY_REQUIRED）或无法读取 operation 的条目被跳过并返回原因，绝不转换为「放弃跟踪」。同 idempotency_key 重放返回已存储的逐条结果，不重复执行；同一幂等键绑定到不同条目返回 409。批次执行期间持有批次级互斥，另一个批次或单条外部写会被拒绝（connection_in_use）。
+         */
+        post: operations["deleteTrackingBatchPlans"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tracking/batch-delete-plan-external": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 批量删除本地追番方案并先删除受控外部订阅
+         * @description issue #223 / ADR-0007：与仅本地批量删除同一批语义，但每条先通过可靠管理序列删除它自己的受控外部订阅，只有外部删除被确认成功后才删除该条的本地方案与记录。外部删除失败或结果未知时该条不删除任何本地数据（方案、记录、映射与恢复证据全保留），其余条目照常处理；响应逐条给出结果。执行是顺序的，批次级互斥排除其它批次与单条外部写；同 idempotency_key 重放不产生重复外部写。`file=false` 固定，不删除已下载媒体，不转移连接、不改绑旧 operation。
+         */
+        post: operations["deleteTrackingBatchPlansWithExternal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tracking/batch-submit": {
         parameters: {
             query?: never;
@@ -403,6 +443,26 @@ export interface paths {
          * @description US-217：返回“全部信息”只读弹窗专用的严格安全白名单（RequestSafeInfoDTO，extra=forbid）。serializer 默认拒绝，逐字段显式构造：request_id、标题/别名/季度/公开季数证据摘要、选定 MiKan 合集标题与公开编号（不含完整合集/RSS URL）、字幕组/过滤规则用户可读摘要/相对 storage profile/安全文件夹名、有效/完整/排除资源数量与脱敏文件名摘要、总集数与 updated_episode=null/updated_episode_status=NOT_IMPLEMENTED、Request 状态、脱敏历史与安全 Auto Bangumi 状态摘要。完整 URL、RSS、magnet、endpoint、token、cookie、password、Authorization、原始响应与绝对路径绝不出现在成功响应、错误或 OpenAPI 示例。
          */
         get: operations["getRequestSafeInfo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tracking/batch-deletions/{batch_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 按幂等键查询一次批量删除的状态与逐条结果
+         * @description issue #223 / ADR-0007：批次每完成一条就持久化该条结果，因此客户端超时或连接中断后可以按同一幂等键查询：`state=IN_PROGRESS` 时 `items` 只包含已完成的条目，`state=COMPLETED` 时是最终结果。纯本地读取，不发起任何外部写。未记录的幂等键返回 tracking_not_found。
+         */
+        get: operations["getTrackingBatchDeleteStatus"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4799,6 +4859,552 @@ export interface operations {
             };
         };
     };
+    deleteTrackingBatchPlans: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 批量删除本地追番方案（零外部写） */
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "items": [
+                 *         {
+                 *           "tracking_id": "trk_0123456789abcdef0123456789abcdef",
+                 *           "expected_revision": 1
+                 *         }
+                 *       ],
+                 *       "confirm": true,
+                 *       "idempotency_key": "batch-delete-key-1"
+                 *     }
+                 */
+                "application/json": {
+                    /**
+                     * @description 显式选择的追番记录；每条携带自己的 expected_revision。
+                     * @example [
+                     *       {
+                     *         "tracking_id": "trk_0123456789abcdef0123456789abcdef",
+                     *         "expected_revision": 1
+                     *       }
+                     *     ]
+                     */
+                    items: {
+                        tracking_id: string;
+                        expected_revision: number;
+                    }[];
+                    /**
+                     * @description 必须为 true：用户显式确认这一批本地删除。
+                     * @constant
+                     */
+                    confirm: true;
+                    /**
+                     * @description opaque 客户端批次 id；同键重放返回同一逐条结果，不重复删除。
+                     * @example batch-delete-key-1
+                     */
+                    idempotency_key: string;
+                    /** @description 存储目录（服务端允许根目录下的相对目录 profile）。 */
+                    storage_dir?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "batch_key": "示例",
+                     *         "kind": "示例",
+                     *         "state": "示例",
+                     *         "items": [
+                     *           {
+                     *             "tracking_id": "示例",
+                     *             "outcome": "示例",
+                     *             "external_deleted": false,
+                     *             "skip_reason": null,
+                     *             "error_type": null
+                     *           }
+                     *         ],
+                     *         "summary": {
+                     *           "total": 1,
+                     *           "deleted": 1,
+                     *           "external_deleted": 1,
+                     *           "skipped": 1,
+                     *           "failed": 1,
+                     *           "unknown": 1
+                     *         }
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /**
+                         * TrackingBatchDeleteResultDTO
+                         * @description Result of a batch delete (``POST .../batch-delete-plan[-external]``).
+                         *
+                         *     ``state`` is ``COMPLETED`` for a finished batch and ``IN_PROGRESS`` when
+                         *     read through the status endpoint while entries are still running, in which
+                         *     case ``items`` only holds the entries that already reached an outcome.
+                         *     ``batch_key`` is the client's opaque idempotency key, so the same result is
+                         *     also the replay payload and the query answer.
+                         */
+                        result: {
+                            /** Batch Key */
+                            batch_key: string;
+                            /**
+                             * Kind
+                             * @enum {string}
+                             */
+                            kind: "LOCAL_ONLY" | "LOCAL_AND_EXTERNAL";
+                            /**
+                             * State
+                             * @enum {string}
+                             */
+                            state: "IN_PROGRESS" | "COMPLETED";
+                            /** Items */
+                            items: {
+                                /** Tracking Id */
+                                tracking_id: string;
+                                /**
+                                 * Outcome
+                                 * @enum {string}
+                                 */
+                                outcome: "DELETED" | "EXTERNAL_FAILED" | "EXTERNAL_UNKNOWN" | "SKIPPED";
+                                /**
+                                 * External Deleted
+                                 * @default false
+                                 */
+                                external_deleted: boolean;
+                                /**
+                                 * Skip Reason
+                                 * @default null
+                                 */
+                                skip_reason: ("UNRESOLVED" | "REVISION_CHANGED" | "NOT_FOUND") | null;
+                                /**
+                                 * Error Type
+                                 * @default null
+                                 */
+                                error_type: string | null;
+                            }[];
+                            /**
+                             * TrackingBatchDeleteSummaryDTO
+                             * @description Safe batch-delete counts; ``total`` is the requested entry count.
+                             */
+                            summary: {
+                                /** Total */
+                                total: number;
+                                /** Deleted */
+                                deleted: number;
+                                /** External Deleted */
+                                external_deleted: number;
+                                /** Skipped */
+                                skipped: number;
+                                /** Failed */
+                                failed: number;
+                                /** Unknown */
+                                unknown: number;
+                            };
+                        };
+                    };
+                };
+            };
+            /** @description data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "data_validation_errors",
+                     *       "error_message": "请求参数校验失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description idempotency_conflict: 该幂等键已绑定到另一批删除 / connection_in_use: 另一个批量操作或单条外部写正在执行 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "idempotency_conflict",
+                     *       "error_message": "该幂等键已绑定到另一批删除",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description storage_error: 写入/读取追番记录失败 / storage_json_error: 追番记录或批量删除记录 JSON 损坏 / tracking_storage_error: 追番记录存储失败 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "storage_error",
+                     *       "error_message": "写入/读取追番记录失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
+    deleteTrackingBatchPlansWithExternal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 批量删除本地追番方案并先删除受控外部订阅 */
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "items": [
+                 *         {
+                 *           "tracking_id": "trk_0123456789abcdef0123456789abcdef",
+                 *           "expected_revision": 1
+                 *         }
+                 *       ],
+                 *       "confirm": true,
+                 *       "idempotency_key": "batch-delete-external-key-1",
+                 *       "connection_ref": "11111111-1111-4111-8111-111111111111",
+                 *       "configuration_revision": 1
+                 *     }
+                 */
+                "application/json": {
+                    /**
+                     * @description 显式选择的追番记录；每条携带自己的 expected_revision。
+                     * @example [
+                     *       {
+                     *         "tracking_id": "trk_0123456789abcdef0123456789abcdef",
+                     *         "expected_revision": 1
+                     *       }
+                     *     ]
+                     */
+                    items: {
+                        tracking_id: string;
+                        expected_revision: number;
+                    }[];
+                    /**
+                     * @description 必须为 true：用户显式确认这一批删除（含受控外部订阅）。
+                     * @constant
+                     */
+                    confirm: true;
+                    /**
+                     * @description opaque 客户端批次 id；同键重放返回同一逐条结果，不重复外部写。
+                     * @example batch-delete-external-key-1
+                     */
+                    idempotency_key: string;
+                    /** @description 存储目录（服务器允许根目录下的相对目录 profile）。 */
+                    storage_dir?: string | null;
+                    /**
+                     * Format: uuid
+                     * @description 已保存 Auto Bangumi 连接引用；服务端在此 generation 上解析秘密。
+                     * @example 11111111-1111-4111-8111-111111111111
+                     */
+                    connection_ref: string;
+                    /** @description 已保存连接的配置版本；变化即拒绝该批次。 */
+                    configuration_revision: number;
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "batch_key": "示例",
+                     *         "kind": "示例",
+                     *         "state": "示例",
+                     *         "items": [
+                     *           {
+                     *             "tracking_id": "示例",
+                     *             "outcome": "示例",
+                     *             "external_deleted": false,
+                     *             "skip_reason": null,
+                     *             "error_type": null
+                     *           }
+                     *         ],
+                     *         "summary": {
+                     *           "total": 1,
+                     *           "deleted": 1,
+                     *           "external_deleted": 1,
+                     *           "skipped": 1,
+                     *           "failed": 1,
+                     *           "unknown": 1
+                     *         }
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /**
+                         * TrackingBatchDeleteResultDTO
+                         * @description Result of a batch delete (``POST .../batch-delete-plan[-external]``).
+                         *
+                         *     ``state`` is ``COMPLETED`` for a finished batch and ``IN_PROGRESS`` when
+                         *     read through the status endpoint while entries are still running, in which
+                         *     case ``items`` only holds the entries that already reached an outcome.
+                         *     ``batch_key`` is the client's opaque idempotency key, so the same result is
+                         *     also the replay payload and the query answer.
+                         */
+                        result: {
+                            /** Batch Key */
+                            batch_key: string;
+                            /**
+                             * Kind
+                             * @enum {string}
+                             */
+                            kind: "LOCAL_ONLY" | "LOCAL_AND_EXTERNAL";
+                            /**
+                             * State
+                             * @enum {string}
+                             */
+                            state: "IN_PROGRESS" | "COMPLETED";
+                            /** Items */
+                            items: {
+                                /** Tracking Id */
+                                tracking_id: string;
+                                /**
+                                 * Outcome
+                                 * @enum {string}
+                                 */
+                                outcome: "DELETED" | "EXTERNAL_FAILED" | "EXTERNAL_UNKNOWN" | "SKIPPED";
+                                /**
+                                 * External Deleted
+                                 * @default false
+                                 */
+                                external_deleted: boolean;
+                                /**
+                                 * Skip Reason
+                                 * @default null
+                                 */
+                                skip_reason: ("UNRESOLVED" | "REVISION_CHANGED" | "NOT_FOUND") | null;
+                                /**
+                                 * Error Type
+                                 * @default null
+                                 */
+                                error_type: string | null;
+                            }[];
+                            /**
+                             * TrackingBatchDeleteSummaryDTO
+                             * @description Safe batch-delete counts; ``total`` is the requested entry count.
+                             */
+                            summary: {
+                                /** Total */
+                                total: number;
+                                /** Deleted */
+                                deleted: number;
+                                /** External Deleted */
+                                external_deleted: number;
+                                /** Skipped */
+                                skipped: number;
+                                /** Failed */
+                                failed: number;
+                                /** Unknown */
+                                unknown: number;
+                            };
+                        };
+                    };
+                };
+            };
+            /** @description data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "data_validation_errors",
+                     *       "error_message": "请求参数校验失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description idempotency_conflict: 该幂等键已绑定到另一批删除 / connection_in_use: 另一个批量操作或单条外部写正在执行 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "idempotency_conflict",
+                     *       "error_message": "该幂等键已绑定到另一批删除",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description storage_error: 写入/读取追番记录失败 / storage_json_error: 追番记录或批量删除记录 JSON 损坏 / tracking_storage_error: 追番记录存储失败 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "storage_error",
+                     *       "error_message": "写入/读取追番记录失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
     submitTrackingBatch: {
         parameters: {
             query?: never;
@@ -5107,6 +5713,42 @@ export interface operations {
                      *       "ok": false,
                      *       "error_type": "data_validation_errors",
                      *       "error_message": "请求参数校验失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description connection_in_use: 另一个批量操作或外部写正在执行，请稍后再试 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "connection_in_use",
+                     *       "error_message": "另一个批量操作或外部写正在执行，请稍后再试",
                      *       "error_data": {
                      *         "failed_step": "示例步骤"
                      *       }
@@ -9322,6 +9964,237 @@ export interface operations {
             };
         };
     };
+    getTrackingBatchDeleteStatus: {
+        parameters: {
+            query?: {
+                /** @description 存储目录（服务器允许根目录下的相对目录 profile）。 */
+                storage_dir?: string;
+            };
+            header?: never;
+            path: {
+                /** @description 客户端批次幂等键（与该批 POST 的 idempotency_key 相同）。 */
+                batch_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "batch_key": "示例",
+                     *         "kind": "示例",
+                     *         "state": "示例",
+                     *         "items": [
+                     *           {
+                     *             "tracking_id": "示例",
+                     *             "outcome": "示例",
+                     *             "external_deleted": false,
+                     *             "skip_reason": null,
+                     *             "error_type": null
+                     *           }
+                     *         ],
+                     *         "summary": {
+                     *           "total": 1,
+                     *           "deleted": 1,
+                     *           "external_deleted": 1,
+                     *           "skipped": 1,
+                     *           "failed": 1,
+                     *           "unknown": 1
+                     *         }
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /**
+                         * TrackingBatchDeleteResultDTO
+                         * @description Result of a batch delete (``POST .../batch-delete-plan[-external]``).
+                         *
+                         *     ``state`` is ``COMPLETED`` for a finished batch and ``IN_PROGRESS`` when
+                         *     read through the status endpoint while entries are still running, in which
+                         *     case ``items`` only holds the entries that already reached an outcome.
+                         *     ``batch_key`` is the client's opaque idempotency key, so the same result is
+                         *     also the replay payload and the query answer.
+                         */
+                        result: {
+                            /** Batch Key */
+                            batch_key: string;
+                            /**
+                             * Kind
+                             * @enum {string}
+                             */
+                            kind: "LOCAL_ONLY" | "LOCAL_AND_EXTERNAL";
+                            /**
+                             * State
+                             * @enum {string}
+                             */
+                            state: "IN_PROGRESS" | "COMPLETED";
+                            /** Items */
+                            items: {
+                                /** Tracking Id */
+                                tracking_id: string;
+                                /**
+                                 * Outcome
+                                 * @enum {string}
+                                 */
+                                outcome: "DELETED" | "EXTERNAL_FAILED" | "EXTERNAL_UNKNOWN" | "SKIPPED";
+                                /**
+                                 * External Deleted
+                                 * @default false
+                                 */
+                                external_deleted: boolean;
+                                /**
+                                 * Skip Reason
+                                 * @default null
+                                 */
+                                skip_reason: ("UNRESOLVED" | "REVISION_CHANGED" | "NOT_FOUND") | null;
+                                /**
+                                 * Error Type
+                                 * @default null
+                                 */
+                                error_type: string | null;
+                            }[];
+                            /**
+                             * TrackingBatchDeleteSummaryDTO
+                             * @description Safe batch-delete counts; ``total`` is the requested entry count.
+                             */
+                            summary: {
+                                /** Total */
+                                total: number;
+                                /** Deleted */
+                                deleted: number;
+                                /** External Deleted */
+                                external_deleted: number;
+                                /** Skipped */
+                                skipped: number;
+                                /** Failed */
+                                failed: number;
+                                /** Unknown */
+                                unknown: number;
+                            };
+                        };
+                    };
+                };
+            };
+            /** @description invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / validation_error: batch_key 不是合法的批量删除幂等键 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "invalid_storage_dir",
+                     *       "error_message": "storage_dir 必须是服务器允许根目录下的相对目录",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description tracking_not_found: 未找到该批量删除批次 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "tracking_not_found",
+                     *       "error_message": "未找到该批量删除批次",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description storage_error: 读取批量删除记录失败 / storage_json_error: 批量删除记录 JSON 损坏 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "storage_error",
+                     *       "error_message": "读取批量删除记录失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
     getTrackingItemDetail: {
         parameters: {
             query?: {
@@ -10290,7 +11163,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 当前追番记录没有可核验的待确认提交 / tracking_check_in_progress: 该追番记录的只读检查正在进行 */
+            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 当前追番记录没有可核验的待确认提交 / tracking_check_in_progress: 该追番记录的只读检查正在进行 / connection_in_use: 另一个批量操作或外部写正在执行，请稍后再试 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -10539,7 +11412,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description tracking_state_conflict: 外部操作仍可能执行，或操作/记录已变化使确认过期 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 */
+            /** @description tracking_state_conflict: 外部操作仍可能执行，或操作/记录已变化使确认过期 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / connection_in_use: 另一个批量操作或外部写正在执行，请稍后再试 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -11214,7 +12087,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description tracking_management_capability_unknown: 当前 Auto Bangumi 管理能力未验证 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复 */
+            /** @description tracking_management_capability_unknown: 当前 Auto Bangumi 管理能力未验证 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复 / connection_in_use: 另一个批量操作或外部写正在执行，请稍后再试 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -11575,7 +12448,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 当前追番记录状态不允许恢复 */
+            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 当前追番记录状态不允许恢复 / connection_in_use: 另一个批量操作或外部写正在执行，请稍后再试 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -11976,7 +12849,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description tracking_management_capability_unknown: 当前 Auto Bangumi 管理能力未验证 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复 */
+            /** @description tracking_management_capability_unknown: 当前 Auto Bangumi 管理能力未验证 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复 / connection_in_use: 另一个批量操作或外部写正在执行，请稍后再试 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -12433,7 +13306,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重新检查 / tracking_state_conflict: 当前追番记录没有可核验的待确认提交 / tracking_check_in_progress: 该追番记录的只读检查正在进行 / tracking_resubmit_binding_conflict: 本次重新提交绑定的操作或连接已变化，请重新检查后再确认 / tracking_operation_in_progress: 存在尚未完成的提交操作，请先恢复后再提交 / tracking_idempotency_conflict: 同一幂等键已绑定不同的提交内容，不能复用 */
+            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重新检查 / tracking_state_conflict: 当前追番记录没有可核验的待确认提交 / tracking_check_in_progress: 该追番记录的只读检查正在进行 / tracking_resubmit_binding_conflict: 本次重新提交绑定的操作或连接已变化，请重新检查后再确认 / tracking_operation_in_progress: 存在尚未完成的提交操作，请先恢复后再提交 / tracking_idempotency_conflict: 同一幂等键已绑定不同的提交内容，不能复用 / connection_in_use: 另一个批量操作或外部写正在执行，请稍后再试 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -12883,7 +13756,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 只有明确提交失败的记录可以重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的提交内容，不能复用 / tracking_operation_in_progress: 存在尚未完成的提交操作，请先恢复后再提交 */
+            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 只有明确提交失败的记录可以重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的提交内容，不能复用 / tracking_operation_in_progress: 存在尚未完成的提交操作，请先恢复后再提交 / connection_in_use: 另一个批量操作或外部写正在执行，请稍后再试 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -13268,7 +14141,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 当前追番记录状态不允许复核 */
+            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 当前追番记录状态不允许复核 / connection_in_use: 另一个批量操作或外部写正在执行，请稍后再试 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -13671,7 +14544,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description tracking_management_capability_unknown: 当前 Auto Bangumi 管理能力未验证 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复 */
+            /** @description tracking_management_capability_unknown: 当前 Auto Bangumi 管理能力未验证 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复 / connection_in_use: 另一个批量操作或外部写正在执行，请稍后再试 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -14085,7 +14958,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 当前追番记录状态不允许提交 / tracking_idempotency_conflict: 同一幂等键已绑定不同的提交内容，不能复用 / tracking_operation_in_progress: 存在尚未完成的提交操作，请先恢复后再提交 */
+            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 当前追番记录状态不允许提交 / tracking_idempotency_conflict: 同一幂等键已绑定不同的提交内容，不能复用 / tracking_operation_in_progress: 存在尚未完成的提交操作，请先恢复后再提交 / connection_in_use: 另一个批量操作或外部写正在执行，请稍后再试 */
             409: {
                 headers: {
                     [name: string]: unknown;

@@ -34,6 +34,9 @@ from __future__ import annotations
 
 import json
 import re
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -78,6 +81,102 @@ class TrackingListResult:
         return len(self.damaged_tracking_ids)
 
 
+#: Issue #223 (ADR-0007): one batch owns every tracking write for its whole
+#: duration.  The lock is process-wide and shared by the batch lease and every
+#: single tracking write, so a batch and a single external write cannot overlap
+#: in either direction: the later one waits (bounded) and is then refused with
+#: ``connection_in_use`` instead of racing.  Because a single write also holds
+#: this lock for its own write, a batch's own nested writes pass straight
+#: through (non-zero depth on the owning thread).
+_BATCH_LOCK = threading.Lock()
+_BATCH_STATE = threading.local()
+#: Set while a **batch** lease is held (a single write also holds the lock, but
+#: very briefly; the route-level exclusion must only react to a batch).
+_ACTIVE_BATCH = threading.Event()
+
+#: How long a batch waits for another batch/single write before failing closed.
+#: The request itself keeps its own budget; this only bounds the queueing window.
+_BATCH_WAIT_SECONDS = 10.0
+
+
+def _batch_depth() -> int:
+    return getattr(_BATCH_STATE, "depth", 0)
+
+
+def tracking_batch_active() -> bool:
+    """True while a batch (not a single write) holds the store."""
+    return _ACTIVE_BATCH.is_set()
+
+
+@contextmanager
+def tracking_batch_lease(
+    *, batch_key: str, step: str = "tracking_batch_lease"
+) -> Iterator[str]:
+    """Hold the batch write lease (bounded wait, re-entrant per thread).
+
+    A non-zero depth means the current thread already owns the lease, so the
+    batch service and the single-item services it reuses can nest.  Another
+    thread's batch or single tracking write either finishes first or, after the
+    bounded wait, fails closed with ``connection_in_use`` (409).
+    """
+    depth = _batch_depth()
+    if depth == 0 and not _BATCH_LOCK.acquire(timeout=_BATCH_WAIT_SECONDS):
+        raise Stage1Error(
+            "connection_in_use",
+            "另一个批量操作或外部写正在执行，请稍后再试",
+            step,
+            {"batch_key": batch_key},
+        )
+    _BATCH_STATE.depth = depth + 1
+    owns_batch = getattr(_BATCH_STATE, "batch", 0) == 0
+    if owns_batch:
+        _BATCH_STATE.batch = 1
+        _ACTIVE_BATCH.set()
+    try:
+        yield batch_key
+    finally:
+        if owns_batch:
+            _BATCH_STATE.batch = 0
+            _ACTIVE_BATCH.clear()
+        _BATCH_STATE.depth = depth
+        if depth == 0:
+            _BATCH_LOCK.release()
+
+
+@contextmanager
+def _serialized_tracking_write(step: str) -> Iterator[None]:
+    """Queue one single-write repository step behind a running batch.
+
+    ADR-0007 decision 3 requires the exclusion in both directions, but a single
+    external write **must not fail after it persisted its intent**: the write
+    order is "persist intent → call the external system → persist the result",
+    and refusing the later repository write would leave a resumable intent that
+    the record does not point at (a permanent same-key conflict).  The single
+    write therefore *waits* for the batch instead of being refused: the batch
+    holds the lock only while it runs, and every external call inside it has its
+    own adapter timeout, so the wait is bounded by the batch's own lifetime.
+    A bounded refusal is reserved for a batch that arrives while another batch
+    runs (``tracking_batch_lease``), where nothing has been persisted yet.
+    """
+    depth = _batch_depth()
+    if depth > 0:
+        # The owning batch (or an enclosing write in this thread) already holds
+        # the store; count the nesting so a future nested call cannot deadlock.
+        _BATCH_STATE.depth = depth + 1
+        try:
+            yield
+        finally:
+            _BATCH_STATE.depth = depth
+        return
+    _BATCH_LOCK.acquire()
+    _BATCH_STATE.depth = 1
+    try:
+        yield
+    finally:
+        _BATCH_STATE.depth = 0
+        _BATCH_LOCK.release()
+
+
 def ensure_tracking_record(
     config: StorageConfig,
     record: TrackingRecord,
@@ -98,8 +197,7 @@ def ensure_tracking_record(
             raise Stage1Error(
                 "invalid_tracking_record",
                 "外部同步记录不得包含 request_id",
-                "delete_tracking_record",
-    "ensure_tracking_record",
+                "ensure_tracking_record",
                 {"field": "request_id"},
             )
         clean_id = _validated_tracking_id(record.tracking_id, "ensure_tracking_record")
@@ -111,7 +209,7 @@ def ensure_tracking_record(
                 {"field": "revision", "revision": record.revision},
             )
         ensure_storage_layout(config)
-        with _LOCKS.for_key(clean_id):
+        with _serialized_tracking_write("ensure_tracking_record"), _LOCKS.for_key(clean_id):
             if _tracking_path(config, clean_id, "ensure_tracking_record").exists():
                 return _load_tracking_record(config, clean_id, "ensure_tracking_record"), False
             normalized = _normalize(record, "ensure_tracking_record")
@@ -141,7 +239,7 @@ def ensure_tracking_record(
         )
     ensure_storage_layout(config)
 
-    with _LOCKS.for_key(expected_id):
+    with _serialized_tracking_write("ensure_tracking_record"), _LOCKS.for_key(expected_id):
         if _tracking_path(config, expected_id, "ensure_tracking_record").exists():
             existing = _load_tracking_record(
                 config, expected_id, "ensure_tracking_record"
@@ -185,8 +283,9 @@ def delete_tracking_record(
     path = _tracking_path(config, clean_id, step)
     # The read → compare → unlink runs under the same per-key lock as every other
     # tracking write, so a concurrent CAS cannot slip a new revision between the
-    # check and the unlink (issue #230, ADR-0006).
-    with _LOCKS.for_key(clean_id):
+    # check and the unlink (issue #230, ADR-0006); the batch serializer keeps a
+    # running batch from interleaving with this delete (issue #223, ADR-0007).
+    with _serialized_tracking_write(step), _LOCKS.for_key(clean_id):
         if not path.exists():
             raise Stage1Error(
                 "tracking_not_found",
@@ -237,7 +336,7 @@ def compare_and_swap_tracking_record(
     clean_id = _validated_tracking_id(tracking_id, "compare_and_swap_tracking_record")
     ensure_storage_layout(config)
 
-    with _LOCKS.for_key(clean_id):
+    with _serialized_tracking_write("compare_and_swap_tracking_record"), _LOCKS.for_key(clean_id):
         current = _load_tracking_record(
             config, clean_id, "compare_and_swap_tracking_record"
         )
@@ -454,6 +553,8 @@ def _tracking_path(
 
 
 __all__ = [
+    "tracking_batch_active",
+    "tracking_batch_lease",
     "TrackingListResult",
     "compare_and_swap_tracking_record",
     "delete_tracking_record",

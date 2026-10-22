@@ -1187,6 +1187,55 @@ class TrackingBatchSubmitResultDTO(_StrictBase):
     summary: TrackingBatchSubmitSummaryDTO
 
 
+class TrackingBatchDeleteItemResultDTO(_StrictBase):
+    """One entry result inside a batch delete (issue #223).
+
+    ``DELETED`` means this entry's local plan and record are gone (and, for the
+    external action, its controlled subscription was confirmed removed first).
+    ``EXTERNAL_FAILED``/``EXTERNAL_UNKNOWN`` mean nothing local was removed for
+    that entry.  ``SKIPPED`` means the entry was excluded at execution time and
+    was never written: ``skip_reason`` names the ADR-0006 reason
+    (``UNRESOLVED``/``REVISION_CHANGED``/``NOT_FOUND``), and ``error_type``
+    carries the stable code for any other pre-write refusal.
+    """
+
+    tracking_id: str
+    outcome: Literal["DELETED", "EXTERNAL_FAILED", "EXTERNAL_UNKNOWN", "SKIPPED"]
+    external_deleted: bool = False
+    skip_reason: (
+        Literal["UNRESOLVED", "REVISION_CHANGED", "NOT_FOUND"] | None
+    ) = None
+    error_type: str | None = None
+
+
+class TrackingBatchDeleteSummaryDTO(_StrictBase):
+    """Safe batch-delete counts; ``total`` is the requested entry count."""
+
+    total: int
+    deleted: int
+    external_deleted: int
+    skipped: int
+    failed: int
+    unknown: int
+
+
+class TrackingBatchDeleteResultDTO(_StrictBase):
+    """Result of a batch delete (``POST .../batch-delete-plan[-external]``).
+
+    ``state`` is ``COMPLETED`` for a finished batch and ``IN_PROGRESS`` when
+    read through the status endpoint while entries are still running, in which
+    case ``items`` only holds the entries that already reached an outcome.
+    ``batch_key`` is the client's opaque idempotency key, so the same result is
+    also the replay payload and the query answer.
+    """
+
+    batch_key: str
+    kind: Literal["LOCAL_ONLY", "LOCAL_AND_EXTERNAL"]
+    state: Literal["IN_PROGRESS", "COMPLETED"]
+    items: list[TrackingBatchDeleteItemResultDTO]
+    summary: TrackingBatchDeleteSummaryDTO
+
+
 class TrackingRecoverResultDTO(_StrictBase):
     """Result of ``POST /api/v1/tracking/items/{tracking_id}/recover`` (US-226).
 

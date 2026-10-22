@@ -55,6 +55,7 @@ from apps.migu_orca_web.api_contract import (
     RequestPreviewModifyResultDTO,
     RequestSafeInfoResultDTO,
     RequestSaveConfirmResultDTO,
+    TrackingBatchDeleteResultDTO,
     TrackingBatchSubmitResultDTO,
     TrackingCheckResultDTO,
     TrackingDetailResultDTO,
@@ -85,6 +86,8 @@ from apps.migu_orca_web.schemas import (
     RequestPreviewModifyPayload,
     RequestSaveConfirmPayload,
     SavedAutoBangumiProbePayload,
+    SavedTrackingBatchDeleteExternalInput,
+    SavedTrackingBatchDeleteInput,
     SavedTrackingBatchSubmitInput,
     SavedTrackingLocalPlan,
     SavedTrackingPlanDeleteInput,
@@ -1570,6 +1573,134 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "POST /api/v1/tracking/batch-delete-plan": {
+        "operationId": "deleteTrackingBatchPlans",
+        "summary": "批量删除本地追番方案（零外部写）",
+        "description": "issue #223 / ADR-0007：一次显式批量删除 1～36 条互不相同的本地追番方案与记录。请求体没有任何连接字段，因此这一动作在契约层面就不可能访问 Auto Bangumi：受控外部订阅继续运行，MiGuOrca 只是不再管理它们。每条在执行时重新校验 revision 与当前 operation；已进入未决（PREPARED/IN_PROGRESS/OUTCOME_UNKNOWN/RECOVERY_REQUIRED）或无法读取 operation 的条目被跳过并返回原因，绝不转换为「放弃跟踪」。同 idempotency_key 重放返回已存储的逐条结果，不重复执行；同一幂等键绑定到不同条目返回 409。批次执行期间持有批次级互斥，另一个批次或单条外部写会被拒绝（connection_in_use）。",
+        "requestBody": _rb(
+            SavedTrackingBatchDeleteInput,
+            overlay={
+                "properties": {
+                    "items": {
+                        "description": "显式选择的追番记录；每条携带自己的 expected_revision。",
+                        "example": [{
+                            "tracking_id": "trk_0123456789abcdef0123456789abcdef",
+                            "expected_revision": 1,
+                        }],
+                    },
+                    "idempotency_key": {
+                        "description": "opaque 客户端批次 id；同键重放返回同一逐条结果，不重复删除。",
+                        "example": "batch-delete-key-1",
+                    },
+                    "confirm": {
+                        "description": "必须为 true：用户显式确认这一批本地删除。",
+                    },
+                    "storage_dir": {
+                        "description": "存储目录（服务端允许根目录下的相对目录 profile）。",
+                    },
+                },
+            },
+        ),
+        "success": TrackingBatchDeleteResultDTO,
+        "errors": {
+            "400": {
+                "data_validation_errors": "请求参数校验失败",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+            },
+            "409": {
+                "idempotency_conflict": "该幂等键已绑定到另一批删除",
+                "connection_in_use": "另一个批量操作或单条外部写正在执行",
+            },
+            "500": {
+                "storage_error": "写入/读取追番记录失败",
+                "storage_json_error": "追番记录或批量删除记录 JSON 损坏",
+                "tracking_storage_error": "追番记录存储失败",
+            },
+        },
+    },
+    "POST /api/v1/tracking/batch-delete-plan-external": {
+        "operationId": "deleteTrackingBatchPlansWithExternal",
+        "summary": "批量删除本地追番方案并先删除受控外部订阅",
+        "description": "issue #223 / ADR-0007：与仅本地批量删除同一批语义，但每条先通过可靠管理序列删除它自己的受控外部订阅，只有外部删除被确认成功后才删除该条的本地方案与记录。外部删除失败或结果未知时该条不删除任何本地数据（方案、记录、映射与恢复证据全保留），其余条目照常处理；响应逐条给出结果。执行是顺序的，批次级互斥排除其它批次与单条外部写；同 idempotency_key 重放不产生重复外部写。`file=false` 固定，不删除已下载媒体，不转移连接、不改绑旧 operation。",
+        "requestBody": _rb(
+            SavedTrackingBatchDeleteExternalInput,
+            overlay={
+                "properties": {
+                    "items": {
+                        "description": "显式选择的追番记录；每条携带自己的 expected_revision。",
+                        "example": [{
+                            "tracking_id": "trk_0123456789abcdef0123456789abcdef",
+                            "expected_revision": 1,
+                        }],
+                    },
+                    "idempotency_key": {
+                        "description": "opaque 客户端批次 id；同键重放返回同一逐条结果，不重复外部写。",
+                        "example": "batch-delete-external-key-1",
+                    },
+                    "confirm": {
+                        "description": "必须为 true：用户显式确认这一批删除（含受控外部订阅）。",
+                    },
+                    "connection_ref": {
+                        "description": "已保存 Auto Bangumi 连接引用；服务端在此 generation 上解析秘密。",
+                        "example": "11111111-1111-4111-8111-111111111111",
+                    },
+                    "configuration_revision": {
+                        "description": "已保存连接的配置版本；变化即拒绝该批次。",
+                    },
+                    "storage_dir": {
+                        "description": "存储目录（服务器允许根目录下的相对目录 profile）。",
+                    },
+                },
+            },
+        ),
+        "success": TrackingBatchDeleteResultDTO,
+        "errors": {
+            "400": {
+                "data_validation_errors": "请求参数校验失败",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+            },
+            "409": {
+                "idempotency_conflict": "该幂等键已绑定到另一批删除",
+                "connection_in_use": "另一个批量操作或单条外部写正在执行",
+            },
+            "500": {
+                "storage_error": "写入/读取追番记录失败",
+                "storage_json_error": "追番记录或批量删除记录 JSON 损坏",
+                "tracking_storage_error": "追番记录存储失败",
+            },
+        },
+    },
+    "GET /api/v1/tracking/batch-deletions/<path:batch_key>": {
+        "operationId": "getTrackingBatchDeleteStatus",
+        "summary": "按幂等键查询一次批量删除的状态与逐条结果",
+        "description": "issue #223 / ADR-0007：批次每完成一条就持久化该条结果，因此客户端超时或连接中断后可以按同一幂等键查询：`state=IN_PROGRESS` 时 `items` 只包含已完成的条目，`state=COMPLETED` 时是最终结果。纯本地读取，不发起任何外部写。未记录的幂等键返回 tracking_not_found。",
+        "parameters": [
+            {
+                "name": "batch_key",
+                "in": "path",
+                "description": "客户端批次幂等键（与该批 POST 的 idempotency_key 相同）。",
+            },
+            {
+                "name": "storage_dir",
+                "in": "query",
+                "required": False,
+                "description": "存储目录（服务器允许根目录下的相对目录 profile）。",
+                "schema": {"type": "string"},
+            },
+        ],
+        "success": TrackingBatchDeleteResultDTO,
+        "errors": {
+            "400": {
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+                "validation_error": "batch_key 不是合法的批量删除幂等键",
+            },
+            "404": {"tracking_not_found": "未找到该批量删除批次"},
+            "500": {
+                "storage_error": "读取批量删除记录失败",
+                "storage_json_error": "批量删除记录 JSON 损坏",
+            },
+        },
+    },
     "POST /api/v1/tracking/batch-submit": {
         "operationId": "submitTrackingBatch",
         "summary": "批量提交显式选择的追番方案（逐条独立结果）",
@@ -2071,6 +2202,29 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         },
     },
 }
+
+#: Issue #223 (ADR-0007): the batch lease refuses a tracking write while a
+#: batch owns the store, so every route that persists one can answer with this
+#: exact envelope error.  Declared in one place so the contract cannot drift
+#: endpoint by endpoint.
+_TRACKING_WRITE_ENDPOINTS: tuple[str, ...] = (
+    "POST /api/v1/tracking/batch-submit",
+    "POST /api/v1/tracking/items/<path:tracking_id>/delete-plan",
+    "POST /api/v1/tracking/items/<path:tracking_id>/submit",
+    "POST /api/v1/tracking/items/<path:tracking_id>/retry",
+    "POST /api/v1/tracking/items/<path:tracking_id>/recover",
+    "POST /api/v1/tracking/items/<path:tracking_id>/check",
+    "POST /api/v1/tracking/items/<path:tracking_id>/revalidate",
+    "POST /api/v1/tracking/items/<path:tracking_id>/resubmit",
+    "POST /api/v1/tracking/items/<path:tracking_id>/modify",
+    "POST /api/v1/tracking/items/<path:tracking_id>/set-enabled",
+    "POST /api/v1/tracking/items/<path:tracking_id>/refresh",
+)
+for _write_key in _TRACKING_WRITE_ENDPOINTS:
+    _ENDPOINTS[_write_key]["errors"].setdefault("409", {}).setdefault(
+        "connection_in_use", "另一个批量操作或外部写正在执行，请稍后再试"
+    )
+
 
 def _normalized_path(path: str) -> str:
     """Convert url_map <...> placeholders to OpenAPI {param} form."""
