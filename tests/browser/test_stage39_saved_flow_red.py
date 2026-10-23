@@ -821,7 +821,7 @@ def test_recovery_entry_is_the_read_only_verification_only(page, live_server_url
         assert page.locator(retired).count() == 0
     assert page.locator("#tracking-recover-verify").count() == 0
     expect(page.locator("#tracking-recovery-heading").locator("..")).to_contain_text(
-        "只读外部核验需要先在页面连接 Auto Bangumi"
+        "只读外部核验需要先在设置中连接 Auto Bangumi"
     )
     # The removed standalone revalidation is not rendered anywhere.
     assert page.locator("#tracking-revalidate").count() == 0

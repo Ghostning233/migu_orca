@@ -113,6 +113,12 @@ generated 类型。F-G 设置简化、全局连接状态与最终发布收尾继
 
 ### D38-06：同步与能力降级
 
+> **部分已被取代（2026-10）**：第 1 条的「用户点击『同步 Auto Bangumi』并确认」与第 3 条的「重新连接／
+> 重新探测／再次同步入口」已由 #229（T6）改为「进入『我的追番』页自动执行一次只读同步，取消手动按钮、确认框
+> 与页面连接模块」。现行口径见 #229、`TrackingView.vue` 的 `syncOnEntry` 与 `CONTEXT.md` 的「追番同步」；
+> 不可逆边界见 `docs/adr/0005-no-full-autobangumi-takeover.md`。
+> 第 2、4 条（结果采纳、单请求并发）与现行实现一致，此处保留为当时记录。
+
 1. 页面初始只读本地 tracking；只有已建立页面凭据会话且用户点击“同步 Auto Bangumi”并确认后，才调用
    generated `syncTrackingItems(confirm=true)`。
 2. 同步结果以返回的 tracking items/summary 安全更新页面，再重新读取当前详情；不从外部返回拼对象。
@@ -357,11 +363,11 @@ US-303～US-317 全部 `passes=true`；分支 `ralph/stage38-tracking-management
 
 | AC | 场景 | 覆盖 story | 证据 |
 | --- | --- | --- | --- |
-| AC-16 | Auto Bangumi 未连接时进入管理/提交 | US-307、US-310 | 未连接时外部写动作不渲染，`#tracking-connect` 提供连接入口；连接成功只回到动作上下文，**不自动提交**（Chromium `test_explicit_submit_confirms_once_and_keeps_the_key_in_page_memory` 断言连接后仍需一次显式确认） |
+| AC-16 | Auto Bangumi 未连接时进入管理/提交 | US-307、US-310 | 未连接时外部写动作不渲染，`#tracking-connect` 提供连接入口（2026-10：#229 已移除追番页连接入口，连接改在设置页）；连接成功只回到动作上下文，**不自动提交**（Chromium `test_explicit_submit_confirms_once_and_keeps_the_key_in_page_memory` 断言连接后仍需一次显式确认） |
 | AC-17 | 待提交上下文已过期 | US-309、US-310 | `revalidate` 的 `ready=false` 是 200 业务结果并说明「尚未向 Auto Bangumi 创建订阅」；submit 的 `NEEDS_RECONFIRM` 走返回修改方案；两条路径都零外部写入且深链 `/app/plans?request_id=...` |
 | AC-18 | 外部提交超时且结果未知 | US-310、US-311、US-312 | 结果不明保留锁定 intent、只读回查，transport 重试整份复用同 key + 同 `expected_revision`，外部只可能产生一个订阅（Chromium `test_retry_transport_unknown_locks_the_key_and_only_reads_back` 断言两次请求的 key 与 revision 完全相等） |
 | AC-19 | 连接 3.1.18 后执行列表/详情/编辑/启停/删除/RSS 刷新 | US-313、US-314、US-315 | 四个管理动作在 `subscription_*`/`rss_*` capability 为 `SUPPORTED` 时按 `target_scopes` 渲染，结果按 `management_status` 收敛，错误按条隔离（单条 4xx 不锁死其他条目） |
-| AC-20 | 连接未知/部分能力版本 | US-307、US-308、US-313、US-314、US-315 | 只显示已证实支持的操作，未证实的能力各自渲染只读降级原因；探测失败/`PARTIAL`/`UNKNOWN` 保留旧列表并给出重连、重探测或再次同步入口，不误报为空（Chromium `test_modify_capability_degradation_hides_the_scope`、`test_capability_degradation_hides_only_the_unproven_action`、`test_delete_capability_degradation_hides_only_the_unproven_scope`） |
+| AC-20 | 连接未知/部分能力版本 | US-307、US-308、US-313、US-314、US-315 | 只显示已证实支持的操作，未证实的能力各自渲染只读降级原因；探测失败/`PARTIAL`/`UNKNOWN` 保留旧列表并给出重连、重探测或再次同步入口（2026-10：#229 已取消手动入口，改为入口自动同步与设置页一句说明），不误报为空（Chromium `test_modify_capability_degradation_hides_the_scope`、`test_capability_degradation_hides_only_the_unproven_action`、`test_delete_capability_degradation_hides_only_the_unproven_scope`） |
 | AC-21 | 删除有已下载媒体的外部订阅 | US-315 | 二次确认固定说明只删外部对象、保留本地 Request/tracking/审计/任务与已下载媒体；请求无 `file` 字段；取消零请求、默认焦点为取消（Chromium `test_delete_needs_a_chosen_target_and_keeps_every_local_record`） |
 | AC-22 | 敏感源数据检查页面/DOM/日志 trace | US-316 | `TestAppTrackingSensitiveCanary` 9 例覆盖探测成功/失败、同步、提交成功、transport 未知与恢复，断言 canary 不进 DOM 文本与「移除对话框子树后」的标记、URL、`history.state`、localStorage/sessionStorage、console；只用白名单安全字段渲染 |
 

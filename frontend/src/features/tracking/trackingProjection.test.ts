@@ -499,7 +499,7 @@ describe('risk-confirmed resubmission projection (issue #184)', () => {
       .toContain('存在尚未完成的提交操作')
     expect(resubmitConflictMessage('tracking_state_conflict')).toContain('恢复核验')
     expect(resubmitConflictMessage('tracking_resubmit_binding_conflict')).toContain('绑定的操作或连接已变化')
-    expect(resubmitConflictMessage('tracking_check_in_progress')).toContain('只读检查正在进行')
+    expect(resubmitConflictMessage('tracking_check_in_progress')).toContain('只读核验正在进行')
     for (const value of ['something_new', null, undefined, 7]) {
       expect(resubmitConflictMessage(value)).toBe(RESUBMIT_CONFLICT_FALLBACK_MESSAGE)
     }

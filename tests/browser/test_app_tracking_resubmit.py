@@ -6,7 +6,7 @@ Real Chromium against the built SPA and the real Flask server; only the tracking
 DTO boundary and the tracking endpoints are mocked, and the external Auto Bangumi
 write is *always* a route mock.  The page must
 
-* offer 重新提交 beside the read-only 重新检查 for a pending submission,
+* offer 重新提交 beside the read-only 核验 for a pending submission,
 * run the read-only phase first and send no write-family request for it,
 * state the proven duplication/resource risk before anything is written,
 * send nothing at all when the user cancels,

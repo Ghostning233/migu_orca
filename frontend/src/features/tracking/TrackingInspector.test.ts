@@ -1338,7 +1338,7 @@ describe('TrackingInspector unknown-result recovery (US-312 / issue #228)', () =
     expect(withoutSession.find('#tracking-recover-succeeded').exists()).toBe(false)
     expect(withoutSession.find('#tracking-recover-failed').exists()).toBe(false)
     expect(withoutSession.find('#tracking-recover-verify').exists()).toBe(false)
-    expect(withoutSession.text()).toContain('只读外部核验需要先在页面连接 Auto Bangumi')
+    expect(withoutSession.text()).toContain('只读外部核验需要先在设置中连接 Auto Bangumi')
 
     const withSession = await mountRecoverable(LIVE_SESSION)
     expect(withSession.find('#tracking-recover-verify').text()).toBe('核验结果')
@@ -1361,7 +1361,7 @@ describe('TrackingInspector unknown-result recovery (US-312 / issue #228)', () =
       expect(wrapper.find('#tracking-recover-verify').exists()).toBe(false)
       // The panel still explains the missing capability instead of hiding it.
       expect(wrapper.find('#tracking-recovery-heading').exists()).toBe(true)
-      expect(wrapper.text()).toContain('只读外部核验需要先在页面连接 Auto Bangumi')
+      expect(wrapper.text()).toContain('只读外部核验需要先在设置中连接 Auto Bangumi')
       wrapper.unmount()
     }
   })
@@ -1891,7 +1891,7 @@ describe('pending submission check (issue #183)', () => {
     available_actions: [],
   })
 
-  it('offers the read-only 重新检查 and the risk-confirmed 重新提交, hiding the recovery panel', async () => {
+  it('offers the read-only 核验 and the risk-confirmed 重新提交, hiding the recovery panel', async () => {
     apiGet.mockResolvedValue(pendingDetail() as never)
     const wrapper = await mountInspector('tracking-1', {
       checkSession: createCheckSession('tracking-1', 'PENDING', 'NOT_FOUND', 2),
@@ -1921,7 +1921,7 @@ describe('pending submission check (issue #183)', () => {
     expect(wrapper.find('#tracking-recovery-heading').exists()).toBe(true)
     expect(wrapper.find('#tracking-recovery-heading').text()).toBe('结果待确认')
     // No live session, so the only surviving recovery states why it is absent.
-    expect(wrapper.text()).toContain('只读外部核验需要先在页面连接 Auto Bangumi')
+    expect(wrapper.text()).toContain('只读外部核验需要先在设置中连接 Auto Bangumi')
     expect(wrapper.find('#tracking-check').exists()).toBe(false)
   })
 

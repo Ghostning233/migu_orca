@@ -1084,7 +1084,7 @@ defineExpose({ reload: () => fetchDetail(true) })
             @click="requestRecovery('VERIFY_EXTERNAL')"
           >核验结果</BaseButton>
           <p v-else class="field-help">
-            只读外部核验需要先在页面连接 Auto Bangumi，并确认外部核验能力可用。
+            只读外部核验需要先在设置中连接 Auto Bangumi，并确认外部核验能力可用。
           </p>
         </template>
         <template v-else-if="reconfirmPrimary">
