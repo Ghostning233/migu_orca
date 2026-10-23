@@ -147,6 +147,9 @@ def _refuse_single_tracking_write_during_batch() -> Any | None:
     rule = request.url_rule
     if rule is None:
         return None
+    if profile is None:
+        # A malformed body must reach the view for its 400 (issue #248).
+        return None
     key = (request.method.upper(), rule.rule)
     if key in _BATCH_EXCLUDED_CONNECTION_WRITES:
         if scope.connection_ref is None:
@@ -156,7 +159,7 @@ def _refuse_single_tracking_write_during_batch() -> Any | None:
             "批量操作进行中：请等待批次结束后再修改 Auto Bangumi 连接",
             {"failed_step": "tracking_batch_connection_exclusion"},
         )
-    if key not in _BATCH_EXCLUDED_SINGLE_WRITES or profile is None:
+    if key not in _BATCH_EXCLUDED_SINGLE_WRITES:
         return None
     tracking_id = (request.view_args or {}).get("tracking_id")
     if not isinstance(tracking_id, str) or not tracking_id.strip():

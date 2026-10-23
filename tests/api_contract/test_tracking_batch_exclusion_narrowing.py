@@ -455,3 +455,18 @@ def test_read_only_routes_are_never_refused_by_the_batch(
 
     assert response.status_code != 500, (suffix, response.get_json())
     assert response.get_json().get("error_type") != "connection_in_use", (suffix, response.get_json())
+
+
+def test_malformed_settings_body_reaches_the_view_instead_of_a_409(
+    tmp_path: Path, client: FlaskClient
+) -> None:
+    """A parse failure is a 400 even when a batch pins the connection."""
+    with _HeldBatch(tracking_ids={_seed(tmp_path, 1).tracking_id}, storage_dir=_profile(tmp_path)):
+        response = client.put(
+            "/api/v1/settings/autobangumi",
+            data="{not json",
+            content_type="application/json",
+        )
+
+    assert response.status_code == 400, response.get_json()
+    assert response.get_json()["error_type"] == "data_validation_errors"
