@@ -572,6 +572,7 @@ async function runSessionTransport<Result extends { tracking: TrackingItem }>(op
   const controller = new AbortController()
   writeController?.abort()
   writeController = controller
+  batchBusyRefusal.value = ''
   try {
     const result = await api.post<Result>(options.request.endpoint, {
       path: options.request.path, body: options.request.body, signal: controller.signal,
@@ -583,7 +584,9 @@ async function runSessionTransport<Result extends { tracking: TrackingItem }>(op
     await runWriteEffects(options.settle(result))
   } catch (error) {
     if (sequence !== writeSequence) return
-    await runWriteEffects(options.fail(toApiError(error)))
+    const apiError = toApiError(error)
+    noteBatchBusy(apiError)
+    await runWriteEffects(options.fail(apiError))
   } finally {
     if (sequence === writeSequence) {
       writes.finishAttempt()
@@ -819,6 +822,24 @@ const batchDeleteTitles = ref<Record<string, string>>({})
  */
 const batchDeleteKey = ref('')
 let batchDeleteSequence = 0
+/** Issue #248: set when a single write was refused by a running batch. */
+const batchBusyRefusal = ref('')
+/**
+ * Issue #248 AC2: state the running batch explicitly — both while one is in
+ * flight (single actions will queue) and after one refused a single action.
+ */
+const batchBusyNote = computed(() =>
+  batchBusyRefusal.value
+  || (batchLoading.value || batchDeleteBusy.value
+    ? '批量操作进行中：单条操作会等待批次结束后再继续。'
+    : ''),
+)
+
+function noteBatchBusy(error: { type: string }): void {
+  batchBusyRefusal.value = error.type === 'connection_in_use'
+    ? '批量操作进行中：这条记录的单项操作已暂缓，请等批次结束后再试。'
+    : ''
+}
 
 /**
  * The local pre-check for a batch delete. It uses only the list evidence the
@@ -921,6 +942,24 @@ function applyBatchDeleteResult(result: BatchDeleteResult): void {
  * connection fields at all (local-only). Entries the local pre-check excluded
  * are never sent; the server re-verifies the rest and can still skip them.
  */
+/**
+ * Issue #248 AC4: answer a lost batch-delete response with the status endpoint.
+ *
+ * The batch key is never regenerated on this path, so a failed query can only
+ * leave the batch to be replayed under the same key — it can never delete twice.
+ */
+async function queryBatchDeleteStatus(batchKey: string): Promise<BatchDeleteResult | null> {
+  const storageDir = storageQuery().storage_dir
+  try {
+    return await api.get<BatchDeleteResult>('/api/v1/tracking/batch-deletions/{batch_key}', {
+      path: { batch_key: batchKey },
+      ...(storageDir ? { query: { storage_dir: storageDir } } : {}),
+    })
+  } catch {
+    return null
+  }
+}
+
 async function runBatchDelete(deleteExternal: boolean): Promise<void> {
   if (batchDeleteBusy.value || batchLoading.value) return
   const key = batchDeleteKey.value
@@ -967,6 +1006,25 @@ async function runBatchDelete(deleteExternal: boolean): Promise<void> {
   } catch (error) {
     if (sequence !== batchDeleteSequence) return
     const apiError = toApiError(error)
+    if (apiError.status === 0 && apiError.type !== 'request_cancelled') {
+      // Issue #248 AC4: no HTTP response (timeout/network) is answered by the
+      // batch status endpoint; the key is unchanged, so a failed query can only
+      // replay the same batch and never deletes a second time.
+      const status = await queryBatchDeleteStatus(key)
+      if (sequence !== batchDeleteSequence) return
+      if (status?.state === 'COMPLETED') {
+        applyBatchDeleteResult(status)
+        batchDeleteNotice.value = ''
+        return
+      }
+      if (status) {
+        batchDeleteOutcome.value = status
+        batchDeleteNotice.value = `批次仍在执行（已完成 ${status.items.length} 条）：批次标识已保留，稍后可再次查询/重放，不会重复删除。`
+        return
+      }
+      batchDeleteNotice.value = '未收到批量删除结果，且暂时无法查询批次状态；批次标识已保留，重试会按同一批次重放，不会重复删除。'
+      return
+    }
     // The locked batch key stays: the next attempt queries/replays the same
     // batch, so a lost response can never delete something twice.
     batchDeleteNotice.value = apiError.type === 'request_timeout' || apiError.type === 'request_cancelled'
@@ -1235,6 +1293,7 @@ async function runPlanDelete(payload: {
     if (sequence !== planDeleteSequence) return
     const apiError = toApiError(error)
     if (apiError.cancelled && !apiError.httpError) return
+    noteBatchBusy(apiError)
     await runWriteEffects(writes.failPlanDelete(apiError))
   }
 }
@@ -1325,11 +1384,14 @@ onBeforeUnmount(() => {
         <!-- B5: 降级／未完成／含忽略项的同步结果留在列表工具区的有界状态区；
              成功且干净的结果走全局通知。 -->
         <div
-          v-if="syncStatus || (batchMode && batchSkippedNotice)"
+          v-if="syncStatus || (batchMode && batchSkippedNotice) || batchBusyNote"
           class="tracking-toolbar-status"
         >
           <p v-if="syncStatus" id="tracking-sync-status" role="status">{{ syncStatus }}</p>
           <p v-if="batchMode && batchSkippedNotice" id="tracking-batch-skipped" role="status">{{ batchSkippedNotice }}</p>
+          <p v-if="batchBusyNote" id="tracking-batch-busy" class="tracking-batch-help" role="status">
+            {{ batchBusyNote }}
+          </p>
         </div>
 
         <!-- 批量工具栏：仅多选态，标题行下方另起一行（#218 补充澄清 + 行规格）。 -->

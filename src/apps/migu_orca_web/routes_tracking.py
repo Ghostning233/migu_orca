@@ -67,27 +67,24 @@ from apps.migu_orca_web.tracking_submission_service import (
 from extensions.flask_api import class_route
 from extensions.flask_api.api import failed_response
 from extensions.flask_api.views import GetView, PostView
+from shared.errors import Stage1Error
 from storage_engine.controllers.operation_repository import load_tracking_operation
 from storage_engine.controllers.storage_config import load_storage_config
 from storage_engine.controllers.tracking_repository import (
     load_tracking_record,
-    tracking_batch_active,
     tracking_batch_lease,
+    tracking_batch_scope,
 )
 from tracking_engine.models.operation import TRACKING_OPERATION_STATE_SUCCEEDED
 
-#: Issue #223 (ADR-0007): single tracking writes that must not start while a
-#: batch owns the store.  The refusal happens at the request boundary — before
-#: any service persists an operation intent — so it can never leave an orphan
-#: PREPARED operation behind; the repository serialization stays as the ordering
-#: fallback for the race window between this check and the service.
-_SINGLE_TRACKING_WRITE_RULES: frozenset[tuple[str, str]] = frozenset({
+#: Issue #248: only a single write that may start an **external** write on a
+#: record can collide with a running batch.  Read-only verifications
+#: (``check``/``revalidate``/``recover``) and pure-local record writes are never
+#: refused here: they do not touch the batch's external-write resource.
+_BATCH_EXCLUDED_SINGLE_WRITES: frozenset[tuple[str, str]] = frozenset({
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/submit"),
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/retry"),
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/delete-plan"),
-    ("POST", "/api/v1/tracking/items/<path:tracking_id>/recover"),
-    ("POST", "/api/v1/tracking/items/<path:tracking_id>/check"),
-    ("POST", "/api/v1/tracking/items/<path:tracking_id>/revalidate"),
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/resubmit"),
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/modify"),
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/set-enabled"),
@@ -95,24 +92,60 @@ _SINGLE_TRACKING_WRITE_RULES: frozenset[tuple[str, str]] = frozenset({
 })
 
 
+def _request_storage_profile() -> str | None:
+    """The resolved storage root of this request, or ``None`` when unparseable.
+
+    ``None`` covers a malformed JSON body and an invalid profile: both must be
+    answered by the view (400), never by the batch boundary guard as a 409
+    (issue #248).
+    """
+    body = request.get_json(silent=True)
+    if request.data and body is None:
+        return None
+    raw = request.args.get("storage_dir")
+    if raw is None and isinstance(body, dict):
+        raw = body.get("storage_dir")
+    if raw is not None and not isinstance(raw, str):
+        return None
+    try:
+        return str(_storage_dir(raw))
+    except Stage1Error:
+        return None
+
+
 @api_blueprint.before_request
 def _refuse_single_tracking_write_during_batch() -> Any | None:
-    """ADR-0007: a batch excludes single external writes in both directions.
+    """Early refusal for a single external write the running batch owns.
 
-    A later single write is refused **before** its service persists anything, so
-    the published ``connection_in_use`` (409) is the real outcome and no orphan
-    intent can appear.  A request that already passed this check only races the
-    batch for milliseconds; the repository serializer then queues it.
+    The batch publishes its occupied resources (records + profile) with its
+    lease; this guard refuses only an external write on one of those records in
+    the same profile.  It runs before any service persists an intent, so the
+    published ``connection_in_use`` (409) cannot leave an orphan operation; the
+    repository's ``lock_tracking_record`` is the final, shared check for the
+    race window between this guard and the batch.
     """
-    if not tracking_batch_active():
+    scope = tracking_batch_scope()
+    if scope is None:
         return None
     rule = request.url_rule
-    if rule is None or (request.method.upper(), rule.rule) not in _SINGLE_TRACKING_WRITE_RULES:
+    if rule is None or (request.method.upper(), rule.rule) not in _BATCH_EXCLUDED_SINGLE_WRITES:
         return None
+    profile = _request_storage_profile()
+    if profile is None:
+        return None
+    tracking_id = (request.view_args or {}).get("tracking_id")
+    if not isinstance(tracking_id, str) or not tracking_id:
+        return None
+    if scope.tracking_ids:
+        # Known scope: only the batch's own records in its own profile conflict.
+        if scope.storage_dir is not None and profile != scope.storage_dir:
+            return None
+        if tracking_id.strip() not in scope.tracking_ids:
+            return None
     return failed_response(
         "connection_in_use",
-        "批量操作正在执行，请稍后再试",
-        {"failed_step": "tracking_batch_exclusion"},
+        "批量操作进行中：请等待批次结束后再操作该记录",
+        {"failed_step": "tracking_batch_exclusion", "batch_key": scope.batch_key},
     )
 
 
@@ -258,11 +291,19 @@ class TrackingBatchSubmitView(PostView):
         payload = self.request_validator_model
         assert isinstance(payload, SavedTrackingBatchSubmitInput)
         config = load_storage_config(_storage_dir(payload.storage_dir))
+        tracking_ids = {entry.tracking_id for entry in payload.items}
         # ADR-0007 decision 3 applies to every batch: refuse while another
         # record already owns an external write, then hold the batch lease so a
         # later batch or single write cannot overlap this one.
-        ensure_no_racing_single_writes(config, {entry.tracking_id for entry in payload.items})
-        with tracking_batch_lease(batch_key=f"submit:{payload.items[0].idempotency_key}"):
+        ensure_no_racing_single_writes(config, tracking_ids)
+        # Issue #248: publish the occupied resources so the boundary guard and
+        # the repository gate exclude exactly these records.
+        with tracking_batch_lease(
+            batch_key=f"submit:{payload.items[0].idempotency_key}",
+            tracking_ids=tracking_ids,
+            connection_ref=str(payload.connection_ref),
+            storage_dir=str(config.storage_dir),
+        ):
             return run_saved_tracking_batch_submit(config, payload=payload)
 
 
