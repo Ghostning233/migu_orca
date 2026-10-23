@@ -1546,7 +1546,12 @@ describe('TrackingView batch consolidation (issue #248)', () => {
   it('states the running batch when a single write is refused (AC2)', async () => {
     const wrapper = await mountPending()
     apiPost.mockImplementation(async () => {
-      throw { type: 'connection_in_use', status: 409, httpError: true }
+      throw {
+        type: 'connection_in_use',
+        status: 409,
+        httpError: true,
+        details: { failed_step: 'tracking_batch_exclusion' },
+      }
     })
 
     await wrapper.find('#tracking-resubmit').trigger('click')
@@ -1687,6 +1692,89 @@ describe('TrackingView batch consolidation (issue #248)', () => {
     const [endpoint, options] = batchDeleteBody(0)
     expect(endpoint).toBe('/api/v1/tracking/batch-delete-plan')
     expect((options as { body: Record<string, unknown> }).body.confirm).toBe(true)
+    wrapper.unmount()
+  })
+})
+
+describe('TrackingView batch consolidation residuals (issue #248)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset(); nextSyncFixture = null })
+
+  it('never labels a config-lease connection_in_use as a running batch (I3)', async () => {
+    const wrapper = await mountPending()
+    apiPost.mockImplementation(async () => {
+      throw {
+        type: 'connection_in_use',
+        status: 409,
+        httpError: true,
+        details: { failed_step: 'acquire_autobangumi_config_lease' },
+      }
+    })
+
+    await wrapper.find('#tracking-resubmit').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#tracking-batch-busy').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('drops the batch note once the batch it described ended (minor 8)', async () => {
+    const rows = [rowFor('a', '番 A')]
+    const { wrapper } = await mountBatchRows(rows)
+    await enterBatchAndSelectAll(wrapper)
+    let release: (() => void) | undefined
+    apiPost.mockImplementation(() => new Promise((resolve) => {
+      release = () => resolve({
+        ok: false,
+        error_type: 'connection_in_use',
+        error_message: '批量操作进行中',
+        error_data: { failed_step: 'tracking_batch_exclusion' },
+      } as never)
+    }))
+
+    await wrapper.find('#tracking-batch-delete').trigger('click')
+    await wrapper.find('#tracking-batch-delete-confirm').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#tracking-batch-busy').text()).toContain('批量操作进行中')
+
+    release?.()
+    await flushPromises()
+    expect(wrapper.find('#tracking-batch-busy').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('keeps the same batch key after an IN_PROGRESS answer (AC4)', async () => {
+    const rows = [rowFor('a', '番 A')]
+    const { wrapper } = await mountBatchRows(rows)
+    await enterBatchAndSelectAll(wrapper)
+    apiPost.mockImplementation(async () => { throw { type: 'request_timeout', status: 0 } })
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/v1/tracking/batch-deletions/{batch_key}') {
+        return {
+          ...batchDeleteResponse(
+            [{ tracking_id: 'a', outcome: 'DELETED', external_deleted: false, skip_reason: null }],
+            { total: 2, deleted: 1, external_deleted: 0, skipped: 0, failed: 0, unknown: 0 },
+          ),
+          state: 'IN_PROGRESS',
+        } as never
+      }
+      if (path === '/api/v1/settings/autobangumi') {
+        return { configured: true, credential_present: true, connection_ref: REF, configuration_revision: 3, connection_status: 'CONFIGURED', capabilities: null } as never
+      }
+      return listRowsResponse(rows) as never
+    })
+
+    await wrapper.find('#tracking-batch-delete').trigger('click')
+    await wrapper.find('#tracking-batch-delete-confirm').trigger('click')
+    await flushPromises()
+
+    const firstKey = batchDeleteBody(0)[1].body.idempotency_key
+    apiPost.mockImplementation(async () => batchDeleteResponse([
+      { tracking_id: 'a', outcome: 'DELETED', external_deleted: false, skip_reason: null },
+    ]) as never)
+    await wrapper.find('#tracking-batch-delete').trigger('click')
+    await wrapper.find('#tracking-batch-delete-confirm').trigger('click')
+    await flushPromises()
+    expect(batchDeleteBody(1)[1].body.idempotency_key).toBe(firstKey)
     wrapper.unmount()
   })
 })

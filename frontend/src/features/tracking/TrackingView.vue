@@ -803,7 +803,9 @@ async function performBatchSubmit(): Promise<void> {
     await runWriteEffects(writes.finishBatchSubmit(result))
   } catch (error) {
     if (sequence !== batchSequence) return
-    writes.failBatchSubmit(toApiError(error))
+    const apiError = toApiError(error)
+    noteBatchBusy(apiError)
+    writes.failBatchSubmit(apiError)
   }
 }
 
@@ -835,11 +837,28 @@ const batchBusyNote = computed(() =>
     : ''),
 )
 
-function noteBatchBusy(error: { type: string }): void {
+/** The boundary/repository steps that mean "a batch refused this write". */
+const BATCH_EXCLUSION_STEPS = new Set([
+  'tracking_batch_exclusion',
+  'tracking_batch_connection_exclusion',
+  // A single write queued behind a batch and refused by the final gate.
+  'lock_tracking_record',
+])
+
+function noteBatchBusy(error: { type: string; details?: Record<string, unknown> | null }): void {
+  const step = error.details?.failed_step
+  // Only a real batch refusal gets this copy: an Auto Bangumi config-lease
+  // `connection_in_use` is a different situation and keeps the generic copy.
   batchBusyRefusal.value = error.type === 'connection_in_use'
+    && typeof step === 'string' && BATCH_EXCLUSION_STEPS.has(step)
     ? '批量操作进行中：这条记录的单项操作已暂缓，请等批次结束后再试。'
     : ''
 }
+
+// A stale "wait for the batch" note must not survive the batch it described.
+watch([batchLoading, batchDeleteBusy], ([loading, deleting]) => {
+  if (!loading && !deleting) batchBusyRefusal.value = ''
+})
 
 /**
  * The local pre-check for a batch delete. It uses only the list evidence the
@@ -948,15 +967,20 @@ function applyBatchDeleteResult(result: BatchDeleteResult): void {
  * The batch key is never regenerated on this path, so a failed query can only
  * leave the batch to be replayed under the same key — it can never delete twice.
  */
-async function queryBatchDeleteStatus(batchKey: string): Promise<BatchDeleteResult | null> {
+async function queryBatchDeleteStatus(
+  batchKey: string,
+): Promise<{ result: BatchDeleteResult | null; notFound: boolean }> {
   const storageDir = storageQuery().storage_dir
   try {
-    return await api.get<BatchDeleteResult>('/api/v1/tracking/batch-deletions/{batch_key}', {
-      path: { batch_key: batchKey },
-      ...(storageDir ? { query: { storage_dir: storageDir } } : {}),
-    })
-  } catch {
-    return null
+    return {
+      result: await api.get<BatchDeleteResult>('/api/v1/tracking/batch-deletions/{batch_key}', {
+        path: { batch_key: batchKey },
+        ...(storageDir ? { query: { storage_dir: storageDir } } : {}),
+      }),
+      notFound: false,
+    }
+  } catch (error) {
+    return { result: null, notFound: toApiError(error).type === 'tracking_not_found' }
   }
 }
 
@@ -1006,11 +1030,16 @@ async function runBatchDelete(deleteExternal: boolean): Promise<void> {
   } catch (error) {
     if (sequence !== batchDeleteSequence) return
     const apiError = toApiError(error)
-    if (apiError.status === 0 && apiError.type !== 'request_cancelled') {
+    // No HTTP answer (timeout/network) or a server-side failure (5xx, e.g. a
+    // proxy timeout): the batch may have run, so ask its stored status instead
+    // of guessing. A cancelled request never asks.
+    const noDefiniteAnswer = apiError.type !== 'request_cancelled'
+      && (apiError.status === 0 || apiError.status >= 500)
+    if (noDefiniteAnswer) {
       // Issue #248 AC4: no HTTP response (timeout/network) is answered by the
       // batch status endpoint; the key is unchanged, so a failed query can only
       // replay the same batch and never deletes a second time.
-      const status = await queryBatchDeleteStatus(key)
+      const { result: status, notFound } = await queryBatchDeleteStatus(key)
       if (sequence !== batchDeleteSequence) return
       if (status?.state === 'COMPLETED') {
         applyBatchDeleteResult(status)
@@ -1019,10 +1048,16 @@ async function runBatchDelete(deleteExternal: boolean): Promise<void> {
       }
       if (status) {
         batchDeleteOutcome.value = status
-        batchDeleteNotice.value = `批次仍在执行（已完成 ${status.items.length} 条）：批次标识已保留，稍后可再次查询/重放，不会重复删除。`
+        batchDeleteNotice.value = `批次仍在执行（已完成 ${status.items.length} 条）：列表已刷新，批次标识已保留，重新提交会按同一批次重放，不会重复删除。`
+        // The batch already removed some rows: converge the list without
+        // pretending the batch finished.
+        void loadList(true)
+        syncSelection(true)
         return
       }
-      batchDeleteNotice.value = '未收到批量删除结果，且暂时无法查询批次状态；批次标识已保留，重试会按同一批次重放，不会重复删除。'
+      batchDeleteNotice.value = notFound
+        ? '未收到批量删除结果，且没有该批次的记录：本次可能尚未执行；批次标识已保留，重试会按同一标识执行，已完成条目不会重复删除。'
+        : '未收到批量删除结果，且暂时无法查询批次状态；批次标识已保留，重试会按同一批次重放，不会重复删除。'
       return
     }
     // The locked batch key stays: the next attempt queries/replays the same

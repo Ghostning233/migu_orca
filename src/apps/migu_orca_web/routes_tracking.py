@@ -71,16 +71,18 @@ from shared.errors import Stage1Error
 from storage_engine.controllers.operation_repository import load_tracking_operation
 from storage_engine.controllers.storage_config import load_storage_config
 from storage_engine.controllers.tracking_repository import (
+    batch_conflicts_with,
     load_tracking_record,
+    note_request_storage_dir,
     tracking_batch_lease,
     tracking_batch_scope,
 )
 from tracking_engine.models.operation import TRACKING_OPERATION_STATE_SUCCEEDED
 
-#: Issue #248: only a single write that may start an **external** write on a
-#: record can collide with a running batch.  Read-only verifications
+#: Issue #248: only a route that may start an **external** write on a record can
+#: collide with the batch's external-write resource.  Read-only verifications
 #: (``check``/``revalidate``/``recover``) and pure-local record writes are never
-#: refused here: they do not touch the batch's external-write resource.
+#: refused here — the batch owns the external write, not the record file.
 _BATCH_EXCLUDED_SINGLE_WRITES: frozenset[tuple[str, str]] = frozenset({
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/submit"),
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/retry"),
@@ -89,6 +91,15 @@ _BATCH_EXCLUDED_SINGLE_WRITES: frozenset[tuple[str, str]] = frozenset({
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/modify"),
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/set-enabled"),
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/refresh"),
+})
+
+#: Issue #248 (connection resource): replacing or deleting the saved Auto Bangumi
+#: connection changes the generation a running batch pinned, so a batch that
+#: names a connection excludes those two writes.  A local-only batch has no
+#: connection and does not block a settings change.
+_BATCH_EXCLUDED_CONNECTION_WRITES: frozenset[tuple[str, str]] = frozenset({
+    ("PUT", "/api/v1/settings/autobangumi"),
+    ("DELETE", "/api/v1/settings/autobangumi"),
 })
 
 
@@ -102,9 +113,11 @@ def _request_storage_profile() -> str | None:
     body = request.get_json(silent=True)
     if request.data and body is None:
         return None
-    raw = request.args.get("storage_dir")
-    if raw is None and isinstance(body, dict):
-        raw = body.get("storage_dir")
+    raw = body.get("storage_dir") if isinstance(body, dict) else None
+    if raw is None:
+        # The views read the body, so the body must win; the query is only a
+        # fallback for a request that carries no body profile.
+        raw = request.args.get("storage_dir")
     if raw is not None and not isinstance(raw, str):
         return None
     try:
@@ -124,29 +137,47 @@ def _refuse_single_tracking_write_during_batch() -> Any | None:
     repository's ``lock_tracking_record`` is the final, shared check for the
     race window between this guard and the batch.
     """
+    # Publish the request profile first: the repository's final gate must apply
+    # the same profile-aware predicate as this guard (issue #248 I2/I3).
+    profile = _request_storage_profile()
+    note_request_storage_dir(profile)
     scope = tracking_batch_scope()
     if scope is None:
         return None
     rule = request.url_rule
-    if rule is None or (request.method.upper(), rule.rule) not in _BATCH_EXCLUDED_SINGLE_WRITES:
+    if rule is None:
         return None
-    profile = _request_storage_profile()
-    if profile is None:
+    key = (request.method.upper(), rule.rule)
+    if key in _BATCH_EXCLUDED_CONNECTION_WRITES:
+        if scope.connection_ref is None:
+            return None
+        return failed_response(
+            "connection_in_use",
+            "批量操作进行中：请等待批次结束后再修改 Auto Bangumi 连接",
+            {"failed_step": "tracking_batch_connection_exclusion"},
+        )
+    if key not in _BATCH_EXCLUDED_SINGLE_WRITES or profile is None:
         return None
     tracking_id = (request.view_args or {}).get("tracking_id")
-    if not isinstance(tracking_id, str) or not tracking_id:
+    if not isinstance(tracking_id, str) or not tracking_id.strip():
         return None
-    if scope.tracking_ids:
-        # Known scope: only the batch's own records in its own profile conflict.
-        if scope.storage_dir is not None and profile != scope.storage_dir:
-            return None
-        if tracking_id.strip() not in scope.tracking_ids:
-            return None
+    # Deferred to the view: malformed JSON / invalid profile (parse failures,
+    # above).  A parseable but schema-invalid body still gets this 409 while the
+    # record is owned: the batch is the stronger, fail-closed answer, and the
+    # alternative would require duplicating each view's validator here.
+    if not batch_conflicts_with(tracking_id, storage_dir=profile):
+        return None
     return failed_response(
         "connection_in_use",
         "批量操作进行中：请等待批次结束后再操作该记录",
-        {"failed_step": "tracking_batch_exclusion", "batch_key": scope.batch_key},
+        {"failed_step": "tracking_batch_exclusion"},
     )
+
+
+@api_blueprint.teardown_request
+def _clear_request_storage_profile(_exception: BaseException | None) -> None:
+    """Do not let one request's profile leak into the next on this thread."""
+    note_request_storage_dir(None)
 
 
 @class_route(api_blueprint, "/api/v1/tracking/items", methods=["GET"])
@@ -364,11 +395,19 @@ class TrackingBatchDeletePlanView(PostView):
     def save(self) -> dict[str, object]:
         payload = self.request_validator_model
         assert isinstance(payload, SavedTrackingBatchDeleteInput)
-        return run_saved_tracking_batch_delete(
-            load_storage_config(_storage_dir(payload.storage_dir)),
-            payload=payload,
-            delete_external=False,
-        )
+        config = load_storage_config(_storage_dir(payload.storage_dir))
+        # Issue #248: publish the occupied resources; the service's own lease
+        # nests inside this one and keeps the same scope.
+        with tracking_batch_lease(
+            batch_key=payload.idempotency_key,
+            tracking_ids={entry.tracking_id for entry in payload.items},
+            storage_dir=str(config.storage_dir),
+        ):
+            return run_saved_tracking_batch_delete(
+                config,
+                payload=payload,
+                delete_external=False,
+            )
 
 
 @class_route(
@@ -392,11 +431,18 @@ class TrackingBatchDeletePlanExternalView(PostView):
     def save(self) -> dict[str, object]:
         payload = self.request_validator_model
         assert isinstance(payload, SavedTrackingBatchDeleteExternalInput)
-        return run_saved_tracking_batch_delete(
-            load_storage_config(_storage_dir(payload.storage_dir)),
-            payload=payload,
-            delete_external=True,
-        )
+        config = load_storage_config(_storage_dir(payload.storage_dir))
+        with tracking_batch_lease(
+            batch_key=payload.idempotency_key,
+            tracking_ids={entry.tracking_id for entry in payload.items},
+            connection_ref=str(payload.connection_ref),
+            storage_dir=str(config.storage_dir),
+        ):
+            return run_saved_tracking_batch_delete(
+                config,
+                payload=payload,
+                delete_external=True,
+            )
 
 
 @class_route(

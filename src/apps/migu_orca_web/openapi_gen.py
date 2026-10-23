@@ -2203,18 +2203,20 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     },
 }
 
-#: Issue #223 (ADR-0007): the batch lease refuses a tracking write while a
-#: batch owns the store, so every route that persists one can answer with this
-#: exact envelope error.  Declared in one place so the contract cannot drift
-#: endpoint by endpoint.
+#: Issue #223/#248 (ADR-0007, amended): a running batch occupies the external
+#: write of its own records, so a route that can start one answers with this
+#: exact envelope error while that batch runs.  Declared in one place so the
+#: contract cannot drift endpoint by endpoint.
+#:
+#: Read-only verifications (``check``/``revalidate``/``recover``) are deliberately
+#: absent: #248 stopped refusing them and they have no other ``connection_in_use``
+#: source (the Auto Bangumi config lease never refuses), so declaring it there
+#: would publish an unreachable error.
 _TRACKING_WRITE_ENDPOINTS: tuple[str, ...] = (
     "POST /api/v1/tracking/batch-submit",
     "POST /api/v1/tracking/items/<path:tracking_id>/delete-plan",
     "POST /api/v1/tracking/items/<path:tracking_id>/submit",
     "POST /api/v1/tracking/items/<path:tracking_id>/retry",
-    "POST /api/v1/tracking/items/<path:tracking_id>/recover",
-    "POST /api/v1/tracking/items/<path:tracking_id>/check",
-    "POST /api/v1/tracking/items/<path:tracking_id>/revalidate",
     "POST /api/v1/tracking/items/<path:tracking_id>/resubmit",
     "POST /api/v1/tracking/items/<path:tracking_id>/modify",
     "POST /api/v1/tracking/items/<path:tracking_id>/set-enabled",

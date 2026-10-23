@@ -29,10 +29,11 @@ Storage rules
 - Damaged records are never deleted or auto-overwritten; a single damaged file
   does not block the healthy list.
 
-Lock order (issue #247)
------------------------
-Every tracking writer holds the process-wide store lock first, then the
-per-record lock, then (inside ``operation_repository``) the per-operation lock:
+Lock order (issue #247, refined by issue #248)
+---------------------------------------------
+An **external write intent** (``lock_tracking_record``) takes the store lock
+first, then the per-record lock, then (inside ``operation_repository``) the
+per-operation lock:
 
 1. the batch store lock (``_serialized_tracking_write`` / ``tracking_batch_lease``);
 2. the per-record lock (``lock_tracking_record``, keyed by ``tracking_id``);
@@ -43,13 +44,23 @@ The direction is mandatory: never take the store lock while holding a record or
 operation lock, never take a record lock while holding an operation lock, take
 several record locks in a stable id order if a caller ever needs two, and never
 call an external service (Auto Bangumi, MiKan, qBittorrent) while any of these
-locks is held.  A single write *waits* for a running batch (ADR-0007) and is
-never refused after it persisted its intent.  ``bind + record-pointer write +
-the operation execution gate`` run inside one record critical section (itself
-under the store lock), so a concurrent same-key request cannot observe a
-half-written binding and two retriers cannot both take execution.  A process
-crash can still interrupt the two file writes; that residue is claimed by the
-verified rule in ``operation_repository.claimable_prepared_operation``.
+locks is held.
+
+Since #248 the store lock protects the batch's **occupied resources** (storage
+profile + tracking id, plus the connection generation for connection-level
+writes) instead of the whole store: a pure-local record write (CAS/ensure/delete
+from revalidate, check, sync, handoff) takes only the per-record lock, so it
+never queues behind a batch and never takes the store lock.  An external write
+intent that targets a record the running batch owns waits for that batch
+(bounded, ``connection_in_use``) *before* its bind, so it is never refused after
+persisting its intent; an intent on another record or profile passes without the
+store lock.  When no batch runs, the intent still holds the store lock across
+``bind + record-pointer write + the operation execution gate`` so a batch cannot
+start inside that critical section (ADR-0008 decision 2).  That critical section
+is what keeps a concurrent same-key request from observing a half-written
+binding and two retriers from both taking execution.  A process crash can still
+interrupt the two file writes; that residue is claimed by the verified rule in
+``operation_repository.claimable_prepared_operation``.
 """
 
 from __future__ import annotations
@@ -145,22 +156,47 @@ def _active_scope() -> TrackingBatchScope | None:
         return _ACTIVE_SCOPE
 
 
-def tracking_batch_active() -> bool:
-    """True while a batch holds the store."""
-    return _ACTIVE_BATCH.is_set()
-
-
 def tracking_batch_scope() -> TrackingBatchScope | None:
     """The occupied resource scope of the running batch, or ``None``."""
     return _active_scope()
 
 
-def _scope_conflicts(scope: TrackingBatchScope, tracking_id: str) -> bool:
-    """Whether one external write targets a resource the batch occupies."""
+def note_request_storage_dir(storage_dir: str | None) -> None:
+    """Publish this request thread's storage profile for the final write gate.
+
+    The route guard resolves the request's profile (body first, exactly like the
+    view) and records it here; ``lock_tracking_record`` then applies the same
+    profile-aware conflict predicate as the guard (issue #248 I2).  Background
+    threads leave it ``None`` and fall back to the record-id comparison.
+    """
+    _BATCH_STATE.request_storage_dir = storage_dir
+
+
+def _request_storage_dir() -> str | None:
+    return getattr(_BATCH_STATE, "request_storage_dir", None)
+
+
+def _scope_conflicts(
+    scope: TrackingBatchScope, tracking_id: str, storage_dir: str | None
+) -> bool:
+    """The single conflict predicate shared by the guard and the write gate."""
     if not scope.tracking_ids:
         # Unknown scope: fail safe (the #223 blanket exclusion).
         return True
-    return tracking_id in scope.tracking_ids
+    if (
+        storage_dir is not None
+        and scope.storage_dir is not None
+        and storage_dir != scope.storage_dir
+    ):
+        # Another storage profile is a different resource (issue #248).
+        return False
+    return tracking_id.strip() in scope.tracking_ids
+
+
+def batch_conflicts_with(tracking_id: str, *, storage_dir: str | None = None) -> bool:
+    """Whether one external write on ``tracking_id`` conflicts with the batch."""
+    scope = _active_scope()
+    return scope is not None and _scope_conflicts(scope, tracking_id, storage_dir)
 
 
 @contextmanager
@@ -245,16 +281,32 @@ def _serialized_tracking_write(step: str) -> Iterator[None]:
     # pure-local writers (CAS/ensure/delete from revalidate, check, sync, handoff)
     # publish nothing and therefore never wait for a batch (issue #248).
     tracking_id = getattr(_BATCH_STATE, "external_write_id", None)
-    scope = _active_scope()
-    if tracking_id is None or scope is None or not _scope_conflicts(scope, tracking_id):
+    if tracking_id is None:
         yield
         return
+    profile = _request_storage_dir()
+    scope = _active_scope()
+    if scope is not None and not _scope_conflicts(scope, tracking_id, profile):
+        # The batch owns other resources; the per-record lock is enough.
+        yield
+        return
+    # No batch: hold the store lock so a batch cannot start *inside* this
+    # external-write critical section (ADR-0008 decision 2 / #247).  Conflicting
+    # batch: queue behind it — the bind happens after this gate, so the refusal
+    # is always pre-intent.
     if not _BATCH_LOCK.acquire(timeout=_BATCH_WAIT_SECONDS):
         raise Stage1Error(
             "connection_in_use",
             "批量操作进行中：请等待批次结束后再操作该记录",
             step,
         )
+    # Re-check under the lock: a batch that started in the race window and owns
+    # other resources must not make an unrelated write fail.
+    scope = _active_scope()
+    if scope is not None and not _scope_conflicts(scope, tracking_id, profile):
+        _BATCH_LOCK.release()
+        yield
+        return
     _BATCH_STATE.depth = 1
     try:
         yield
@@ -662,8 +714,8 @@ def _tracking_path(
 
 
 __all__ = [
-    "TrackingBatchScope",
-    "tracking_batch_active",
+    "batch_conflicts_with",
+    "note_request_storage_dir",
     "tracking_batch_lease",
     "tracking_batch_scope",
     "TrackingListResult",

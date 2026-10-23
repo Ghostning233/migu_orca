@@ -11189,7 +11189,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 当前追番记录没有可核验的待确认提交 / tracking_check_in_progress: 该追番记录的只读检查正在进行 / connection_in_use: 另一个批量操作或外部写正在执行，请稍后再试 */
+            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 当前追番记录没有可核验的待确认提交 / tracking_check_in_progress: 该追番记录的只读检查正在进行 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -12474,7 +12474,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 当前追番记录状态不允许恢复 / connection_in_use: 另一个批量操作或外部写正在执行，请稍后再试 */
+            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 当前追番记录状态不允许恢复 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -14167,7 +14167,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 当前追番记录状态不允许复核 / connection_in_use: 另一个批量操作或外部写正在执行，请稍后再试 */
+            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 当前追番记录状态不允许复核 */
             409: {
                 headers: {
                     [name: string]: unknown;

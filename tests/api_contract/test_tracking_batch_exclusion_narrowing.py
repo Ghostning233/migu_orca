@@ -20,6 +20,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+import pytest
 from flask.testing import FlaskClient
 
 from storage_engine.controllers.operation_repository import (
@@ -32,10 +33,12 @@ from storage_engine.controllers.tracking_repository import (
     ensure_tracking_record,
     load_tracking_record,
     tracking_batch_lease,
+    tracking_batch_scope,
 )
 from tracking_engine.models.operation import transition_tracking_operation
 from tracking_engine.models.tracking import (
     TRACKING_STATUS_ACTIVE,
+    TRACKING_STATUS_NEEDS_RECONFIRM,
     TrackingRecord,
     create_external_tracking_record,
 )
@@ -51,7 +54,12 @@ def _profile(tmp_path: Path) -> str:
     return str((tmp_path / "storage").resolve())
 
 
-def _seed(tmp_path: Path, index: int) -> TrackingRecord:
+def _seed(
+    tmp_path: Path,
+    index: int,
+    *,
+    status: str = TRACKING_STATUS_ACTIVE,
+) -> TrackingRecord:
     config = _config(tmp_path)
     record = create_external_tracking_record(
         adapter="legacy_3_1",
@@ -62,9 +70,7 @@ def _seed(tmp_path: Path, index: int) -> TrackingRecord:
         season=1,
         connection_ref=REF,
     )
-    seeded, _created = ensure_tracking_record(
-        config, replace(record, status=TRACKING_STATUS_ACTIVE)
-    )
+    seeded, _created = ensure_tracking_record(config, replace(record, status=status))
     return seeded
 
 
@@ -117,14 +123,16 @@ def test_external_write_on_an_owned_record_is_refused(
 
     assert response.status_code == 409, response.get_json()
     assert response.get_json()["error_type"] == "connection_in_use"
-    # Refused before any persistence: the record is untouched.
-    load_tracking_record(_config(tmp_path), owned.tracking_id)
+    # Refused before any persistence: no intent and the record is untouched.
+    store = _config(tmp_path)
+    assert list(store.tracking_operations_dir.glob("*.json")) == []
+    assert load_tracking_record(store, owned.tracking_id).revision == owned.revision
 
 
 def test_pure_local_write_on_an_owned_record_is_not_refused(
     tmp_path: Path, client: FlaskClient
 ) -> None:
-    owned = _seed(tmp_path, 1)
+    owned = _seed(tmp_path, 1, status=TRACKING_STATUS_NEEDS_RECONFIRM)
     with _HeldBatch(tracking_ids={owned.tracking_id}, storage_dir=_profile(tmp_path)):
         revalidate = client.post(
             f"/api/v1/tracking/items/{owned.tracking_id}/revalidate",
@@ -137,7 +145,10 @@ def test_pure_local_write_on_an_owned_record_is_not_refused(
 
     # Neither request may be refused by the batch guard; any remaining 409 is a
     # business state conflict (e.g. the record is not revalidatable while ACTIVE).
+    assert revalidate.status_code == 200, revalidate.get_json()
+    assert check.status_code in {200, 409}, check.get_json()
     for response in (revalidate, check):
+        assert response.status_code != 500
         assert response.get_json().get("error_type") != "connection_in_use", response.get_json()
 
 
@@ -158,7 +169,10 @@ def test_another_profile_is_not_refused(tmp_path: Path, client: FlaskClient) -> 
     with _HeldBatch(tracking_ids={owned.tracking_id}, storage_dir=_profile(tmp_path)):
         response = _delete_plan(client, owned, storage_dir="other")
 
-    assert response.status_code != 409, response.get_json()
+    # The record does not exist in the other profile: the view answers 404, not
+    # a batch refusal.
+    assert response.status_code == 404, response.get_json()
+    assert response.get_json()["error_type"] == "tracking_not_found"
 
 
 def test_malformed_body_is_a_400_not_a_409(tmp_path: Path, client: FlaskClient) -> None:
@@ -186,6 +200,11 @@ def test_invalid_profile_is_a_400_not_a_409(tmp_path: Path, client: FlaskClient)
 def test_unscoped_batch_keeps_the_fail_safe_exclusion(
     tmp_path: Path, client: FlaskClient
 ) -> None:
+    """A caller that does not publish resources keeps #223's blanket refusal.
+
+    All three real batch routes publish their scope (see the route-level tests
+    above); this is the defensive fallback for any other caller.
+    """
     record = _seed(tmp_path, 1)
     with _HeldBatch(tracking_ids=set(), storage_dir=None):
         response = _delete_plan(client, record)
@@ -244,3 +263,195 @@ def test_an_unresolved_single_operation_keeps_its_protection_after_the_batch(
         "tracking_management_state_conflict",
         "tracking_state_conflict",
     }
+
+
+def test_the_body_profile_wins_over_the_query(tmp_path: Path, client: FlaskClient) -> None:
+    """I3 (#248): the guard must resolve the profile exactly like the view."""
+    owned = _seed(tmp_path, 1)
+    with _HeldBatch(tracking_ids={owned.tracking_id}, storage_dir=_profile(tmp_path)):
+        # The body points at another (empty) profile, so the record there is not
+        # the one the batch owns; a query string must not change that.
+        response = client.post(
+            f"/api/v1/tracking/items/{owned.tracking_id}/delete-plan?storage_dir=storage",
+            json={
+                "confirm": True,
+                "idempotency_key": "body-profile-wins",
+                "storage_dir": "other",
+            },
+        )
+
+    assert response.status_code == 404, response.get_json()
+    assert response.get_json()["error_type"] == "tracking_not_found"
+
+
+def test_a_connection_level_change_is_refused_while_a_batch_pins_it(
+    tmp_path: Path, client: FlaskClient
+) -> None:
+    """I1 (#248): replacing the saved connection changes the batch generation."""
+    with _HeldBatch(tracking_ids={_seed(tmp_path, 1).tracking_id}, storage_dir=_profile(tmp_path)):
+        response = client.put("/api/v1/settings/autobangumi", json={})
+
+    assert response.status_code == 409, response.get_json()
+    assert response.get_json()["error_type"] == "connection_in_use"
+
+
+def test_a_local_only_batch_does_not_block_a_connection_change(
+    tmp_path: Path, client: FlaskClient
+) -> None:
+    record = _seed(tmp_path, 1)
+    with tracking_batch_lease(
+        batch_key="local-only-batch",
+        tracking_ids={record.tracking_id},
+        storage_dir=_profile(tmp_path),
+    ):
+        response = client.put("/api/v1/settings/autobangumi", json={})
+
+    assert response.status_code != 409, response.get_json()
+
+
+def test_the_delete_route_publishes_its_occupied_scope(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """B2 (#248): the batch service must run under the route's scoped lease."""
+    import apps.migu_orca_web.routes_tracking as routes
+
+    record = _seed(tmp_path, 1)
+    captured: dict[str, Any] = {}
+
+    def spy(config: Any, *, payload: Any, delete_external: bool) -> dict[str, Any]:
+        captured["scope"] = tracking_batch_scope()
+        captured["delete_external"] = delete_external
+        return {
+            "batch_key": payload.idempotency_key,
+            "kind": "LOCAL_ONLY",
+            "state": "COMPLETED",
+            "items": [],
+            "summary": {
+                "total": 0, "deleted": 0, "external_deleted": 0,
+                "skipped": 0, "failed": 0, "unknown": 0,
+            },
+        }
+
+    monkeypatch.setattr(routes, "run_saved_tracking_batch_delete", spy)
+    response = client.post(
+        "/api/v1/tracking/batch-delete-plan",
+        json={
+            "confirm": True,
+            "idempotency_key": "scoped-route-batch",
+            "items": [{"tracking_id": record.tracking_id, "expected_revision": record.revision}],
+            "storage_dir": "storage",
+        },
+    )
+
+    assert response.status_code == 200, response.get_json()
+    scope = captured["scope"]
+    assert scope is not None
+    assert scope.tracking_ids == frozenset({record.tracking_id})
+    assert scope.storage_dir == _profile(tmp_path)
+    assert scope.connection_ref is None
+
+
+def test_read_only_verifications_do_not_declare_the_batch_exclusion() -> None:
+    """I5 (#248): the published 409 must be reachable after the narrowing."""
+    import json
+    from pathlib import Path as _Path
+
+    doc = json.loads(
+        (_Path(__file__).resolve().parents[2] / "docs/api/openapi.json").read_text(encoding="utf-8")
+    )
+    read_only = (
+        "/api/v1/tracking/items/{tracking_id}/check",
+        "/api/v1/tracking/items/{tracking_id}/revalidate",
+        "/api/v1/tracking/items/{tracking_id}/recover",
+    )
+    external = (
+        "/api/v1/tracking/items/{tracking_id}/submit",
+        "/api/v1/tracking/items/{tracking_id}/retry",
+        "/api/v1/tracking/items/{tracking_id}/delete-plan",
+        "/api/v1/tracking/items/{tracking_id}/resubmit",
+        "/api/v1/tracking/items/{tracking_id}/modify",
+        "/api/v1/tracking/items/{tracking_id}/set-enabled",
+        "/api/v1/tracking/items/{tracking_id}/refresh",
+    )
+    for path in read_only:
+        description = doc["paths"][path]["post"]["responses"]["409"]["description"]
+        assert "connection_in_use" not in description, path
+    for path in external:
+        description = doc["paths"][path]["post"]["responses"]["409"]["description"]
+        assert "connection_in_use" in description, path
+
+
+def test_the_submit_route_publishes_its_occupied_scope(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """B2 (#248): batch-submit must run under the route's scoped lease too."""
+    import apps.migu_orca_web.routes_tracking as routes
+
+    record = _seed(tmp_path, 1, status=TRACKING_STATUS_NEEDS_RECONFIRM)
+    captured: dict[str, Any] = {}
+
+    def spy(config: Any, *, payload: Any) -> dict[str, Any]:
+        captured["scope"] = tracking_batch_scope()
+        return {
+            "items": [],
+            "summary": {
+                "total": 0, "succeeded": 0, "failed": 0, "unknown": 0, "blocked": 0,
+            },
+        }
+
+    monkeypatch.setattr(routes, "run_saved_tracking_batch_submit", spy)
+    response = client.post(
+        "/api/v1/tracking/batch-submit",
+        json={
+            "confirm": True,
+            "connection_ref": REF,
+            "configuration_revision": 1,
+            "storage_dir": "storage",
+            "items": [{
+                "tracking_id": record.tracking_id,
+                "expected_revision": record.revision,
+                "idempotency_key": "route-scoped-submit",
+            }],
+        },
+    )
+
+    assert response.status_code == 200, response.get_json()
+    scope = captured["scope"]
+    assert scope is not None
+    assert scope.tracking_ids == frozenset({record.tracking_id})
+    assert scope.storage_dir == _profile(tmp_path)
+    assert scope.connection_ref == REF
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    ["submit", "retry", "delete-plan", "resubmit", "modify", "set-enabled", "refresh"],
+)
+def test_every_external_write_route_is_refused_on_an_owned_record(
+    tmp_path: Path, client: FlaskClient, suffix: str
+) -> None:
+    owned = _seed(tmp_path, 1)
+    with _HeldBatch(tracking_ids={owned.tracking_id}, storage_dir=_profile(tmp_path)):
+        response = client.post(
+            f"/api/v1/tracking/items/{owned.tracking_id}/{suffix}",
+            json={"confirm": True, "storage_dir": "storage"},
+        )
+
+    assert response.status_code == 409, (suffix, response.get_json())
+    assert response.get_json()["error_type"] == "connection_in_use"
+    assert response.get_json()["error_data"]["failed_step"] == "tracking_batch_exclusion"
+
+
+@pytest.mark.parametrize("suffix", ["check", "revalidate", "recover"])
+def test_read_only_routes_are_never_refused_by_the_batch(
+    tmp_path: Path, client: FlaskClient, suffix: str
+) -> None:
+    owned = _seed(tmp_path, 1)
+    with _HeldBatch(tracking_ids={owned.tracking_id}, storage_dir=_profile(tmp_path)):
+        response = client.post(
+            f"/api/v1/tracking/items/{owned.tracking_id}/{suffix}",
+            json={"expected_revision": owned.revision, "action": "VERIFY_EXTERNAL", "storage_dir": "storage"},
+        )
+
+    assert response.status_code != 500, (suffix, response.get_json())
+    assert response.get_json().get("error_type") != "connection_in_use", (suffix, response.get_json())
