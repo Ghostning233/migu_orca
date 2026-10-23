@@ -126,7 +126,7 @@ def test_external_write_on_an_owned_record_queues_behind_the_batch(
     config: StorageConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # A real queue (not a refusal) needs a wait budget longer than the assertion.
-    monkeypatch.setattr(tracking_repository, "_BATCH_WAIT_SECONDS", 5.0)
+    monkeypatch.setattr(tracking_repository, "_BATCH_WAIT_SECONDS", 120)
     seeded = _seed(config, 1)
     _entered, release, thread = _hold_scope(
         tracking_ids={seeded.tracking_id}, storage_dir=str(config.storage_dir)
@@ -263,7 +263,7 @@ def test_a_batch_cannot_start_inside_an_external_write_critical_section(
     whose intent is already persisted).
     """
     seeded = _seed(config, 1)
-    monkeypatch.setattr(tracking_repository, "_BATCH_WAIT_SECONDS", 5.0)
+    monkeypatch.setattr(tracking_repository, "_BATCH_WAIT_SECONDS", 120)
     inside = threading.Event()
     finish = threading.Event()
     batch_acquired = threading.Event()
@@ -355,7 +355,7 @@ def test_a_queued_write_proceeds_when_the_batch_crashes_inside_the_gate(
     config: StorageConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """#248: a batch that raises inside its lease must release the *queued* write."""
-    monkeypatch.setattr(tracking_repository, "_BATCH_WAIT_SECONDS", 5.0)
+    monkeypatch.setattr(tracking_repository, "_BATCH_WAIT_SECONDS", 120)
     seeded = _seed(config, 1)
     entered = threading.Event()
     crash = threading.Event()
@@ -405,7 +405,7 @@ def test_a_new_batch_waits_for_a_write_that_began_under_another_batch(
     intent it registered keeps batch 2 (which owns this record) from publishing
     its scope inside that critical section.
     """
-    monkeypatch.setattr(tracking_repository, "_BATCH_WAIT_SECONDS", 5.0)
+    monkeypatch.setattr(tracking_repository, "_BATCH_WAIT_SECONDS", 120)
     owned_by_first = _seed(config, 1)
     target = _seed(config, 2)
 

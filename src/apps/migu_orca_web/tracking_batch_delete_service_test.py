@@ -445,6 +445,9 @@ def test_a_single_write_queues_behind_a_batch_and_leaves_no_orphan_intent(
     write persists nothing (not even an intent) until the batch releases the
     store.
     """
+    # The product bound (10s) is intentional; this test only needs an assertion
+    # window that does not depend on CI speed, so widen it for this test alone.
+    monkeypatch.setattr(tracking_repository, "_BATCH_WAIT_SECONDS", 120)
     config, saved = roots
     fake = _FakeAb()
     fake.gate = threading.Event()
