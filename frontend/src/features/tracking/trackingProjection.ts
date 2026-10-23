@@ -545,7 +545,7 @@ export function isRecoverableStatus(status: unknown): status is TrackingItem['st
  *
  * A persistent ``提交`` whose outcome could not be proven shows 结果待确认. The
  * page explains it from the server's *proven* reason class and offers exactly
- * one next step: a read-only 重新检查. The page never supplies a connection —
+ * one next step: a read-only 核验 (button label「核验结果」). The page never supplies a connection —
  * the server resolves the original submit operation's bound Auto Bangumi
  * instance — and it can never rebind, create or resubmit anything.
  */
