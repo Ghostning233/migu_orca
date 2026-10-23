@@ -157,19 +157,34 @@ def _batch_depth() -> int:
     return getattr(_BATCH_STATE, "depth", 0)
 
 
-@contextmanager
-def _external_write_intent() -> Iterator[None]:
-    """Mark one external write as inside its critical section (issue #248)."""
+def _try_pass_through(tracking_id: str, profiles: Iterable[str]) -> bool:
+    """Register a non-conflicting external write atomically with the decision.
+
+    The scope snapshot and the intent registration happen under the same lock, so
+    a batch can neither publish a scope between them nor miss this write when it
+    drains intents (issue #248 R12).
+    """
+    global _ACTIVE_INTENTS
+    with _INTENT_COND:
+        scope = _ACTIVE_SCOPE
+        if scope is None or _scope_conflicts(scope, tracking_id, profiles):
+            return False
+        _ACTIVE_INTENTS += 1
+        return True
+
+
+def _register_intent() -> None:
     global _ACTIVE_INTENTS
     with _INTENT_COND:
         _ACTIVE_INTENTS += 1
-    try:
-        yield
-    finally:
-        with _INTENT_COND:
-            _ACTIVE_INTENTS -= 1
-            if _ACTIVE_INTENTS == 0:
-                _INTENT_COND.notify_all()
+
+
+def _release_intent() -> None:
+    global _ACTIVE_INTENTS
+    with _INTENT_COND:
+        _ACTIVE_INTENTS -= 1
+        if _ACTIVE_INTENTS == 0:
+            _INTENT_COND.notify_all()
 
 
 def _await_no_active_intents(step: str) -> None:
@@ -334,16 +349,17 @@ def _serialized_tracking_write(step: str) -> Iterator[None]:
         yield
         return
     profiles = _request_storage_dirs()
-    scope = _active_scope()
-    if scope is not None and not _scope_conflicts(scope, tracking_id, profiles):
-        # The batch owns other resources; the per-record lock is enough.  Mark
-        # the nesting so a *nested* write can never fall back into the store-lock
-        # path while this record lock is held (issue #248 R1).
+    if _try_pass_through(tracking_id, profiles):
+        # The batch owns other resources; the per-record lock is enough.  The
+        # intent was registered atomically with that decision, so a later batch
+        # cannot publish its scope mid critical section (issue #248 R1/R2/R12),
+        # and the depth keeps a nested write out of the store-lock path.
         _BATCH_STATE.depth = 1
         try:
             yield
         finally:
             _BATCH_STATE.depth = 0
+            _release_intent()
         return
     # No batch: hold the store lock so a batch cannot start *inside* this
     # external-write critical section (ADR-0008 decision 2 / #247).  Conflicting
@@ -359,18 +375,22 @@ def _serialized_tracking_write(step: str) -> Iterator[None]:
     # other resources must not make an unrelated write fail.
     scope = _active_scope()
     if scope is not None and not _scope_conflicts(scope, tracking_id, profiles):
+        _register_intent()
         _BATCH_LOCK.release()
         _BATCH_STATE.depth = 1
         try:
             yield
         finally:
             _BATCH_STATE.depth = 0
+            _release_intent()
         return
     _BATCH_STATE.depth = 1
+    _register_intent()
     try:
         yield
     finally:
         _BATCH_STATE.depth = 0
+        _release_intent()
         _BATCH_LOCK.release()
 
 
@@ -746,11 +766,7 @@ def lock_tracking_record(tracking_id: str) -> Iterator[None]:
         # record published above to decide whether this write conflicts.  The
         # intent is published only after that gate, so a write queued behind a
         # batch never blocks the batch that is already holding the lock.
-        with (
-            _serialized_tracking_write("lock_tracking_record"),
-            _external_write_intent(),
-            _LOCKS.for_key(clean_id),
-        ):
+        with _serialized_tracking_write("lock_tracking_record"), _LOCKS.for_key(clean_id):
             yield
     finally:
         _BATCH_STATE.external_write_id = None

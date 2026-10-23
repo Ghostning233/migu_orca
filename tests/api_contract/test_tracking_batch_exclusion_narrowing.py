@@ -578,3 +578,57 @@ def test_a_completed_batch_replays_while_another_batch_runs(
 
     assert replay.status_code == 200, replay.get_json()
     assert replay.get_json()["result"] == first.get_json()["result"]
+
+
+def test_a_replay_with_different_entries_conflicts_even_while_a_batch_runs(
+    tmp_path: Path, client: FlaskClient
+) -> None:
+    """B4 (#248): the replay fallback must never bypass the binding check."""
+    first = _seed(tmp_path, 1)
+    second = _seed(tmp_path, 2)
+    other = _seed(tmp_path, 3)
+    body = {
+        "confirm": True,
+        "idempotency_key": "replay-binding",
+        "items": [{"tracking_id": first.tracking_id, "expected_revision": first.revision}],
+        "storage_dir": "storage",
+    }
+    assert client.post("/api/v1/tracking/batch-delete-plan", json=body).status_code == 200
+
+    with _HeldBatch(tracking_ids={other.tracking_id}, storage_dir=_profile(tmp_path)):
+        response = client.post(
+            "/api/v1/tracking/batch-delete-plan",
+            json={
+                **body,
+                "items": [
+                    {"tracking_id": second.tracking_id, "expected_revision": second.revision}
+                ],
+            },
+        )
+
+    assert response.status_code == 409, response.get_json()
+    assert response.get_json()["error_type"] == "idempotency_conflict"
+
+
+def test_a_replay_with_a_different_kind_conflicts_even_while_a_batch_runs(
+    tmp_path: Path, client: FlaskClient
+) -> None:
+    """B4 (#248): local vs external is part of the batch identity."""
+    first = _seed(tmp_path, 1)
+    other = _seed(tmp_path, 2)
+    body = {
+        "confirm": True,
+        "idempotency_key": "replay-kind",
+        "items": [{"tracking_id": first.tracking_id, "expected_revision": first.revision}],
+        "storage_dir": "storage",
+    }
+    assert client.post("/api/v1/tracking/batch-delete-plan", json=body).status_code == 200
+
+    with _HeldBatch(tracking_ids={other.tracking_id}, storage_dir=_profile(tmp_path)):
+        response = client.post(
+            "/api/v1/tracking/batch-delete-plan-external",
+            json={**body, "connection_ref": REF, "configuration_revision": 1},
+        )
+
+    assert response.status_code == 409, response.get_json()
+    assert response.get_json()["error_type"] == "idempotency_conflict"

@@ -42,6 +42,18 @@ from apps.migu_orca_web.schemas import (
 )
 from apps.migu_orca_web.services import _storage_dir
 from apps.migu_orca_web.tracking_batch_delete_service import (
+    # The batch binding digest and its authoritative comparison live in the
+    # service; the route reuses them so a completed replay can be answered
+    # before the lease without ever bypassing the idempotency binding (issue
+    # #248 B4).  A public read-only seam would be preferable; the file面 for
+    # this ticket does not allow changing the service.
+    KIND_LOCAL_AND_EXTERNAL,
+    KIND_LOCAL_ONLY,
+    STATE_COMPLETED,
+    _fingerprint,
+    _public,
+    _read_record,
+    _require_same_batch,
     ensure_no_racing_single_writes,
     get_saved_tracking_batch_delete,
     run_saved_tracking_batch_delete,
@@ -394,31 +406,28 @@ def _run_batch_delete(
 ) -> dict[str, object]:
     """Run one batch delete under the route-published resource scope.
 
-    A replay of an already completed batch is a pure read, so another running
-    batch must not turn it into a 409: fall back to the stored result.
+    A **finished** batch is replayed as a pure read before the lease, but only
+    after the same binding check the service performs: a same-key request with
+    different entries or a different kind still gets ``idempotency_conflict``
+    instead of another batch's stored result (issue #248 B4).
     """
-    try:
-        with tracking_batch_lease(
-            batch_key=payload.idempotency_key,
-            tracking_ids=tracking_ids,
-            connection_ref=connection_ref,
-            storage_dir=str(config.storage_dir),
-        ):
-            return run_saved_tracking_batch_delete(
-                config,
-                payload=payload,
-                delete_external=delete_external,
-            )
-    except Stage1Error as exc:
-        if exc.error_type != "connection_in_use":
-            raise
-        try:
-            stored = get_saved_tracking_batch_delete(config, batch_key=payload.idempotency_key)
-        except Stage1Error:
-            raise exc from None
-        if stored.get("state") == "COMPLETED":
-            return stored
-        raise
+    kind = KIND_LOCAL_AND_EXTERNAL if delete_external else KIND_LOCAL_ONLY
+    existing = _read_record(config, payload.idempotency_key)
+    if existing is not None:
+        _require_same_batch(existing, _fingerprint(kind, payload.items))
+        if existing.get("state") == STATE_COMPLETED:
+            return _public(existing)
+    with tracking_batch_lease(
+        batch_key=payload.idempotency_key,
+        tracking_ids=tracking_ids,
+        connection_ref=connection_ref,
+        storage_dir=str(config.storage_dir),
+    ):
+        return run_saved_tracking_batch_delete(
+            config,
+            payload=payload,
+            delete_external=delete_external,
+        )
 
 
 @class_route(

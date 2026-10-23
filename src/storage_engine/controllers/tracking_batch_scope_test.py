@@ -394,3 +394,58 @@ def test_a_queued_write_proceeds_when_the_batch_crashes_inside_the_gate(
     assert done.wait(timeout=10), "the waiter must proceed after the batch crashed"
     worker.join(timeout=5)
     assert tracking_batch_scope() is None
+
+
+def test_a_new_batch_waits_for_a_write_that_began_under_another_batch(
+    config: StorageConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R2 (#248): a later batch owning the record must wait for the intent.
+
+    The single write passed through because batch 1 owned another record; the
+    intent it registered keeps batch 2 (which owns this record) from publishing
+    its scope inside that critical section.
+    """
+    monkeypatch.setattr(tracking_repository, "_BATCH_WAIT_SECONDS", 5.0)
+    owned_by_first = _seed(config, 1)
+    target = _seed(config, 2)
+
+    first_entered, release_first, first_thread = _hold_scope(
+        tracking_ids={owned_by_first.tracking_id}, storage_dir=str(config.storage_dir)
+    )
+    inside = threading.Event()
+    finish = threading.Event()
+
+    def single_write() -> None:
+        note_request_storage_dirs({str(config.storage_dir)})
+        with lock_tracking_record(target.tracking_id):
+            inside.set()
+            assert finish.wait(timeout=10)
+
+    writer = threading.Thread(target=single_write)
+    writer.start()
+    assert inside.wait(timeout=10)
+
+    # End batch 1 and start batch 2 (which owns the record the write is holding).
+    release_first.set()
+    first_thread.join(timeout=10)
+    second_acquired = threading.Event()
+
+    def second_batch() -> None:
+        with tracking_batch_lease(
+            batch_key="second-batch",
+            tracking_ids={target.tracking_id},
+            storage_dir=str(config.storage_dir),
+        ):
+            second_acquired.set()
+
+    second_thread = threading.Thread(target=second_batch)
+    second_thread.start()
+    try:
+        assert not second_acquired.wait(timeout=0.3), (
+            "the new batch entered while an external write intent was active"
+        )
+    finally:
+        finish.set()
+        writer.join(timeout=10)
+    assert second_acquired.wait(timeout=10)
+    second_thread.join(timeout=10)
