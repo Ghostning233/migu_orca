@@ -20299,7 +20299,7 @@
     "/api/v1/tracking/items/{tracking_id}": {
       "get": {
         "summary": "查看统一追番记录安全详情",
-        "description": "US-223：读取单条统一追番记录，复用 Request safe-info 白名单，额外只返回当前 operation 安全摘要、revalidation issues、外部安全映射摘要与最近 20 条审计事件；绝不回显完整 Request、外部原始 JSON、完整 URL、凭据、magnet 或绝对路径。缺失 → tracking_not_found；路径片段 → invalid_tracking_id。",
+        "description": "US-223：读取单条统一追番记录，复用 Request safe-info 白名单，额外只返回当前 operation 安全摘要、revalidation issues、当前失败的持久化原因（issue #241 的 last_failure，仅 NEEDS_RECONFIRM/SUBMIT_FAILED 且与当前失败绑定）、外部安全映射摘要与最近 20 条审计事件；绝不回显完整 Request、外部原始 JSON、完整 URL、凭据、magnet 或绝对路径。缺失 → tracking_not_found；路径片段 → invalid_tracking_id。",
         "operationId": "getTrackingItemDetail",
         "responses": {
           "200": {
@@ -21174,6 +21174,87 @@
                           "title": "Revalidation Issues",
                           "type": "array"
                         },
+                        "last_failure": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "description": "Issue #241: the persisted reason of the record's *current* failure.\n\nOnly ``NEEDS_RECONFIRM`` and ``SUBMIT_FAILED`` records publish it, and only\nwhile that failure is still the record's state.  ``category`` is specific to\n``SUBMIT_FAILED`` (a revalidation failure names its issue in\n``reason_code``/``safe_message`` instead).  ``safe_message`` is the\nsanitized copy persisted with the failure; a failed submission always stores\nthe fixed 「提交失败，可重新提交」 line, so ``category`` is the part the page\ncan translate into a real instruction.  ``occurred_at`` is filled only from\nthe audit transition bound to this failure or from the terminal operation's\ncompletion time — never from ``updated_at``.",
+                              "properties": {
+                                "error_type": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "default": null,
+                                  "title": "Error Type"
+                                },
+                                "category": {
+                                  "anyOf": [
+                                    {
+                                      "enum": [
+                                        "CONNECTION",
+                                        "AUTHENTICATION",
+                                        "VERSION",
+                                        "CAPABILITY",
+                                        "DUPLICATE_SUBSCRIPTION",
+                                        "VALIDATION",
+                                        "REJECTED",
+                                        "OUTCOME_UNKNOWN"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "default": null,
+                                  "title": "Category"
+                                },
+                                "reason_code": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "default": null,
+                                  "title": "Reason Code"
+                                },
+                                "safe_message": {
+                                  "title": "Safe Message",
+                                  "type": "string"
+                                },
+                                "occurred_at": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "default": null,
+                                  "title": "Occurred At"
+                                }
+                              },
+                              "required": [
+                                "safe_message"
+                              ],
+                              "title": "TrackingLastFailureDTO",
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null
+                        },
                         "external_mapping": {
                           "anyOf": [
                             {
@@ -21444,6 +21525,7 @@
                         "recovery_action": "示例"
                       }
                     ],
+                    "last_failure": null,
                     "external_mapping": null,
                     "audit_events": [
                       {

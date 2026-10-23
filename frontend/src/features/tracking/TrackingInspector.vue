@@ -283,7 +283,7 @@ function requestResubmit(): void {
  * any of it (the action hierarchy belongs to T4b).
  */
 interface MainFeedback {
-  readonly source: 'write' | 'revalidation'
+  readonly source: 'write' | 'record'
   readonly tone: 'warning' | 'danger'
   readonly title: string
   readonly verdict: string
@@ -311,12 +311,17 @@ const WRITE_FEEDBACK: Record<FeedbackState, { title: string; tone: 'warning' | '
   UNKNOWN: { title: '本次提交结果待确认', tone: 'warning' },
 }
 
+type LastFailureCategory = NonNullable<
+  NonNullable<TrackingDetail['last_failure']>['category']
+>
+
 /**
  * The next step per server-published failure class.  A credential, version or
  * capability failure needs the saved connection fixed before another submit, so
  * it must never be answered with a flat «retry» (the session copy already says so).
+ * A total record over the generated union: a new category is a compile error.
  */
-const FAILURE_NEXT_STEPS: Record<string, string> = {
+const FAILURE_NEXT_STEPS: Record<LastFailureCategory, string> = {
   CONNECTION: '先前往设置检查地址与网络，再回来提交。',
   AUTHENTICATION: '先前往设置更新账号或密码，再回来提交。',
   VERSION: '先前往设置确认 Auto Bangumi 版本，再回来提交。',
@@ -325,6 +330,38 @@ const FAILURE_NEXT_STEPS: Record<string, string> = {
   VALIDATION: '按提示修改追番方案后重新提交。',
   REJECTED: '检查方案内容后重新确认提交。',
   OUTCOME_UNKNOWN: '先做只读核验；未确认前不要重复提交。',
+}
+
+/**
+ * The public failure category in the user's words (issue #241).  A refreshed
+ * SUBMIT_FAILED record only keeps its category, so this table is what the card
+ * can honestly say; an unknown category falls back to the generic next step.
+ */
+//: A total record over the generated category union, so a server-side addition
+//: is a compile error here instead of a silent missing label.
+const FAILURE_CATEGORY_LABELS: Record<LastFailureCategory, string> = {
+  CONNECTION: '无法连接 Auto Bangumi',
+  AUTHENTICATION: 'Auto Bangumi 认证失败',
+  VERSION: 'Auto Bangumi 版本不受支持',
+  CAPABILITY: '当前连接不支持创建订阅',
+  DUPLICATE_SUBSCRIPTION: '已存在相同订阅',
+  VALIDATION: '提交前检查未通过',
+  REJECTED: 'Auto Bangumi 明确拒绝',
+  OUTCOME_UNKNOWN: '提交结果待确认',
+}
+
+/** The label for a published category; an unknown value yields no reason. */
+function failureCategoryLabel(category: string): string | null {
+  return Object.prototype.hasOwnProperty.call(FAILURE_CATEGORY_LABELS, category)
+    ? FAILURE_CATEGORY_LABELS[category as LastFailureCategory]
+    : null
+}
+
+/** The next step for a published category; unknown values keep the state copy. */
+function failureCategoryNextStep(category: string): string | null {
+  return Object.prototype.hasOwnProperty.call(FAILURE_NEXT_STEPS, category)
+    ? FAILURE_NEXT_STEPS[category as LastFailureCategory]
+    : null
 }
 
 const STATE_NEXT_STEPS: Record<FeedbackState, string> = {
@@ -351,10 +388,10 @@ const failingWrite = computed(() => {
 /**
  * Record-level feedback for a reloaded page that has no live write session.
  *
- * The read DTO does not persist a failure reason, so these entries only state
- * what the status itself proves and point at the safe next move.  They keep AC5
- * (reason/next step on the first screen) true after a refresh; the reason list
- * still comes from a live result or from ``revalidation_issues`` when present.
+ * These entries state what the status itself proves and point at the safe next
+ * move; the reason list is resolved separately (issue #241) from the live
+ * result, the structured revalidation issues, or the persisted
+ * ``last_failure`` — never fabricated when no evidence exists.
  */
 const RECORD_FEEDBACK: Record<string, { title: string; tone: 'warning' | 'danger'; verdict: string; nextStep: string }> = {
   SUBMIT_FAILED: {
@@ -373,6 +410,33 @@ const RECORD_FEEDBACK: Record<string, { title: string; tone: 'warning' | 'danger
   },
 }
 
+/**
+ * Exactly one reason set per card (issue #241):
+ *
+ * 1. a live write result (its own ``issues``) wins;
+ * 2. the structured revalidation issues published with the record;
+ * 3. the persisted ``last_failure`` — its exact issue sentence for
+ *    ``NEEDS_RECONFIRM``, and only the translated category for
+ *    ``SUBMIT_FAILED`` (that status stores fixed copy, never detail).
+ *
+ * An unknown category produces no reason at all, so the card keeps the generic
+ * next step instead of inventing a cause.
+ */
+const recordFailureReasons = computed<string[]>(() => {
+  const issues = detail.value?.revalidation_issues ?? []
+  if (issues.length) return issues.map((issue) => issue.message)
+  const failure = detail.value?.last_failure
+  if (!failure) return []
+  if (detail.value?.status === 'NEEDS_RECONFIRM') {
+    return failure.safe_message ? [failure.safe_message] : []
+  }
+  if (detail.value?.status === 'SUBMIT_FAILED') {
+    const label = failure.category ? failureCategoryLabel(failure.category) : null
+    return label ? [label] : []
+  }
+  return []
+})
+
 const mainFeedback = computed<MainFeedback | null>(() => {
   const session = failingWrite.value
   if (session) {
@@ -384,18 +448,22 @@ const mainFeedback = computed<MainFeedback | null>(() => {
       title: WRITE_FEEDBACK[state].title,
       verdict: session.message,
       reasons: session.issues.map((issue) => issue.message),
-      nextStep: (category ? FAILURE_NEXT_STEPS[category] : undefined) ?? STATE_NEXT_STEPS[state],
+      nextStep: (category ? failureCategoryNextStep(category) : null) ?? STATE_NEXT_STEPS[state],
     }
   }
   const record = detail.value ? RECORD_FEEDBACK[detail.value.status] : undefined
   if (!record) return null
+  const failure = detail.value?.last_failure
+  const categoryStep = detail.value?.status === 'SUBMIT_FAILED' && failure?.category
+    ? failureCategoryNextStep(failure.category)
+    : null
   return {
-    source: 'revalidation',
+    source: 'record',
     tone: record.tone,
     title: record.title,
     verdict: record.verdict,
-    reasons: (detail.value?.revalidation_issues ?? []).map((issue) => issue.message),
-    nextStep: record.nextStep,
+    reasons: recordFailureReasons.value,
+    nextStep: categoryStep ?? record.nextStep,
   }
 })
 
@@ -958,7 +1026,7 @@ defineExpose({ reload: () => fetchDetail(true) })
         >
           <p class="tracking-submit-verdict">{{ mainFeedback.verdict }}</p>
           <template v-if="mainFeedback.reasons.length">
-            <p v-if="mainFeedback.source === 'revalidation'" class="field-help">原因</p>
+            <p v-if="mainFeedback.source === 'record'" class="field-help">原因</p>
             <ul class="tracking-submit-issues" aria-label="提交问题">
               <li v-for="reason in mainFeedback.reasons" :key="reason">{{ reason }}</li>
             </ul>

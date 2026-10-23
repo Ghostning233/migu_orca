@@ -45,6 +45,21 @@ class _StrictBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+#: The public failure category a submit-family result publishes (issue #86):
+#: what the user must fix, never an upstream response.  One alias so a new
+#: category is added once and every DTO follows.
+TrackingFailureCategory = Literal[
+    "CONNECTION",
+    "AUTHENTICATION",
+    "VERSION",
+    "CAPABILITY",
+    "DUPLICATE_SUBSCRIPTION",
+    "VALIDATION",
+    "REJECTED",
+    "OUTCOME_UNKNOWN",
+]
+
+
 class ApiOkEnvelope(_StrictBase):
     """Successful envelope: ``{"ok": true, "result": {...}}``."""
 
@@ -997,6 +1012,32 @@ class TrackingItemListResultDTO(_StrictBase):
     warnings: list[str] = Field(default_factory=list)
 
 
+class TrackingLastFailureDTO(_StrictBase):
+    """Issue #241: the persisted reason of the record's *current* failure.
+
+    Only ``NEEDS_RECONFIRM`` and ``SUBMIT_FAILED`` records publish it, and only
+    while that failure is still the record's state.  ``category`` is specific to
+    ``SUBMIT_FAILED`` (a revalidation failure names its issue in
+    ``reason_code``/``safe_message`` instead).  ``safe_message`` is the
+    sanitized copy persisted with the failure; a failed submission always stores
+    the fixed 「提交失败，可重新提交」 line, so ``category`` is the part the page
+    can translate into a real instruction.  ``occurred_at`` is filled only from
+    the audit transition bound to this failure or from the terminal operation's
+    completion time — never from ``updated_at``.
+    """
+
+    error_type: str | None = None
+    #: The same public failure category a live submit response publishes.
+    category: TrackingFailureCategory | None = None
+    reason_code: str | None = None
+    safe_message: str
+    occurred_at: str | None = None
+    #: For every reachable ``SUBMIT_FAILED`` write, ``error_type`` and
+    #: ``reason_code`` carry the same adapter code (the writer stores both from
+    #: the persisted operation); they are kept apart so a future source can
+    #: publish a distinct reason without another contract change.
+
+
 class TrackingDetailResultDTO(_StrictBase):
     """Result of ``GET /api/v1/tracking/items/{tracking_id}`` (§11.3).
 
@@ -1046,6 +1087,10 @@ class TrackingDetailResultDTO(_StrictBase):
     revalidation_issues: list[TrackingRevalidationIssueDTO] = Field(
         default_factory=list
     )
+    #: Issue #241: the persisted reason of the record's current failure, present
+    #: only for ``NEEDS_RECONFIRM``/``SUBMIT_FAILED`` and only while that failure
+    #: is bound to the record's current operation/transition.
+    last_failure: TrackingLastFailureDTO | None = None
     external_mapping: TrackingExternalSummaryDTO | None = None
     audit_events: list[TrackingAuditEventDTO] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
@@ -1122,16 +1167,7 @@ class TrackingSubmitResultDTO(_StrictBase):
     #: success; every other code maps to fixed client copy and a fixed display
     #: channel (blocking dialog vs. inline item message).
     diagnostics: TrackingSubmitDiagnosticsDTO = Field(default_factory=TrackingSubmitDiagnosticsDTO)
-    failure_category: Literal[
-        "CONNECTION",
-        "AUTHENTICATION",
-        "VERSION",
-        "CAPABILITY",
-        "DUPLICATE_SUBSCRIPTION",
-        "VALIDATION",
-        "REJECTED",
-        "OUTCOME_UNKNOWN",
-    ] | None = None
+    failure_category: TrackingFailureCategory | None = None
     #: Issue #183: the proven reason class of a ``VERIFYING_EXTERNAL`` /
     #: ``RECOVERY_REQUIRED`` outcome (``NOT_FOUND``/``AMBIGUOUS``/``UNREADABLE``/
     #: ``CONNECTION``/``AUTHENTICATION``/``VERSION``/``CAPABILITY``), so the page
@@ -1366,16 +1402,7 @@ class TrackingResubmitResultDTO(_StrictBase):
     #: The pending operation a confirmed resubmit replaced; its record and audit
     #: are preserved.
     previous_operation_id: str | None = None
-    failure_category: Literal[
-        "CONNECTION",
-        "AUTHENTICATION",
-        "VERSION",
-        "CAPABILITY",
-        "DUPLICATE_SUBSCRIPTION",
-        "VALIDATION",
-        "REJECTED",
-        "OUTCOME_UNKNOWN",
-    ] | None = None
+    failure_category: TrackingFailureCategory | None = None
     diagnostics: TrackingSubmitDiagnosticsDTO = Field(
         default_factory=TrackingSubmitDiagnosticsDTO
     )
