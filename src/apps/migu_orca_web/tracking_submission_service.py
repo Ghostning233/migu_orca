@@ -72,6 +72,7 @@ from storage_engine.controllers.autobangumi_config_repository import (
 )
 from storage_engine.controllers.operation_repository import (
     bind_tracking_operation,
+    claimable_prepared_operation,
     compare_and_swap_tracking_operation,
     load_tracking_operation,
 )
@@ -83,7 +84,9 @@ from storage_engine.controllers.storage_config import StorageConfig
 from storage_engine.controllers.tracking_repository import (
     compare_and_swap_tracking_record,
     load_tracking_record,
+    lock_tracking_record,
 )
+from tracking_engine.controllers.recover import RECOVERABLE_STATUSES
 from tracking_engine.controllers.revalidate import (
     REVALIDATE_ISSUE_REQUEST_CHANGED,
     RevalidationEvidence,
@@ -653,6 +656,153 @@ def _coerce_saved_submit_input(
 # ---------------------------------------------------------------------------
 
 
+def _resume_prepared_binding(
+    config: StorageConfig,
+    *,
+    record: TrackingRecord,
+    request: dict[str, Any] | None,
+    operation: TrackingOperation,
+    expected_revision: int,
+    idempotency_key: str,
+    fingerprint: str | None,
+    ab_config: Any,
+    connection_ref: str | UUID | None,
+    submit_one: Any,
+    persist_ab_result: Any,
+    readback_external: Any,
+    timestamp: str,
+) -> dict[str, Any]:
+    """Resume one claimable PREPARED binding (no external call yet, #247)."""
+    if not isinstance(request, dict):
+        return _resume_missing_request(config, record, operation, timestamp)
+    return _submit_through_external(
+        config,
+        record=record,
+        request=request,
+        fingerprint=fingerprint,
+        expected_revision=expected_revision,
+        idempotency_key=idempotency_key,
+        ab_config=ab_config,
+        connection_ref=connection_ref,
+        operation=operation,
+        submit_one=submit_one,
+        persist_ab_result=persist_ab_result,
+        readback_external=readback_external,
+        timestamp=timestamp,
+    )
+
+
+def _raise_unclaimable_prepared(record: TrackingRecord) -> None:
+    """The stored PREPARED binding is not this failure's residue (issue #247)."""
+    raise Stage1Error(
+        "tracking_state_conflict",
+        "该提交操作无法证明可安全恢复，请刷新后重新提交",
+        "tracking_submit",
+        {
+            "reason": "unclaimable_prepared_operation",
+            "field": "current_operation_id",
+            "current_status": record.status,
+        },
+    )
+
+
+def _submit_claim_statuses(operation: TrackingOperation) -> frozenset[str]:
+    """Statuses a same-key submit claim may start from (issue #247).
+
+    A risk-confirmed resubmit binds a fresh ``SUBMIT`` operation while the
+    record is still in a recoverable (unresolved) state, so those statuses are
+    allowed only when the operation records the pending operation it replaces.
+    """
+    if operation.previous_operation_id is not None:
+        return SUBMIT_FROM_STATUSES | RECOVERABLE_STATUSES
+    return SUBMIT_FROM_STATUSES
+
+
+def _locked_record_snapshot(
+    config: StorageConfig, record: TrackingRecord
+) -> TrackingRecord:
+    """Re-read the record under the lock; a concurrent write is a conflict."""
+    fresh = load_tracking_record(config, record.tracking_id)
+    if fresh.revision != record.revision:
+        # A competing writer moved the record between the caller's read and the
+        # critical section; keep the historical in-progress contract.
+        _raise_operation_in_progress(fresh)
+    return fresh
+
+
+def _attach_operation_pointer(
+    config: StorageConfig,
+    record: TrackingRecord,
+    operation: TrackingOperation,
+    fingerprint: str | None,
+    timestamp: str,
+) -> TrackingRecord:
+    """Persist ``SUBMITTING`` + ``current_operation_id`` for this operation.
+
+    The caller holds the per-record lock.  A record already in ``SUBMITTING``
+    for this operation is the crashed pointer write (nothing to do); a different
+    one is an in-progress intent that must not be stolen.
+    """
+    if record.status == TRACKING_STATUS_SUBMITTING:
+        if record.current_operation_id == operation.operation_id:
+            return record
+        _raise_operation_in_progress(record)
+    adopted = fingerprint is not None and record.request_fingerprint != fingerprint
+    next_record = transition_record(
+        record,
+        status=TRACKING_STATUS_SUBMITTING,
+        audit_action=TRACKING_AUDIT_SUBMIT_STARTED,
+        audit_actor=TRACKING_AUDIT_ACTOR_SYSTEM,
+        operation_id=operation.operation_id,
+        safe_message=SUBMIT_ADOPTED_MESSAGE if adopted else SUBMIT_STARTED_MESSAGE,
+        now=timestamp,
+    )
+    next_record = replace(
+        next_record,
+        current_operation_id=operation.operation_id,
+        request_fingerprint=fingerprint,
+    )
+    try:
+        return compare_and_swap_tracking_record(
+            config,
+            record.tracking_id,
+            base_revision=record.revision,
+            record=next_record,
+        )
+    except Stage1Error as exc:
+        if exc.error_type == "tracking_revision_conflict":
+            _raise_operation_in_progress(record)
+        raise
+
+
+def _open_external_gate(
+    config: StorageConfig,
+    record: TrackingRecord,
+    operation: TrackingOperation,
+    timestamp: str,
+) -> TrackingOperation:
+    """Mirror the boundary into the legacy queue and win the execution gate."""
+    # §13.2: when a legacy batch queue still holds this Request, mirror the
+    # SUBMITTING boundary into it before the external call (best-effort; a
+    # damaged/unwritable queue never blocks the authoritative submit).
+    _sync_queue_projection(config, record, TRACKING_STATUS_SUBMITTING)
+    try:
+        return compare_and_swap_tracking_operation(
+            config,
+            operation.operation_id,
+            expected_state=TRACKING_OPERATION_STATE_PREPARED,
+            record=transition_tracking_operation(
+                operation,
+                state=TRACKING_OPERATION_STATE_IN_PROGRESS,
+                now=timestamp,
+            ),
+        )
+    except Stage1Error as exc:
+        if exc.error_type == "tracking_operation_state_conflict":
+            _raise_operation_in_progress(record)
+        raise
+
+
 def _resolve_existing_operation(
     config: StorageConfig,
     *,
@@ -689,53 +839,87 @@ def _resolve_existing_operation(
         _raise_operation_in_progress(record)
 
     # operation.state == PREPARED: the external system was provably never
-    # called, so the same-key request may resume the normal submit path.
+    # called *if* this is the crash residue of this very binding (issue #247).
+    if not claimable_prepared_operation(
+        record, operation, allowed_statuses=_submit_claim_statuses(operation)
+    ):
+        _raise_unclaimable_prepared(record)
     if record.status == TRACKING_STATUS_SUBMITTING and (
         record.current_operation_id == operation.operation_id
     ):
         # The earlier attempt already persisted SUBMITTING before crashing;
         # resume from the durable operation gate.
-        if not isinstance(request, dict):
-            return _resume_missing_request(config, record, operation, timestamp)
-        return _submit_through_external(
+        return _resume_prepared_binding(
             config,
             record=record,
             request=request,
-            fingerprint=fingerprint,
+            operation=operation,
             expected_revision=expected_revision,
             idempotency_key=idempotency_key,
+            fingerprint=fingerprint,
             ab_config=ab_config,
             connection_ref=connection_ref,
-            operation=operation,
             submit_one=submit_one,
             persist_ab_result=persist_ab_result,
             readback_external=readback_external,
             timestamp=timestamp,
         )
-    if record.status in SUBMIT_FROM_STATUSES:
-        if not isinstance(request, dict):
-            return _resume_missing_request(config, record, operation, timestamp)
-        return _submit_through_external(
+    # The predecessor shape is reachable through /submit only when a resubmit
+    # binding is replayed with its derived key; run_saved_tracking_resubmit goes
+    # straight to _submit_through_external.  Keeping the branch here keeps the
+    # same-key replay consistent across both entries.
+    if record.status in SUBMIT_FROM_STATUSES or (
+        operation.previous_operation_id is not None
+        and record.current_operation_id == operation.previous_operation_id
+    ):
+        return _resume_prepared_binding(
             config,
             record=record,
             request=request,
-            fingerprint=fingerprint,
+            operation=operation,
             expected_revision=expected_revision,
             idempotency_key=idempotency_key,
+            fingerprint=fingerprint,
             ab_config=ab_config,
             connection_ref=connection_ref,
-            operation=operation,
             submit_one=submit_one,
             persist_ab_result=persist_ab_result,
             readback_external=readback_external,
             timestamp=timestamp,
         )
-    # The record no longer allows submission; the prepared operation cannot
-    # safely continue.
-    _raise_operation_in_progress(record)
+    # Claimable but not one of the two recorded shapes (e.g. a resubmit whose
+    # pointer write never happened): the predicate above already proved the
+    # external was never called, so resume the same durable path.
+    return _resume_prepared_binding(
+        config,
+        record=record,
+        request=request,
+        operation=operation,
+        expected_revision=expected_revision,
+        idempotency_key=idempotency_key,
+        fingerprint=fingerprint,
+        ab_config=ab_config,
+        connection_ref=connection_ref,
+        submit_one=submit_one,
+        persist_ab_result=persist_ab_result,
+        readback_external=readback_external,
+        timestamp=timestamp,
+    )
 
 
 def _resume_missing_request(
+    config: StorageConfig,
+    record: TrackingRecord,
+    operation: TrackingOperation,
+    timestamp: str,
+) -> dict[str, Any]:
+    """Fail the PREPARED operation and point the record at it (locked, #247)."""
+    with lock_tracking_record(record.tracking_id):
+        fresh = load_tracking_record(config, record.tracking_id)
+        return _resume_missing_request_locked(config, fresh, operation, timestamp)
+
+
+def _resume_missing_request_locked(
     config: StorageConfig,
     record: TrackingRecord,
     operation: TrackingOperation,
@@ -881,25 +1065,42 @@ def _submit_through_external(
 ) -> dict[str, Any]:
     """Persist the SUBMITTING boundary, gate the external call and finalize."""
     if operation is None:
-        operation, created = bind_tracking_operation(
-            config,
-            tracking_id=record.tracking_id,
-            operation=TRACKING_OPERATION_KIND_SUBMIT,
-            idempotency_key=idempotency_key,
-            expected_revision=expected_revision,
-            request_fingerprint=fingerprint or "",
-            connection_ref=connection_ref,
-            submission_mode=submission_mode,
-            # Issue #184: a resubmit operation records the pending operation it
-            # replaces; an ordinary submit leaves the link null.
-            previous_operation_id=previous_operation_id,
-            now=timestamp,
-        )
-        if not created:
-            # A concurrent same-key bind won the race; resolve by its state.
+        # Issue #247: the binding and the record pointer are one critical
+        # section.  The per-record lock comes first, the per-key operation lock
+        # is taken inside bind, and the PREPARED -> IN_PROGRESS gate stays in the
+        # same section so two retriers cannot both take execution.
+        with lock_tracking_record(record.tracking_id):
+            fresh = _locked_record_snapshot(config, record)
+            operation, created = bind_tracking_operation(
+                config,
+                tracking_id=fresh.tracking_id,
+                operation=TRACKING_OPERATION_KIND_SUBMIT,
+                idempotency_key=idempotency_key,
+                expected_revision=expected_revision,
+                request_fingerprint=fingerprint or "",
+                connection_ref=connection_ref,
+                submission_mode=submission_mode,
+                # Issue #184: a resubmit operation records the pending operation it
+                # replaces; an ordinary submit leaves the link null.
+                previous_operation_id=previous_operation_id,
+                now=timestamp,
+            )
+            claimed = created or claimable_prepared_operation(
+                fresh, operation, allowed_statuses=_submit_claim_statuses(operation)
+            )
+            if claimed:
+                record = _attach_operation_pointer(
+                    config, fresh, operation, fingerprint, timestamp
+                )
+                operation = _open_external_gate(config, record, operation, timestamp)
+            else:
+                pending_resolve = fresh
+        if not claimed:
+            # Not this failure's residue (another operation owns the pointer, or
+            # the record moved on): resolve by the stored state, never re-attach.
             return _resolve_existing_operation(
                 config,
-                record=record,
+                record=pending_resolve,
                 request=request,
                 operation=operation,
                 expected_revision=expected_revision,
@@ -912,61 +1113,17 @@ def _submit_through_external(
                 timestamp=timestamp,
                 readback_external=readback_external,
             )
-
-    if record.status != TRACKING_STATUS_SUBMITTING:
-        adopted = fingerprint is not None and record.request_fingerprint != fingerprint
-        next_record = transition_record(
-            record,
-            status=TRACKING_STATUS_SUBMITTING,
-            audit_action=TRACKING_AUDIT_SUBMIT_STARTED,
-            audit_actor=TRACKING_AUDIT_ACTOR_SYSTEM,
-            operation_id=operation.operation_id,
-            safe_message=SUBMIT_ADOPTED_MESSAGE if adopted else SUBMIT_STARTED_MESSAGE,
-            now=timestamp,
-        )
-        next_record = replace(
-            next_record,
-            current_operation_id=operation.operation_id,
-            request_fingerprint=fingerprint,
-        )
-        try:
-            record = compare_and_swap_tracking_record(
-                config,
-                record.tracking_id,
-                base_revision=record.revision,
-                record=next_record,
+    else:
+        with lock_tracking_record(record.tracking_id):
+            fresh = _locked_record_snapshot(config, record)
+            if operation.state == TRACKING_OPERATION_STATE_PREPARED and not claimable_prepared_operation(
+                fresh, operation, allowed_statuses=_submit_claim_statuses(operation)
+            ):
+                _raise_unclaimable_prepared(fresh)
+            record = _attach_operation_pointer(
+                config, fresh, operation, fingerprint, timestamp
             )
-        except Stage1Error as exc:
-            if exc.error_type == "tracking_revision_conflict":
-                # A competing submit already moved the record into SUBMITTING.
-                _raise_operation_in_progress(record)
-            raise
-    elif record.current_operation_id != operation.operation_id:
-        _raise_operation_in_progress(record)
-
-    # §13.2: when a legacy batch queue still holds this Request, mirror the
-    # SUBMITTING boundary into it before the external call (best-effort; a
-    # damaged/unwritable queue never blocks the authoritative submit).
-    _sync_queue_projection(config, record, TRACKING_STATUS_SUBMITTING)
-
-    # Durable external boundary: only the caller that wins the PREPARED ->
-    # IN_PROGRESS compare-and-swap may touch Auto Bangumi.
-    try:
-        in_flight = compare_and_swap_tracking_operation(
-            config,
-            operation.operation_id,
-            expected_state=TRACKING_OPERATION_STATE_PREPARED,
-            record=transition_tracking_operation(
-                operation,
-                state=TRACKING_OPERATION_STATE_IN_PROGRESS,
-                now=timestamp,
-            ),
-        )
-    except Stage1Error as exc:
-        if exc.error_type == "tracking_operation_state_conflict":
-            _raise_operation_in_progress(record)
-        raise
-    operation = in_flight
+            operation = _open_external_gate(config, record, operation, timestamp)
 
     # Issue #217: the persistent operation is the authority for the submission
     # mode.  A PREPARED resume (crash between the bind and the durable

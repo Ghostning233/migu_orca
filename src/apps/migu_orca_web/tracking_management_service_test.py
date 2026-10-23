@@ -25,6 +25,7 @@ from tracking_engine.controllers.management_target import ResolvedManagementTarg
 from tracking_engine.models.operation import (
     TRACKING_OPERATION_STATE_FAILED,
     TRACKING_OPERATION_STATE_IN_PROGRESS,
+    TRACKING_OPERATION_STATE_PREPARED,
     TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
     TRACKING_OPERATION_STATE_SUCCEEDED,
 )
@@ -866,3 +867,200 @@ def test_retired_record_keeps_only_the_internal_plan_delete_leg(tmp_path: Path) 
                 **extra,
             )
         assert refused.value.error_type == "tracking_management_state_conflict"
+
+
+# -- issue #247: a crashed bind/pointer write is claimed, never permanently lost --
+
+
+class _Crash(BaseException):
+    """Simulated process death (not an ``Exception``, so no compensation runs)."""
+
+
+def _operation_id(key: str = "key-1") -> str:
+    return management_service.tracking_operation_id_for_idempotency_key(key)
+
+
+def _crashing_bind(monkeypatch: pytest.MonkeyPatch) -> None:
+    real_bind = management_service.bind_tracking_operation
+
+    def crashing(*args, **kwargs):
+        real_bind(*args, **kwargs)
+        raise _Crash("process died after the bind write")
+
+    monkeypatch.setattr(management_service, "bind_tracking_operation", crashing)
+
+
+def test_crash_after_bind_is_claimed_by_the_same_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config, record = _seed(tmp_path)
+    _crashing_bind(monkeypatch)
+    with pytest.raises(_Crash):
+        _run(config, record, _FakeClient(), [])
+    monkeypatch.undo()
+
+    orphan_id = _operation_id()
+    assert load_tracking_operation(config, orphan_id).state == TRACKING_OPERATION_STATE_PREPARED
+    orphaned = load_tracking_record(config, record.tracking_id)
+    assert orphaned.current_operation_id is None
+
+    # The same intent (same key) is claimed: one external call, pointer repaired.
+    calls: list[object] = []
+    result = _run(config, orphaned, _FakeClient(), calls)
+    assert len(calls) == 1
+    assert result["operation_id"] == orphan_id
+    assert result["management_status"] == TRACKING_OPERATION_STATE_IN_PROGRESS
+    stored = load_tracking_record(config, record.tracking_id)
+    assert stored.current_operation_id == orphan_id
+    assert load_tracking_operation(config, orphan_id).state == TRACKING_OPERATION_STATE_IN_PROGRESS
+
+
+def test_crash_after_the_pointer_write_is_resumed_without_a_second_pointer_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config, record = _seed(tmp_path)
+    real_cas = management_service.compare_and_swap_tracking_operation
+
+    def crashing_cas(*args, **kwargs):
+        if args[2] == TRACKING_OPERATION_STATE_PREPARED:
+            raise _Crash("process died before the operation gate")
+        return real_cas(*args, **kwargs)
+
+    monkeypatch.setattr(management_service, "compare_and_swap_tracking_operation", crashing_cas)
+    with pytest.raises(_Crash):
+        _run(config, record, _FakeClient(), [])
+    monkeypatch.undo()
+
+    attached = load_tracking_record(config, record.tracking_id)
+    assert attached.current_operation_id == _operation_id()
+    assert attached.revision == record.revision + 1
+    assert load_tracking_operation(config, _operation_id()).state == TRACKING_OPERATION_STATE_PREPARED
+
+    # The client keeps the intent's original revision; the claim accepts it.
+    calls: list[object] = []
+    result = run_tracking_management(
+        config,
+        tracking_id=attached.tracking_id,
+        expected_revision=record.revision,
+        idempotency_key="key-1",
+        confirm=True,
+        operation="MODIFY",
+        target_scope="SUBSCRIPTION",
+        management_client=_FakeClient(),
+        patch={"title": "Changed"},
+        write=lambda target, payload: calls.append((target, payload)),
+    )
+    assert len(calls) == 1
+    assert result["operation_id"] == _operation_id()
+    resumed = load_tracking_record(config, record.tracking_id)
+    assert resumed.current_operation_id == _operation_id()
+    # No duplicate pointer write: the crashed attempt already advanced the record.
+    assert resumed.revision == attached.revision
+    assert load_tracking_operation(config, _operation_id()).state == TRACKING_OPERATION_STATE_IN_PROGRESS
+
+
+def test_a_prepared_operation_replaced_by_another_pointer_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config, record = _seed(tmp_path)
+    _crashing_bind(monkeypatch)
+    with pytest.raises(_Crash):
+        _run(config, record, _FakeClient(), [])
+    monkeypatch.undo()
+
+    # Another operation becomes the record's current one before the retry.
+    other = management_service.bind_tracking_operation(
+        config,
+        tracking_id=record.tracking_id,
+        operation="MODIFY",
+        idempotency_key="key-2",
+        expected_revision=record.revision,
+        request_fingerprint="other-fingerprint",
+        target_scope="SUBSCRIPTION",
+        previous_tracking_status=record.status,
+        expected_external_fingerprint="sha256:" + "b" * 64,
+        now="2026-09-08T00:00:00+00:00",
+    )[0]
+    attached = replace(
+        load_tracking_record(config, record.tracking_id),
+        current_operation_id=other.operation_id,
+        revision=record.revision + 1,
+    )
+    from storage_engine.controllers.tracking_repository import compare_and_swap_tracking_record
+
+    compare_and_swap_tracking_record(
+        config, record.tracking_id, record.revision, attached
+    )
+
+    calls: list[object] = []
+    with pytest.raises(Stage1Error) as error:
+        _run(config, attached, _FakeClient(), calls)
+    assert error.value.error_type == "tracking_management_state_conflict"
+    assert calls == []
+
+
+def test_a_prepared_orphan_whose_record_advanced_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config, record = _seed(tmp_path)
+    _crashing_bind(monkeypatch)
+    with pytest.raises(_Crash):
+        _run(config, record, _FakeClient(), [])
+    monkeypatch.undo()
+
+    # An unrelated write moved the record past the binding revision.
+    from storage_engine.controllers.tracking_repository import compare_and_swap_tracking_record
+
+    advanced = replace(
+        load_tracking_record(config, record.tracking_id),
+        revision=record.revision + 1,
+        updated_at="2026-09-08T00:00:05+00:00",
+    )
+    compare_and_swap_tracking_record(config, record.tracking_id, record.revision, advanced)
+
+    calls: list[object] = []
+    with pytest.raises(Stage1Error) as error:
+        _run(config, advanced, _FakeClient(), calls)
+    # The record advanced past the binding revision, so the residue is no longer
+    # claimable: one definite refusal, never a retry.
+    assert error.value.error_type == "tracking_management_state_conflict"
+    assert calls == []
+
+
+def test_concurrent_claims_produce_a_single_external_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    config, record = _seed(tmp_path)
+    _crashing_bind(monkeypatch)
+    with pytest.raises(_Crash):
+        _run(config, record, _FakeClient(), [])
+    monkeypatch.undo()
+
+    orphaned = load_tracking_record(config, record.tracking_id)
+    calls: list[object] = []
+    errors: list[Stage1Error] = []
+    barrier = threading.Barrier(2)
+    lock = threading.Lock()
+
+    def worker() -> None:
+        try:
+            barrier.wait(timeout=10)
+            _run(config, orphaned, _FakeClient(), calls, idempotency_key="key-1")
+        except Stage1Error as exc:  # noqa: BLE001 - the losing claim is a conflict
+            with lock:
+                errors.append(exc)
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=20)
+
+    assert len(calls) == 1
+    # The loser may instead replay the operation if it loads after the winner
+    # finished; either way there is exactly one external call.
+    assert len(errors) <= 1
+    if errors:
+        assert errors[0].error_type == "tracking_management_state_conflict"

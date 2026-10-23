@@ -8,6 +8,7 @@ come from the static fixture; records are seeded through the handoff.
 """
 
 import threading
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,7 @@ from storage_engine.controllers.tracking_repository import (
 from tracking_engine.models.operation import (
     TRACKING_OPERATION_STATE_FAILED,
     TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN,
+    TRACKING_OPERATION_STATE_PREPARED,
     TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
     TRACKING_OPERATION_STATE_SUCCEEDED,
 )
@@ -568,3 +570,170 @@ def test_replay_resumes_prepared_operation_after_submitting_write(
     assert after.status == TRACKING_STATUS_ACTIVE
     operation = load_tracking_operation(config, bound.operation_id)
     assert operation.state == TRACKING_OPERATION_STATE_SUCCEEDED
+
+
+# -- issue #247: the prepared-binding claim rule (submit regression guard) ------
+
+
+class _Crash(BaseException):
+    """Simulated process death (not an ``Exception``)."""
+
+
+def test_crash_after_bind_is_resumed_once_by_the_same_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import apps.migu_orca_web.tracking_submission_service as submission_service
+
+    request = _accepted_request(tmp_path)
+    record = _seeded_tracking(tmp_path, request)
+    config = _config(tmp_path)
+    real_bind = submission_service.bind_tracking_operation
+
+    def crashing(*args: Any, **kwargs: Any):
+        real_bind(*args, **kwargs)
+        raise _Crash("process died after the bind write")
+
+    monkeypatch.setattr(submission_service, "bind_tracking_operation", crashing)
+    with pytest.raises(_Crash):
+        run_tracking_submit(
+            **_submit_kwargs(config, record), submit_one=_counting_submit_one([])
+        )
+    monkeypatch.undo()
+
+    orphaned = load_tracking_record(config, record.tracking_id)
+    assert orphaned.current_operation_id is None
+    assert orphaned.revision == record.revision
+    operation_id = submission_service.tracking_operation_id_for_idempotency_key("key-1")
+    assert load_tracking_operation(config, operation_id).state == TRACKING_OPERATION_STATE_PREPARED
+
+    # The same intent resumes the claim: exactly one external call.
+    calls: list[int] = []
+    result = run_tracking_submit(
+        **_submit_kwargs(config, orphaned),
+        submit_one=_counting_submit_one(calls),
+    )
+    assert result["outcome"] == TRACKING_STATUS_ACTIVE
+    assert result["operation_id"] == operation_id
+    assert len(calls) == 1
+    stored = load_tracking_record(config, record.tracking_id)
+    assert stored.current_operation_id == operation_id
+    assert load_tracking_operation(config, operation_id).state == TRACKING_OPERATION_STATE_SUCCEEDED
+
+
+def test_a_prepared_binding_pointing_at_another_operation_is_rejected(
+    tmp_path: Path,
+) -> None:
+    from storage_engine.controllers.operation_repository import (
+        bind_tracking_operation,
+    )
+    from storage_engine.controllers.tracking_repository import (
+        compare_and_swap_tracking_record,
+    )
+    from tracking_engine.models.operation import TRACKING_OPERATION_KIND_SUBMIT
+
+    request = _accepted_request(tmp_path)
+    record = _seeded_tracking(tmp_path, request)
+    config = _config(tmp_path)
+    first, _ = bind_tracking_operation(
+        config,
+        tracking_id=record.tracking_id,
+        operation=TRACKING_OPERATION_KIND_SUBMIT,
+        idempotency_key="key-1",
+        expected_revision=record.revision,
+        request_fingerprint=record.request_fingerprint or "fingerprint",
+        now=NOW,
+    )
+    other, _ = bind_tracking_operation(
+        config,
+        tracking_id=record.tracking_id,
+        operation=TRACKING_OPERATION_KIND_SUBMIT,
+        idempotency_key="key-2",
+        expected_revision=record.revision,
+        request_fingerprint=record.request_fingerprint or "fingerprint",
+        now=NOW,
+    )
+    attached = replace(
+        load_tracking_record(config, record.tracking_id),
+        current_operation_id=other.operation_id,
+        revision=record.revision + 1,
+    )
+    compare_and_swap_tracking_record(
+        config, record.tracking_id, record.revision, attached
+    )
+
+    calls: list[int] = []
+    with pytest.raises(Stage1Error) as error:
+        run_tracking_submit(
+            **_submit_kwargs(config, attached, expected_revision=record.revision),
+            submit_one=_counting_submit_one(calls),
+        )
+    # Never steal another operation's pointer and never call the external API.
+    assert error.value.error_type == "tracking_state_conflict"
+    assert calls == []
+    stored = load_tracking_record(config, record.tracking_id)
+    assert stored.current_operation_id == other.operation_id
+    assert load_tracking_operation(config, first.operation_id).state == TRACKING_OPERATION_STATE_PREPARED
+
+
+def test_concurrent_retries_after_a_crash_produce_a_single_external_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #247: after the crash residue, two retriers still call the external once."""
+    import threading
+
+    import apps.migu_orca_web.tracking_submission_service as submission_service
+
+    request = _accepted_request(tmp_path)
+    record = _seeded_tracking(tmp_path, request)
+    config = _config(tmp_path)
+    real_bind = submission_service.bind_tracking_operation
+
+    def crashing(*args: Any, **kwargs: Any):
+        real_bind(*args, **kwargs)
+        raise _Crash("process died after the bind write")
+
+    monkeypatch.setattr(submission_service, "bind_tracking_operation", crashing)
+    with pytest.raises(_Crash):
+        run_tracking_submit(
+            **_submit_kwargs(config, record), submit_one=_counting_submit_one([])
+        )
+    monkeypatch.undo()
+
+    orphaned = load_tracking_record(config, record.tracking_id)
+    calls: list[int] = []
+    errors: list[Stage1Error] = []
+    barrier = threading.Barrier(2)
+    lock = threading.Lock()
+
+    def worker() -> None:
+        try:
+            barrier.wait(timeout=10)
+            run_tracking_submit(
+                **_submit_kwargs(config, orphaned), submit_one=_counting_submit_one(calls)
+            )
+        except Stage1Error as exc:  # noqa: BLE001 - the losing claim is a conflict
+            with lock:
+                errors.append(exc)
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=20)
+
+    assert len(calls) == 1
+    # The loser either conflicts or (if it loads after the winner finished)
+    # replays the terminal operation; neither may start a second external call.
+    assert len(errors) <= 1
+    if errors:
+        assert errors[0].error_type in {
+            "tracking_operation_in_progress",
+            "tracking_state_conflict",
+        }
+    stored = load_tracking_record(config, record.tracking_id)
+    operation_id = submission_service.tracking_operation_id_for_idempotency_key("key-1")
+    assert stored.current_operation_id == operation_id
+    assert load_tracking_operation(config, operation_id).state in {
+        TRACKING_OPERATION_STATE_SUCCEEDED,
+        TRACKING_OPERATION_STATE_FAILED,
+    }

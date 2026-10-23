@@ -7,9 +7,9 @@ status query.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import threading
-import time
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
@@ -19,6 +19,7 @@ import pytest
 
 import apps.migu_orca_web.services as web_services
 import apps.migu_orca_web.tracking_batch_delete_service as batch_delete
+import apps.migu_orca_web.tracking_management_service as management_service
 import apps.migu_orca_web.tracking_saved_management_service as saved_management
 import storage_engine.controllers.tracking_repository as tracking_repository
 from ab_engine.models.management import AutoBangumiCapabilities, ExternalSubscription
@@ -434,12 +435,15 @@ def test_a_second_batch_is_refused_while_one_runs(
 def test_a_single_write_queues_behind_a_batch_and_leaves_no_orphan_intent(
     roots: tuple[StorageConfig, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """ADR-0007 + B1: the single write waits for the batch instead of failing.
+    """ADR-0007 + B1 + #247: the single write waits for the batch instead of failing.
 
     A refusal after the intent was persisted would leave a resumable operation
     that no record points at (permanent same-key conflict).  The single write is
     therefore queued: it starts no external call while the batch runs, completes
-    afterwards, and its intent ends as normal history — not an orphan.
+    afterwards, and its intent ends as normal history — not an orphan.  Since
+    #247 the queue gate is the store lock taken *before* the binding, so a queued
+    write persists nothing (not even an intent) until the batch releases the
+    store.
     """
     config, saved = roots
     fake = _FakeAb()
@@ -481,21 +485,26 @@ def test_a_single_write_queues_behind_a_batch_and_leaves_no_orphan_intent(
             single_outcome["error"] = exc
         single_done.set()
 
+    # Deterministic signal: the single write reached the store gate and is
+    # waiting there, before it persisted anything and before any external call.
+    reached_gate = threading.Event()
+    real_lock = management_service.lock_tracking_record
+
+    @contextlib.contextmanager
+    def signalling_lock(tracking_id: str):
+        reached_gate.set()
+        with real_lock(tracking_id):
+            yield
+
+    monkeypatch.setattr(management_service, "lock_tracking_record", signalling_lock)
     single_thread = threading.Thread(target=run_single)
     single_thread.start()
-    # Deterministic signal: the single write has persisted its intent (that
-    # happens before the queue gate) and is waiting, with no external call yet.
+    assert reached_gate.wait(timeout=10), "the single write never reached the store gate"
     operation_id = tracking_operation_id_for_idempotency_key(single_key)
-    deadline = time.time() + 5
-    while time.time() < deadline:
-        try:
-            load_tracking_operation(config, operation_id)
-            break
-        except Stage1Error:
-            time.sleep(0.01)
-    else:  # pragma: no cover - only when the write never starts
-        raise AssertionError("the single write never persisted its intent")
+    # Nothing was persisted while queued: no intent, no orphan.
+    assert not (config.tracking_operations_dir / f"{operation_id}.json").exists()
     assert not single_done.is_set(), "the single write was not serialized"
+    assert single_thread.is_alive(), "the single write finished while the batch ran"
     assert "delete:sub-2" not in fake.calls
 
     fake.gate.set()

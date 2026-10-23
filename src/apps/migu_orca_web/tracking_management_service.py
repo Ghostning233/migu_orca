@@ -17,6 +17,7 @@ from ab_engine.models.management import AutoBangumiCapabilities
 from shared.errors import Stage1Error
 from storage_engine.controllers.operation_repository import (
     bind_tracking_operation,
+    claimable_prepared_operation,
     compare_and_swap_tracking_operation,
     load_tracking_operation,
     recover_tracking_operation,
@@ -25,6 +26,7 @@ from storage_engine.controllers.storage_config import StorageConfig, load_storag
 from storage_engine.controllers.tracking_repository import (
     compare_and_swap_tracking_record,
     load_tracking_record,
+    lock_tracking_record,
 )
 from tracking_engine.controllers.management_operation import (
     MANAGEMENT_OUTCOME_DEFINITE_FAILURE,
@@ -77,6 +79,7 @@ from tracking_engine.models.tracking import (
     TRACKING_STATUS_EXTERNAL_DELETED,
     TRACKING_STATUS_RECOVERY_REQUIRED,
     TRACKING_STATUS_VERIFYING_EXTERNAL,
+    TRACKING_STATUSES,
     TrackingRecord,
     append_audit_event,
     build_audit_event,
@@ -185,10 +188,16 @@ def run_tracking_management(
                         existing.request_fingerprint, existing.connection_ref) == (
                             record.tracking_id, operation, target_scope,
                             binding.action_fingerprint, connection_ref)
+        if not same_binding:
+            raise Stage1Error("tracking_idempotency_conflict", "同一幂等键已绑定不同的管理操作", "tracking_management")
         # Terminal replay remains bound to the original revision.  The caller
         # may safely replay with that stale-but-recorded revision; a different
-        # revision is a different request and must conflict.
-        if not same_binding or existing.expected_revision != expected_revision:
+        # revision is a different request and must conflict.  A PREPARED binding
+        # carries either revision (issue #247) and is decided by the claim below.
+        if (
+            existing.state in TRACKING_OPERATION_TERMINAL_STATES
+            and existing.expected_revision != expected_revision
+        ):
             raise Stage1Error("tracking_idempotency_conflict", "同一幂等键已绑定不同的管理操作", "tracking_management")
         if existing.state in TRACKING_OPERATION_TERMINAL_STATES:
             # A later operation may have replaced the record pointer.  Never
@@ -214,7 +223,29 @@ def run_tracking_management(
                 "needs_manual": existing.state in {MANAGEMENT_OUTCOME_UNKNOWN, "RECOVERY_REQUIRED"},
                 "created": False,
             }
-        raise Stage1Error("tracking_management_state_conflict", "已有管理操作正在执行，请先恢复", "tracking_management")
+        if existing.state != TRACKING_OPERATION_STATE_PREPARED:
+            raise Stage1Error("tracking_management_state_conflict", "已有管理操作正在执行，请先恢复", "tracking_management")
+        # Issue #247: a PREPARED binding may be the residue of a crashed bind or
+        # pointer write; the locked claim below decides, everything else conflicts.
+    claim_candidate = (
+        existing is not None
+        and existing.state == TRACKING_OPERATION_STATE_PREPARED
+    )
+    if claim_candidate and not claimable_prepared_operation(
+        record,
+        existing,
+        allowed_statuses=_action_start_statuses(
+            operation, enabled=enabled, internal_plan_delete=internal_plan_delete
+        ),
+    ):
+        # Fail closed before any Auto Bangumi read: an unverifiable residue must
+        # never cost an external snapshot or be masked by a transport error.
+        raise Stage1Error(
+            "tracking_management_state_conflict",
+            "该幂等键的残留操作无法证明可安全恢复，请使用新的确认重试",
+            "tracking_management",
+            {"reason": "unclaimable_prepared_operation"},
+        )
     if not management_action_allowed(
         record.status,
         operation,
@@ -222,9 +253,17 @@ def run_tracking_management(
         include_internal=internal_plan_delete,
     ):
         raise Stage1Error("tracking_management_state_conflict", "当前追番状态不允许该管理操作", "tracking_management")
-    if expected_revision != record.revision:
-        raise Stage1Error("tracking_revision_conflict", "追番记录版本已变化，请刷新后重试", "tracking_management", {"expected_revision": expected_revision, "current_revision": record.revision})
-    _guard_current_operation(resolved_config, record)
+    _guard_management_revision(
+        expected_revision,
+        record.revision,
+        claim_candidate=claim_candidate,
+        claim_revision=existing.expected_revision if claim_candidate else None,
+    )
+    _guard_current_operation(
+        resolved_config,
+        record,
+        claimable_operation_id=existing.operation_id if claim_candidate else None,
+    )
     if connection_ref is not None:
         validate_management_mapping(record, connection_ref)
     if management_client is None:
@@ -259,40 +298,78 @@ def run_tracking_management(
         expected_projection = None
     if expected_projection is not None:
         binding = replace(binding, expected_external_fingerprint=_projection_digest(expected_projection, operation, target_scope))
-    operation_record, created = bind_tracking_operation(
-        resolved_config, tracking_id=record.tracking_id, operation=operation,
-        idempotency_key=idempotency_key, expected_revision=expected_revision,
-        request_fingerprint=binding.action_fingerprint, target_scope=target_scope,
-        previous_tracking_status=record.status,
-        expected_external_fingerprint=binding.expected_external_fingerprint, now=now,
-        connection_ref=connection_ref,
-    )
-    if not created:
-        if operation_record.state == TRACKING_OPERATION_STATE_IN_PROGRESS:
-            raise Stage1Error("tracking_management_state_conflict", "已有管理操作正在核验或恢复", "tracking_management")
-        raise Stage1Error("tracking_management_state_conflict", "该幂等键已绑定已有管理操作", "tracking_management")
-
-    started = replace(record, current_operation_id=operation_record.operation_id)
-    started = append_audit_event(started, build_audit_event(
-        action=TRACKING_AUDIT_MANAGEMENT_STARTED, actor=TRACKING_AUDIT_ACTOR_USER,
-        from_status=record.status, to_status=record.status,
-        tracking_revision=record.revision + 1, operation_id=operation_record.operation_id,
-        reason_code=operation, safe_message="已准备执行 Auto Bangumi 管理操作", created_at=now or utc_now(),
-    ))
-    started = replace(started, revision=record.revision + 1, updated_at=now or utc_now())
-    compare_and_swap_tracking_record(resolved_config, record.tracking_id, record.revision, started)
-    try:
-        in_progress = compare_and_swap_tracking_operation(
-            resolved_config, operation_record.operation_id, TRACKING_OPERATION_STATE_PREPARED,
-            transition_tracking_operation(operation_record, state=TRACKING_OPERATION_STATE_IN_PROGRESS, now=now),
+    # Issue #247: binding + record pointer + the PREPARED -> IN_PROGRESS gate are
+    # one critical section (per-record lock first, per-key lock inside bind), so
+    # two retriers cannot both take execution.  No external call happens here.
+    with lock_tracking_record(record.tracking_id):
+        fresh = load_tracking_record(resolved_config, record.tracking_id)
+        _guard_management_revision(
+            expected_revision,
+            fresh.revision,
+            claim_candidate=claim_candidate,
+            claim_revision=existing.expected_revision if claim_candidate else None,
         )
-    except Stage1Error:
-        raise
-    except Exception:
-        # The external boundary was never crossed.  Compensate the durable
-        # PREPARED binding and its record pointer before surfacing the failure.
-        _compensate_prepared_start(resolved_config, started, operation_record, now or utc_now())
-        raise
+        if not management_action_allowed(
+            fresh.status,
+            operation,
+            enabled=enabled,
+            include_internal=internal_plan_delete,
+        ):
+            raise Stage1Error(
+                "tracking_management_state_conflict",
+                "当前追番状态不允许该管理操作",
+                "tracking_management",
+            )
+        bind_revision = (
+            existing.expected_revision
+            if claim_candidate
+            else expected_revision
+        )
+        operation_record, created = bind_tracking_operation(
+            resolved_config, tracking_id=fresh.tracking_id, operation=operation,
+            idempotency_key=idempotency_key, expected_revision=bind_revision,
+            request_fingerprint=binding.action_fingerprint, target_scope=target_scope,
+            previous_tracking_status=fresh.status,
+            expected_external_fingerprint=binding.expected_external_fingerprint, now=now,
+            connection_ref=connection_ref,
+        )
+        if created:
+            started = _attach_management_pointer(
+                resolved_config, fresh, operation_record, now
+            )
+        elif claimable_prepared_operation(
+            fresh,
+            operation_record,
+            allowed_statuses=_action_start_statuses(
+                operation, enabled=enabled, internal_plan_delete=internal_plan_delete
+            ),
+        ):
+            # POINTER_MATCHES: the crashed attempt already wrote the pointer and
+            # its audit; do not write a second one.  POINTER_EMPTY: repair it.
+            started = (
+                fresh
+                if fresh.current_operation_id == operation_record.operation_id
+                else _attach_management_pointer(
+                    resolved_config, fresh, operation_record, now
+                )
+            )
+        elif operation_record.state == TRACKING_OPERATION_STATE_IN_PROGRESS:
+            raise Stage1Error("tracking_management_state_conflict", "已有管理操作正在核验或恢复", "tracking_management")
+        else:
+            raise Stage1Error("tracking_management_state_conflict", "该幂等键已绑定已有管理操作", "tracking_management")
+
+        try:
+            in_progress = compare_and_swap_tracking_operation(
+                resolved_config, operation_record.operation_id, TRACKING_OPERATION_STATE_PREPARED,
+                transition_tracking_operation(operation_record, state=TRACKING_OPERATION_STATE_IN_PROGRESS, now=now),
+            )
+        except Stage1Error:
+            raise
+        except Exception:
+            # The external boundary was never crossed.  Compensate the durable
+            # PREPARED binding and its record pointer before surfacing the failure.
+            _compensate_prepared_start(resolved_config, started, operation_record, now or utc_now())
+            raise
     if write is not None:
         try:
             response = _run_management_write(
@@ -855,10 +932,79 @@ def _write_payload(operation: str, target: ResolvedManagementTarget, patch: Mapp
     return {"enabled": enabled} if operation == "SET_ENABLED" else None
 
 
-def _guard_current_operation(config: StorageConfig, record: TrackingRecord) -> None:
+def _action_start_statuses(
+    operation: str,
+    *,
+    enabled: bool | None,
+    internal_plan_delete: bool,
+) -> frozenset[str]:
+    """Issue #247: statuses the action is actually allowed to start from."""
+    return frozenset(
+        status
+        for status in TRACKING_STATUSES
+        if management_action_allowed(
+            status,
+            operation,
+            enabled=enabled,
+            include_internal=internal_plan_delete,
+        )
+    )
+
+
+def _guard_management_revision(
+    expected_revision: int,
+    current_revision: int,
+    *,
+    claim_candidate: bool,
+    claim_revision: int | None,
+) -> None:
+    """Issue #247: a claim may carry the operation's own (original) revision."""
+    if expected_revision == current_revision:
+        return
+    if claim_candidate and claim_revision is not None and expected_revision == claim_revision:
+        return
+    raise Stage1Error(
+        "tracking_revision_conflict",
+        "追番记录版本已变化，请刷新后重试",
+        "tracking_management",
+        {"expected_revision": expected_revision, "current_revision": current_revision},
+    )
+
+
+def _attach_management_pointer(
+    config: StorageConfig,
+    record: TrackingRecord,
+    operation_record: TrackingOperation,
+    now: str | None,
+) -> TrackingRecord:
+    """Persist the management pointer + audit for this operation (lock held)."""
+    started = replace(record, current_operation_id=operation_record.operation_id)
+    started = append_audit_event(started, build_audit_event(
+        action=TRACKING_AUDIT_MANAGEMENT_STARTED, actor=TRACKING_AUDIT_ACTOR_USER,
+        from_status=record.status, to_status=record.status,
+        tracking_revision=record.revision + 1, operation_id=operation_record.operation_id,
+        reason_code=operation_record.operation, safe_message="已准备执行 Auto Bangumi 管理操作",
+        created_at=now or utc_now(),
+    ))
+    started = replace(started, revision=record.revision + 1, updated_at=now or utc_now())
+    return compare_and_swap_tracking_record(config, record.tracking_id, record.revision, started)
+
+
+def _guard_current_operation(
+    config: StorageConfig,
+    record: TrackingRecord,
+    *,
+    claimable_operation_id: str | None = None,
+) -> None:
     if not record.current_operation_id:
         return
     operation = load_tracking_operation(config, record.current_operation_id)
+    if (
+        operation.state == TRACKING_OPERATION_STATE_PREPARED
+        and claimable_operation_id == operation.operation_id
+    ):
+        # Issue #247: the crashed pointer write; the locked claim re-verifies it.
+        return
     if operation.state in {
         TRACKING_OPERATION_STATE_PREPARED,
         TRACKING_OPERATION_STATE_IN_PROGRESS,
