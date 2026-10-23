@@ -953,6 +953,42 @@ def _verified_capabilities() -> dict[str, Any]:
     }
 
 
+def _serve_detail(page: Page, item: dict[str, Any], detail: dict[str, Any]) -> None:
+    def handler(route: Any, request: Any) -> None:
+        path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
+        if request.method == "GET" and path == "/settings/autobangumi":
+            route.fulfill(json={"ok": True, "result": {
+                "configured": True, "credential_present": True,
+                "connection_ref": "11111111-1111-4111-8111-111111111111",
+                "configuration_revision": 1, "connection_status": "CONFIGURED",
+                "capabilities": _verified_capabilities(),
+            }})
+            return
+        if request.method == "GET" and path == "/tracking/items":
+            route.fulfill(json={"ok": True, "result": {
+                "items": [item],
+                "summary": _summary(1),
+                "status_groups": _status_groups_for([item]),
+                "warnings": [],
+            }})
+            return
+        if request.method == "GET" and path.startswith("/tracking/items/"):
+            route.fulfill(json={"ok": True, "result": detail})
+            return
+        route.continue_()
+
+    page.route("**/api/v1/**", handler)
+
+
+def _open_detail(page: Page, live_server_url: str, storage_dir: Path) -> None:
+    _require_dist()
+    set_storage_preferences(page, storage_dir)
+    page.goto(f"{live_server_url}/app/tracking")
+    page.wait_for_selector(".tracking-list-item")
+    page.locator(".tracking-list-item").first.click()
+    page.wait_for_selector(".tracking-inspector-facts")
+
+
 class TestDetailActionGrouping:
     """Issue #233 (D3/D4): one primary next step, external-only management row.
 
@@ -962,44 +998,12 @@ class TestDetailActionGrouping:
     adds a button the server withheld.
     """
 
-    @staticmethod
-    def _serve(page: Page, item: dict[str, Any], detail: dict[str, Any]) -> None:
-        def handler(route: Any, request: Any) -> None:
-            path = request.url.split("/api/v1", 1)[-1].split("?", 1)[0]
-            if request.method == "GET" and path == "/settings/autobangumi":
-                route.fulfill(json={"ok": True, "result": {
-                    "configured": True, "credential_present": True,
-                    "connection_ref": "11111111-1111-4111-8111-111111111111",
-                    "configuration_revision": 1, "connection_status": "CONFIGURED",
-                    "capabilities": _verified_capabilities(),
-                }})
-                return
-            if request.method == "GET" and path == "/tracking/items":
-                route.fulfill(json={"ok": True, "result": {
-                    "items": [item],
-                    "summary": _summary(1),
-                    "status_groups": _status_groups_for([item]),
-                    "warnings": [],
-                }})
-                return
-            if request.method == "GET" and path.startswith("/tracking/items/"):
-                route.fulfill(json={"ok": True, "result": detail})
-                return
-            route.continue_()
-
-        page.route("**/api/v1/**", handler)
+    _serve = staticmethod(_serve_detail)
+    _open = staticmethod(_open_detail)
 
     @staticmethod
     def _visible_buttons(page: Page) -> list[str]:
         return page.locator(".tracking-inspector button:visible").all_inner_texts()
-
-    def _open(self, page: Page, live_server_url: str, storage_dir: Path) -> None:
-        _require_dist()
-        set_storage_preferences(page, storage_dir)
-        page.goto(f"{live_server_url}/app/tracking")
-        page.wait_for_selector(".tracking-list-item")
-        page.locator(".tracking-list-item").first.click()
-        page.wait_for_selector(".tracking-inspector-facts")
 
     def test_following_record_shows_only_the_external_management_row(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -1220,6 +1224,124 @@ class TestDetailActionGrouping:
         assert page.locator(".tracking-inspector").evaluate(
             "el => el.scrollHeight > el.clientHeight"
         ) is True
+
+class TestDetailLastFailureIssue241:
+    """Issue #241: a refreshed failure keeps its persisted reason.
+
+    ``SUBMIT_FAILED`` only recovers its category (the stored message is fixed
+    copy), ``NEEDS_RECONFIRM`` keeps the exact issue sentence, and no evidence
+    means no reason row at all.
+    """
+
+    _serve = staticmethod(_serve_detail)
+    _open = staticmethod(_open_detail)
+
+    @staticmethod
+    def _base(item: dict[str, Any], **overrides: Any) -> dict[str, Any]:
+        return {
+            **item, "origin": "single", "batch_id": None,
+            "created_at": "2026-10-18T12:00:00Z", "last_synced_at": None, "safe_info": None,
+            "current_operation": None, "revalidation_issues": [], "external_mapping": None,
+            "audit_events": [], "warnings": [], **overrides,
+        }
+
+    def test_submit_failure_shows_the_persisted_category(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        item = {
+            **_item("tracking-failed", "云境之下"),
+            "status": "SUBMIT_FAILED", "status_label": "提交失败", "status_group": "ATTENTION",
+        }
+        detail = self._base(item, available_actions=[{
+            "code": "RETRY", "label": "重试提交", "style": "PRIMARY",
+            "requires_confirmation": True, "target_scopes": [],
+        }], last_failure={
+            "error_type": "ab_auth_failed", "category": "AUTHENTICATION",
+            "reason_code": "ab_auth_failed", "safe_message": "提交失败，可重新提交",
+            "occurred_at": "2026-10-20T10:00:00+00:00",
+        })
+        self._serve(page, item, detail)
+        self._open(page, live_server_url, storage_dir)
+
+        feedback = page.locator("#tracking-feedback")
+        expect(feedback).to_be_visible()
+        expect(page.locator("#tracking-feedback-title")).to_have_text("提交失败")
+        reasons = feedback.locator(".tracking-submit-issues")
+        expect(reasons).to_have_text("Auto Bangumi 认证失败")
+        # The fixed stored message is copy, not an invented reason detail.
+        assert "提交失败，可重新提交" not in reasons.inner_text()
+        assert "下一步" in feedback.inner_text()
+
+    def test_reconfirm_shows_the_persisted_issue_sentence(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        item = {
+            **_item("tracking-reconfirm", "云境之下"),
+            "status": "NEEDS_RECONFIRM", "status_label": "待重新确认", "status_group": "PENDING",
+        }
+        detail = self._base(item, available_actions=[{
+            "code": "SUBMIT", "label": "提交到 Auto Bangumi", "style": "PRIMARY",
+            "requires_confirmation": True, "target_scopes": [],
+        }], last_failure={
+            "error_type": None, "category": None, "reason_code": "NO_VALID_RESOURCES",
+            "safe_message": "当前方案需要重新核对资源筛选。",
+            "occurred_at": "2026-10-20T10:00:00+00:00",
+        })
+        self._serve(page, item, detail)
+        self._open(page, live_server_url, storage_dir)
+
+        expect(page.locator("#tracking-feedback-title")).to_have_text("提交前复核未通过")
+        expect(page.locator("#tracking-feedback .tracking-submit-issues")).to_have_text(
+            "当前方案需要重新核对资源筛选。"
+        )
+
+    def test_no_persisted_evidence_keeps_the_generic_next_step(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        item = {
+            **_item("tracking-failed", "云境之下"),
+            "status": "SUBMIT_FAILED", "status_label": "提交失败", "status_group": "ATTENTION",
+        }
+        detail = self._base(item, available_actions=[{
+            "code": "RETRY", "label": "重试提交", "style": "PRIMARY",
+            "requires_confirmation": True, "target_scopes": [],
+        }])
+        self._serve(page, item, detail)
+        self._open(page, live_server_url, storage_dir)
+
+        feedback = page.locator("#tracking-feedback")
+        expect(feedback).to_be_visible()
+        assert feedback.locator(".tracking-submit-issues").count() == 0
+        assert "下一步" in feedback.inner_text()
+
+    def test_live_issues_win_over_the_persisted_summary(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        item = {
+            **_item("tracking-reconfirm", "云境之下"),
+            "status": "NEEDS_RECONFIRM", "status_label": "待重新确认", "status_group": "PENDING",
+        }
+        detail = self._base(
+            item,
+            available_actions=[{
+                "code": "SUBMIT", "label": "提交到 Auto Bangumi", "style": "PRIMARY",
+                "requires_confirmation": True, "target_scopes": [],
+            }],
+            revalidation_issues=[{
+                "code": "NO_VALID_RESOURCES", "field": "filter_rule",
+                "message": "实时复核：资源筛选不满足。",
+            }],
+            last_failure={
+                "error_type": None, "category": None, "reason_code": "REQUEST_CHANGED",
+                "safe_message": "持久化：方案已变化。", "occurred_at": None,
+            },
+        )
+        self._serve(page, item, detail)
+        self._open(page, live_server_url, storage_dir)
+
+        lists = page.locator("#tracking-feedback .tracking-submit-issues")
+        assert lists.count() == 1
+        expect(lists).to_have_text("实时复核：资源筛选不满足。")
 
 class TestDetailSummaryIssue227:
     """Issue #227 (T4a): the detail summary, the reason card and the records.

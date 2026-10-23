@@ -17,8 +17,8 @@ Security rules enforced here:
   own safe ``plan_summary`` with ``valid_resource_count`` 0 — it never fails
   the list or detail;
 - the detail reuses ``serialize_request_safe_info`` unchanged and adds only the
-  current operation's safe summary, revalidation issues, external mapping
-  summary and the most recent audit events.
+  current operation's safe summary, revalidation issues, the persisted reason of
+  the record's current failure (issue #241) and the most recent audit events.
 """
 
 from typing import Any
@@ -47,8 +47,16 @@ from storage_engine.controllers.tracking_repository import (
     list_tracking_records,
     load_tracking_record,
 )
-from tracking_engine.models.operation import TRACKING_SUBMISSION_MODES_SET
+from tracking_engine.controllers.submit import submit_failure_category
+from tracking_engine.models.operation import (
+    TRACKING_OPERATION_STATE_FAILED,
+    TRACKING_OPERATION_STATE_IN_PROGRESS,
+    TRACKING_SUBMISSION_MODES_SET,
+)
 from tracking_engine.models.tracking import (
+    TRACKING_AUDIT_PLAN_CHANGE_DETECTED,
+    TRACKING_AUDIT_REVALIDATION_FAILED,
+    TRACKING_AUDIT_SUBMIT_FAILED,
     TRACKING_OVERVIEW_CARD_GROUPS,
     TRACKING_STATUS_ADDED_TO_DOWNLOAD,
     TRACKING_STATUS_EXTERNAL_ONLY,
@@ -59,6 +67,8 @@ from tracking_engine.models.tracking import (
     TRACKING_STATUS_GROUP_ORDER,
     TRACKING_STATUS_GROUP_PENDING,
     TRACKING_STATUS_GROUP_PROCESSING,
+    TRACKING_STATUS_NEEDS_RECONFIRM,
+    TRACKING_STATUS_SUBMIT_FAILED,
     TrackingRecord,
     tracking_status_group,
 )
@@ -72,6 +82,19 @@ TRACKING_DETAIL_REQUEST_UNAVAILABLE_WARNING = "该订阅方案不存在或暂时
 
 #: Fixed warning when the record references an operation that cannot be read.
 TRACKING_DETAIL_OPERATION_UNAVAILABLE_WARNING = "当前提交操作记录暂不可读"
+
+#: Issue #241: the only statuses whose *current* failure still owns a reason.
+_LAST_FAILURE_STATUSES = frozenset(
+    {TRACKING_STATUS_NEEDS_RECONFIRM, TRACKING_STATUS_SUBMIT_FAILED}
+)
+
+#: The audit transitions that record a pre-submit revalidation failure.
+_RECONFIRM_FAILURE_ACTIONS = frozenset(
+    {TRACKING_AUDIT_REVALIDATION_FAILED, TRACKING_AUDIT_PLAN_CHANGE_DETECTED}
+)
+
+#: The audit transition that records a definite submit failure.
+_SUBMIT_FAILURE_ACTIONS = frozenset({TRACKING_AUDIT_SUBMIT_FAILED})
 
 #: Default sort is newest ``updated_at`` first (local list, stable tie-break).
 _DEFAULT_SORT = "updated_at"
@@ -140,6 +163,132 @@ def list_tracking_items(
     }
 
 
+def _safe_text(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text or None
+
+
+def _last_failure_event(
+    record: TrackingRecord,
+    actions: frozenset[str],
+    *,
+    to_status: str | None = None,
+    operation_id: str | None = None,
+) -> dict[str, Any] | None:
+    """Return the newest persisted audit event that records this failure.
+
+    The event (not ``updated_at``) is the reliable time/binding source: it is
+    written in the same atomic transition that moved the record into the failure
+    state, and it carries the operation identity and the sanitized reason.
+    """
+    events = record.audit_events if isinstance(record.audit_events, list) else []
+    for event in reversed(events):
+        if not isinstance(event, dict) or event.get("action") not in actions:
+            continue
+        if to_status is not None and event.get("to_status") != to_status:
+            continue
+        # A same-status bookkeeping event (e.g. a sync that refreshed the mapping
+        # with PLAN_CHANGE_DETECTED) is not the transition into this failure.
+        if event.get("from_status") == event.get("to_status"):
+            continue
+        if operation_id is not None and event.get("operation_id") != operation_id:
+            continue
+        return event
+    return None
+
+
+def project_tracking_last_failure(
+    record: TrackingRecord,
+    operation: Any | None,
+) -> dict[str, Any] | None:
+    """Project the persisted reason of the record's *current* failure (#241).
+
+    ``NEEDS_RECONFIRM`` persists no ``last_error``; its failure evidence is the
+    revalidation audit transition itself (reason code + issue copy + time).  The
+    projection reads the full stored audit list (the published window is capped
+    at 20) so an older failure transition is still the one it reports.
+    ``SUBMIT_FAILED`` persists ``last_error`` and must prove that reason belongs
+    to the current terminal operation before publishing it.  Every other status
+    (including ``OUTCOME_UNKNOWN``) publishes nothing: "结果待确认" is not a
+    failure reason, and a stale error must never be replayed for a new failure.
+    """
+    if record.status not in _LAST_FAILURE_STATUSES:
+        return None
+    if record.status == TRACKING_STATUS_NEEDS_RECONFIRM:
+        event = _last_failure_event(
+            record,
+            _RECONFIRM_FAILURE_ACTIONS,
+            to_status=TRACKING_STATUS_NEEDS_RECONFIRM,
+        )
+        if event is None:
+            return None
+        reason_code = _safe_text(event.get("reason_code"))
+        safe_message = _safe_text(event.get("safe_message"))
+        if not safe_message:
+            # ``last_failure.safe_message`` is required by the contract; an event
+            # that only carries a code is not a usable reason.
+            return None
+        return {
+            "error_type": None,
+            "category": None,
+            "reason_code": reason_code,
+            "safe_message": safe_message,
+            "occurred_at": _safe_text(event.get("created_at")),
+        }
+
+    if operation is None:
+        return None
+    terminal = operation.state == TRACKING_OPERATION_STATE_FAILED
+    # The record is written before the operation's terminal state, so a crash can
+    # leave the operation IN_PROGRESS while the failure record is complete.  The
+    # bound audit transition proves that window, and nothing else is accepted.
+    crash_window = operation.state == TRACKING_OPERATION_STATE_IN_PROGRESS
+    if not (terminal or crash_window):
+        return None
+    operation_error = _safe_text(operation.error_type)
+    event = _last_failure_event(
+        record, _SUBMIT_FAILURE_ACTIONS, operation_id=operation.operation_id
+    )
+    error = record.last_error if isinstance(record.last_error, dict) else None
+    stored_error = _safe_text(error.get("error_type")) if error else None
+    stored_message = _safe_text(error.get("safe_message")) if error else None
+    bound_stored = bool(stored_error) and bool(stored_message) and (
+        operation_error is None or stored_error == operation_error
+    )
+    if bound_stored:
+        # The stored error belongs to this operation (equal error type); either
+        # its terminal state or the bound audit transition is enough.
+        if event is None and not terminal:
+            return None
+        error_type = stored_error
+        safe_message = stored_message
+        reason_code = _safe_text(error.get("reason_code")) or error_type
+    elif event is not None:
+        # Crash replay (no ``last_error``) or a stale stored error: the audit
+        # transition bound to this operation is the current failure's evidence.
+        error_type = _safe_text(event.get("reason_code")) or operation_error
+        safe_message = _safe_text(event.get("safe_message"))
+        reason_code = error_type
+        if not error_type or not safe_message:
+            return None
+    else:
+        return None
+    occurred_at = _safe_text(event.get("created_at")) if event else None
+    if occurred_at is None:
+        occurred_at = _safe_text(operation.completed_at)
+    return {
+        "error_type": error_type,
+        "category": submit_failure_category(
+            outcome=record.status, error_type=error_type
+        ),
+        "reason_code": reason_code,
+        "safe_message": safe_message,
+        "occurred_at": occurred_at,
+    }
+
+
 def build_tracking_detail(
     config: StorageConfig,
     tracking_id: str,
@@ -147,8 +296,10 @@ def build_tracking_detail(
     """Build the safe public tracking detail payload (Stage 29 PRD §11.3).
 
     Reuses the Request safe-info producer and adds only the current operation's
-    safe summary, revalidation issues, external mapping summary and the most
-    recent 20 audit events.  A missing/damaged backing Request or operation
+    safe summary, revalidation issues, the persisted reason of the current
+    failure (issue #241) and the most recent 20 audit events.  ``last_failure``
+    is null unless a ``NEEDS_RECONFIRM``/``SUBMIT_FAILED`` record still owns a
+    bound failure; the payload never gains a second reason channel.  A missing/damaged backing Request or operation
     degrades to the safe summary plus a fixed warning — never a failure.
     """
     migration_result = run_tracking_migration(config=config)
@@ -181,6 +332,7 @@ def build_tracking_detail(
             warnings.append(TRACKING_DETAIL_REQUEST_UNAVAILABLE_WARNING)
 
     current_operation = None
+    operation = None
     operation_id = record.current_operation_id
     if operation_id:
         operation = _tolerant_load_operation(config, operation_id)
@@ -200,6 +352,9 @@ def build_tracking_detail(
         "safe_info": safe_info,
         "current_operation": current_operation,
         "revalidation_issues": [],
+        # Issue #241: the persisted reason of the record's current failure; the
+        # read projection never derives adapter errors into the review issues.
+        "last_failure": project_tracking_last_failure(record, operation),
         "external_mapping": serialize_tracking_external_summary(record.external_mapping),
         "audit_events": serialize_tracking_audit_events(record.audit_events),
         "warnings": warnings,
@@ -431,5 +586,6 @@ __all__ = [
     "TRACKING_DETAIL_REQUEST_UNAVAILABLE_WARNING",
     "TRACKING_LIST_UNREADABLE_WARNING",
     "build_tracking_detail",
+    "project_tracking_last_failure",
     "list_tracking_items",
 ]

@@ -1506,7 +1506,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     "GET /api/v1/tracking/items/<path:tracking_id>": {
         "operationId": "getTrackingItemDetail",
         "summary": "查看统一追番记录安全详情",
-        "description": "US-223：读取单条统一追番记录，复用 Request safe-info 白名单，额外只返回当前 operation 安全摘要、revalidation issues、外部安全映射摘要与最近 20 条审计事件；绝不回显完整 Request、外部原始 JSON、完整 URL、凭据、magnet 或绝对路径。缺失 → tracking_not_found；路径片段 → invalid_tracking_id。",
+        "description": "US-223：读取单条统一追番记录，复用 Request safe-info 白名单，额外只返回当前 operation 安全摘要、revalidation issues、当前失败的持久化原因（issue #241 的 last_failure，仅 NEEDS_RECONFIRM/SUBMIT_FAILED 且与当前失败绑定）、外部安全映射摘要与最近 20 条审计事件；绝不回显完整 Request、外部原始 JSON、完整 URL、凭据、magnet 或绝对路径。缺失 → tracking_not_found；路径片段 → invalid_tracking_id。",
         "parameters": [
             {
                 "name": "tracking_id",

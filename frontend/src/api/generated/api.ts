@@ -480,7 +480,7 @@ export interface paths {
         };
         /**
          * 查看统一追番记录安全详情
-         * @description US-223：读取单条统一追番记录，复用 Request safe-info 白名单，额外只返回当前 operation 安全摘要、revalidation issues、外部安全映射摘要与最近 20 条审计事件；绝不回显完整 Request、外部原始 JSON、完整 URL、凭据、magnet 或绝对路径。缺失 → tracking_not_found；路径片段 → invalid_tracking_id。
+         * @description US-223：读取单条统一追番记录，复用 Request safe-info 白名单，额外只返回当前 operation 安全摘要、revalidation issues、当前失败的持久化原因（issue #241 的 last_failure，仅 NEEDS_RECONFIRM/SUBMIT_FAILED 且与当前失败绑定）、外部安全映射摘要与最近 20 条审计事件；绝不回显完整 Request、外部原始 JSON、完整 URL、凭据、magnet 或绝对路径。缺失 → tracking_not_found；路径片段 → invalid_tracking_id。
          */
         get: operations["getTrackingItemDetail"];
         put?: never;
@@ -10259,6 +10259,7 @@ export interface operations {
                      *             "recovery_action": "示例"
                      *           }
                      *         ],
+                     *         "last_failure": null,
                      *         "external_mapping": null,
                      *         "audit_events": [
                      *           {
@@ -10674,6 +10675,31 @@ export interface operations {
                                  */
                                 recovery_action: "" | "SUBMIT";
                             }[];
+                            /** @default null */
+                            last_failure: {
+                                /**
+                                 * Error Type
+                                 * @default null
+                                 */
+                                error_type: string | null;
+                                /**
+                                 * Category
+                                 * @default null
+                                 */
+                                category: ("CONNECTION" | "AUTHENTICATION" | "VERSION" | "CAPABILITY" | "DUPLICATE_SUBSCRIPTION" | "VALIDATION" | "REJECTED" | "OUTCOME_UNKNOWN") | null;
+                                /**
+                                 * Reason Code
+                                 * @default null
+                                 */
+                                reason_code: string | null;
+                                /** Safe Message */
+                                safe_message: string;
+                                /**
+                                 * Occurred At
+                                 * @default null
+                                 */
+                                occurred_at: string | null;
+                            } | null;
                             /** @default null */
                             external_mapping: {
                                 /**

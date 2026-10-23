@@ -178,6 +178,123 @@ describe('TrackingInspector detail summary (issue #227)', () => {
   })
 })
 
+describe('TrackingInspector persisted failure reason (issue #241)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  it('shows the persisted revalidation reason after a refresh (issue #241)', async () => {
+    apiGet.mockResolvedValue(detail({
+      status: 'NEEDS_RECONFIRM', status_label: '待重新确认', status_group: 'PENDING',
+      available_actions: [submitAction],
+      last_failure: {
+        error_type: null, category: null, reason_code: 'NO_VALID_RESOURCES',
+        safe_message: '当前方案需要重新核对资源筛选。',
+        occurred_at: '2026-10-20T10:00:00+00:00',
+      },
+    }) as never)
+    const wrapper = await mountInspector()
+
+    const feedback = wrapper.find('#tracking-feedback')
+    expect(feedback.find('#tracking-feedback-title').text()).toBe('提交前复核未通过')
+    expect(feedback.find('.tracking-submit-issues').text()).toContain('当前方案需要重新核对资源筛选')
+    // The stored category is null for a revalidation failure: no invented cause.
+    expect(feedback.text()).not.toContain('AUTHENTICATION')
+  })
+
+  it('shows the persisted submit category, and never an invented detail (issue #241)', async () => {
+    apiGet.mockResolvedValue(detail({
+      status: 'SUBMIT_FAILED', status_label: '提交失败', status_group: 'ATTENTION',
+      available_actions: [retryAction],
+      last_failure: {
+        error_type: 'ab_auth_failed', category: 'AUTHENTICATION',
+        reason_code: 'ab_auth_failed', safe_message: '提交失败，可重新提交',
+        occurred_at: '2026-10-20T10:00:00+00:00',
+      },
+    }) as never)
+    const wrapper = await mountInspector()
+
+    const feedback = wrapper.find('#tracking-feedback')
+    expect(feedback.find('.tracking-submit-issues').text()).toBe('Auto Bangumi 认证失败')
+    // The refreshed card keeps the live path's category-specific next step.
+    expect(feedback.find('.tracking-feedback-next').text()).toContain('前往设置更新账号或密码')
+    // The fixed safe_message is the verdict of the live path, not a reason here.
+    expect(feedback.find('#tracking-feedback .tracking-submit-issues').text())
+      .not.toContain('提交失败，可重新提交')
+  })
+
+  it('falls back to the generic next step when the stored category is unknown', async () => {
+    apiGet.mockResolvedValue(detail({
+      status: 'SUBMIT_FAILED', status_label: '提交失败', status_group: 'ATTENTION',
+      available_actions: [retryAction],
+      last_failure: {
+        error_type: 'ab_something_new', category: 'SOMETHING_NEW',
+        reason_code: 'ab_something_new', safe_message: '提交失败，可重新提交',
+        occurred_at: null,
+      },
+    }) as never)
+    const wrapper = await mountInspector()
+
+    const feedback = wrapper.find('#tracking-feedback')
+    expect(feedback.exists()).toBe(true)
+    expect(feedback.text()).toContain('下一步')
+    // No fabricated reason and no placeholder row.
+    expect(feedback.find('.tracking-submit-issues').exists()).toBe(false)
+  })
+
+  it('renders exactly one reason set when both sources are present (issue #241)', async () => {
+    apiGet.mockResolvedValue(detail({
+      status: 'NEEDS_RECONFIRM', status_label: '待重新确认', status_group: 'PENDING',
+      available_actions: [submitAction],
+      revalidation_issues: [{
+        code: 'NO_VALID_RESOURCES', field: 'filter_rule',
+        message: '实时复核：资源筛选不满足。',
+      }],
+      last_failure: {
+        error_type: null, category: null, reason_code: 'REQUEST_CHANGED',
+        safe_message: '持久化：方案已变化。', occurred_at: null,
+      },
+    }) as never)
+    const wrapper = await mountInspector()
+
+    const issues = wrapper.find('#tracking-feedback .tracking-submit-issues')
+    expect(issues.text()).toContain('实时复核：资源筛选不满足')
+    expect(issues.text()).not.toContain('持久化：方案已变化')
+    expect(wrapper.findAll('#tracking-feedback .tracking-submit-issues')).toHaveLength(1)
+  })
+
+  it('never shows a failure reason for a record without persisted evidence', async () => {
+    apiGet.mockResolvedValue(detail({
+      status: 'NEEDS_RECONFIRM', status_label: '待重新确认', status_group: 'PENDING',
+      available_actions: [submitAction], last_failure: null,
+    }) as never)
+    const wrapper = await mountInspector()
+
+    const feedback = wrapper.find('#tracking-feedback')
+    expect(feedback.exists()).toBe(true)
+    expect(feedback.find('.tracking-submit-issues').exists()).toBe(false)
+  })
+
+  it('keeps the unresolved state free of a failure reason (issue #241)', async () => {
+    apiGet.mockResolvedValue(detail({
+      status: 'VERIFYING_EXTERNAL', status_label: '核验外部结果中', status_group: 'PROCESSING',
+      submission_mode: 'CONTINUE_TRACKING',
+      current_operation: {
+        operation_id: 'op-1', operation: 'SUBMIT', state: 'OUTCOME_UNKNOWN', attempt: 1,
+        external_result_id: null, error_type: null, created_at: null, updated_at: null, completed_at: null,
+      },
+      available_actions: [],
+      last_failure: {
+        error_type: 'outcome_unknown', category: 'OUTCOME_UNKNOWN',
+        reason_code: 'outcome_unknown', safe_message: 'Auto Bangumi 结果待确认',
+        occurred_at: null,
+      },
+    }) as never)
+    const wrapper = await mountInspector()
+
+    expect(wrapper.find('#tracking-feedback').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('失败原因')
+  })
+})
+
 describe('TrackingInspector action grouping (issue #233 D3/D4)', () => {
   beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
 
