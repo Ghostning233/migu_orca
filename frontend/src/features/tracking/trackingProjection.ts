@@ -663,7 +663,7 @@ function checkStateMessage(state: TrackingCheckState): string {
   switch (state) {
     case 'IN_FLIGHT': return '正在只读核验 Auto Bangumi 的当前状态…'
     case 'CONFIRMED': return '已确认订阅存在，追番状态已更新。'
-    case 'CONFLICT': return '追番记录已变化，本次检查未生效；正在读取最新详情，请再核验。'
+    case 'CONFLICT': return '追番记录已变化，本次核验未生效；正在读取最新详情，请再核验。'
     default: return '暂时无法完成只读核验；未确认前不会再次提交。'
   }
 }
@@ -800,13 +800,13 @@ const RESUBMIT_CONFLICT_MESSAGES: Readonly<Record<string, string>> = {
   tracking_state_conflict:
     '当前追番状态没有可核验的待确认提交（例如上一次提交仍可能在进行），本次未重新提交；请先完成恢复核验。',
   tracking_check_in_progress:
-    '该追番记录的只读检查正在进行，本次未重新提交；请稍候再试。',
+    '该追番记录的只读核验正在进行，本次未重新提交；请稍候再试。',
   tracking_operation_in_progress:
     '存在尚未完成的提交操作，本次未重新提交；请先完成恢复核验。',
   tracking_resubmit_binding_conflict:
     '本次重新提交绑定的操作或连接已变化，未重新提交；请先核验再确认。',
   tracking_idempotency_conflict:
-    '本次重新提交标识已失效，未重新提交；请先核验再确认。',
+    '本次重新提交标识已失效，未重新提交；请重新确认后再试。',
 }
 
 export const RESUBMIT_CONFLICT_FALLBACK_MESSAGE =
