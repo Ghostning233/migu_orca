@@ -34,6 +34,17 @@
 - 无法证明安全性的残留（指针被别人接管、记录已推进、operation 被 transition 过、时间戳异常）继续报冲突，由用户以新意图重新发起；系统不会替它重发。
 - 诊断能力是运维/排障工具，不进入公开 API；将来若要自动化清理，必须先在本 ADR 之外重新设计可核验的清理规则。
 
+## 修订（#248）：资源域排除下的锁语义
+
+#248 把「批次占用」从整个 store 收窄为一组资源（storage profile + `tracking_id` 集合；指定连接时另含连接 generation），并据此修订决策 2 的适用范围：
+
+- **只有外部写意图（`lock_tracking_record`）获取 store 锁。** 它仍然先取 store 锁、再取 per-record 锁、最后取 per-operation 锁，方向不变；`bind + 记录指针 + 门` 仍在该临界区内完成。
+- **纯本地记录写（revalidate/check/sync/handoff 的 CAS/ensure/delete）只取 per-record 锁**，不获取 store 锁、不因运行中的批次排队。它们与批次的并发由 per-record 锁 + revision CAS 裁定：谁先落盘谁赢，输者得到常规 revision/缺失冲突，不产生外部写。
+- **无批次时外部写意图仍持 store 锁跨越整个临界区**，因此批次不能在单条写的 bind 与指针之间启动（本决策决策 2 的原始理由保留）。
+- **批次占用域内**的外部写意图在 bind 之前排队等待该批次（有界后 `connection_in_use`），所以「单条写不会在已持久化意图之后被拒绝」仍然成立。
+- **批次发布占用域前会排空在途外部写意图**（有界）：单条外部写进入 bind 临界区时登记计数，批次取得 store 锁后等待计数清零，因此由非冲突批次切换而来的新批次也无法在 bind 与指针之间启动。
+- 「所有 tracking 写者都先取 store 锁」的旧表述由本节取代；锁方向、持锁不调外部服务、稳定 id 排序等约束不变。
+
 ## 参考
 
 - [ADR-0002](0002-risk-confirmed-manual-resubmission.md)：风险确认的主动重发，`previous_operation_id` 的来源。

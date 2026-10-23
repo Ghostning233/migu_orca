@@ -1533,3 +1533,278 @@ describe('TrackingView batch delete (#223)', () => {
     expect(wrapper.find('#tracking-batch-delete-notice').text()).toContain('没有可删除的条目')
   })
 })
+
+// -- Issue #248: batch consolidation ---------------------------------------
+
+function listRowsResponse(rows: unknown[]) {
+  return { items: rows, summary: { ...defaultSummary, total: rows.length }, status_groups: statusGroups(), warnings: [] }
+}
+
+describe('TrackingView batch consolidation (issue #248)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset(); nextSyncFixture = null })
+
+  it('states the running batch when a single write is refused (AC2)', async () => {
+    const wrapper = await mountPending()
+    apiPost.mockImplementation(async () => {
+      throw {
+        type: 'connection_in_use',
+        status: 409,
+        httpError: true,
+        details: { failed_step: 'tracking_batch_exclusion' },
+      }
+    })
+
+    await wrapper.find('#tracking-resubmit').trigger('click')
+    await flushPromises()
+
+    const note = wrapper.find('#tracking-batch-busy')
+    expect(note.exists()).toBe(true)
+    expect(note.text()).toContain('批量操作进行中')
+    expect(note.text()).toContain('等批次结束后再试')
+    wrapper.unmount()
+  })
+
+  it('keeps the running-batch note visible while a batch delete is in flight (AC2)', async () => {
+    const rows = [rowFor('a', '番 A')]
+    const { wrapper } = await mountBatchRows(rows)
+    await enterBatchAndSelectAll(wrapper)
+    let release: (() => void) | undefined
+    apiPost.mockImplementation(() => new Promise((resolve) => {
+      release = () => resolve(batchDeleteResponse([
+        { tracking_id: 'a', outcome: 'DELETED', external_deleted: false, skip_reason: null },
+      ]) as never)
+    }))
+
+    await wrapper.find('#tracking-batch-delete').trigger('click')
+    await wrapper.find('#tracking-batch-delete-confirm').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#tracking-batch-busy').text()).toContain('批量操作进行中')
+    release?.()
+    await flushPromises()
+    expect(wrapper.find('#tracking-batch-busy').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('recovers a lost batch-delete response from the status endpoint (AC4)', async () => {
+    const rows = [rowFor('a', '番 A')]
+    const { wrapper } = await mountBatchRows(rows)
+    await enterBatchAndSelectAll(wrapper)
+    apiPost.mockImplementation(async () => { throw { type: 'request_timeout', status: 0 } })
+    const completed = batchDeleteResponse(
+      [{ tracking_id: 'a', outcome: 'DELETED', external_deleted: false, skip_reason: null }],
+      { total: 1, deleted: 1, external_deleted: 0, skipped: 0, failed: 0, unknown: 0 },
+    )
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/v1/tracking/batch-deletions/{batch_key}') return completed as never
+      if (path === '/api/v1/settings/autobangumi') {
+        return { configured: true, credential_present: true, connection_ref: REF, configuration_revision: 3, connection_status: 'CONFIGURED', capabilities: null } as never
+      }
+      return listRowsResponse([]) as never
+    })
+
+    await wrapper.find('#tracking-batch-delete').trigger('click')
+    await wrapper.find('#tracking-batch-delete-confirm').trigger('click')
+    await flushPromises()
+
+    expect(apiGet).toHaveBeenCalledWith(
+      '/api/v1/tracking/batch-deletions/{batch_key}',
+      expect.objectContaining({ path: { batch_key: expect.any(String) } }),
+    )
+    expect(wrapper.find('#tracking-batch-delete-summary').text()).toContain('已删除 1 条')
+    wrapper.unmount()
+  })
+
+  it('reports partial progress without retiring the batch key (AC4)', async () => {
+    const rows = [rowFor('a', '番 A')]
+    const { wrapper } = await mountBatchRows(rows)
+    await enterBatchAndSelectAll(wrapper)
+    apiPost.mockImplementation(async () => { throw { type: 'request_timeout', status: 0 } })
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/v1/tracking/batch-deletions/{batch_key}') {
+        return {
+          ...batchDeleteResponse(
+            [{ tracking_id: 'a', outcome: 'DELETED', external_deleted: false, skip_reason: null }],
+            { total: 2, deleted: 1, external_deleted: 0, skipped: 0, failed: 0, unknown: 0 },
+          ),
+          state: 'IN_PROGRESS',
+        } as never
+      }
+      if (path === '/api/v1/settings/autobangumi') {
+        return { configured: true, credential_present: true, connection_ref: REF, configuration_revision: 3, connection_status: 'CONFIGURED', capabilities: null } as never
+      }
+      return listRowsResponse(rows) as never
+    })
+
+    await wrapper.find('#tracking-batch-delete').trigger('click')
+    await wrapper.find('#tracking-batch-delete-confirm').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#tracking-batch-delete-notice').text()).toContain('批次仍在执行')
+    wrapper.unmount()
+  })
+
+  it('keeps the key and names the query failure, never resending under a new key (AC4)', async () => {
+    const rows = [rowFor('a', '番 A')]
+    const { wrapper } = await mountBatchRows(rows)
+    await enterBatchAndSelectAll(wrapper)
+    apiPost.mockImplementation(async () => { throw { type: 'request_timeout', status: 0 } })
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/v1/tracking/batch-deletions/{batch_key}') {
+        throw { type: 'network_error', status: 0 }
+      }
+      if (path === '/api/v1/settings/autobangumi') {
+        return { configured: true, credential_present: true, connection_ref: REF, configuration_revision: 3, connection_status: 'CONFIGURED', capabilities: null } as never
+      }
+      return listRowsResponse(rows) as never
+    })
+
+    await wrapper.find('#tracking-batch-delete').trigger('click')
+    await wrapper.find('#tracking-batch-delete-confirm').trigger('click')
+    await flushPromises()
+
+    const firstKey = batchDeleteBody(0)[1].body.idempotency_key
+    expect(wrapper.find('#tracking-batch-delete-notice').text()).toContain('无法查询批次状态')
+
+    // The next attempt replays the same batch: the key is never regenerated.
+    apiPost.mockImplementation(async () => batchDeleteResponse([
+      { tracking_id: 'a', outcome: 'DELETED', external_deleted: false, skip_reason: null },
+    ]) as never)
+    await wrapper.find('#tracking-batch-delete').trigger('click')
+    await wrapper.find('#tracking-batch-delete-confirm').trigger('click')
+    await flushPromises()
+    expect(batchDeleteBody(1)[1].body.idempotency_key).toBe(firstKey)
+    wrapper.unmount()
+  })
+
+  it('sends the batch delete through the unified client transport (AC3)', async () => {
+    const rows = [rowFor('a', '番 A')]
+    const { wrapper } = await mountBatchRows(rows)
+    await enterBatchAndSelectAll(wrapper)
+    apiPost.mockImplementation(async () => batchDeleteResponse([
+      { tracking_id: 'a', outcome: 'DELETED', external_deleted: false, skip_reason: null },
+    ]) as never)
+
+    await wrapper.find('#tracking-batch-delete').trigger('click')
+    await wrapper.find('#tracking-batch-delete-confirm').trigger('click')
+    await flushPromises()
+
+    const [endpoint, options] = batchDeleteBody(0)
+    expect(endpoint).toBe('/api/v1/tracking/batch-delete-plan')
+    expect((options as { body: Record<string, unknown> }).body.confirm).toBe(true)
+    wrapper.unmount()
+  })
+})
+
+describe('TrackingView batch consolidation residuals (issue #248)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset(); nextSyncFixture = null })
+
+  it('never labels a config-lease connection_in_use as a running batch (I3)', async () => {
+    const wrapper = await mountPending()
+    apiPost.mockImplementation(async () => {
+      throw {
+        type: 'connection_in_use',
+        status: 409,
+        httpError: true,
+        details: { failed_step: 'acquire_autobangumi_config_lease' },
+      }
+    })
+
+    await wrapper.find('#tracking-resubmit').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#tracking-batch-busy').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('queries the batch status after a 5xx answer (AC4)', async () => {
+    const rows = [rowFor('a', '番 A')]
+    const { wrapper } = await mountBatchRows(rows)
+    await enterBatchAndSelectAll(wrapper)
+    apiPost.mockImplementation(async () => {
+      throw { type: 'unexpected_error', status: 500, httpError: true }
+    })
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/v1/tracking/batch-deletions/{batch_key}') {
+        return batchDeleteResponse(
+          [{ tracking_id: 'a', outcome: 'DELETED', external_deleted: false, skip_reason: null }],
+          { total: 1, deleted: 1, external_deleted: 0, skipped: 0, failed: 0, unknown: 0 },
+        ) as never
+      }
+      if (path === '/api/v1/settings/autobangumi') {
+        return { configured: true, credential_present: true, connection_ref: REF, configuration_revision: 3, connection_status: 'CONFIGURED', capabilities: null } as never
+      }
+      return listRowsResponse([]) as never
+    })
+
+    await wrapper.find('#tracking-batch-delete').trigger('click')
+    await wrapper.find('#tracking-batch-delete-confirm').trigger('click')
+    await flushPromises()
+
+    expect(apiGet).toHaveBeenCalledWith(
+      '/api/v1/tracking/batch-deletions/{batch_key}',
+      expect.objectContaining({ path: { batch_key: expect.any(String) } }),
+    )
+    expect(wrapper.find('#tracking-batch-delete-summary').text()).toContain('已删除 1 条')
+    wrapper.unmount()
+  })
+
+  it('says the batch may not have run when the status is unknown (AC4)', async () => {
+    const rows = [rowFor('a', '番 A')]
+    const { wrapper } = await mountBatchRows(rows)
+    await enterBatchAndSelectAll(wrapper)
+    apiPost.mockImplementation(async () => { throw { type: 'request_timeout', status: 0 } })
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/v1/tracking/batch-deletions/{batch_key}') {
+        throw { type: 'tracking_not_found', status: 404, httpError: true }
+      }
+      if (path === '/api/v1/settings/autobangumi') {
+        return { configured: true, credential_present: true, connection_ref: REF, configuration_revision: 3, connection_status: 'CONFIGURED', capabilities: null } as never
+      }
+      return listRowsResponse(rows) as never
+    })
+
+    await wrapper.find('#tracking-batch-delete').trigger('click')
+    await wrapper.find('#tracking-batch-delete-confirm').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#tracking-batch-delete-notice').text()).toContain('可能尚未执行')
+    wrapper.unmount()
+  })
+
+  it('keeps the same batch key after an IN_PROGRESS answer (AC4)', async () => {
+    const rows = [rowFor('a', '番 A')]
+    const { wrapper } = await mountBatchRows(rows)
+    await enterBatchAndSelectAll(wrapper)
+    apiPost.mockImplementation(async () => { throw { type: 'request_timeout', status: 0 } })
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/v1/tracking/batch-deletions/{batch_key}') {
+        return {
+          ...batchDeleteResponse(
+            [{ tracking_id: 'a', outcome: 'DELETED', external_deleted: false, skip_reason: null }],
+            { total: 2, deleted: 1, external_deleted: 0, skipped: 0, failed: 0, unknown: 0 },
+          ),
+          state: 'IN_PROGRESS',
+        } as never
+      }
+      if (path === '/api/v1/settings/autobangumi') {
+        return { configured: true, credential_present: true, connection_ref: REF, configuration_revision: 3, connection_status: 'CONFIGURED', capabilities: null } as never
+      }
+      return listRowsResponse(rows) as never
+    })
+
+    await wrapper.find('#tracking-batch-delete').trigger('click')
+    await wrapper.find('#tracking-batch-delete-confirm').trigger('click')
+    await flushPromises()
+
+    const firstKey = batchDeleteBody(0)[1].body.idempotency_key
+    apiPost.mockImplementation(async () => batchDeleteResponse([
+      { tracking_id: 'a', outcome: 'DELETED', external_deleted: false, skip_reason: null },
+    ]) as never)
+    await wrapper.find('#tracking-batch-delete').trigger('click')
+    await wrapper.find('#tracking-batch-delete-confirm').trigger('click')
+    await flushPromises()
+    expect(batchDeleteBody(1)[1].body.idempotency_key).toBe(firstKey)
+    wrapper.unmount()
+  })
+})

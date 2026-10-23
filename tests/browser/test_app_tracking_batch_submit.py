@@ -87,8 +87,17 @@ def _detail(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _install(page: Page, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Mock settings/list/detail plus the batch endpoint; return posted bodies."""
+def _install(
+    page: Page,
+    items: list[dict[str, Any]],
+    *,
+    refuse_single_submit: bool = False,
+) -> list[dict[str, Any]]:
+    """Mock settings/list/detail plus the batch endpoint; return posted bodies.
+
+    ``refuse_single_submit`` answers a single submit with the batch-exclusion
+    409 (issue #248) so the page's "批量操作进行中" copy can be asserted.
+    """
     bodies: list[dict[str, Any]] = []
     state = {"items": [dict(item) for item in items]}
 
@@ -128,6 +137,22 @@ def _install(page: Page, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 state["items"][0],
             )
             route.fulfill(json={"ok": True, "result": _detail(match)})
+            return
+        if (
+            refuse_single_submit
+            and request.method == "POST"
+            and path.startswith("/tracking/items/")
+            and path.endswith("/submit")
+        ):
+            route.fulfill(
+                status=409,
+                json={
+                    "ok": False,
+                    "error_type": "connection_in_use",
+                    "error_message": "批量操作进行中：请等待批次结束后再操作该记录",
+                    "error_data": {"failed_step": "tracking_batch_exclusion"},
+                },
+            )
             return
         if request.method == "POST" and path == "/tracking/batch-submit":
             body = request.post_data_json or {}
@@ -625,3 +650,25 @@ class TestBatchDeleteJourney:
         expect(page.locator('.tracking-list-row[data-tracking-id="tracking-b"]')).to_have_class(
             re.compile("is-batch-selected")
         )
+
+
+class TestSingleWriteDuringABatch:
+    """Issue #248: a refused single write states the running batch explicitly."""
+
+    def test_a_refused_single_submit_shows_the_batch_in_progress_copy(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _require_dist()
+        set_storage_preferences(page, storage_dir)
+        _install(page, [_pending("trk_a", "番 A")], refuse_single_submit=True)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=trk_a")
+        page.wait_for_selector("#tracking-submit")
+
+        page.locator("#tracking-submit").click()
+        page.wait_for_selector("#tracking-mode-continue")
+        page.locator("#tracking-mode-continue").click()
+
+        expect(page.locator("#tracking-batch-busy")).to_contain_text("批量操作进行中")
+        expect(page.locator("#tracking-batch-busy")).to_contain_text("等批次结束后再试")
+        # The generic failure copy must not be the only thing the user sees.
+        expect(page.locator("#tracking-submit-result")).not_to_contain_text("批量操作进行中")

@@ -160,12 +160,19 @@
 
 ## 3. 端点族明细
 
-> ADR-0007（#223）起：批量执行期间，单条 tracking 写请求（`delete-plan`、`submit`、
-> `retry`、`recover`、`check`、`revalidate`、`resubmit`、`modify`、`set-enabled`、
-> `refresh`）在**请求入口**即返回 409 `connection_in_use`，此时尚未持久化任何
-> operation 意图；若请求已通过入口检查、随后批次才取得批次租约，仓库层会将该写排队到
-> 批次结束（不重复外部写）。`batch-submit` 与两个批量删除作为“批次”本身在另一个批次
-> 持租约时按 `_BATCH_WAIT_SECONDS` 等待后返回同一 409。
+> ADR-0007（#223，**#248 修订**）起：批次占用的是一组**资源**而不是整个存储。批次租约发布
+> 自己占用的 storage profile + `tracking_id` 集合 +（可选）连接 generation；请求入口只拒绝
+> 「同 profile、本批次占用的记录」上的**外部写**（`delete-plan`、`submit`、`retry`、
+> `resubmit`、`modify`、`set-enabled`、`refresh`），此时尚未持久化任何 operation 意图。
+> 纯本地/只读核验（`check`、`revalidate`、`recover`）、无关记录与其它 profile **不再**
+> 返回该 409。入口在**解析不出** profile（非法 JSON、非法 profile）时不提前拒绝，交给视图
+> 按各自校验返回 400 或按默认 profile 处理；body 与 query 给出不同 profile 时按「任一命中
+> 即拒」fail-closed（各视图读取来源不一致，见 issue #248）。
+> 若请求已通过入口、随后批次才取得租约，`lock_tracking_record`（与批次共用同一把 store 锁，
+> 且在任何意图落盘之前）负责排队/有界拒绝。批次指定了连接时，替换/删除该 AB 连接
+> （`PUT|DELETE /api/v1/settings/autobangumi`）同样返回 409 `connection_in_use`。
+> `batch-submit` 与两个批量删除作为“批次”本身在另一个批次持租约时按
+> `_BATCH_WAIT_SECONDS` 等待后返回同一 409。
 
 ### 3.1 Requests（`/api/v1/requests`）
 

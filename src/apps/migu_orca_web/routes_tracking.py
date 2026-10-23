@@ -42,6 +42,18 @@ from apps.migu_orca_web.schemas import (
 )
 from apps.migu_orca_web.services import _storage_dir
 from apps.migu_orca_web.tracking_batch_delete_service import (
+    # The batch binding digest and its authoritative comparison live in the
+    # service; the route reuses them so a completed replay can be answered
+    # before the lease without ever bypassing the idempotency binding (issue
+    # #248 B4).  A public read-only seam would be preferable; the file面 for
+    # this ticket does not allow changing the service.
+    KIND_LOCAL_AND_EXTERNAL,
+    KIND_LOCAL_ONLY,
+    STATE_COMPLETED,
+    _fingerprint,
+    _public,
+    _read_record,
+    _require_same_batch,
     ensure_no_racing_single_writes,
     get_saved_tracking_batch_delete,
     run_saved_tracking_batch_delete,
@@ -67,53 +79,127 @@ from apps.migu_orca_web.tracking_submission_service import (
 from extensions.flask_api import class_route
 from extensions.flask_api.api import failed_response
 from extensions.flask_api.views import GetView, PostView
+from shared.errors import Stage1Error
 from storage_engine.controllers.operation_repository import load_tracking_operation
 from storage_engine.controllers.storage_config import load_storage_config
 from storage_engine.controllers.tracking_repository import (
+    batch_conflicts_with,
     load_tracking_record,
-    tracking_batch_active,
+    note_request_storage_dirs,
     tracking_batch_lease,
+    tracking_batch_scope,
 )
 from tracking_engine.models.operation import TRACKING_OPERATION_STATE_SUCCEEDED
 
-#: Issue #223 (ADR-0007): single tracking writes that must not start while a
-#: batch owns the store.  The refusal happens at the request boundary — before
-#: any service persists an operation intent — so it can never leave an orphan
-#: PREPARED operation behind; the repository serialization stays as the ordering
-#: fallback for the race window between this check and the service.
-_SINGLE_TRACKING_WRITE_RULES: frozenset[tuple[str, str]] = frozenset({
+#: Issue #248: only a route that may start an **external** write on a record can
+#: collide with the batch's external-write resource.  Read-only verifications
+#: (``check``/``revalidate``/``recover``) and pure-local record writes are never
+#: refused here — the batch owns the external write, not the record file.
+_BATCH_EXCLUDED_SINGLE_WRITES: frozenset[tuple[str, str]] = frozenset({
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/submit"),
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/retry"),
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/delete-plan"),
-    ("POST", "/api/v1/tracking/items/<path:tracking_id>/recover"),
-    ("POST", "/api/v1/tracking/items/<path:tracking_id>/check"),
-    ("POST", "/api/v1/tracking/items/<path:tracking_id>/revalidate"),
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/resubmit"),
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/modify"),
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/set-enabled"),
     ("POST", "/api/v1/tracking/items/<path:tracking_id>/refresh"),
 })
 
+#: Issue #248 (connection resource): replacing or deleting the saved Auto Bangumi
+#: connection changes the generation a running batch pinned, so a batch that
+#: names a connection excludes those two writes.  A local-only batch has no
+#: connection and does not block a settings change.
+_BATCH_EXCLUDED_CONNECTION_WRITES: frozenset[tuple[str, str]] = frozenset({
+    ("PUT", "/api/v1/settings/autobangumi"),
+    ("DELETE", "/api/v1/settings/autobangumi"),
+})
+
+
+def _request_storage_profiles() -> frozenset[str] | None:
+    """Every storage profile this request could resolve to, or ``None``.
+
+    Views disagree about the ``storage_dir`` source: the manual tracking views
+    read the body, while ``extensions.flask_api.views`` lets a query string
+    override it.  The guard therefore records **both** candidates and the
+    conflict predicate fails closed on any match, so an attacker cannot pick the
+    source the guard ignores (issue #248 B3).
+
+    ``None`` means a parse failure (malformed JSON body / invalid profile): the
+    view must answer 400, never this guard a 409.
+    """
+    body = request.get_json(silent=True)
+    if request.data and body is None:
+        return None
+    raw_body = body.get("storage_dir") if isinstance(body, dict) else None
+    raw_query = request.args.get("storage_dir")
+    if raw_body is not None and not isinstance(raw_body, str):
+        return None
+    if raw_query is not None and not isinstance(raw_query, str):
+        return None
+    try:
+        candidates = {str(_storage_dir(raw_body))}
+        candidates.add(str(_storage_dir(raw_query)))
+    except Stage1Error:
+        return None
+    return frozenset(candidates)
+
 
 @api_blueprint.before_request
 def _refuse_single_tracking_write_during_batch() -> Any | None:
-    """ADR-0007: a batch excludes single external writes in both directions.
+    """Early refusal for a single external write the running batch owns.
 
-    A later single write is refused **before** its service persists anything, so
-    the published ``connection_in_use`` (409) is the real outcome and no orphan
-    intent can appear.  A request that already passed this check only races the
-    batch for milliseconds; the repository serializer then queues it.
+    The batch publishes its occupied resources (records + profile + connection)
+    with its lease; this guard refuses only an external write on one of those
+    records in one of the profiles this request may resolve to.  It runs before
+    any service persists an intent, so the published ``connection_in_use`` (409)
+    cannot leave an orphan operation; the repository's ``lock_tracking_record``
+    is the final, shared check for the race window between this guard and the
+    batch.
     """
-    if not tracking_batch_active():
+    note_request_storage_dirs(())
+    scope = tracking_batch_scope()
+    if scope is None:
         return None
     rule = request.url_rule
-    if rule is None or (request.method.upper(), rule.rule) not in _SINGLE_TRACKING_WRITE_RULES:
+    if rule is None:
+        return None
+    key = (request.method.upper(), rule.rule)
+    if key not in _BATCH_EXCLUDED_SINGLE_WRITES and key not in _BATCH_EXCLUDED_CONNECTION_WRITES:
+        return None
+    profiles = _request_storage_profiles()
+    # Publish the candidates for the repository's final gate: it must apply the
+    # same predicate as this guard (issue #248 I2/I3/B3).
+    note_request_storage_dirs(profiles)
+    if profiles is None:
+        # A malformed body/profile must reach the view for its 400.
+        return None
+    if key in _BATCH_EXCLUDED_CONNECTION_WRITES:
+        if scope.connection_ref is None:
+            return None
+        return failed_response(
+            "connection_in_use",
+            "批量操作进行中：请等待批次结束后再修改 Auto Bangumi 连接",
+            {"failed_step": "tracking_batch_connection_exclusion"},
+        )
+    tracking_id = (request.view_args or {}).get("tracking_id")
+    if not isinstance(tracking_id, str) or not tracking_id.strip():
+        return None
+    # A parseable but schema-invalid body still gets this 409 while the record is
+    # owned: the batch is the stronger, fail-closed answer, and the alternative
+    # would require duplicating each view's validator here.
+    if not batch_conflicts_with(tracking_id, storage_dirs=profiles):
         return None
     return failed_response(
         "connection_in_use",
-        "批量操作正在执行，请稍后再试",
+        "批量操作进行中：请等待批次结束后再操作该记录",
         {"failed_step": "tracking_batch_exclusion"},
     )
+
+
+@api_blueprint.teardown_request
+def _clear_request_storage_profile(_exception: BaseException | None) -> None:
+    """Do not let one request's profiles leak into the next on this thread."""
+    note_request_storage_dirs(())
 
 
 @class_route(api_blueprint, "/api/v1/tracking/items", methods=["GET"])
@@ -258,11 +344,19 @@ class TrackingBatchSubmitView(PostView):
         payload = self.request_validator_model
         assert isinstance(payload, SavedTrackingBatchSubmitInput)
         config = load_storage_config(_storage_dir(payload.storage_dir))
+        tracking_ids = {entry.tracking_id for entry in payload.items}
         # ADR-0007 decision 3 applies to every batch: refuse while another
         # record already owns an external write, then hold the batch lease so a
         # later batch or single write cannot overlap this one.
-        ensure_no_racing_single_writes(config, {entry.tracking_id for entry in payload.items})
-        with tracking_batch_lease(batch_key=f"submit:{payload.items[0].idempotency_key}"):
+        ensure_no_racing_single_writes(config, tracking_ids)
+        # Issue #248: publish the occupied resources so the boundary guard and
+        # the repository gate exclude exactly these records.
+        with tracking_batch_lease(
+            batch_key=f"submit:{payload.items[0].idempotency_key}",
+            tracking_ids=tracking_ids,
+            connection_ref=str(payload.connection_ref),
+            storage_dir=str(config.storage_dir),
+        ):
             return run_saved_tracking_batch_submit(config, payload=payload)
 
 
@@ -302,6 +396,40 @@ class TrackingItemDeletePlanView(PostView):
         )
 
 
+def _run_batch_delete(
+    config: Any,
+    *,
+    payload: Any,
+    delete_external: bool,
+    tracking_ids: set[str],
+    connection_ref: str | None = None,
+) -> dict[str, object]:
+    """Run one batch delete under the route-published resource scope.
+
+    A **finished** batch is replayed as a pure read before the lease, but only
+    after the same binding check the service performs: a same-key request with
+    different entries or a different kind still gets ``idempotency_conflict``
+    instead of another batch's stored result (issue #248 B4).
+    """
+    kind = KIND_LOCAL_AND_EXTERNAL if delete_external else KIND_LOCAL_ONLY
+    existing = _read_record(config, payload.idempotency_key)
+    if existing is not None:
+        _require_same_batch(existing, _fingerprint(kind, payload.items))
+        if existing.get("state") == STATE_COMPLETED:
+            return _public(existing)
+    with tracking_batch_lease(
+        batch_key=payload.idempotency_key,
+        tracking_ids=tracking_ids,
+        connection_ref=connection_ref,
+        storage_dir=str(config.storage_dir),
+    ):
+        return run_saved_tracking_batch_delete(
+            config,
+            payload=payload,
+            delete_external=delete_external,
+        )
+
+
 @class_route(
     api_blueprint,
     "/api/v1/tracking/batch-delete-plan",
@@ -323,10 +451,14 @@ class TrackingBatchDeletePlanView(PostView):
     def save(self) -> dict[str, object]:
         payload = self.request_validator_model
         assert isinstance(payload, SavedTrackingBatchDeleteInput)
-        return run_saved_tracking_batch_delete(
-            load_storage_config(_storage_dir(payload.storage_dir)),
+        config = load_storage_config(_storage_dir(payload.storage_dir))
+        # Issue #248: publish the occupied resources; the service's own lease
+        # nests inside this one and keeps the same scope.
+        return _run_batch_delete(
+            config,
             payload=payload,
             delete_external=False,
+            tracking_ids={entry.tracking_id for entry in payload.items},
         )
 
 
@@ -351,10 +483,13 @@ class TrackingBatchDeletePlanExternalView(PostView):
     def save(self) -> dict[str, object]:
         payload = self.request_validator_model
         assert isinstance(payload, SavedTrackingBatchDeleteExternalInput)
-        return run_saved_tracking_batch_delete(
-            load_storage_config(_storage_dir(payload.storage_dir)),
+        config = load_storage_config(_storage_dir(payload.storage_dir))
+        return _run_batch_delete(
+            config,
             payload=payload,
             delete_external=True,
+            tracking_ids={entry.tracking_id for entry in payload.items},
+            connection_ref=str(payload.connection_ref),
         )
 
 
