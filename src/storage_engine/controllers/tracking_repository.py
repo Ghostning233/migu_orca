@@ -28,6 +28,28 @@ Storage rules
   and never carry sensitive content.
 - Damaged records are never deleted or auto-overwritten; a single damaged file
   does not block the healthy list.
+
+Lock order (issue #247)
+-----------------------
+Every tracking writer holds the process-wide store lock first, then the
+per-record lock, then (inside ``operation_repository``) the per-operation lock:
+
+1. the batch store lock (``_serialized_tracking_write`` / ``tracking_batch_lease``);
+2. the per-record lock (``lock_tracking_record``, keyed by ``tracking_id``);
+3. the per-idempotency-key / per-operation lock taken inside
+   ``operation_repository`` (keyed by the derived ``operation_id``).
+
+The direction is mandatory: never take the store lock while holding a record or
+operation lock, never take a record lock while holding an operation lock, take
+several record locks in a stable id order if a caller ever needs two, and never
+call an external service (Auto Bangumi, MiKan, qBittorrent) while any of these
+locks is held.  A single write *waits* for a running batch (ADR-0007) and is
+never refused after it persisted its intent.  ``bind + record-pointer write +
+the operation execution gate`` run inside one record critical section (itself
+under the store lock), so a concurrent same-key request cannot observe a
+half-written binding and two retriers cannot both take execution.  A process
+crash can still interrupt the two file writes; that residue is claimed by the
+verified rule in ``operation_repository.claimable_prepared_operation``.
 """
 
 from __future__ import annotations
@@ -530,6 +552,22 @@ def _validated_tracking_id(tracking_id: str, failed_step: str) -> str:
     return clean_id
 
 
+@contextmanager
+def lock_tracking_record(tracking_id: str) -> Iterator[None]:
+    """Hold the store + per-record critical section for one write (issue #247).
+
+    The store lock is taken first (the order every other tracking writer uses),
+    then the per-record ``RLock``; ``operation_repository`` takes its
+    per-operation lock inside.  Nested record writes re-enter both, so the whole
+    bind + pointer write + execution gate is one critical section in this
+    process, and it is released before any external call.  A crash still leaves
+    either both writes or the recoverable operation-without-pointer residue.
+    """
+    clean_id = _validated_tracking_id(tracking_id, "lock_tracking_record")
+    with _serialized_tracking_write("lock_tracking_record"), _LOCKS.for_key(clean_id):
+        yield
+
+
 #: 进程内 per-key 锁池：同一条目的 ensure/CAS 写串行，不同条目互不阻塞。
 _LOCKS = KeyedLocks()
 
@@ -561,4 +599,5 @@ __all__ = [
     "ensure_tracking_record",
     "list_tracking_records",
     "load_tracking_record",
+    "lock_tracking_record",
 ]

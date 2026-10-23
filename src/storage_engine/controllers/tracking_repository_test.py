@@ -9,6 +9,7 @@ rejection, atomic writes, and the guarantee that the persisted file never
 carries sensitive content.
 """
 
+import contextlib
 import json
 import threading
 from dataclasses import replace
@@ -479,3 +480,55 @@ def test_delete_tracking_record_without_a_revision_keeps_the_old_behaviour(
         "deleted": True,
     }
     assert list_tracking_records(config).records == []
+
+
+def test_lock_tracking_record_takes_the_store_lock_before_the_record_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #247: the critical section must follow the writers' lock order.
+
+    Every ordinary tracking writer takes the process-wide store lock first and
+    the per-record lock second.  ``lock_tracking_record`` must acquire them in
+    the same direction; taking the record lock first would deadlock with a
+    running batch (ABBA).  Asserting the acquisition order is deterministic,
+    which a two-thread race is not.
+    """
+    import storage_engine.controllers.tracking_repository as repository
+
+    config = _config(tmp_path)
+    record, _ = ensure_tracking_record(config, _record())
+    order: list[str] = []
+    real_store = repository._serialized_tracking_write
+    real_locks = repository._LOCKS
+
+    class _RecordingLocks:
+        def for_key(self, key: str):
+            order.append("record")
+            return real_locks.for_key(key)
+
+    @contextlib.contextmanager
+    def recording_store(step: str):
+        order.append("store")
+        with real_store(step):
+            yield
+
+    monkeypatch.setattr(repository, "_serialized_tracking_write", recording_store)
+    monkeypatch.setattr(repository, "_LOCKS", _RecordingLocks())
+
+    with repository.lock_tracking_record(record.tracking_id):
+        # A nested record CAS re-enters both locks in the same thread.
+        compare_and_swap_tracking_record(
+            config,
+            record.tracking_id,
+            record.revision,
+            replace(
+                record,
+                revision=record.revision + 1,
+                updated_at="2026-01-02T00:00:00+00:00",
+            ),
+        )
+
+    assert order[0] == "store"
+    assert order[1] == "record"
+    # The nested write re-enters the same locks instead of taking new ones.
+    assert order == ["store", "record"] * 2

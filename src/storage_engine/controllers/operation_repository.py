@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Collection
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -60,6 +61,7 @@ from tracking_engine.models.operation import (
     TRACKING_OPERATION_SCHEMA_VERSION,
     TRACKING_OPERATION_STATE_FAILED,
     TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN,
+    TRACKING_OPERATION_STATE_PREPARED,
     TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
     TRACKING_OPERATION_STATE_SUCCEEDED,
     TrackingOperation,
@@ -70,6 +72,7 @@ from tracking_engine.models.operation import (
     tracking_operation_transition_allowed,
     utc_now,
 )
+from tracking_engine.models.tracking import TRACKING_STATUS_SUBMITTING, TrackingRecord
 
 #: Opaque operation-id shape (``op_<32 hex>``).  The character whitelist keeps
 #: the id usable as a single safe path/URL segment.
@@ -179,6 +182,173 @@ def bind_tracking_operation(
         normalized = _normalize(record, "bind_tracking_operation")
         _atomic_write(config, operation_id, normalized, "bind_tracking_operation")
         return normalized, True
+
+
+def claimable_prepared_operation(
+    record: TrackingRecord,
+    operation: TrackingOperation,
+    *,
+    allowed_statuses: Collection[str],
+) -> bool:
+    """True only when a stored ``PREPARED`` operation may be claimed (issue #247).
+
+    Claiming means: *this* crash residue was created by *this* exact binding, and
+    the external write it guards provably never started, so the caller may
+    attach/finish the record pointer and continue through the ordinary
+    ``PREPARED -> IN_PROGRESS`` compare-and-swap (which remains the single
+    execution gate).
+
+    Binding equality (same idempotency key, ``tracking_id``, connection, action,
+    request fingerprint, recorded revision) is enforced by
+    ``bind_tracking_operation`` before this predicate runs; this function only
+    checks the record/operation relationship.
+
+    The security proof is a state invariant, not a timestamp: every transition is
+    persisted, the state machine forbids returning to ``PREPARED``, and the write
+    path only calls the external system after ``IN_PROGRESS`` is durably
+    persisted (see the module docstring and ADR-0008).  A ``PREPARED`` operation
+    therefore proves the external call never happened.  ``updated_at ==
+    created_at`` is only an auxiliary corruption check.
+
+    Three recoverable shapes are accepted (anything else is a hard refusal):
+
+    - ``POINTER_EMPTY``: the pointer write never happened; the record must still
+      be exactly at the binding revision.
+    - ``POINTER_MATCHES``: the pointer write happened (it advanced the record),
+      so the record must be at or beyond ``expected_revision + 1``.
+    - ``POINTER_PREVIOUS``: a risk-confirmed resubmit still points at the pending
+      operation it records as ``previous_operation_id``; that successor link is
+      part of the binding, so the record stays at the binding revision.
+    - a pointer to any *unrelated* operation is refused.
+    """
+    if operation.state != TRACKING_OPERATION_STATE_PREPARED:
+        return False
+    if operation.tracking_id != record.tracking_id:
+        return False
+    if operation.schema_version != TRACKING_OPERATION_SCHEMA_VERSION:
+        return False
+    if operation.previous_tracking_status not in (None, record.status):
+        return False
+    if operation.external_result_id is not None:
+        return False
+    # Auxiliary corruption check; the state invariant above is the real proof.
+    if operation.updated_at != operation.created_at:
+        return False
+    pointer = record.current_operation_id
+    if pointer is None:
+        # The pointer write never happened: the record must still be in a state
+        # this operation may be started from, at exactly the binding revision.
+        if record.status not in allowed_statuses:
+            return False
+        return record.revision == operation.expected_revision
+    if pointer == operation.operation_id:
+        # The pointer write advanced the record; a submit record is then
+        # SUBMITTING (the state the crashed attempt persisted with the pointer).
+        if record.status not in allowed_statuses and record.status != TRACKING_STATUS_SUBMITTING:
+            return False
+        return record.revision >= operation.expected_revision + 1
+    if (
+        operation.previous_operation_id is not None
+        and pointer == operation.previous_operation_id
+    ):
+        # Risk-confirmed resubmit (ADR-0002): the record still points at the
+        # pending operation this new one replaces; the successor link is part of
+        # the binding, so this is not an unrelated operation.
+        if record.status not in allowed_statuses:
+            return False
+        return record.revision == operation.expected_revision
+    return False
+
+
+def diagnose_prepared_binding(
+    record: TrackingRecord,
+    operation: TrackingOperation,
+    *,
+    allowed_statuses: Collection[str] | None = None,
+) -> dict[str, Any]:
+    """Read-only diagnosis of one stored operation against a record (issue #247).
+
+    Returns only sanitized identities, revisions, a stable shape/reason code and
+    the first hard ``blocking_reason`` the claim predicate would reject on, in
+    the predicate's own order (so a ``POINTER_*`` shape is never read as
+    claimable by itself).  Pass ``allowed_statuses`` (the action's allowed start
+    statuses) to also report ``RECORD_STATUS_NOT_CLAIMABLE``.  It never carries
+    a message, endpoint, credential or any content from the operation.
+    ``retry_authorized`` is always ``False``: the diagnosis explains what a
+    residue looks like, it never authorizes a write.  Services must gate a claim
+    on :func:`claimable_prepared_operation`, never on this report.
+    """
+    pointer = record.current_operation_id
+    if operation.state != TRACKING_OPERATION_STATE_PREPARED:
+        shape, reason = "NOT_PREPARED", "OPERATION_NOT_PREPARED"
+    elif pointer is None:
+        shape, reason = "POINTER_EMPTY", "POINTER_MISSING"
+    elif pointer == operation.operation_id:
+        shape, reason = "POINTER_MATCHES", "POINTER_MATCHES"
+    elif (
+        operation.previous_operation_id is not None
+        and pointer == operation.previous_operation_id
+    ):
+        shape, reason = "POINTER_PREVIOUS", "POINTER_PREVIOUS_OPERATION"
+    else:
+        shape, reason = "POINTER_OTHER", "POINTER_REPLACED"
+    # Name the first hard blocker the claim predicate would also reject on, so a
+    # POINTER_* shape is never read as "claimable" on its own.
+    # Same order as ``claimable_prepared_operation`` so the first reported
+    # blocker is the one the predicate would reject on.
+    if operation.state != TRACKING_OPERATION_STATE_PREPARED:
+        blocking: str | None = "OPERATION_NOT_PREPARED"
+    elif operation.tracking_id != record.tracking_id:
+        blocking = "FOREIGN_RECORD"
+    elif operation.schema_version != TRACKING_OPERATION_SCHEMA_VERSION:
+        blocking = "SCHEMA_MISMATCH"
+    elif operation.previous_tracking_status not in (None, record.status):
+        blocking = "PREVIOUS_STATUS_MISMATCH"
+    elif operation.external_result_id is not None:
+        blocking = "EXTERNAL_RESULT_PRESENT"
+    elif operation.updated_at != operation.created_at:
+        blocking = "TIMESTAMP_MISMATCH"
+    elif pointer is None:
+        if allowed_statuses is not None and record.status not in allowed_statuses:
+            blocking = "RECORD_STATUS_NOT_CLAIMABLE"
+        elif record.revision != operation.expected_revision:
+            blocking = "RECORD_REVISION_MISMATCH"
+        else:
+            blocking = None
+    elif pointer == operation.operation_id:
+        if (
+            allowed_statuses is not None
+            and record.status not in allowed_statuses
+            and record.status != TRACKING_STATUS_SUBMITTING
+        ):
+            blocking = "RECORD_STATUS_NOT_CLAIMABLE"
+        elif record.revision < operation.expected_revision + 1:
+            blocking = "RECORD_REVISION_MISMATCH"
+        else:
+            blocking = None
+    elif (
+        operation.previous_operation_id is not None
+        and pointer == operation.previous_operation_id
+    ):
+        if allowed_statuses is not None and record.status not in allowed_statuses:
+            blocking = "RECORD_STATUS_NOT_CLAIMABLE"
+        elif record.revision != operation.expected_revision:
+            blocking = "RECORD_REVISION_MISMATCH"
+        else:
+            blocking = None
+    else:
+        blocking = "POINTER_OTHER"
+    return {
+        "shape": shape,
+        "reason_code": reason,
+        "blocking_reason": blocking,
+        "operation_id": operation.operation_id,
+        "tracking_id": record.tracking_id,
+        "operation_state": operation.state,
+        "record_revision": record.revision,
+        "operation_expected_revision": operation.expected_revision,
+        "retry_authorized": False,
+    }
 
 
 def load_tracking_operation(
@@ -559,6 +729,8 @@ def _operation_path(
 
 __all__ = [
     "bind_tracking_operation",
+    "claimable_prepared_operation",
+    "diagnose_prepared_binding",
     "compare_and_swap_tracking_operation",
     "recover_tracking_operation",
     "load_tracking_operation",

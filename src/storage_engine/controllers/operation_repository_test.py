@@ -21,12 +21,15 @@ import pytest
 from shared.errors import Stage1Error
 from storage_engine.controllers.operation_repository import (
     bind_tracking_operation,
+    claimable_prepared_operation,
     compare_and_swap_tracking_operation,
+    diagnose_prepared_binding,
     load_tracking_operation,
     recover_tracking_operation,
 )
 from storage_engine.controllers.storage_config import load_storage_config
 from tracking_engine.models.operation import (
+    TRACKING_OPERATION_KIND_MODIFY,
     TRACKING_OPERATION_KIND_SUBMIT,
     TRACKING_OPERATION_STATE_FAILED,
     TRACKING_OPERATION_STATE_IN_PROGRESS,
@@ -38,6 +41,17 @@ from tracking_engine.models.operation import (
     operation_to_storage_dict,
     tracking_operation_id_for_idempotency_key,
     transition_tracking_operation,
+)
+from tracking_engine.models.tracking import (
+    TRACKING_AUDIT_ACTOR_USER,
+    TRACKING_AUDIT_TRACKING_CREATED,
+    TRACKING_ORIGIN_SAVE_CONFIRM,
+    TRACKING_STATUS_ACTIVE,
+    TRACKING_STATUS_DISABLED,
+    TRACKING_STATUS_NEEDS_RECONFIRM,
+    TRACKING_STATUS_PENDING_SUBMIT,
+    TRACKING_STATUS_RECOVERY_REQUIRED,
+    create_tracking_record,
 )
 
 IDEMPOTENCY_KEY = "client-op-key-20260908-a1"
@@ -686,3 +700,279 @@ def test_bind_keeps_the_previous_operation_link_and_it_is_immutable(tmp_path: Pa
 
     assert error.value.error_type == "invalid_tracking_operation"
     assert error.value.details["field"] == "previous_operation_id"
+
+
+# -- issue #247: the prepared-claim predicate and its read-only diagnosis ------
+
+CLAIM_STATUSES = frozenset(
+    {
+        TRACKING_STATUS_PENDING_SUBMIT,
+        TRACKING_STATUS_NEEDS_RECONFIRM,
+        # A risk-confirmed resubmit claims while the record is still unresolved.
+        TRACKING_STATUS_RECOVERY_REQUIRED,
+    }
+)
+MANAGEMENT_STATUSES = frozenset({TRACKING_STATUS_ACTIVE, TRACKING_STATUS_DISABLED})
+
+
+def _record(**overrides: Any):
+    """A stored-shape tracking record for the pure claim predicate."""
+    record = create_tracking_record(
+        request_id="request-1",
+        status=TRACKING_STATUS_PENDING_SUBMIT,
+        plan_summary={"title": "葬送的芙莉莲", "season": 1},
+        origin=TRACKING_ORIGIN_SAVE_CONFIRM,
+        audit_action=TRACKING_AUDIT_TRACKING_CREATED,
+        audit_actor=TRACKING_AUDIT_ACTOR_USER,
+        now="2026-09-08T00:00:00+00:00",
+    )
+    base: dict[str, Any] = {"tracking_id": TRACKING_ID, "revision": 5}
+    base.update(overrides)
+    return replace(record, **base)
+
+
+def _prepared(config, **kwargs: Any) -> TrackingOperation:
+    operation, created = _bind(config, **kwargs)
+    assert created is True
+    return operation
+
+
+def test_claim_accepts_an_empty_pointer_at_the_bound_revision(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    operation = _prepared(config)
+    record = _record(current_operation_id=None, revision=5)
+
+    assert claimable_prepared_operation(
+        record, operation, allowed_statuses=CLAIM_STATUSES
+    ) is True
+
+
+def test_claim_rejects_an_empty_pointer_after_the_record_advanced(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    operation = _prepared(config)
+    record = _record(current_operation_id=None, revision=6)
+
+    # The binding revision no longer matches the stored record: this is not the
+    # crash residue any more, so the key must stay conflicted.
+    assert claimable_prepared_operation(
+        record, operation, allowed_statuses=CLAIM_STATUSES
+    ) is False
+
+
+def test_claim_accepts_a_matching_pointer_one_revision_later(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    operation = _prepared(config)
+    record = _record(current_operation_id=operation.operation_id, revision=6)
+
+    # The pointer write already advanced the record: no extra revision equality.
+    assert claimable_prepared_operation(
+        record, operation, allowed_statuses=CLAIM_STATUSES
+    ) is True
+
+
+def test_claim_accepts_the_recorded_predecessor_pointer(tmp_path: Path) -> None:
+    # Risk-confirmed resubmit (ADR-0002): the new SUBMIT operation records the
+    # pending operation it replaces, and the record still points at that one.
+    config = _config(tmp_path)
+    predecessor = _prepared(config)
+    successor, created = bind_tracking_operation(
+        config,
+        tracking_id=TRACKING_ID,
+        operation=TRACKING_OPERATION_KIND_SUBMIT,
+        idempotency_key=SECOND_KEY,
+        expected_revision=5,
+        request_fingerprint=FINGERPRINT,
+        previous_operation_id=predecessor.operation_id,
+        now="2026-09-08T00:00:00+00:00",
+    )
+    assert created is True
+    record = _record(
+        status=TRACKING_STATUS_RECOVERY_REQUIRED,
+        current_operation_id=predecessor.operation_id,
+        revision=5,
+    )
+
+    assert claimable_prepared_operation(
+        record, successor, allowed_statuses=CLAIM_STATUSES
+    ) is True
+    report = diagnose_prepared_binding(record, successor)
+    assert report["shape"] == "POINTER_PREVIOUS"
+    assert report["retry_authorized"] is False
+
+    # An unrelated operation is still refused.
+    unrelated = _record(current_operation_id="op_someone_else", revision=5)
+    assert claimable_prepared_operation(
+        unrelated, successor, allowed_statuses=CLAIM_STATUSES
+    ) is False
+
+
+def test_claim_rejects_a_pointer_to_another_operation(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    operation = _prepared(config)
+    other = _prepared(config, idempotency_key=SECOND_KEY)
+    record = _record(current_operation_id=other.operation_id, revision=6)
+
+    assert claimable_prepared_operation(
+        record, operation, allowed_statuses=CLAIM_STATUSES
+    ) is False
+
+
+def test_claim_rejects_every_non_prepared_operation(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    operation = _prepared(config)
+    advanced = replace(
+        operation,
+        state=TRACKING_OPERATION_STATE_IN_PROGRESS,
+        updated_at="2026-09-08T00:00:01+00:00",
+    )
+    record = _record(current_operation_id=None, revision=5)
+
+    assert claimable_prepared_operation(
+        record, advanced, allowed_statuses=CLAIM_STATUSES
+    ) is False
+    terminal = replace(operation, state=TRACKING_OPERATION_STATE_SUCCEEDED)
+    assert claimable_prepared_operation(
+        record, terminal, allowed_statuses=CLAIM_STATUSES
+    ) is False
+
+
+def test_claim_rejects_a_foreign_record_or_disallowed_status(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    operation = _prepared(config)
+    foreign = _record(tracking_id=SECOND_TRACKING_ID, current_operation_id=None, revision=5)
+    wrong_status = _record(
+        status=TRACKING_STATUS_ACTIVE, current_operation_id=None, revision=5
+    )
+
+    assert claimable_prepared_operation(
+        foreign, operation, allowed_statuses=CLAIM_STATUSES
+    ) is False
+    assert claimable_prepared_operation(
+        wrong_status, operation, allowed_statuses=CLAIM_STATUSES
+    ) is False
+
+
+def test_claim_rejects_a_record_that_left_the_bound_status(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    operation, created = bind_tracking_operation(
+        config,
+        tracking_id=TRACKING_ID,
+        operation=TRACKING_OPERATION_KIND_MODIFY,
+        idempotency_key=IDEMPOTENCY_KEY,
+        expected_revision=5,
+        request_fingerprint=FINGERPRINT,
+        target_scope="SUBSCRIPTION",
+        previous_tracking_status=TRACKING_STATUS_ACTIVE,
+        expected_external_fingerprint="sha256:" + "a" * 64,
+        now="2026-09-08T00:00:00+00:00",
+    )
+    assert created is True
+    assert operation.previous_tracking_status == TRACKING_STATUS_ACTIVE
+    # The record moved to another status (even with the pointer empty): the stored
+    # operation belongs to the old status, so it is not this failure's residue.
+    moved_on = _record(status=TRACKING_STATUS_PENDING_SUBMIT, current_operation_id=None, revision=5)
+
+    assert claimable_prepared_operation(
+        moved_on, operation, allowed_statuses=MANAGEMENT_STATUSES
+    ) is False
+    still_active = _record(
+        status=TRACKING_STATUS_ACTIVE, current_operation_id=None, revision=5
+    )
+    assert claimable_prepared_operation(
+        still_active, operation, allowed_statuses=MANAGEMENT_STATUSES
+    ) is True
+
+
+def test_claim_treats_a_transitioned_timestamp_as_auxiliary_evidence(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    operation = _prepared(config)
+    tampered = replace(
+        operation,
+        updated_at="2026-09-08T00:00:05+00:00",
+        created_at="2026-09-08T00:00:00+00:00",
+    )
+
+    # The state invariant is the proof; a mismatched timestamp still fails closed.
+    assert claimable_prepared_operation(
+        _record(current_operation_id=None, revision=5),
+        tampered,
+        allowed_statuses=CLAIM_STATUSES,
+    ) is False
+
+
+def test_diagnosis_reports_each_prepared_shape_without_authorizing_retry(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    operation = _prepared(config)
+    other = _prepared(config, idempotency_key=SECOND_KEY)
+
+    empty = diagnose_prepared_binding(
+        _record(current_operation_id=None, revision=5), operation
+    )
+    assert empty["shape"] == "POINTER_EMPTY"
+    assert empty["retry_authorized"] is False
+    assert empty["operation_id"] == operation.operation_id
+    assert empty["tracking_id"] == TRACKING_ID
+    assert empty["record_revision"] == 5
+    assert empty["operation_expected_revision"] == 5
+
+    matched = diagnose_prepared_binding(
+        _record(current_operation_id=operation.operation_id, revision=6), operation
+    )
+    assert matched["shape"] == "POINTER_MATCHES"
+    assert matched["retry_authorized"] is False
+
+    replaced = diagnose_prepared_binding(
+        _record(current_operation_id=other.operation_id, revision=6), operation
+    )
+    assert replaced["shape"] == "POINTER_OTHER"
+
+    not_prepared = diagnose_prepared_binding(
+        _record(), replace(operation, state=TRACKING_OPERATION_STATE_IN_PROGRESS)
+    )
+    assert not_prepared["shape"] == "NOT_PREPARED"
+    assert not_prepared["blocking_reason"] == "OPERATION_NOT_PREPARED"
+
+    tampered = diagnose_prepared_binding(
+        _record(current_operation_id=None, revision=5),
+        replace(operation, updated_at="2026-09-08T00:00:09+00:00"),
+    )
+    assert tampered["shape"] == "POINTER_EMPTY"
+    assert tampered["blocking_reason"] == "TIMESTAMP_MISMATCH"
+    assert tampered["retry_authorized"] is False
+
+    advanced = diagnose_prepared_binding(
+        _record(current_operation_id=None, revision=6), operation
+    )
+    assert advanced["shape"] == "POINTER_EMPTY"
+    assert advanced["blocking_reason"] == "RECORD_REVISION_MISMATCH"
+
+    wrong_status = diagnose_prepared_binding(
+        _record(status=TRACKING_STATUS_ACTIVE, current_operation_id=None, revision=5),
+        operation,
+        allowed_statuses=CLAIM_STATUSES,
+    )
+    assert wrong_status["blocking_reason"] == "RECORD_STATUS_NOT_CLAIMABLE"
+
+    elsewhere = diagnose_prepared_binding(
+        _record(current_operation_id="op_someone_else", revision=6), operation
+    )
+    assert elsewhere["shape"] == "POINTER_OTHER"
+    assert elsewhere["blocking_reason"] == "POINTER_OTHER"
+
+    # The diagnosis never carries free text or hidden upstream data.
+    for report in (empty, matched, replaced, not_prepared):
+        assert set(report) == {
+            "shape",
+            "reason_code",
+            "blocking_reason",
+            "operation_id",
+            "tracking_id",
+            "operation_state",
+            "record_revision",
+            "operation_expected_revision",
+            "retry_authorized",
+        }
+        assert "blocking_reason" in report
+        assert "safe_message" not in report
