@@ -545,7 +545,7 @@ export function isRecoverableStatus(status: unknown): status is TrackingItem['st
  *
  * A persistent ``提交`` whose outcome could not be proven shows 结果待确认. The
  * page explains it from the server's *proven* reason class and offers exactly
- * one next step: a read-only 核验 (button label「核验结果」). The page never supplies a connection —
+ * one **read-only** next step: 核验（button label「核验结果」）. The page never supplies a connection —
  * the server resolves the original submit operation's bound Auto Bangumi
  * instance — and it can never rebind, create or resubmit anything.
  */
@@ -583,9 +583,9 @@ const CHECK_REASON_MESSAGES: Readonly<Record<TrackingCheckReason, string>> = {
   NOT_FOUND: '暂时没有在 Auto Bangumi 中找到该订阅。订阅可能仍在处理，也可能尚未建立；未确认前不会再次提交。',
   AMBIGUOUS: '在 Auto Bangumi 中找到多个相同身份的订阅，无法确认哪一条属于本方案；未确认前不会再次提交。',
   UNREADABLE: '无法读取 Auto Bangumi 的当前状态，暂时无法确认；未确认前不会再次提交。',
-  CONNECTION: '保存的 Auto Bangumi 连接当前无法访问，暂时无法确认；请检查网络或设置后重新检查。',
-  AUTHENTICATION: 'Auto Bangumi 拒绝了保存的连接凭据，暂时无法确认；请前往设置更新账号或密码后重新检查。',
-  VERSION: '当前 Auto Bangumi 版本不在已验证范围内，暂时无法确认；请前往设置确认版本后重新检查。',
+  CONNECTION: '保存的 Auto Bangumi 连接当前无法访问，暂时无法确认；请检查网络或设置后再核验。',
+  AUTHENTICATION: 'Auto Bangumi 拒绝了保存的连接凭据，暂时无法确认；请前往设置更新账号或密码后再核验。',
+  VERSION: '当前 Auto Bangumi 版本不在已验证范围内，暂时无法确认；请前往设置确认版本后再核验。',
   CAPABILITY: '保存的连接不支持只读核验，暂时无法确认；请前往设置检查连接类型。',
   CONNECTION_CHANGED: '保存的连接已被更换，原提交绑定的实例不再可用；不会用新连接认领旧结果。',
 }
@@ -663,7 +663,7 @@ function checkStateMessage(state: TrackingCheckState): string {
   switch (state) {
     case 'IN_FLIGHT': return '正在只读核验 Auto Bangumi 的当前状态…'
     case 'CONFIRMED': return '已确认订阅存在，追番状态已更新。'
-    case 'CONFLICT': return '追番记录已变化，本次检查未生效；正在读取最新详情，请重新检查。'
+    case 'CONFLICT': return '追番记录已变化，本次检查未生效；正在读取最新详情，请再核验。'
     default: return '暂时无法完成只读核验；未确认前不会再次提交。'
   }
 }
@@ -764,7 +764,7 @@ const RESUBMIT_BLOCKED_MESSAGES: Readonly<Record<TrackingResubmitBlockedReason, 
   CONFIG_ERROR:
     '保存的 Auto Bangumi 连接当前不可用，本次不会重新提交；请前往设置检查连接。',
   RESULT_UNPROVEN:
-    '无法用已证实的原因判定当前待确认结果，本次不会重新提交；请稍后重新检查。',
+    '无法用已证实的原因判定当前待确认结果，本次不会重新提交；请稍后再核验。',
   ONE_TIME_SUBMISSION:
     '本次提交方式是「下载现有资源」，不属于持续追番的待确认结果，本次不会重新提交；请按既有提交流程处理。',
   CONNECTION_CHANGED:
@@ -776,7 +776,7 @@ const RESUBMIT_BLOCKED_MESSAGES: Readonly<Record<TrackingResubmitBlockedReason, 
   CAPABILITY:
     '保存的连接不支持所需的只读核验能力，本次不会重新提交；请前往设置检查连接类型。',
   CONNECTION:
-    '保存的 Auto Bangumi 连接当前无法访问，本次不会重新提交；请检查网络或设置后重新检查。',
+    '保存的 Auto Bangumi 连接当前无法访问，本次不会重新提交；请检查网络或设置后再核验。',
 }
 
 export const RESUBMIT_BLOCKED_FALLBACK_MESSAGE =
@@ -796,7 +796,7 @@ export function trackingResubmitBlockedMessage(value: unknown): string {
  */
 const RESUBMIT_CONFLICT_MESSAGES: Readonly<Record<string, string>> = {
   tracking_revision_conflict:
-    '追番记录已变化，本次未重新提交；正在读取最新详情，请重新检查后再确认。',
+    '追番记录已变化，本次未重新提交；正在读取最新详情，请先核验再确认。',
   tracking_state_conflict:
     '当前追番状态没有可核验的待确认提交（例如上一次提交仍可能在进行），本次未重新提交；请先完成恢复核验。',
   tracking_check_in_progress:
@@ -804,13 +804,13 @@ const RESUBMIT_CONFLICT_MESSAGES: Readonly<Record<string, string>> = {
   tracking_operation_in_progress:
     '存在尚未完成的提交操作，本次未重新提交；请先完成恢复核验。',
   tracking_resubmit_binding_conflict:
-    '本次重新提交绑定的操作或连接已变化，未重新提交；请重新检查后再确认。',
+    '本次重新提交绑定的操作或连接已变化，未重新提交；请先核验再确认。',
   tracking_idempotency_conflict:
-    '本次重新提交标识已失效，未重新提交；请重新检查后再确认。',
+    '本次重新提交标识已失效，未重新提交；请先核验再确认。',
 }
 
 export const RESUBMIT_CONFLICT_FALLBACK_MESSAGE =
-  '追番记录或绑定已变化，本次未重新提交；正在读取最新详情，请重新检查后再确认。'
+  '追番记录或绑定已变化，本次未重新提交；正在读取最新详情，请先核验再确认。'
 
 export function resubmitConflictMessage(errorType: unknown): string {
   return typeof errorType === 'string' && errorType in RESUBMIT_CONFLICT_MESSAGES

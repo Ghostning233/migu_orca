@@ -1891,7 +1891,7 @@ describe('pending submission check (issue #183)', () => {
     available_actions: [],
   })
 
-  it('offers the read-only 重新检查 and the risk-confirmed 重新提交, hiding the recovery panel', async () => {
+  it('offers the read-only 核验 and the risk-confirmed 重新提交, hiding the recovery panel', async () => {
     apiGet.mockResolvedValue(pendingDetail() as never)
     const wrapper = await mountInspector('tracking-1', {
       checkSession: createCheckSession('tracking-1', 'PENDING', 'NOT_FOUND', 2),
