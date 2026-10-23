@@ -68,6 +68,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+import time
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -126,6 +127,11 @@ _BATCH_STATE = threading.local()
 _ACTIVE_BATCH = threading.Event()
 _SCOPE_GUARD = threading.Lock()
 _ACTIVE_SCOPE: TrackingBatchScope | None = None
+#: External write intents currently inside their bind/pointer critical section.
+#: A batch waits for this to drain before publishing its scope, so a new batch
+#: can never start between an intent's decision and its binder (issue #248 R1/R2).
+_INTENT_COND = threading.Condition(_SCOPE_GUARD)
+_ACTIVE_INTENTS = 0
 
 #: How long a batch waits for another batch/single write before failing closed.
 #: The request itself keeps its own budget; this only bounds the queueing window.
@@ -151,6 +157,36 @@ def _batch_depth() -> int:
     return getattr(_BATCH_STATE, "depth", 0)
 
 
+@contextmanager
+def _external_write_intent() -> Iterator[None]:
+    """Mark one external write as inside its critical section (issue #248)."""
+    global _ACTIVE_INTENTS
+    with _INTENT_COND:
+        _ACTIVE_INTENTS += 1
+    try:
+        yield
+    finally:
+        with _INTENT_COND:
+            _ACTIVE_INTENTS -= 1
+            if _ACTIVE_INTENTS == 0:
+                _INTENT_COND.notify_all()
+
+
+def _await_no_active_intents(step: str) -> None:
+    """Wait (bounded) until no external write is mid critical section."""
+    deadline = time.monotonic() + _BATCH_WAIT_SECONDS
+    with _INTENT_COND:
+        while _ACTIVE_INTENTS > 0:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise Stage1Error(
+                    "connection_in_use",
+                    "另一个外部写正在执行，请稍后再试",
+                    step,
+                )
+            _INTENT_COND.wait(timeout=remaining)
+
+
 def _active_scope() -> TrackingBatchScope | None:
     with _SCOPE_GUARD:
         return _ACTIVE_SCOPE
@@ -161,42 +197,47 @@ def tracking_batch_scope() -> TrackingBatchScope | None:
     return _active_scope()
 
 
-def note_request_storage_dir(storage_dir: str | None) -> None:
-    """Publish this request thread's storage profile for the final write gate.
+def note_request_storage_dirs(storage_dirs: Iterable[str] | None) -> None:
+    """Publish the storage profiles this request may resolve to.
 
-    The route guard resolves the request's profile (body first, exactly like the
-    view) and records it here; ``lock_tracking_record`` then applies the same
-    profile-aware conflict predicate as the guard (issue #248 I2).  Background
-    threads leave it ``None`` and fall back to the record-id comparison.
+    Views disagree about where ``storage_dir`` comes from (the manual views read
+    the body, the validator views let a query override it — see
+    ``extensions.flask_api.views``), so the route guard records **every**
+    candidate profile here and the final write gate treats any match as a
+    conflict (fail closed, issue #248 B3).  Background threads leave it empty and
+    fall back to the record-id comparison.
     """
-    _BATCH_STATE.request_storage_dir = storage_dir
+    _BATCH_STATE.request_storage_dirs = frozenset(storage_dirs or ())
 
 
-def _request_storage_dir() -> str | None:
-    return getattr(_BATCH_STATE, "request_storage_dir", None)
+def _request_storage_dirs() -> frozenset[str]:
+    return getattr(_BATCH_STATE, "request_storage_dirs", frozenset())
 
 
 def _scope_conflicts(
-    scope: TrackingBatchScope, tracking_id: str, storage_dir: str | None
+    scope: TrackingBatchScope, tracking_id: str, storage_dirs: Iterable[str]
 ) -> bool:
     """The single conflict predicate shared by the guard and the write gate."""
     if not scope.tracking_ids:
         # Unknown scope: fail safe (the #223 blanket exclusion).
         return True
-    if (
-        storage_dir is not None
-        and scope.storage_dir is not None
-        and storage_dir != scope.storage_dir
-    ):
-        # Another storage profile is a different resource (issue #248).
+    if tracking_id.strip() not in scope.tracking_ids:
         return False
-    return tracking_id.strip() in scope.tracking_ids
+    candidates = frozenset(storage_dirs)
+    if not candidates or scope.storage_dir is None:
+        # Unknown profile on either side: compare by record id only.
+        return True
+    # A different profile is a different resource; a candidate that *is* the
+    # batch's profile conflicts (fail closed when the request could mean either).
+    return scope.storage_dir in candidates
 
 
-def batch_conflicts_with(tracking_id: str, *, storage_dir: str | None = None) -> bool:
+def batch_conflicts_with(
+    tracking_id: str, *, storage_dirs: Iterable[str] = ()
+) -> bool:
     """Whether one external write on ``tracking_id`` conflicts with the batch."""
     scope = _active_scope()
-    return scope is not None and _scope_conflicts(scope, tracking_id, storage_dir)
+    return scope is not None and _scope_conflicts(scope, tracking_id, storage_dirs)
 
 
 @contextmanager
@@ -228,6 +269,14 @@ def tracking_batch_lease(
     _BATCH_STATE.depth = depth + 1
     owns_batch = getattr(_BATCH_STATE, "batch", 0) == 0
     if owns_batch:
+        try:
+            # No external write may be inside its binder when this batch starts,
+            # even if it began while another (non-conflicting) batch was running.
+            _await_no_active_intents(step)
+        except Stage1Error:
+            _BATCH_STATE.depth = depth
+            _BATCH_LOCK.release()
+            raise
         _BATCH_STATE.batch = 1
         scope = TrackingBatchScope(
             batch_key=batch_key,
@@ -284,11 +333,17 @@ def _serialized_tracking_write(step: str) -> Iterator[None]:
     if tracking_id is None:
         yield
         return
-    profile = _request_storage_dir()
+    profiles = _request_storage_dirs()
     scope = _active_scope()
-    if scope is not None and not _scope_conflicts(scope, tracking_id, profile):
-        # The batch owns other resources; the per-record lock is enough.
-        yield
+    if scope is not None and not _scope_conflicts(scope, tracking_id, profiles):
+        # The batch owns other resources; the per-record lock is enough.  Mark
+        # the nesting so a *nested* write can never fall back into the store-lock
+        # path while this record lock is held (issue #248 R1).
+        _BATCH_STATE.depth = 1
+        try:
+            yield
+        finally:
+            _BATCH_STATE.depth = 0
         return
     # No batch: hold the store lock so a batch cannot start *inside* this
     # external-write critical section (ADR-0008 decision 2 / #247).  Conflicting
@@ -303,9 +358,13 @@ def _serialized_tracking_write(step: str) -> Iterator[None]:
     # Re-check under the lock: a batch that started in the race window and owns
     # other resources must not make an unrelated write fail.
     scope = _active_scope()
-    if scope is not None and not _scope_conflicts(scope, tracking_id, profile):
+    if scope is not None and not _scope_conflicts(scope, tracking_id, profiles):
         _BATCH_LOCK.release()
-        yield
+        _BATCH_STATE.depth = 1
+        try:
+            yield
+        finally:
+            _BATCH_STATE.depth = 0
         return
     _BATCH_STATE.depth = 1
     try:
@@ -684,8 +743,14 @@ def lock_tracking_record(tracking_id: str) -> Iterator[None]:
     try:
         # The store lock (batch exclusion) is taken before the per-record lock;
         # #247's order is unchanged.  ``_serialized_tracking_write`` reads the
-        # record published above to decide whether this write conflicts.
-        with _serialized_tracking_write("lock_tracking_record"), _LOCKS.for_key(clean_id):
+        # record published above to decide whether this write conflicts.  The
+        # intent is published only after that gate, so a write queued behind a
+        # batch never blocks the batch that is already holding the lock.
+        with (
+            _serialized_tracking_write("lock_tracking_record"),
+            _external_write_intent(),
+            _LOCKS.for_key(clean_id),
+        ):
             yield
     finally:
         _BATCH_STATE.external_write_id = None
@@ -715,7 +780,7 @@ def _tracking_path(
 
 __all__ = [
     "batch_conflicts_with",
-    "note_request_storage_dir",
+    "note_request_storage_dirs",
     "tracking_batch_lease",
     "tracking_batch_scope",
     "TrackingListResult",

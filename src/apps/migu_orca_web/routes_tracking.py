@@ -73,7 +73,7 @@ from storage_engine.controllers.storage_config import load_storage_config
 from storage_engine.controllers.tracking_repository import (
     batch_conflicts_with,
     load_tracking_record,
-    note_request_storage_dir,
+    note_request_storage_dirs,
     tracking_batch_lease,
     tracking_batch_scope,
 )
@@ -103,54 +103,64 @@ _BATCH_EXCLUDED_CONNECTION_WRITES: frozenset[tuple[str, str]] = frozenset({
 })
 
 
-def _request_storage_profile() -> str | None:
-    """The resolved storage root of this request, or ``None`` when unparseable.
+def _request_storage_profiles() -> frozenset[str] | None:
+    """Every storage profile this request could resolve to, or ``None``.
 
-    ``None`` covers a malformed JSON body and an invalid profile: both must be
-    answered by the view (400), never by the batch boundary guard as a 409
-    (issue #248).
+    Views disagree about the ``storage_dir`` source: the manual tracking views
+    read the body, while ``extensions.flask_api.views`` lets a query string
+    override it.  The guard therefore records **both** candidates and the
+    conflict predicate fails closed on any match, so an attacker cannot pick the
+    source the guard ignores (issue #248 B3).
+
+    ``None`` means a parse failure (malformed JSON body / invalid profile): the
+    view must answer 400, never this guard a 409.
     """
     body = request.get_json(silent=True)
     if request.data and body is None:
         return None
-    raw = body.get("storage_dir") if isinstance(body, dict) else None
-    if raw is None:
-        # The views read the body, so the body must win; the query is only a
-        # fallback for a request that carries no body profile.
-        raw = request.args.get("storage_dir")
-    if raw is not None and not isinstance(raw, str):
+    raw_body = body.get("storage_dir") if isinstance(body, dict) else None
+    raw_query = request.args.get("storage_dir")
+    if raw_body is not None and not isinstance(raw_body, str):
+        return None
+    if raw_query is not None and not isinstance(raw_query, str):
         return None
     try:
-        return str(_storage_dir(raw))
+        candidates = {str(_storage_dir(raw_body))}
+        candidates.add(str(_storage_dir(raw_query)))
     except Stage1Error:
         return None
+    return frozenset(candidates)
 
 
 @api_blueprint.before_request
 def _refuse_single_tracking_write_during_batch() -> Any | None:
     """Early refusal for a single external write the running batch owns.
 
-    The batch publishes its occupied resources (records + profile) with its
-    lease; this guard refuses only an external write on one of those records in
-    the same profile.  It runs before any service persists an intent, so the
-    published ``connection_in_use`` (409) cannot leave an orphan operation; the
-    repository's ``lock_tracking_record`` is the final, shared check for the
-    race window between this guard and the batch.
+    The batch publishes its occupied resources (records + profile + connection)
+    with its lease; this guard refuses only an external write on one of those
+    records in one of the profiles this request may resolve to.  It runs before
+    any service persists an intent, so the published ``connection_in_use`` (409)
+    cannot leave an orphan operation; the repository's ``lock_tracking_record``
+    is the final, shared check for the race window between this guard and the
+    batch.
     """
-    # Publish the request profile first: the repository's final gate must apply
-    # the same profile-aware predicate as this guard (issue #248 I2/I3).
-    profile = _request_storage_profile()
-    note_request_storage_dir(profile)
+    note_request_storage_dirs(())
     scope = tracking_batch_scope()
     if scope is None:
         return None
     rule = request.url_rule
     if rule is None:
         return None
-    if profile is None:
-        # A malformed body must reach the view for its 400 (issue #248).
-        return None
     key = (request.method.upper(), rule.rule)
+    if key not in _BATCH_EXCLUDED_SINGLE_WRITES and key not in _BATCH_EXCLUDED_CONNECTION_WRITES:
+        return None
+    profiles = _request_storage_profiles()
+    # Publish the candidates for the repository's final gate: it must apply the
+    # same predicate as this guard (issue #248 I2/I3/B3).
+    note_request_storage_dirs(profiles)
+    if profiles is None:
+        # A malformed body/profile must reach the view for its 400.
+        return None
     if key in _BATCH_EXCLUDED_CONNECTION_WRITES:
         if scope.connection_ref is None:
             return None
@@ -159,16 +169,13 @@ def _refuse_single_tracking_write_during_batch() -> Any | None:
             "批量操作进行中：请等待批次结束后再修改 Auto Bangumi 连接",
             {"failed_step": "tracking_batch_connection_exclusion"},
         )
-    if key not in _BATCH_EXCLUDED_SINGLE_WRITES:
-        return None
     tracking_id = (request.view_args or {}).get("tracking_id")
     if not isinstance(tracking_id, str) or not tracking_id.strip():
         return None
-    # Deferred to the view: malformed JSON / invalid profile (parse failures,
-    # above).  A parseable but schema-invalid body still gets this 409 while the
-    # record is owned: the batch is the stronger, fail-closed answer, and the
-    # alternative would require duplicating each view's validator here.
-    if not batch_conflicts_with(tracking_id, storage_dir=profile):
+    # A parseable but schema-invalid body still gets this 409 while the record is
+    # owned: the batch is the stronger, fail-closed answer, and the alternative
+    # would require duplicating each view's validator here.
+    if not batch_conflicts_with(tracking_id, storage_dirs=profiles):
         return None
     return failed_response(
         "connection_in_use",
@@ -179,8 +186,8 @@ def _refuse_single_tracking_write_during_batch() -> Any | None:
 
 @api_blueprint.teardown_request
 def _clear_request_storage_profile(_exception: BaseException | None) -> None:
-    """Do not let one request's profile leak into the next on this thread."""
-    note_request_storage_dir(None)
+    """Do not let one request's profiles leak into the next on this thread."""
+    note_request_storage_dirs(())
 
 
 @class_route(api_blueprint, "/api/v1/tracking/items", methods=["GET"])
@@ -377,6 +384,43 @@ class TrackingItemDeletePlanView(PostView):
         )
 
 
+def _run_batch_delete(
+    config: Any,
+    *,
+    payload: Any,
+    delete_external: bool,
+    tracking_ids: set[str],
+    connection_ref: str | None = None,
+) -> dict[str, object]:
+    """Run one batch delete under the route-published resource scope.
+
+    A replay of an already completed batch is a pure read, so another running
+    batch must not turn it into a 409: fall back to the stored result.
+    """
+    try:
+        with tracking_batch_lease(
+            batch_key=payload.idempotency_key,
+            tracking_ids=tracking_ids,
+            connection_ref=connection_ref,
+            storage_dir=str(config.storage_dir),
+        ):
+            return run_saved_tracking_batch_delete(
+                config,
+                payload=payload,
+                delete_external=delete_external,
+            )
+    except Stage1Error as exc:
+        if exc.error_type != "connection_in_use":
+            raise
+        try:
+            stored = get_saved_tracking_batch_delete(config, batch_key=payload.idempotency_key)
+        except Stage1Error:
+            raise exc from None
+        if stored.get("state") == "COMPLETED":
+            return stored
+        raise
+
+
 @class_route(
     api_blueprint,
     "/api/v1/tracking/batch-delete-plan",
@@ -401,16 +445,12 @@ class TrackingBatchDeletePlanView(PostView):
         config = load_storage_config(_storage_dir(payload.storage_dir))
         # Issue #248: publish the occupied resources; the service's own lease
         # nests inside this one and keeps the same scope.
-        with tracking_batch_lease(
-            batch_key=payload.idempotency_key,
+        return _run_batch_delete(
+            config,
+            payload=payload,
+            delete_external=False,
             tracking_ids={entry.tracking_id for entry in payload.items},
-            storage_dir=str(config.storage_dir),
-        ):
-            return run_saved_tracking_batch_delete(
-                config,
-                payload=payload,
-                delete_external=False,
-            )
+        )
 
 
 @class_route(
@@ -435,17 +475,13 @@ class TrackingBatchDeletePlanExternalView(PostView):
         payload = self.request_validator_model
         assert isinstance(payload, SavedTrackingBatchDeleteExternalInput)
         config = load_storage_config(_storage_dir(payload.storage_dir))
-        with tracking_batch_lease(
-            batch_key=payload.idempotency_key,
+        return _run_batch_delete(
+            config,
+            payload=payload,
+            delete_external=True,
             tracking_ids={entry.tracking_id for entry in payload.items},
             connection_ref=str(payload.connection_ref),
-            storage_dir=str(config.storage_dir),
-        ):
-            return run_saved_tracking_batch_delete(
-                config,
-                payload=payload,
-                delete_external=True,
-            )
+        )
 
 
 @class_route(

@@ -1717,28 +1717,58 @@ describe('TrackingView batch consolidation residuals (issue #248)', () => {
     wrapper.unmount()
   })
 
-  it('drops the batch note once the batch it described ended (minor 8)', async () => {
+  it('queries the batch status after a 5xx answer (AC4)', async () => {
     const rows = [rowFor('a', '番 A')]
     const { wrapper } = await mountBatchRows(rows)
     await enterBatchAndSelectAll(wrapper)
-    let release: (() => void) | undefined
-    apiPost.mockImplementation(() => new Promise((resolve) => {
-      release = () => resolve({
-        ok: false,
-        error_type: 'connection_in_use',
-        error_message: '批量操作进行中',
-        error_data: { failed_step: 'tracking_batch_exclusion' },
-      } as never)
-    }))
+    apiPost.mockImplementation(async () => {
+      throw { type: 'unexpected_error', status: 500, httpError: true }
+    })
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/v1/tracking/batch-deletions/{batch_key}') {
+        return batchDeleteResponse(
+          [{ tracking_id: 'a', outcome: 'DELETED', external_deleted: false, skip_reason: null }],
+          { total: 1, deleted: 1, external_deleted: 0, skipped: 0, failed: 0, unknown: 0 },
+        ) as never
+      }
+      if (path === '/api/v1/settings/autobangumi') {
+        return { configured: true, credential_present: true, connection_ref: REF, configuration_revision: 3, connection_status: 'CONFIGURED', capabilities: null } as never
+      }
+      return listRowsResponse([]) as never
+    })
 
     await wrapper.find('#tracking-batch-delete').trigger('click')
     await wrapper.find('#tracking-batch-delete-confirm').trigger('click')
     await flushPromises()
-    expect(wrapper.find('#tracking-batch-busy').text()).toContain('批量操作进行中')
 
-    release?.()
+    expect(apiGet).toHaveBeenCalledWith(
+      '/api/v1/tracking/batch-deletions/{batch_key}',
+      expect.objectContaining({ path: { batch_key: expect.any(String) } }),
+    )
+    expect(wrapper.find('#tracking-batch-delete-summary').text()).toContain('已删除 1 条')
+    wrapper.unmount()
+  })
+
+  it('says the batch may not have run when the status is unknown (AC4)', async () => {
+    const rows = [rowFor('a', '番 A')]
+    const { wrapper } = await mountBatchRows(rows)
+    await enterBatchAndSelectAll(wrapper)
+    apiPost.mockImplementation(async () => { throw { type: 'request_timeout', status: 0 } })
+    apiGet.mockImplementation(async (path) => {
+      if (path === '/api/v1/tracking/batch-deletions/{batch_key}') {
+        throw { type: 'tracking_not_found', status: 404, httpError: true }
+      }
+      if (path === '/api/v1/settings/autobangumi') {
+        return { configured: true, credential_present: true, connection_ref: REF, configuration_revision: 3, connection_status: 'CONFIGURED', capabilities: null } as never
+      }
+      return listRowsResponse(rows) as never
+    })
+
+    await wrapper.find('#tracking-batch-delete').trigger('click')
+    await wrapper.find('#tracking-batch-delete-confirm').trigger('click')
     await flushPromises()
-    expect(wrapper.find('#tracking-batch-busy').exists()).toBe(false)
+
+    expect(wrapper.find('#tracking-batch-delete-notice').text()).toContain('可能尚未执行')
     wrapper.unmount()
   })
 

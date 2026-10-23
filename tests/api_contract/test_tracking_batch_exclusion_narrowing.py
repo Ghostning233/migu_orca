@@ -46,6 +46,14 @@ from tracking_engine.models.tracking import (
 REF = "11111111-1111-4111-8111-111111111111"
 
 
+@pytest.fixture(autouse=True)
+def _fast_batch_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the bounded lease wait short so refusals stay fast in tests."""
+    import storage_engine.controllers.tracking_repository as tracking_repository
+
+    monkeypatch.setattr(tracking_repository, "_BATCH_WAIT_SECONDS", 0.05)
+
+
 def _config(tmp_path: Path) -> StorageConfig:
     return load_storage_config(tmp_path / "storage")
 
@@ -265,23 +273,42 @@ def test_an_unresolved_single_operation_keeps_its_protection_after_the_batch(
     }
 
 
-def test_the_body_profile_wins_over_the_query(tmp_path: Path, client: FlaskClient) -> None:
-    """I3 (#248): the guard must resolve the profile exactly like the view."""
-    owned = _seed(tmp_path, 1)
+def test_body_and_query_profile_disagreement_fails_closed(
+    tmp_path: Path, client: FlaskClient
+) -> None:
+    """B3 (#248): a request must not pick the profile source the guard ignores.
+
+    Views disagree about where ``storage_dir`` comes from (manual views read the
+    body, the validator views let the query win), so when the two disagree and
+    either one is the batch's profile the request is refused.
+    """
+    owned = _seed(tmp_path, 1, status=TRACKING_STATUS_NEEDS_RECONFIRM)
     with _HeldBatch(tracking_ids={owned.tracking_id}, storage_dir=_profile(tmp_path)):
-        # The body points at another (empty) profile, so the record there is not
-        # the one the batch owns; a query string must not change that.
         response = client.post(
-            f"/api/v1/tracking/items/{owned.tracking_id}/delete-plan?storage_dir=storage",
-            json={
-                "confirm": True,
-                "idempotency_key": "body-profile-wins",
-                "storage_dir": "other",
-            },
+            f"/api/v1/tracking/items/{owned.tracking_id}/set-enabled?storage_dir=storage",
+            json={"confirm": True, "enabled": True, "storage_dir": "other"},
         )
 
-    assert response.status_code == 404, response.get_json()
-    assert response.get_json()["error_type"] == "tracking_not_found"
+    assert response.status_code == 409, response.get_json()
+    assert response.get_json()["error_type"] == "connection_in_use"
+    assert response.get_json()["error_data"]["failed_step"] == "tracking_batch_exclusion"
+
+
+def test_a_query_only_profile_cannot_smuggle_a_write_past_the_guard(
+    tmp_path: Path, client: FlaskClient
+) -> None:
+    """B3 (#248): the manual views read the body, so a bare query must not bypass."""
+    owned = _seed(tmp_path, 1)
+    with _HeldBatch(tracking_ids={owned.tracking_id}, storage_dir=str((tmp_path).resolve())):
+        # No body profile: the manual view would use the server root, which is
+        # the batch's profile here; the query says "other" and must not hide it.
+        response = client.post(
+            f"/api/v1/tracking/items/{owned.tracking_id}/delete-plan?storage_dir=other",
+            json={"confirm": True, "idempotency_key": "query-smuggle"},
+        )
+
+    assert response.status_code == 409, response.get_json()
+    assert response.get_json()["error_type"] == "connection_in_use"
 
 
 def test_a_connection_level_change_is_refused_while_a_batch_pins_it(
@@ -470,3 +497,84 @@ def test_malformed_settings_body_reaches_the_view_instead_of_a_409(
 
     assert response.status_code == 400, response.get_json()
     assert response.get_json()["error_type"] == "data_validation_errors"
+
+
+def test_the_external_delete_route_publishes_its_connection_scope(
+    tmp_path: Path, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """B2 (#248): the external batch must publish ids + connection generation."""
+    import apps.migu_orca_web.routes_tracking as routes
+
+    record = _seed(tmp_path, 1)
+    captured: dict[str, Any] = {}
+
+    def spy(config: Any, *, payload: Any, delete_external: bool) -> dict[str, Any]:
+        captured["scope"] = tracking_batch_scope()
+        captured["delete_external"] = delete_external
+        return {
+            "batch_key": payload.idempotency_key,
+            "kind": "LOCAL_AND_EXTERNAL",
+            "state": "COMPLETED",
+            "items": [],
+            "summary": {
+                "total": 0, "deleted": 0, "external_deleted": 0,
+                "skipped": 0, "failed": 0, "unknown": 0,
+            },
+        }
+
+    monkeypatch.setattr(routes, "run_saved_tracking_batch_delete", spy)
+    response = client.post(
+        "/api/v1/tracking/batch-delete-plan-external",
+        json={
+            "confirm": True,
+            "idempotency_key": "external-scoped-batch",
+            "items": [{"tracking_id": record.tracking_id, "expected_revision": record.revision}],
+            "connection_ref": REF,
+            "configuration_revision": 1,
+            "storage_dir": "storage",
+        },
+    )
+
+    assert response.status_code == 200, response.get_json()
+    scope = captured["scope"]
+    assert scope is not None
+    assert scope.tracking_ids == frozenset({record.tracking_id})
+    assert scope.connection_ref == REF
+    assert captured["delete_external"] is True
+
+
+@pytest.mark.parametrize("method", ["put", "delete"])
+def test_both_connection_writes_are_refused_while_a_batch_pins_it(
+    tmp_path: Path, client: FlaskClient, method: str
+) -> None:
+    with _HeldBatch(tracking_ids={_seed(tmp_path, 1).tracking_id}, storage_dir=_profile(tmp_path)):
+        if method == "put":
+            response = client.put("/api/v1/settings/autobangumi", json={})
+        else:
+            response = client.delete("/api/v1/settings/autobangumi", json={})
+
+    assert response.status_code == 409, response.get_json()
+    assert response.get_json()["error_type"] == "connection_in_use"
+
+
+def test_a_completed_batch_replays_while_another_batch_runs(
+    tmp_path: Path, client: FlaskClient
+) -> None:
+    """#248: replaying a finished batch is a read; another batch must not 409 it."""
+    record = _seed(tmp_path, 1)
+    other = _seed(tmp_path, 2)
+    body = {
+        "confirm": True,
+        "idempotency_key": "completed-replay",
+        "items": [{"tracking_id": record.tracking_id, "expected_revision": record.revision}],
+        "storage_dir": "storage",
+    }
+    first = client.post("/api/v1/tracking/batch-delete-plan", json=body)
+    assert first.status_code == 200, first.get_json()
+    assert first.get_json()["result"]["state"] == "COMPLETED"
+
+    with _HeldBatch(tracking_ids={other.tracking_id}, storage_dir=_profile(tmp_path)):
+        replay = client.post("/api/v1/tracking/batch-delete-plan", json=body)
+
+    assert replay.status_code == 200, replay.get_json()
+    assert replay.get_json()["result"] == first.get_json()["result"]

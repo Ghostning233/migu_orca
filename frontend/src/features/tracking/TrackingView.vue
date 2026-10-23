@@ -803,9 +803,9 @@ async function performBatchSubmit(): Promise<void> {
     await runWriteEffects(writes.finishBatchSubmit(result))
   } catch (error) {
     if (sequence !== batchSequence) return
-    const apiError = toApiError(error)
-    noteBatchBusy(apiError)
-    writes.failBatchSubmit(apiError)
+    // A refused batch keeps the batch family's own failure copy: the busy note
+    // describes single writes and is cleared as the batch activity ends.
+    writes.failBatchSubmit(toApiError(error))
   }
 }
 
@@ -843,6 +843,8 @@ const BATCH_EXCLUSION_STEPS = new Set([
   'tracking_batch_connection_exclusion',
   // A single write queued behind a batch and refused by the final gate.
   'lock_tracking_record',
+  // A batch request refused while another batch holds the lease.
+  'tracking_batch_lease',
 ])
 
 function noteBatchBusy(error: { type: string; details?: Record<string, unknown> | null }): void {

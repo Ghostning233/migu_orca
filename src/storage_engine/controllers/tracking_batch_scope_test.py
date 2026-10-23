@@ -29,7 +29,7 @@ from storage_engine.controllers.tracking_repository import (
     compare_and_swap_tracking_record,
     ensure_tracking_record,
     lock_tracking_record,
-    note_request_storage_dir,
+    note_request_storage_dirs,
     tracking_batch_lease,
     tracking_batch_scope,
 )
@@ -338,7 +338,7 @@ def test_a_same_id_record_in_another_profile_is_not_blocked(
         def attempt() -> None:
             # A request thread publishes its own profile; the worker plays that
             # role here.
-            note_request_storage_dir(str(other_profile.storage_dir))
+            note_request_storage_dirs({str(other_profile.storage_dir)})
             with lock_tracking_record(other.tracking_id):
                 entered.set()
 
@@ -354,10 +354,11 @@ def test_a_same_id_record_in_another_profile_is_not_blocked(
 def test_a_queued_write_proceeds_when_the_batch_crashes_inside_the_gate(
     config: StorageConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """#248: a batch that raises inside its lease must release the waiter."""
+    """#248: a batch that raises inside its lease must release the *queued* write."""
     monkeypatch.setattr(tracking_repository, "_BATCH_WAIT_SECONDS", 5.0)
     seeded = _seed(config, 1)
     entered = threading.Event()
+    crash = threading.Event()
     crashed = threading.Event()
 
     def failing_batch() -> None:
@@ -368,6 +369,7 @@ def test_a_queued_write_proceeds_when_the_batch_crashes_inside_the_gate(
                 storage_dir=str(config.storage_dir),
             ):
                 entered.set()
+                assert crash.wait(timeout=10)
                 raise RuntimeError("batch crashed")
         except RuntimeError:
             crashed.set()
@@ -375,11 +377,8 @@ def test_a_queued_write_proceeds_when_the_batch_crashes_inside_the_gate(
     batch_thread = threading.Thread(target=failing_batch)
     batch_thread.start()
     assert entered.wait(timeout=10)
-    batch_thread.join(timeout=10)
-    assert crashed.is_set()
-    assert tracking_batch_scope() is None
 
-    # The queued write now proceeds instead of failing closed.
+    # The waiter blocks *before* the crash: it is queued behind the lease.
     done = threading.Event()
 
     def attempt() -> None:
@@ -388,5 +387,10 @@ def test_a_queued_write_proceeds_when_the_batch_crashes_inside_the_gate(
 
     worker = threading.Thread(target=attempt)
     worker.start()
-    assert done.wait(timeout=5), "the waiter must proceed after the batch crashed"
+    assert not done.wait(timeout=0.3), "the waiter must queue behind the batch"
+    crash.set()
+    batch_thread.join(timeout=10)
+    assert crashed.is_set()
+    assert done.wait(timeout=10), "the waiter must proceed after the batch crashed"
     worker.join(timeout=5)
+    assert tracking_batch_scope() is None

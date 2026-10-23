@@ -165,7 +165,9 @@
 > 「同 profile、本批次占用的记录」上的**外部写**（`delete-plan`、`submit`、`retry`、
 > `resubmit`、`modify`、`set-enabled`、`refresh`），此时尚未持久化任何 operation 意图。
 > 纯本地/只读核验（`check`、`revalidate`、`recover`）、无关记录与其它 profile **不再**
-> 返回该 409；请求体非法 JSON 或非法 profile 也由视图返回 400，不会被入口误报成 409。
+> 返回该 409。入口在**解析不出** profile（非法 JSON、非法 profile）时不提前拒绝，交给视图
+> 按各自校验返回 400 或按默认 profile 处理；body 与 query 给出不同 profile 时按「任一命中
+> 即拒」fail-closed（各视图读取来源不一致，见 issue #248）。
 > 若请求已通过入口、随后批次才取得租约，`lock_tracking_record`（与批次共用同一把 store 锁，
 > 且在任何意图落盘之前）负责排队/有界拒绝。批次指定了连接时，替换/删除该 AB 连接
 > （`PUT|DELETE /api/v1/settings/autobangumi`）同样返回 409 `connection_in_use`。
